@@ -745,6 +745,114 @@ body {
   cursor: pointer;
 }
 
+/* ====== TABS ====== */
+.tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  margin-bottom: 16px;
+}
+
+.tab {
+  flex: 1;
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.tab:hover { color: var(--text-primary); background: rgba(255,255,255,0.03); }
+
+.tab.active {
+  background: linear-gradient(135deg, rgba(16,185,129,0.15), rgba(59,130,246,0.1));
+  color: var(--text-primary);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.tab-live {
+  background: var(--red);
+  color: white;
+  font-size: 0.6rem;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 8px;
+  animation: blink 1.5s infinite;
+}
+
+.tab-count {
+  background: var(--accent);
+  color: white;
+  font-size: 0.6rem;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+
+/* ====== ANALIZADOS VIEW ====== */
+.analizados-view { animation: fadeIn 0.3s ease-out; }
+
+.history-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.history-bar-left h2 {
+  font-size: 1.2rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #ffffff, #6ee7b7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.history-bar-left .subtitle {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.history-bar-right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.history-bar-right select {
+  padding: 8px 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.history-bar-right select:focus { outline: none; border-color: var(--accent); }
+
+.time-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--blue);
+}
+
 /* ====== RESPONSIVE ====== */
 @media (max-width: 768px) {
   .container { padding: 10px; }
