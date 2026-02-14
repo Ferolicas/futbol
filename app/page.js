@@ -2,36 +2,26 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-const COUNTRY_FLAGS = {
-  Germany: '🇩🇪', Spain: '🇪🇸', England: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', Italy: '🇮🇹',
-  Turkey: '🇹🇷', Colombia: '🇨🇴', Brazil: '🇧🇷', France: '🇫🇷',
-  'Saudi Arabia': '🇸🇦', Argentina: '🇦🇷', Mexico: '🇲🇽',
+const FLAGS = {
+  Germany: '🇩🇪', Spain: '🇪🇸', England: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', Italy: '🇮🇹', Turkey: '🇹🇷',
+  Colombia: '🇨🇴', Brazil: '🇧🇷', France: '🇫🇷', 'Saudi Arabia': '🇸🇦', Argentina: '🇦🇷', Mexico: '🇲🇽',
 };
 
-function todayStr() {
-  return new Date().toISOString().split('T')[0];
-}
-
-function formatTime(dateStr) {
-  return new Date(dateStr).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
-}
-
-function isLive(status) {
-  return ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(status);
-}
-
-function statusLabel(short) {
-  const map = { NS: 'Proximo', '1H': '1er Tiempo', '2H': '2do Tiempo', HT: 'Descanso', FT: 'Finalizado', ET: 'Extra', P: 'Penales', AET: 'Extra', PEN: 'Penales', SUSP: 'Suspendido', PST: 'Pospuesto', CANC: 'Cancelado', ABD: 'Abandonado', AWD: 'Victoria Admin', WO: 'W.O.', INT: 'Interrumpido' };
-  return map[short] || short;
-}
+const today = () => new Date().toISOString().split('T')[0];
+const fmtTime = (d) => new Date(d).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+const isLive = (s) => ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(s);
+const statusText = (s) => ({ NS: 'Proximo', '1H': '1T', '2H': '2T', HT: 'HT', FT: 'Final', ET: 'Extra', P: 'Pen', AET: 'Extra', PEN: 'Pen', SUSP: 'Susp', PST: 'Post', CANC: 'Canc' }[s] || s);
 
 export default function Home() {
-  const [date, setDate] = useState(todayStr());
+  const [view, setView] = useState('list'); // 'list' or 'analysis'
+  const [date, setDate] = useState(today());
   const [matches, setMatches] = useState([]);
   const [hiddenIds, setHiddenIds] = useState([]);
+  const [selected, setSelected] = useState(new Set());
   const [analyses, setAnalyses] = useState({});
   const [loading, setLoading] = useState(false);
-  const [loadingAnalysis, setLoadingAnalysis] = useState({});
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeProgress, setAnalyzeProgress] = useState({ done: 0, total: 0 });
   const [countryFilter, setCountryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [genderFilter, setGenderFilter] = useState('');
@@ -40,18 +30,14 @@ export default function Home() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const intervalRef = useRef(null);
 
-  // Load hidden matches on mount
   useEffect(() => {
     fetch('/api/hide').then(r => r.json()).then(d => setHiddenIds(d.hidden || [])).catch(() => {});
+    loadMatches(today());
   }, []);
 
-  // Auto-load today's matches on mount
-  useEffect(() => { loadMatches(todayStr()); }, []);
-
-  // Auto-refresh interval
   useEffect(() => {
     if (autoRefresh) {
-      intervalRef.current = setInterval(() => refreshLive(), 60000);
+      intervalRef.current = setInterval(refreshLive, 60000);
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [autoRefresh, date]);
@@ -65,9 +51,9 @@ export default function Home() {
       setMatches(data.matches || []);
       setFromCache(data.fromCache);
       setApiCalls(prev => prev + (data.apiCalls || 0));
+      setSelected(new Set());
     } catch (e) {
       console.error(e);
-      alert('Error: ' + e.message);
     } finally {
       setLoading(false);
     }
@@ -77,60 +63,80 @@ export default function Home() {
     try {
       const res = await fetch(`/api/live?date=${date}`);
       const data = await res.json();
-      if (data.matches) {
-        setMatches(data.matches);
-        setApiCalls(prev => prev + (data.apiCalls || 0));
-      }
-    } catch (e) {
-      console.error('Live refresh error:', e);
-    }
+      if (data.matches) { setMatches(data.matches); setApiCalls(prev => prev + (data.apiCalls || 0)); }
+    } catch {}
   }, [date]);
 
   const changeDate = (offset) => {
     const d = new Date(date);
     d.setDate(d.getDate() + offset);
-    const newDate = d.toISOString().split('T')[0];
-    setDate(newDate);
-    loadMatches(newDate);
+    const nd = d.toISOString().split('T')[0];
+    setDate(nd);
+    loadMatches(nd);
   };
 
-  const analyzeMatch = async (match) => {
-    const id = match.fixture.id;
-    setLoadingAnalysis(prev => ({ ...prev, [id]: true }));
-    try {
-      const params = new URLSearchParams({
-        fixtureId: id,
-        homeId: match.teams.home.id,
-        awayId: match.teams.away.id,
-        leagueId: match.league.id,
-        season: match.league.season,
-        date: date,
-      });
-      const res = await fetch(`/api/analyze?${params}`);
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setAnalyses(prev => ({ ...prev, [id]: data.analysis }));
-      setApiCalls(prev => prev + (data.apiCalls || 0));
-    } catch (e) {
-      console.error(e);
-      alert('Error al analizar: ' + e.message);
-    } finally {
-      setLoadingAnalysis(prev => ({ ...prev, [id]: false }));
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    if (selected.size === filtered.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(filtered.map(m => m.fixture.id)));
     }
   };
 
-  const doHide = async (fixtureId) => {
-    setHiddenIds(prev => [...prev, fixtureId]);
+  const analyzeBatch = async () => {
+    const toAnalyze = filtered.filter(m => selected.has(m.fixture.id));
+    if (toAnalyze.length === 0) return;
+
+    setAnalyzing(true);
+    setAnalyzeProgress({ done: 0, total: toAnalyze.length });
+    setView('analysis');
+
     try {
-      await fetch('/api/hide', {
+      const payload = toAnalyze.map(m => ({
+        fixtureId: m.fixture.id,
+        homeId: m.teams.home.id,
+        awayId: m.teams.away.id,
+        leagueId: m.league.id,
+        season: m.league.season,
+        date,
+      }));
+
+      const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fixtureId }),
+        body: JSON.stringify({ matches: payload }),
       });
+
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      setAnalyses(prev => ({ ...prev, ...data.results }));
+      setApiCalls(prev => prev + (data.apiCalls || 0));
+      setAnalyzeProgress({ done: toAnalyze.length, total: toAnalyze.length });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const doHide = async (e, fixtureId) => {
+    e.stopPropagation();
+    setHiddenIds(prev => [...prev, fixtureId]);
+    setSelected(prev => { const n = new Set(prev); n.delete(fixtureId); return n; });
+    try {
+      await fetch('/api/hide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fixtureId }) });
     } catch {}
   };
 
-  // Filter matches
   const filtered = matches.filter(m => {
     if (hiddenIds.includes(m.fixture.id)) return false;
     const meta = m.leagueMeta || {};
@@ -143,191 +149,291 @@ export default function Home() {
   });
 
   const liveCount = filtered.filter(m => isLive(m.fixture.status.short)).length;
-  const analyzedCount = Object.keys(analyses).length;
+  const selectedMatches = filtered.filter(m => selected.has(m.fixture.id));
 
   return (
-    <div className="container">
-      {/* Header */}
-      <div className="header">
-        <h1>Futbol Analysis</h1>
-        <div className="header-info">
-          <span className="badge badge-blue">Cache Sanity: {fromCache ? 'SI' : 'API'}</span>
-          <span className="badge badge-red">API Calls: {apiCalls}</span>
-          <span className="badge badge-green">{filtered.length} partidos</span>
+    <div className="app">
+      <div className="container">
+        {/* HEADER */}
+        <div className="header">
+          <div className="header-top">
+            <h1>Futbol Analysis</h1>
+            <div className="header-badges">
+              <span className="badge badge-cache">{fromCache ? 'Cache' : 'API'}</span>
+              <span className="badge badge-api">Calls: {apiCalls}</span>
+              <span className="badge badge-count">{filtered.length} partidos</span>
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* Stats */}
-      <div className="stats-grid">
-        <div className="stat-card"><h3>Partidos</h3><div className="number">{filtered.length}</div></div>
-        <div className="stat-card"><h3>En Vivo</h3><div className="number" style={{ color: liveCount > 0 ? '#e74c3c' : undefined }}>{liveCount}</div></div>
-        <div className="stat-card"><h3>Analizados</h3><div className="number" style={{ color: '#3498db' }}>{analyzedCount}</div></div>
-        <div className="stat-card"><h3>Ocultos</h3><div className="number" style={{ color: '#8899a6' }}>{hiddenIds.length}</div></div>
-      </div>
-
-      {/* Date navigation */}
-      <div className="date-nav">
-        <button onClick={() => changeDate(-1)}>&#9664;</button>
-        <span>{new Date(date + 'T12:00:00').toLocaleDateString('es', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span>
-        <button onClick={() => changeDate(1)}>&#9654;</button>
-      </div>
-
-      {/* Filters */}
-      <div className="filters">
-        <select value={countryFilter} onChange={e => setCountryFilter(e.target.value)}>
-          <option value="">Todos los paises</option>
-          {Object.entries(COUNTRY_FLAGS).map(([c, flag]) => (
-            <option key={c} value={c}>{flag} {c}</option>
-          ))}
-        </select>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-          <option value="">Todos</option>
-          <option value="live">En Vivo</option>
-          <option value="upcoming">Proximos</option>
-          <option value="finished">Finalizados</option>
-        </select>
-        <select value={genderFilter} onChange={e => setGenderFilter(e.target.value)}>
-          <option value="">M y F</option>
-          <option value="M">Masculino</option>
-          <option value="W">Femenino</option>
-        </select>
-        <button className="btn btn-primary" onClick={() => loadMatches(date)} disabled={loading}>
-          {loading ? 'Cargando...' : 'Cargar'}
-        </button>
-        <button
-          className={`btn ${autoRefresh ? 'btn-danger' : 'btn-outline'}`}
-          onClick={() => setAutoRefresh(!autoRefresh)}
-        >
-          {autoRefresh ? 'Auto: ON' : 'Auto: OFF'}
-        </button>
-      </div>
-
-      {/* Loading */}
-      {loading && (
-        <div className="loading">
-          <div className="spinner" />
-          <p>Cargando partidos...</p>
+        {/* STATS */}
+        <div className="stats-bar">
+          <div className="stat-pill"><div className="label">Partidos</div><div className="value green">{filtered.length}</div></div>
+          <div className="stat-pill"><div className="label">En Vivo</div><div className="value red">{liveCount}</div></div>
+          <div className="stat-pill"><div className="label">Seleccionados</div><div className="value blue">{selected.size}</div></div>
+          <div className="stat-pill"><div className="label">Ocultos</div><div className="value muted">{hiddenIds.length}</div></div>
         </div>
-      )}
 
-      {/* Matches */}
-      {!loading && filtered.length === 0 && (
-        <div className="empty-state">
-          No hay partidos para esta fecha
-          <small>Intenta otra fecha o revisa los filtros</small>
+        {/* DATE NAV */}
+        <div className="date-nav">
+          <button onClick={() => changeDate(-1)}>&#9664;</button>
+          <div className="date-display">
+            {new Date(date + 'T12:00:00').toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' })}
+          </div>
+          <button onClick={() => changeDate(1)}>&#9654;</button>
         </div>
-      )}
 
-      <div className="matches-container">
-        {filtered.map(match => (
-          <MatchCard
-            key={match.fixture.id}
-            match={match}
-            analysis={analyses[match.fixture.id]}
-            isAnalyzing={loadingAnalysis[match.fixture.id]}
-            onAnalyze={() => analyzeMatch(match)}
-            onHide={() => doHide(match.fixture.id)}
-          />
-        ))}
+        {/* VIEW TOGGLE */}
+        {view === 'analysis' ? (
+          // ================ ANALYSIS VIEW ================
+          <div className="analysis-view">
+            <div className="analysis-header">
+              <div>
+                <h2>Analisis de Partidos</h2>
+                {analyzing && (
+                  <div className="analysis-progress" style={{ marginTop: 6 }}>
+                    <div className="progress-bar-bg">
+                      <div className="progress-bar-fill" style={{ width: `${analyzeProgress.total ? (analyzeProgress.done / analyzeProgress.total) * 100 : 0}%` }} />
+                    </div>
+                    <span>Analizando...</span>
+                  </div>
+                )}
+              </div>
+              <button className="btn btn-ghost" onClick={() => setView('list')}>Volver a Lista</button>
+            </div>
+
+            {analyzing && (
+              <div className="loader">
+                <div className="spinner-ring" />
+                <p>Analizando {selectedMatches.length} partidos... Esto puede tardar unos segundos</p>
+              </div>
+            )}
+
+            {!analyzing && selectedMatches.map(match => (
+              <AnalysisCard key={match.fixture.id} match={match} analysis={analyses[match.fixture.id]} />
+            ))}
+          </div>
+        ) : (
+          // ================ LIST VIEW ================
+          <>
+            {/* TOOLBAR */}
+            <div className="toolbar">
+              <select value={countryFilter} onChange={e => setCountryFilter(e.target.value)}>
+                <option value="">Todos los paises</option>
+                {Object.entries(FLAGS).map(([c, f]) => <option key={c} value={c}>{f} {c}</option>)}
+              </select>
+              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                <option value="">Estado</option>
+                <option value="live">En Vivo</option>
+                <option value="upcoming">Proximos</option>
+                <option value="finished">Finalizados</option>
+              </select>
+              <select value={genderFilter} onChange={e => setGenderFilter(e.target.value)}>
+                <option value="">Genero</option>
+                <option value="M">Masculino</option>
+                <option value="W">Femenino</option>
+              </select>
+              <button className="btn btn-primary" onClick={() => loadMatches(date)} disabled={loading}>
+                {loading ? 'Cargando...' : 'Cargar'}
+              </button>
+              <button className={`btn ${autoRefresh ? 'btn-danger' : 'btn-ghost'} btn-sm`} onClick={() => setAutoRefresh(!autoRefresh)}>
+                {autoRefresh ? 'Auto ON' : 'Auto OFF'}
+              </button>
+            </div>
+
+            {/* LOADING */}
+            {loading && <div className="loader"><div className="spinner-ring" /><p>Cargando partidos del dia...</p></div>}
+
+            {/* EMPTY */}
+            {!loading && filtered.length === 0 && (
+              <div className="empty"><h3>Sin partidos</h3><p>No hay partidos para esta fecha con los filtros actuales</p></div>
+            )}
+
+            {/* SELECT ALL */}
+            {!loading && filtered.length > 0 && (
+              <div className="select-all-row">
+                <label>
+                  <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={selectAll} />
+                  Seleccionar todos ({filtered.length})
+                </label>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  Click en un partido para seleccionarlo
+                </span>
+              </div>
+            )}
+
+            {/* MATCH LIST */}
+            <div className="match-list">
+              {filtered.map(match => (
+                <MatchRow
+                  key={match.fixture.id}
+                  match={match}
+                  isSelected={selected.has(match.fixture.id)}
+                  onToggle={() => toggleSelect(match.fixture.id)}
+                  onHide={(e) => doHide(e, match.fixture.id)}
+                />
+              ))}
+            </div>
+
+            {/* FLOATING SELECTION BAR */}
+            {selected.size > 0 && (
+              <div className="selection-bar">
+                <div>
+                  <div className="count">{selected.size} seleccionados</div>
+                  <div className="api-cost">~{selected.size * 5} API calls</div>
+                </div>
+                <button className="btn btn-primary btn-lg" onClick={analyzeBatch} disabled={analyzing}>
+                  Analizar Seleccion
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>
+                  Limpiar
+                </button>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-// ==================== MATCH CARD ====================
-function MatchCard({ match, analysis, isAnalyzing, onAnalyze, onHide }) {
-  const [showDetails, setShowDetails] = useState(false);
+// ==================== MATCH ROW ====================
+function MatchRow({ match, isSelected, onToggle, onHide }) {
   const live = isLive(match.fixture.status.short);
   const meta = match.leagueMeta || {};
-  const flag = COUNTRY_FLAGS[meta.country] || '';
+  const flag = FLAGS[meta.country] || '';
+  const hasScore = live || ['FT', 'AET', 'PEN'].includes(match.fixture.status.short);
 
   return (
-    <div className={`match-card ${live ? 'live' : ''} ${analysis ? 'analyzed' : ''}`}>
-      {/* Header */}
-      <div className="match-header">
-        <div className="league-info">
-          {match.league.logo && <img src={match.league.logo} alt="" />}
-          <span>{flag} {match.league.name}</span>
-          {meta.gender === 'W' && <span className="gender-badge">FEM</span>}
-        </div>
-        <span className={`match-time ${live ? 'live' : ''}`}>
-          {live ? `${match.fixture.status.elapsed || ''}' ${statusLabel(match.fixture.status.short)}` : formatTime(match.fixture.date)}
-        </span>
+    <div className={`match-row ${isSelected ? 'selected' : ''} ${live ? 'live' : ''}`} onClick={onToggle}>
+      <div className="check-box">
+        <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
       </div>
 
-      {/* Teams */}
-      <div className="teams-row">
-        <div className="team">
-          {match.teams.home.logo && <img src={match.teams.home.logo} alt="" />}
-          <span className="team-name">{match.teams.home.name}</span>
+      <div className="match-row-content">
+        <div className="match-row-top">
+          <div className="match-league">
+            {match.league.logo && <img src={match.league.logo} alt="" />}
+            <span>{flag} {match.league.name}</span>
+            {meta.gender === 'W' && <span className="gender-tag">Fem</span>}
+          </div>
+          <div className="match-meta">
+            <span className={`match-time-badge ${live ? 'live' : ''}`}>
+              {live ? `${match.fixture.status.elapsed || ''}' ${statusText(match.fixture.status.short)}` : fmtTime(match.fixture.date)}
+            </span>
+          </div>
         </div>
-        <div className="vs">
-          {(live || match.fixture.status.short === 'FT' || match.fixture.status.short === 'AET' || match.fixture.status.short === 'PEN')
-            ? <span className="score">{match.goals.home} - {match.goals.away}</span>
-            : 'VS'}
-        </div>
-        <div className="team away">
-          {match.teams.away.logo && <img src={match.teams.away.logo} alt="" />}
-          <span className="team-name">{match.teams.away.name}</span>
+
+        <div className="match-teams">
+          <div className="match-team">
+            {match.teams.home.logo && <img src={match.teams.home.logo} alt="" />}
+            <span className="name">{match.teams.home.name}</span>
+          </div>
+          <div className={`match-score ${!hasScore ? 'pending' : ''}`}>
+            {hasScore ? `${match.goals.home} - ${match.goals.away}` : 'VS'}
+          </div>
+          <div className="match-team away">
+            {match.teams.away.logo && <img src={match.teams.away.logo} alt="" />}
+            <span className="name">{match.teams.away.name}</span>
+          </div>
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="match-actions">
-        <button
-          className="btn btn-blue"
-          onClick={() => { if (!analysis) onAnalyze(); setShowDetails(!showDetails); }}
-          disabled={isAnalyzing}
-        >
-          {isAnalyzing ? 'Analizando...' : analysis ? (showDetails ? 'Ocultar' : 'Ver Analisis') : 'Analizar'}
-        </button>
-        <button className="btn btn-danger btn-sm" onClick={onHide}>X</button>
+      <div className="match-row-actions">
+        <button className="btn-hide-x" onClick={onHide} title="Ocultar">&times;</button>
       </div>
-
-      {/* Details */}
-      {showDetails && analysis && (
-        <div className="details-panel">
-          <MatchDetails match={match} analysis={analysis} />
-        </div>
-      )}
     </div>
   );
 }
 
-// ==================== MATCH DETAILS ====================
-function MatchDetails({ match, analysis }) {
-  const { homeStats, awayStats, h2h, odds, injuries, betterForm } = analysis;
+// ==================== ANALYSIS CARD ====================
+function AnalysisCard({ match, analysis }) {
+  const live = isLive(match.fixture.status.short);
+  const meta = match.leagueMeta || {};
+  const flag = FLAGS[meta.country] || '';
+  const hasScore = live || ['FT', 'AET', 'PEN'].includes(match.fixture.status.short);
 
-  return (
-    <>
-      <div className="details-grid">
-        <TeamDetail team={match.teams.home} stats={homeStats} isBest={betterForm === 'home'} />
-        <TeamDetail team={match.teams.away} stats={awayStats} isBest={betterForm === 'away'} />
-      </div>
-      <div className="extra-details">
-        <H2HSection h2h={h2h} homeId={match.teams.home.id} homeName={match.teams.home.name} awayName={match.teams.away.name} />
-        <InjuriesSection injuries={injuries} homeId={match.teams.home.id} awayId={match.teams.away.id} />
-        <OddsSection odds={odds} />
-      </div>
-    </>
-  );
-}
-
-// ==================== TEAM DETAIL ====================
-function TeamDetail({ team, stats, isBest }) {
-  if (!stats) {
+  if (!analysis || analysis.error) {
     return (
-      <div className="team-detail">
-        <div className="team-detail-header">
-          {team.logo && <img src={team.logo} alt="" />}
-          <div><div className="name">{team.name}</div></div>
+      <div className="analysis-card">
+        <div className="analysis-card-header">
+          <div className="league">
+            {match.league.logo && <img src={match.league.logo} alt="" />}
+            <span>{flag} {match.league.name}</span>
+          </div>
         </div>
-        <p style={{ color: '#8899a6', fontSize: '0.85rem' }}>Estadisticas no disponibles</p>
+        <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>
+          {analysis?.error ? `Error: ${analysis.error}` : 'Cargando...'}
+        </div>
       </div>
     );
   }
 
-  const pos = stats.league?.standings?.[0]?.rank || 'N/A';
+  const { homeStats, awayStats, h2h, odds, injuries, betterForm } = analysis;
+
+  return (
+    <div className="analysis-card">
+      {/* Header */}
+      <div className="analysis-card-header">
+        <div className="league">
+          {match.league.logo && <img src={match.league.logo} alt="" />}
+          <span>{flag} {match.league.name}</span>
+          {meta.gender === 'W' && <span className="gender-tag">Fem</span>}
+        </div>
+        <span className="time">
+          {live ? `${match.fixture.status.elapsed}' ${statusText(match.fixture.status.short)}` : fmtTime(match.fixture.date)}
+        </span>
+      </div>
+
+      {/* Teams display */}
+      <div className="analysis-card-teams">
+        <div className="analysis-team">
+          {match.teams.home.logo && <img src={match.teams.home.logo} alt="" />}
+          <span className="name">{match.teams.home.name}</span>
+        </div>
+        <div className="analysis-vs">
+          {hasScore ? `${match.goals.home} - ${match.goals.away}` : 'VS'}
+        </div>
+        <div className="analysis-team">
+          {match.teams.away.logo && <img src={match.teams.away.logo} alt="" />}
+          <span className="name">{match.teams.away.name}</span>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="analysis-card-body">
+        {/* Stats comparison */}
+        <div className="stats-comparison">
+          <TeamStats team={match.teams.home} stats={homeStats} isBest={betterForm === 'home'} />
+          <TeamStats team={match.teams.away} stats={awayStats} isBest={betterForm === 'away'} />
+        </div>
+
+        {/* Extra panels */}
+        <div className="extra-panels">
+          <H2HPanel h2h={h2h} homeId={match.teams.home.id} homeName={match.teams.home.name} />
+          <InjuriesPanel injuries={injuries} homeId={match.teams.home.id} awayId={match.teams.away.id} />
+          <OddsPanel odds={odds} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== TEAM STATS ====================
+function TeamStats({ team, stats, isBest }) {
+  if (!stats) {
+    return (
+      <div className="team-stats-panel">
+        <div className="team-stats-header">
+          {team.logo && <img src={team.logo} alt="" />}
+          <div className="info"><div className="team-name">{team.name}</div></div>
+        </div>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Sin datos disponibles</p>
+      </div>
+    );
+  }
+
+  const pos = stats.league?.standings?.[0]?.rank || '-';
   const form = stats.form || '';
   const played = stats.fixtures?.played?.total || 0;
   const wins = stats.fixtures?.wins?.total || 0;
@@ -335,153 +441,129 @@ function TeamDetail({ team, stats, isBest }) {
   const losses = stats.fixtures?.loses?.total || 0;
   const gf = stats.goals?.for?.total?.total || 0;
   const ga = stats.goals?.against?.total?.total || 0;
-  const avgGoals = played > 0 ? (gf / played).toFixed(2) : '0.00';
-  const penMissed = stats.penalty?.missed?.total || 0;
+  const avg = played > 0 ? (gf / played).toFixed(1) : '0';
+  const penMiss = stats.penalty?.missed?.total || 0;
 
   return (
-    <div className="team-detail">
-      <div className="team-detail-header">
+    <div className="team-stats-panel">
+      <div className="team-stats-header">
         {team.logo && <img src={team.logo} alt="" />}
-        <div>
-          <div className="name">{team.name}</div>
-          {isBest && <span className="best-form-badge">MEJOR FORMA</span>}
-          <span className="position-badge">#{pos}</span>
+        <div className="info">
+          <div className="team-name">{team.name}</div>
+          <div>
+            {isBest && <span className="best-badge">Mejor Forma</span>}
+            <span className="pos-badge">#{pos}</span>
+          </div>
         </div>
       </div>
 
-      <div style={{ fontSize: '0.8rem', color: '#8899a6', marginBottom: 4 }}>Ultimos 5:</div>
-      <div className="form-display">
-        {form.split('').slice(-5).map((l, i) => (
-          <span key={i} className={`form-letter ${l}`}>{l}</span>
-        ))}
-        {!form && <span style={{ color: '#556', fontSize: '0.8rem' }}>N/A</span>}
+      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Ultimos 5</div>
+      <div className="form-row">
+        {form.split('').slice(-5).map((l, i) => <span key={i} className={`form-dot ${l}`}>{l}</span>)}
+        {!form && <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>N/A</span>}
       </div>
 
-      <div className="stats-list">
-        <div className="stat-item"><span className="stat-label">PJ</span><span className="stat-value">{played}</span></div>
-        <div className="stat-item"><span className="stat-label">V</span><span className="stat-value">{wins}</span></div>
-        <div className="stat-item"><span className="stat-label">E</span><span className="stat-value">{draws}</span></div>
-        <div className="stat-item"><span className="stat-label">D</span><span className="stat-value">{losses}</span></div>
-        <div className="stat-item"><span className="stat-label">Goles/P</span><span className="stat-value">{avgGoals}</span></div>
-        <div className="stat-item"><span className="stat-label">GF</span><span className="stat-value">{gf}</span></div>
-        <div className="stat-item"><span className="stat-label">GC</span><span className="stat-value">{ga}</span></div>
-        <div className="stat-item"><span className="stat-label">Pen. Fall.</span><span className="stat-value">{penMissed}</span></div>
+      <div className="stats-mini-grid">
+        <div className="stat-mini"><span className="lbl">PJ</span><span className="val">{played}</span></div>
+        <div className="stat-mini"><span className="lbl">V</span><span className="val">{wins}</span></div>
+        <div className="stat-mini"><span className="lbl">E</span><span className="val">{draws}</span></div>
+        <div className="stat-mini"><span className="lbl">D</span><span className="val">{losses}</span></div>
+        <div className="stat-mini"><span className="lbl">Gol/P</span><span className="val">{avg}</span></div>
+        <div className="stat-mini"><span className="lbl">GF</span><span className="val">{gf}</span></div>
+        <div className="stat-mini"><span className="lbl">GC</span><span className="val">{ga}</span></div>
+        <div className="stat-mini"><span className="lbl">Pen F.</span><span className="val">{penMiss}</span></div>
       </div>
     </div>
   );
 }
 
-// ==================== H2H ====================
-function H2HSection({ h2h, homeId, homeName, awayName }) {
+// ==================== H2H PANEL ====================
+function H2HPanel({ h2h, homeId, homeName }) {
   if (!h2h || h2h.length === 0) {
-    return (
-      <div className="detail-box">
-        <h4>Historial H2H</h4>
-        <p style={{ color: '#8899a6', fontSize: '0.85rem' }}>Sin datos</p>
-      </div>
-    );
+    return <div className="info-panel"><h4>Historial H2H</h4><p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Sin datos</p></div>;
   }
 
   const asHome = h2h.filter(m => m.teams.home.id === homeId).slice(0, 3);
   const asAway = h2h.filter(m => m.teams.away.id === homeId).slice(0, 3);
 
   return (
-    <div className="detail-box">
+    <div className="info-panel">
       <h4>Historial H2H</h4>
-      <div style={{ marginBottom: 8 }}>
-        <strong style={{ fontSize: '0.8rem', color: '#3498db' }}>{homeName} como Local (ult. 3):</strong>
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: '0.7rem', color: 'var(--blue)', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' }}>{homeName} Local</div>
         {asHome.length > 0 ? asHome.map((m, i) => (
-          <div key={i} className="h2h-row">
-            <span>{new Date(m.fixture.date).toLocaleDateString('es')}</span>
-            <strong>{m.goals.home} - {m.goals.away}</strong>
+          <div key={i} className="h2h-item">
+            <span className="date">{new Date(m.fixture.date).toLocaleDateString('es', { day: '2-digit', month: 'short', year: '2-digit' })}</span>
+            <span className="result">{m.goals.home} - {m.goals.away}</span>
           </div>
-        )) : <p style={{ color: '#556', fontSize: '0.8rem' }}>Sin datos</p>}
+        )) : <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Sin datos</div>}
       </div>
       <div>
-        <strong style={{ fontSize: '0.8rem', color: '#e67e22' }}>{homeName} como Visitante (ult. 3):</strong>
+        <div style={{ fontSize: '0.7rem', color: 'var(--orange)', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' }}>{homeName} Visitante</div>
         {asAway.length > 0 ? asAway.map((m, i) => (
-          <div key={i} className="h2h-row">
-            <span>{new Date(m.fixture.date).toLocaleDateString('es')}</span>
-            <strong>{m.goals.home} - {m.goals.away}</strong>
+          <div key={i} className="h2h-item">
+            <span className="date">{new Date(m.fixture.date).toLocaleDateString('es', { day: '2-digit', month: 'short', year: '2-digit' })}</span>
+            <span className="result">{m.goals.home} - {m.goals.away}</span>
           </div>
-        )) : <p style={{ color: '#556', fontSize: '0.8rem' }}>Sin datos</p>}
+        )) : <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Sin datos</div>}
       </div>
     </div>
   );
 }
 
-// ==================== INJURIES ====================
-function InjuriesSection({ injuries, homeId, awayId }) {
+// ==================== INJURIES PANEL ====================
+function InjuriesPanel({ injuries, homeId, awayId }) {
   if (!injuries || injuries.length === 0) {
-    return (
-      <div className="detail-box">
-        <h4>Lesionados / Suspendidos</h4>
-        <p style={{ color: '#8899a6', fontSize: '0.85rem' }}>Sin bajas reportadas</p>
-      </div>
-    );
+    return <div className="info-panel"><h4>Lesionados / Suspendidos</h4><p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Sin bajas reportadas</p></div>;
   }
 
   const homeInj = injuries.filter(i => i.team.id === homeId);
   const awayInj = injuries.filter(i => i.team.id === awayId);
 
   return (
-    <div className="detail-box">
+    <div className="info-panel">
       <h4>Lesionados / Suspendidos</h4>
       {homeInj.length > 0 ? (
         <>
-          <strong style={{ fontSize: '0.75rem', color: '#3498db' }}>Local:</strong>
+          <div style={{ fontSize: '0.7rem', color: 'var(--blue)', fontWeight: 700, marginBottom: 4 }}>LOCAL</div>
           {homeInj.map((inj, i) => (
-            <div key={i} className="injury-item">{inj.player.name} - {inj.player.reason || 'Lesion'}</div>
+            <div key={i} className="injury-row"><strong>{inj.player.name}</strong> — {inj.player.reason || 'Lesion'}</div>
           ))}
         </>
-      ) : <p style={{ fontSize: '0.8rem', color: '#556' }}>Local: Sin bajas</p>}
+      ) : <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6 }}>Local: Sin bajas</div>}
 
-      <div style={{ marginTop: 8 }}>
-        {awayInj.length > 0 ? (
-          <>
-            <strong style={{ fontSize: '0.75rem', color: '#e67e22' }}>Visitante:</strong>
-            {awayInj.map((inj, i) => (
-              <div key={i} className="injury-item">{inj.player.name} - {inj.player.reason || 'Lesion'}</div>
-            ))}
-          </>
-        ) : <p style={{ fontSize: '0.8rem', color: '#556' }}>Visitante: Sin bajas</p>}
-      </div>
+      {awayInj.length > 0 ? (
+        <>
+          <div style={{ fontSize: '0.7rem', color: 'var(--orange)', fontWeight: 700, marginBottom: 4, marginTop: 8 }}>VISITANTE</div>
+          {awayInj.map((inj, i) => (
+            <div key={i} className="injury-row"><strong>{inj.player.name}</strong> — {inj.player.reason || 'Lesion'}</div>
+          ))}
+        </>
+      ) : <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 6 }}>Visitante: Sin bajas</div>}
     </div>
   );
 }
 
-// ==================== ODDS ====================
-function OddsSection({ odds }) {
+// ==================== ODDS PANEL ====================
+function OddsPanel({ odds }) {
   if (!odds || !odds.bookmakers || odds.bookmakers.length === 0) {
-    return (
-      <div className="detail-box">
-        <h4>Cuotas de Apuestas</h4>
-        <p style={{ color: '#8899a6', fontSize: '0.85rem' }}>No disponibles</p>
-      </div>
-    );
+    return <div className="info-panel"><h4>Cuotas</h4><p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No disponibles</p></div>;
   }
 
-  const mainBet = odds.bookmakers[0]?.bets?.find(b => b.name === 'Match Winner');
-  if (!mainBet) {
-    return (
-      <div className="detail-box">
-        <h4>Cuotas de Apuestas</h4>
-        <p style={{ color: '#8899a6', fontSize: '0.85rem' }}>No disponibles</p>
-      </div>
-    );
-  }
+  const bet = odds.bookmakers[0]?.bets?.find(b => b.name === 'Match Winner');
+  if (!bet) return <div className="info-panel"><h4>Cuotas</h4><p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No disponibles</p></div>;
 
-  const home = mainBet.values.find(v => v.value === 'Home')?.odd || '-';
-  const draw = mainBet.values.find(v => v.value === 'Draw')?.odd || '-';
-  const away = mainBet.values.find(v => v.value === 'Away')?.odd || '-';
+  const h = bet.values.find(v => v.value === 'Home')?.odd || '-';
+  const d = bet.values.find(v => v.value === 'Draw')?.odd || '-';
+  const a = bet.values.find(v => v.value === 'Away')?.odd || '-';
 
   return (
-    <div className="detail-box">
-      <h4>Cuotas de Apuestas</h4>
-      <div className="odds-row">
-        <div className="odd-item"><div className="odd-label">Local</div><div className="odd-value">{home}</div></div>
-        <div className="odd-item"><div className="odd-label">Empate</div><div className="odd-value">{draw}</div></div>
-        <div className="odd-item"><div className="odd-label">Visitante</div><div className="odd-value">{away}</div></div>
+    <div className="info-panel">
+      <h4>Cuotas</h4>
+      <div className="odds-grid">
+        <div className="odd-cell"><div className="lbl">Local</div><div className="val">{h}</div></div>
+        <div className="odd-cell"><div className="lbl">Empate</div><div className="val">{d}</div></div>
+        <div className="odd-cell"><div className="lbl">Visit.</div><div className="val">{a}</div></div>
       </div>
     </div>
   );
