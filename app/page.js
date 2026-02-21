@@ -35,7 +35,13 @@ export default function Home() {
 
   // En Vivo tab state
   const [liveTracked, setLiveTracked] = useState([]);
+  const [liveSource, setLiveSource] = useState('');
+  const [liveLastUpdate, setLiveLastUpdate] = useState(null);
+  const [liveError, setLiveError] = useState(false);
+  const [liveRefreshing, setLiveRefreshing] = useState(false);
+  const [liveNextRefresh, setLiveNextRefresh] = useState(0);
   const liveIntervalRef = useRef(null);
+  const countdownRef = useRef(null);
 
   // Analizados tab state
   const [savedAnalyses, setSavedAnalyses] = useState([]);
@@ -50,30 +56,56 @@ export default function Home() {
     loadMatches(today());
   }, []);
 
-  // Live tracking auto-refresh via Bzzoiro (every 15s)
+  // Live tracking auto-refresh (15s with Bzzoiro, 60s with API-Football)
   useEffect(() => {
     if (liveTracked.length > 0) {
       const refresh = async () => {
+        setLiveRefreshing(true);
         try {
           const res = await fetch(`/api/live?date=${date}`);
           const data = await res.json();
+          setLiveSource(data.source || 'cache');
+          setLiveLastUpdate(new Date());
+          setLiveError(false);
+          if (data.apiCallUsed) {
+            fetch('/api/quota').then(r => r.json()).then(q => setQuota(q)).catch(() => {});
+          }
           if (data.matches) {
             const trackedIds = new Set(liveTracked.map(m => m.fixture.id));
             const updated = data.matches.filter(m => trackedIds.has(m.fixture.id));
             if (updated.length > 0) {
               setLiveTracked(prev => prev.map(old => {
                 const fresh = updated.find(u => u.fixture.id === old.fixture.id);
-                return fresh || old;
+                return fresh ? { ...fresh, _liveSource: data.source } : old;
               }));
             }
           }
-        } catch {}
+          // Set next refresh countdown
+          const interval = data.source === 'bzzoiro' ? 15 : 60;
+          setLiveNextRefresh(interval);
+        } catch {
+          setLiveError(true);
+        } finally {
+          setLiveRefreshing(false);
+        }
       };
       refresh();
-      liveIntervalRef.current = setInterval(refresh, 15000);
+      // Use 15s for Bzzoiro, 60s for API-Football
+      const intervalMs = liveSource === 'bzzoiro' ? 15000 : 60000;
+      liveIntervalRef.current = setInterval(refresh, intervalMs);
     }
     return () => { if (liveIntervalRef.current) clearInterval(liveIntervalRef.current); };
-  }, [liveTracked.length, date]);
+  }, [liveTracked.length, date, liveSource]);
+
+  // Countdown timer for next refresh
+  useEffect(() => {
+    if (liveTracked.length > 0 && liveNextRefresh > 0) {
+      countdownRef.current = setInterval(() => {
+        setLiveNextRefresh(prev => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
+    }
+    return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
+  }, [liveTracked.length, liveNextRefresh > 0]);
 
   // Load history dates when switching to analizados tab
   useEffect(() => {
@@ -406,17 +438,50 @@ export default function Home() {
                 <h2>Seguimiento En Vivo</h2>
                 <p className="subtitle">
                   {liveTracked.length > 0
-                    ? `${liveTracked.length} partidos — actualizacion cada 15s via Bzzoiro`
+                    ? `${liveTracked.length} partidos — via ${liveSource === 'bzzoiro' ? 'Bzzoiro (15s)' : liveSource === 'api-football' ? 'API-Football (60s)' : 'Cache'}`
                     : 'Selecciona partidos y presiona "En Vivo" para seguirlos'
                   }
                 </p>
               </div>
               {liveTracked.length > 0 && (
-                <button className="btn btn-ghost btn-sm" onClick={() => setLiveTracked([])}>
-                  Limpiar todo
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setLiveTracked([]); setLiveSource(''); setLiveLastUpdate(null); }}>
+                    Limpiar todo
+                  </button>
+                </div>
               )}
             </div>
+            {/* Live status bar */}
+            {liveTracked.length > 0 && (
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '8px 14px', marginBottom: 12, borderRadius: 8,
+                background: liveError ? 'rgba(255,59,48,0.1)' : liveSource === 'cache' ? 'rgba(255,149,0,0.1)' : 'rgba(48,209,88,0.1)',
+                border: `1px solid ${liveError ? 'rgba(255,59,48,0.3)' : liveSource === 'cache' ? 'rgba(255,149,0,0.3)' : 'rgba(48,209,88,0.3)'}`,
+                fontSize: '0.7rem',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {liveRefreshing
+                    ? <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--blue)', animation: 'blink 0.5s infinite' }} />
+                    : <span style={{ width: 8, height: 8, borderRadius: '50%', background: liveError ? 'var(--red)' : liveSource === 'cache' ? 'var(--orange)' : 'var(--green)' }} />
+                  }
+                  <span style={{ color: 'rgba(255,255,255,0.8)' }}>
+                    {liveRefreshing ? 'Actualizando...' : liveError ? 'Error de conexion' :
+                      liveSource === 'api-football' ? 'API-Football (1 call/min)' :
+                      liveSource === 'bzzoiro' ? 'Bzzoiro (gratis)' :
+                      'Datos en cache — esperando refresh'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: 'rgba(255,255,255,0.5)' }}>
+                  {liveLastUpdate && (
+                    <span>Ultimo: {liveLastUpdate.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                  )}
+                  {liveNextRefresh > 0 && !liveRefreshing && (
+                    <span>Siguiente: {liveNextRefresh}s</span>
+                  )}
+                </div>
+              </div>
+            )}
 
             {liveTracked.length === 0 && (
               <div className="empty">
@@ -540,7 +605,7 @@ function LiveMatchCard({ match, onRemove }) {
   const meta = match.leagueMeta || {};
   const flag = FLAGS[meta.country] || '';
   const hasScore = live || ['FT', 'AET', 'PEN'].includes(match.fixture.status.short);
-  const source = match._liveSource === 'bzzoiro' ? 'Bzzoiro' : 'Cache';
+  const source = match._liveSource === 'bzzoiro' ? 'Bzzoiro' : match._liveSource === 'api-football' ? 'API' : 'Cache';
 
   return (
     <div className={`match-row ${live ? 'live' : ''}`} style={{ cursor: 'default' }}>
@@ -558,7 +623,7 @@ function LiveMatchCard({ match, onRemove }) {
             {meta.gender === 'W' && <span className="gender-tag">Fem</span>}
           </div>
           <div className="match-meta">
-            <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginRight: 4 }}>{source}</span>
+            <span style={{ fontSize: '0.6rem', color: source === 'Cache' ? 'var(--orange)' : 'var(--green)', marginRight: 4, fontWeight: 600 }}>{source}</span>
             <span className={`match-time-badge ${live ? 'live' : ''}`}>
               {live ? `${match.fixture.status.elapsed || ''}\' ${statusText(match.fixture.status.short)}` : match.fixture.status.short === 'FT' ? 'Final' : fmtTime(match.fixture.date)}
             </span>
