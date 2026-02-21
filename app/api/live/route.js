@@ -1,22 +1,9 @@
-import { getBzzoiroLive, matchBzzoiroToFixtures, applyLiveUpdates } from '../../../lib/bzzoiro-api';
 import { getFromSanity, saveToSanity } from '../../../lib/sanity';
 
 export const dynamic = 'force-dynamic';
 
 const API_HOST = 'v3.football.api-sports.io';
 
-// Direct API-Football call for live fixtures refresh (1 API call)
-async function refreshFromApiFootball(date, apiKey) {
-  const res = await fetch(`https://${API_HOST}/fixtures?date=${date}`, {
-    headers: { 'x-apisports-key': apiKey },
-    cache: 'no-store',
-  });
-  if (!res.ok) throw new Error(`API-Football error: ${res.status}`);
-  const data = await res.json();
-  return data.response || [];
-}
-
-// Track API call usage
 async function trackCall() {
   const key = new Date().toISOString().split('T')[0];
   const doc = await getFromSanity('appConfig', `apiQuota-${key}`);
@@ -25,10 +12,17 @@ async function trackCall() {
   return used;
 }
 
+async function getQuota() {
+  const key = new Date().toISOString().split('T')[0];
+  const doc = await getFromSanity('appConfig', `apiQuota-${key}`);
+  const used = doc?.used || 0;
+  return { used, remaining: 100 - used, limit: 100 };
+}
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const date = searchParams.get('date');
-  const bzzoiroKey = process.env.BZZOIRO_API_KEY;
+  const idsParam = searchParams.get('ids'); // comma-separated fixture IDs being tracked
   const footballKey = process.env.FOOTBALL_API_KEY;
 
   if (!date) {
@@ -36,48 +30,29 @@ export async function GET(request) {
   }
 
   try {
-    // Get current cached matches from Sanity
+    const { ALL_LEAGUE_IDS, LEAGUES } = await import('../../../lib/leagues');
+
+    // Get cached data and check age
     const cached = await getFromSanity('matchDay', date);
     const fixtures = cached?.matches || [];
     const cacheAge = cached?.fetchedAt ? Date.now() - new Date(cached.fetchedAt).getTime() : Infinity;
+    const quota = await getQuota();
 
-    if (fixtures.length === 0) {
-      return Response.json({ matches: [], source: 'empty', updatedAt: null });
-    }
+    // Determine refresh interval based on remaining quota
+    // >50 calls: 45s, >20 calls: 90s, else: 180s
+    const minInterval = quota.remaining > 50 ? 45_000 : quota.remaining > 20 ? 90_000 : 180_000;
 
-    // === STRATEGY 1: Bzzoiro (free, unlimited) ===
-    if (bzzoiroKey) {
+    // Only call API-Football if cache is stale enough and we have quota
+    if (footballKey && cacheAge > minInterval && quota.remaining > 0) {
       try {
-        const liveData = await getBzzoiroLive(bzzoiroKey);
-        const updates = matchBzzoiroToFixtures(liveData, fixtures);
-        const updatedMatches = applyLiveUpdates(fixtures, updates);
-        const now = new Date().toISOString();
-
-        await saveToSanity('matchDay', date, {
-          date,
-          matches: updatedMatches,
-          fetchedAt: now,
-          matchCount: updatedMatches.length,
+        const res = await fetch(`https://${API_HOST}/fixtures?date=${date}`, {
+          headers: { 'x-apisports-key': footballKey },
+          cache: 'no-store',
         });
 
-        return Response.json({
-          matches: updatedMatches,
-          source: 'bzzoiro',
-          liveUpdated: Object.keys(updates).length,
-          updatedAt: now,
-        });
-      } catch (e) {
-        console.error('Bzzoiro live error:', e.message);
-        // Fall through to API-Football
-      }
-    }
-
-    // === STRATEGY 2: API-Football (costs 1 call, throttled to max 1/min) ===
-    if (footballKey && cacheAge > 60_000) {
-      try {
-        const { ALL_LEAGUE_IDS, LEAGUES } = await import('../../../lib/leagues');
-
-        const allFixtures = await refreshFromApiFootball(date, footballKey);
+        if (!res.ok) throw new Error(`API-Football error: ${res.status}`);
+        const data = await res.json();
+        const allFixtures = data.response || [];
         await trackCall();
 
         const filtered = allFixtures
@@ -85,7 +60,6 @@ export async function GET(request) {
           .map(m => ({
             ...m,
             leagueMeta: LEAGUES[m.league.id] || { country: m.league.country, name: m.league.name, division: 0, gender: 'M' },
-            _liveSource: 'api-football',
           }));
 
         const now = new Date().toISOString();
@@ -97,27 +71,42 @@ export async function GET(request) {
           matchCount: filtered.length,
         });
 
+        // If specific IDs requested, filter to those
+        const trackedIds = idsParam ? new Set(idsParam.split(',').map(Number)) : null;
+        const responseMatches = trackedIds
+          ? filtered.filter(m => trackedIds.has(m.fixture.id))
+          : filtered;
+
+        const updatedQuota = await getQuota();
+
         return Response.json({
-          matches: filtered,
+          matches: responseMatches,
+          allCount: filtered.length,
           source: 'api-football',
-          liveUpdated: filtered.filter(m =>
-            ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(m.fixture?.status?.short)
-          ).length,
           updatedAt: now,
           apiCallUsed: true,
+          refreshInterval: updatedQuota.remaining > 50 ? 45 : updatedQuota.remaining > 20 ? 90 : 180,
+          quota: updatedQuota,
         });
       } catch (e) {
         console.error('API-Football live refresh error:', e.message);
       }
     }
 
-    // === FALLBACK: Return cached data with age info ===
+    // Return cached data (no API call)
+    const trackedIds = idsParam ? new Set(idsParam.split(',').map(Number)) : null;
+    const responseMatches = trackedIds
+      ? fixtures.filter(m => trackedIds.has(m.fixture.id))
+      : fixtures;
+
     return Response.json({
-      matches: fixtures,
+      matches: responseMatches,
+      allCount: fixtures.length,
       source: 'cache',
       updatedAt: cached?.fetchedAt || null,
       cacheAgeSec: Math.round(cacheAge / 1000),
-      nextRefreshIn: Math.max(0, Math.round((60_000 - cacheAge) / 1000)),
+      refreshInterval: quota.remaining > 50 ? 45 : quota.remaining > 20 ? 90 : 180,
+      quota,
     });
   } catch (error) {
     console.error('Live scores error:', error);

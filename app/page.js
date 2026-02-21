@@ -63,6 +63,7 @@ export default function Home() {
   const [liveError, setLiveError] = useState(false);
   const [liveRefreshing, setLiveRefreshing] = useState(false);
   const [liveNextRefresh, setLiveNextRefresh] = useState(0);
+  const [liveInterval, setLiveInterval] = useState(60);
   const liveIntervalRef = useRef(null);
   const countdownRef = useRef(null);
   const hasRestoredRef = useRef(false);
@@ -145,70 +146,68 @@ export default function Home() {
     }
   }, [liveTracked]);
 
-  // Live tracking auto-refresh (15s with Bzzoiro, 60s with API-Football)
+  // Live tracking auto-refresh via API-Football (dynamic interval based on quota)
   useEffect(() => {
-    if (liveTracked.length > 0) {
-      const refresh = async () => {
-        setLiveRefreshing(true);
-        try {
-          const res = await fetch(`/api/live?date=${date}`);
-          const data = await res.json();
-          setLiveSource(data.source || 'cache');
-          setLiveLastUpdate(new Date());
-          setLiveError(false);
-          if (data.apiCallUsed) {
-            fetch('/api/quota').then(r => r.json()).then(q => setQuota(q)).catch(() => {});
-          }
-          if (data.matches) {
-            const trackedIds = new Set(liveTracked.map(m => m.fixture.id));
-            const updated = data.matches.filter(m => trackedIds.has(m.fixture.id));
-            if (updated.length > 0) {
-              // Detect score changes and notify
-              updated.forEach(m => {
-                const prev = prevScoresRef.current[m.fixture.id];
-                const newHome = m.goals?.home ?? 0;
-                const newAway = m.goals?.away ?? 0;
-                if (prev && (newHome > prev.home || newAway > prev.away)) {
-                  notifyScoreChange(m, prev.home, prev.away, newHome, newAway);
-                }
-                prevScoresRef.current[m.fixture.id] = { home: newHome, away: newAway };
-              });
+    if (liveTracked.length === 0) return;
 
-              const now = Date.now();
-              setLiveTracked(prev => prev.map(old => {
-                const fresh = updated.find(u => u.fixture.id === old.fixture.id);
-                return fresh ? { ...fresh, _liveSource: data.source, _apiElapsed: fresh.fixture.status.elapsed, _apiTimestamp: now } : old;
-              }));
+    const refresh = async () => {
+      setLiveRefreshing(true);
+      try {
+        const ids = liveTracked.map(m => m.fixture.id).join(',');
+        const res = await fetch(`/api/live?date=${date}&ids=${ids}`);
+        const data = await res.json();
+        setLiveSource(data.source || 'cache');
+        setLiveLastUpdate(new Date());
+        setLiveError(false);
+        if (data.quota) setQuota(data.quota);
+        if (data.refreshInterval) setLiveInterval(data.refreshInterval);
 
-              // Auto-remove finished matches after 18s
-              updated.forEach(m => {
-                if (isFinished(m.fixture.status.short) && !pendingRemovalsRef.current.has(m.fixture.id)) {
-                  pendingRemovalsRef.current.add(m.fixture.id);
-                  setTimeout(() => {
-                    setLiveTracked(prev => prev.filter(t => t.fixture.id !== m.fixture.id));
-                    delete prevScoresRef.current[m.fixture.id];
-                    pendingRemovalsRef.current.delete(m.fixture.id);
-                  }, 18000);
-                }
-              });
+        if (data.matches && data.matches.length > 0) {
+          const now = Date.now();
+
+          // Detect score changes and notify
+          data.matches.forEach(m => {
+            const prev = prevScoresRef.current[m.fixture.id];
+            const newHome = m.goals?.home ?? 0;
+            const newAway = m.goals?.away ?? 0;
+            if (prev && (newHome > prev.home || newAway > prev.away)) {
+              notifyScoreChange(m, prev.home, prev.away, newHome, newAway);
             }
-          }
-          // Set next refresh countdown
-          const interval = data.source === 'bzzoiro' ? 15 : 60;
-          setLiveNextRefresh(interval);
-        } catch {
-          setLiveError(true);
-        } finally {
-          setLiveRefreshing(false);
+            prevScoresRef.current[m.fixture.id] = { home: newHome, away: newAway };
+          });
+
+          // Update tracked matches with fresh data
+          setLiveTracked(prev => prev.map(old => {
+            const fresh = data.matches.find(u => u.fixture.id === old.fixture.id);
+            return fresh ? { ...fresh, _apiElapsed: fresh.fixture.status.elapsed, _apiTimestamp: now } : old;
+          }));
+
+          // Auto-remove finished matches after 18s
+          data.matches.forEach(m => {
+            if (isFinished(m.fixture.status.short) && !pendingRemovalsRef.current.has(m.fixture.id)) {
+              pendingRemovalsRef.current.add(m.fixture.id);
+              setTimeout(() => {
+                setLiveTracked(prev => prev.filter(t => t.fixture.id !== m.fixture.id));
+                delete prevScoresRef.current[m.fixture.id];
+                pendingRemovalsRef.current.delete(m.fixture.id);
+              }, 18000);
+            }
+          });
         }
-      };
-      refresh();
-      // Use 15s for Bzzoiro, 60s for API-Football
-      const intervalMs = liveSource === 'bzzoiro' ? 15000 : 60000;
-      liveIntervalRef.current = setInterval(refresh, intervalMs);
-    }
+        setLiveNextRefresh(data.refreshInterval || liveInterval);
+      } catch {
+        setLiveError(true);
+      } finally {
+        setLiveRefreshing(false);
+      }
+    };
+
+    refresh();
+    const ms = liveInterval * 1000;
+    liveIntervalRef.current = setInterval(refresh, ms);
+
     return () => { if (liveIntervalRef.current) clearInterval(liveIntervalRef.current); };
-  }, [liveTracked.length, date, liveSource]);
+  }, [liveTracked.length, date, liveInterval]);
 
   // Countdown timer for next refresh
   useEffect(() => {
@@ -568,9 +567,8 @@ export default function Home() {
                   }
                   <span>
                     {liveRefreshing ? 'Sincronizando...' : liveError ? 'Error de conexion' :
-                      liveSource === 'bzzoiro' ? 'Bzzoiro (cada 15s)' :
-                      liveSource === 'api-football' ? 'API-Football (cada 60s)' :
-                      'Cache — esperando sync'}
+                      liveSource === 'api-football' ? `API-Football (cada ${liveInterval}s)` :
+                      `Cache — proximo sync en ${liveNextRefresh}s`}
                   </span>
                 </div>
                 <div className="live-conn-right">
