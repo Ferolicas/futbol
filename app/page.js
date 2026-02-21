@@ -118,7 +118,9 @@ export default function Home() {
       .then(r => r.json())
       .then(data => {
         const idSet = new Set(stored.ids);
-        const restored = (data.matches || []).filter(m => idSet.has(m.fixture.id));
+        const now = Date.now();
+        const restored = (data.matches || []).filter(m => idSet.has(m.fixture.id))
+          .map(m => ({ ...m, _liveSource: data.source, _apiElapsed: m.fixture.status.elapsed, _apiTimestamp: now }));
         if (restored.length > 0) {
           const scores = {};
           restored.forEach(m => { scores[m.fixture.id] = { home: m.goals?.home ?? 0, away: m.goals?.away ?? 0 }; });
@@ -172,9 +174,10 @@ export default function Home() {
                 prevScoresRef.current[m.fixture.id] = { home: newHome, away: newAway };
               });
 
+              const now = Date.now();
               setLiveTracked(prev => prev.map(old => {
                 const fresh = updated.find(u => u.fixture.id === old.fixture.id);
-                return fresh ? { ...fresh, _liveSource: data.source } : old;
+                return fresh ? { ...fresh, _liveSource: data.source, _apiElapsed: fresh.fixture.status.elapsed, _apiTimestamp: now } : old;
               }));
 
               // Auto-remove finished matches after 18s
@@ -276,9 +279,11 @@ export default function Home() {
       }
     });
 
+    const now = Date.now();
     setLiveTracked(prev => {
       const existingIds = new Set(prev.map(m => m.fixture.id));
-      const newOnes = toTrack.filter(m => !existingIds.has(m.fixture.id));
+      const newOnes = toTrack.filter(m => !existingIds.has(m.fixture.id))
+        .map(m => ({ ...m, _apiElapsed: m.fixture.status.elapsed, _apiTimestamp: now }));
       return [...prev, ...newOnes];
     });
     setSelected(new Set());
@@ -552,53 +557,32 @@ export default function Home() {
 
         {/* ==================== TAB: EN VIVO ==================== */}
         {tab === 'envivo' && (
-          <div className="analizados-view">
-            <div className="history-bar">
-              <div className="history-bar-left">
-                <h2>Seguimiento En Vivo</h2>
-                <p className="subtitle">
-                  {liveTracked.length > 0
-                    ? `${liveTracked.length} partidos — via ${liveSource === 'bzzoiro' ? 'Bzzoiro (15s)' : liveSource === 'api-football' ? 'API-Football (60s)' : 'Cache'}`
-                    : 'Selecciona partidos y presiona "En Vivo" para seguirlos'
-                  }
-                </p>
-              </div>
-              {liveTracked.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => { setLiveTracked([]); setLiveSource(''); setLiveLastUpdate(null); prevScoresRef.current = {}; pendingRemovalsRef.current.clear(); }}>
-                    Limpiar todo
-                  </button>
-                </div>
-              )}
-            </div>
-            {/* Live status bar */}
+          <div className="live-view">
+            {/* Connection status bar */}
             {liveTracked.length > 0 && (
-              <div style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '8px 14px', marginBottom: 12, borderRadius: 8,
-                background: liveError ? 'rgba(255,59,48,0.1)' : liveSource === 'cache' ? 'rgba(255,149,0,0.1)' : 'rgba(48,209,88,0.1)',
-                border: `1px solid ${liveError ? 'rgba(255,59,48,0.3)' : liveSource === 'cache' ? 'rgba(255,149,0,0.3)' : 'rgba(48,209,88,0.3)'}`,
-                fontSize: '0.7rem',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div className={`live-conn-bar ${liveError ? 'error' : liveSource === 'cache' ? 'cache' : 'ok'}`}>
+                <div className="live-conn-left">
                   {liveRefreshing
-                    ? <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--blue)', animation: 'blink 0.5s infinite' }} />
-                    : <span style={{ width: 8, height: 8, borderRadius: '50%', background: liveError ? 'var(--red)' : liveSource === 'cache' ? 'var(--orange)' : 'var(--green)' }} />
+                    ? <span className="conn-dot syncing" />
+                    : <span className={`conn-dot ${liveError ? 'error' : 'ok'}`} />
                   }
-                  <span style={{ color: 'rgba(255,255,255,0.8)' }}>
-                    {liveRefreshing ? 'Actualizando...' : liveError ? 'Error de conexion' :
-                      liveSource === 'api-football' ? 'API-Football (1 call/min)' :
-                      liveSource === 'bzzoiro' ? 'Bzzoiro (gratis)' :
-                      'Datos en cache — esperando refresh'}
+                  <span>
+                    {liveRefreshing ? 'Sincronizando...' : liveError ? 'Error de conexion' :
+                      liveSource === 'bzzoiro' ? 'Bzzoiro (cada 15s)' :
+                      liveSource === 'api-football' ? 'API-Football (cada 60s)' :
+                      'Cache — esperando sync'}
                   </span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: 'rgba(255,255,255,0.5)' }}>
+                <div className="live-conn-right">
                   {liveLastUpdate && (
-                    <span>Ultimo: {liveLastUpdate.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                    <span>Sync: {liveLastUpdate.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
                   )}
                   {liveNextRefresh > 0 && !liveRefreshing && (
-                    <span>Siguiente: {liveNextRefresh}s</span>
+                    <span className="conn-countdown">{liveNextRefresh}s</span>
                   )}
+                  <button className="live-clear-btn" onClick={() => { setLiveTracked([]); setLiveSource(''); setLiveLastUpdate(null); prevScoresRef.current = {}; pendingRemovalsRef.current.clear(); }}>
+                    Limpiar
+                  </button>
                 </div>
               </div>
             )}
@@ -613,7 +597,7 @@ export default function Home() {
               </div>
             )}
 
-            <div className="match-list">
+            <div className="live-grid">
               {liveTracked.map(match => (
                 <LiveMatchCard key={match.fixture.id} match={match} onRemove={() => removeFromLive(match.fixture.id)} />
               ))}
@@ -719,52 +703,113 @@ function MatchRow({ match, isSelected, onToggle, onHide }) {
   );
 }
 
+// ==================== LIVE CLOCK (synced with API) ====================
+function LiveClock({ elapsed, status, apiTimestamp }) {
+  const [display, setDisplay] = useState('');
+
+  useEffect(() => {
+    if (!isLive(status)) {
+      if (status === 'HT') setDisplay('Entretiempo');
+      else setDisplay(statusText(status));
+      return;
+    }
+
+    const baseMin = elapsed || 0;
+    const baseTime = apiTimestamp || Date.now();
+
+    const tick = () => {
+      const secsSinceUpdate = Math.max(0, Math.floor((Date.now() - baseTime) / 1000));
+      const currentMin = baseMin + Math.floor(secsSinceUpdate / 60);
+      const currentSec = secsSinceUpdate % 60;
+      const is1H = status === '1H';
+      const is2H = status === '2H';
+
+      if (is1H && currentMin >= 45) {
+        const added = currentMin - 45;
+        setDisplay(`45+${added}:${String(currentSec).padStart(2, '0')}`);
+      } else if (is2H && currentMin >= 90) {
+        const added = currentMin - 90;
+        setDisplay(`90+${added}:${String(currentSec).padStart(2, '0')}`);
+      } else {
+        setDisplay(`${currentMin}:${String(currentSec).padStart(2, '0')}`);
+      }
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [elapsed, status, apiTimestamp]);
+
+  return <span>{display}</span>;
+}
+
 // ==================== LIVE MATCH CARD ====================
 function LiveMatchCard({ match, onRemove }) {
   const live = isLive(match.fixture.status.short);
+  const finished = isFinished(match.fixture.status.short);
   const meta = match.leagueMeta || {};
   const flag = FLAGS[meta.country] || '';
-  const hasScore = live || ['FT', 'AET', 'PEN'].includes(match.fixture.status.short);
+  const hasScore = live || finished;
   const source = match._liveSource === 'bzzoiro' ? 'Bzzoiro' : match._liveSource === 'api-football' ? 'API' : 'Cache';
+  const status = match.fixture.status.short;
+
+  const elapsed = match._apiElapsed || match.fixture.status.elapsed || 0;
+  const maxMin = status === '1H' ? 45 : 90;
+  const progress = Math.min(100, (elapsed / maxMin) * 100);
 
   return (
-    <div className={`match-row ${live ? 'live' : ''}`} style={{ cursor: 'default' }}>
-      <div style={{ width: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        {live
-          ? <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--red)', animation: 'blink 1.5s infinite' }} />
-          : <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--text-muted)' }} />
-        }
-      </div>
-      <div className="match-row-content">
-        <div className="match-row-top">
-          <div className="match-league">
-            {match.league.logo && <img src={match.league.logo} alt="" />}
-            <span>{flag} {match.league.name}</span>
-            {meta.gender === 'W' && <span className="gender-tag">Fem</span>}
-          </div>
-          <div className="match-meta">
-            <span style={{ fontSize: '0.6rem', color: source === 'Cache' ? 'var(--orange)' : 'var(--green)', marginRight: 4, fontWeight: 600 }}>{source}</span>
-            <span className={`match-time-badge ${live ? 'live' : ''}`}>
-              {live ? `${match.fixture.status.elapsed || ''}\' ${statusText(match.fixture.status.short)}` : match.fixture.status.short === 'FT' ? 'Final' : fmtTime(match.fixture.date)}
-            </span>
-          </div>
+    <div className={`live-card ${live ? 'is-live' : ''} ${finished ? 'is-finished' : ''}`}>
+      {/* Top bar: league + clock */}
+      <div className="live-card-top">
+        <div className="live-card-league">
+          {match.league.logo && <img src={match.league.logo} alt="" />}
+          <span>{flag} {match.league.name}</span>
+          {meta.gender === 'W' && <span className="gender-tag">Fem</span>}
         </div>
-        <div className="match-teams">
-          <div className="match-team">
-            {match.teams.home.logo && <img src={match.teams.home.logo} alt="" />}
-            <span className="name">{match.teams.home.name}</span>
-          </div>
-          <div className={`match-score ${!hasScore ? 'pending' : ''}`}>
-            {hasScore ? `${match.goals.home} - ${match.goals.away}` : 'VS'}
-          </div>
-          <div className="match-team away">
-            {match.teams.away.logo && <img src={match.teams.away.logo} alt="" />}
-            <span className="name">{match.teams.away.name}</span>
-          </div>
+        <div className="live-card-status">
+          <span className="live-source-tag">{source}</span>
+          {live && <span className="live-pulse" />}
+          <span className={`live-clock-display ${live ? 'ticking' : ''}`}>
+            {live
+              ? <LiveClock elapsed={elapsed} status={status} apiTimestamp={match._apiTimestamp} />
+              : finished ? statusText(status) : fmtTime(match.fixture.date)
+            }
+          </span>
+          {live && <span className="live-badge-sm">LIVE</span>}
         </div>
       </div>
-      <div className="match-row-actions">
-        <button className="btn-hide-x" onClick={onRemove} title="Quitar">&#10005;</button>
+
+      {/* Score area */}
+      <div className="live-card-score-area">
+        <div className="live-card-team">
+          {match.teams.home.logo && <img src={match.teams.home.logo} alt="" />}
+          <span className="live-team-name">{match.teams.home.name}</span>
+        </div>
+        <div className={`live-card-score ${live ? 'glow' : ''} ${!hasScore ? 'pending' : ''}`}>
+          {hasScore ? (
+            <>
+              <span className="score-num">{match.goals.home}</span>
+              <span className="score-sep">-</span>
+              <span className="score-num">{match.goals.away}</span>
+            </>
+          ) : <span className="score-vs">VS</span>}
+        </div>
+        <div className="live-card-team away">
+          {match.teams.away.logo && <img src={match.teams.away.logo} alt="" />}
+          <span className="live-team-name">{match.teams.away.name}</span>
+        </div>
+      </div>
+
+      {/* Progress bar + remove button */}
+      <div className="live-card-bottom">
+        {live && (
+          <div className="live-progress-track">
+            <div className="live-progress-fill" style={{ width: `${progress}%` }} />
+            <span className="live-progress-label">{status === '1H' ? '1T' : '2T'}</span>
+          </div>
+        )}
+        {!live && <div style={{ flex: 1 }} />}
+        <button className="live-remove-btn" onClick={onRemove} title="Quitar">&times;</button>
       </div>
     </div>
   );
