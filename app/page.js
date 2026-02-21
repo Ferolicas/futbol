@@ -13,6 +13,29 @@ const today = () => new Date().toISOString().split('T')[0];
 const fmtTime = (d) => new Date(d).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
 const isLive = (s) => ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(s);
 const statusText = (s) => ({ NS: 'Proximo', '1H': '1T', '2H': '2T', HT: 'HT', FT: 'Final', ET: 'Extra', P: 'Pen', AET: 'Extra', PEN: 'Pen', SUSP: 'Susp', PST: 'Post', CANC: 'Canc' }[s] || s);
+const isFinished = (s) => ['FT', 'AET', 'PEN', 'CANC', 'SUSP', 'PST', 'ABD', 'AWD', 'WO'].includes(s);
+
+const LIVE_STORAGE_KEY = 'futbol_live_tracked';
+
+const saveLiveToStorage = (tracked) => {
+  try {
+    const ids = tracked.map(m => m.fixture.id);
+    localStorage.setItem(LIVE_STORAGE_KEY, JSON.stringify({ ids, date: today() }));
+  } catch {}
+};
+
+const loadLiveFromStorage = () => {
+  try {
+    const raw = localStorage.getItem(LIVE_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (data.date !== today()) {
+      localStorage.removeItem(LIVE_STORAGE_KEY);
+      return null;
+    }
+    return data;
+  } catch { return null; }
+};
 
 export default function Home() {
   // TABS: 'partidos' | 'envivo' | 'analizados'
@@ -42,6 +65,10 @@ export default function Home() {
   const [liveNextRefresh, setLiveNextRefresh] = useState(0);
   const liveIntervalRef = useRef(null);
   const countdownRef = useRef(null);
+  const hasRestoredRef = useRef(false);
+  const pendingRemovalsRef = useRef(new Set());
+  const prevScoresRef = useRef({});
+  const [notifPermission, setNotifPermission] = useState('default');
 
   // Analizados tab state
   const [savedAnalyses, setSavedAnalyses] = useState([]);
@@ -50,11 +77,71 @@ export default function Home() {
   const [historyDates, setHistoryDates] = useState([]);
   const [historyDate, setHistoryDate] = useState(today());
 
+  const requestNotifPermission = useCallback(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission === 'granted') { setNotifPermission('granted'); return; }
+    if (Notification.permission === 'denied') { setNotifPermission('denied'); return; }
+    Notification.requestPermission().then(p => setNotifPermission(p)).catch(() => {});
+  }, []);
+
+  const notifyScoreChange = useCallback((match, oldHome, oldAway, newHome, newAway) => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    const homeName = match.teams?.home?.name || '?';
+    const awayName = match.teams?.away?.name || '?';
+    const homeScored = newHome > oldHome;
+    const awayScored = newAway > oldAway;
+    const scorer = homeScored && awayScored ? 'Doble GOL!' : homeScored ? `GOL ${homeName}!` : `GOL ${awayName}!`;
+    try {
+      new Notification(scorer, {
+        body: `${homeName} ${newHome} - ${newAway} ${awayName}`,
+        icon: match.league?.logo || undefined,
+        tag: `goal-${match.fixture.id}-${newHome}-${newAway}`,
+      });
+    } catch {}
+  }, []);
+
   useEffect(() => {
     fetch('/api/hide').then(r => r.json()).then(d => setHiddenIds(d.hidden || [])).catch(() => {});
     fetch('/api/quota').then(r => r.json()).then(q => setQuota(q)).catch(() => {});
     loadMatches(today());
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setNotifPermission(Notification.permission);
+    }
   }, []);
+
+  // Restore live tracked from localStorage
+  useEffect(() => {
+    const stored = loadLiveFromStorage();
+    if (!stored || stored.ids.length === 0) { hasRestoredRef.current = true; return; }
+    fetch(`/api/live?date=${stored.date}`)
+      .then(r => r.json())
+      .then(data => {
+        const idSet = new Set(stored.ids);
+        const restored = (data.matches || []).filter(m => idSet.has(m.fixture.id));
+        if (restored.length > 0) {
+          const scores = {};
+          restored.forEach(m => { scores[m.fixture.id] = { home: m.goals?.home ?? 0, away: m.goals?.away ?? 0 }; });
+          prevScoresRef.current = scores;
+          setLiveTracked(restored);
+          setLiveSource(data.source || 'cache');
+        } else {
+          localStorage.removeItem(LIVE_STORAGE_KEY);
+        }
+      })
+      .catch(() => { localStorage.removeItem(LIVE_STORAGE_KEY); })
+      .finally(() => { hasRestoredRef.current = true; });
+  }, []);
+
+  // Sync liveTracked to localStorage
+  useEffect(() => {
+    if (!hasRestoredRef.current) return;
+    if (liveTracked.length > 0) {
+      saveLiveToStorage(liveTracked);
+    } else {
+      localStorage.removeItem(LIVE_STORAGE_KEY);
+    }
+  }, [liveTracked]);
 
   // Live tracking auto-refresh (15s with Bzzoiro, 60s with API-Football)
   useEffect(() => {
@@ -74,10 +161,33 @@ export default function Home() {
             const trackedIds = new Set(liveTracked.map(m => m.fixture.id));
             const updated = data.matches.filter(m => trackedIds.has(m.fixture.id));
             if (updated.length > 0) {
+              // Detect score changes and notify
+              updated.forEach(m => {
+                const prev = prevScoresRef.current[m.fixture.id];
+                const newHome = m.goals?.home ?? 0;
+                const newAway = m.goals?.away ?? 0;
+                if (prev && (newHome > prev.home || newAway > prev.away)) {
+                  notifyScoreChange(m, prev.home, prev.away, newHome, newAway);
+                }
+                prevScoresRef.current[m.fixture.id] = { home: newHome, away: newAway };
+              });
+
               setLiveTracked(prev => prev.map(old => {
                 const fresh = updated.find(u => u.fixture.id === old.fixture.id);
                 return fresh ? { ...fresh, _liveSource: data.source } : old;
               }));
+
+              // Auto-remove finished matches after 18s
+              updated.forEach(m => {
+                if (isFinished(m.fixture.status.short) && !pendingRemovalsRef.current.has(m.fixture.id)) {
+                  pendingRemovalsRef.current.add(m.fixture.id);
+                  setTimeout(() => {
+                    setLiveTracked(prev => prev.filter(t => t.fixture.id !== m.fixture.id));
+                    delete prevScoresRef.current[m.fixture.id];
+                    pendingRemovalsRef.current.delete(m.fixture.id);
+                  }, 18000);
+                }
+              });
             }
           }
           // Set next refresh countdown
@@ -158,6 +268,14 @@ export default function Home() {
     const toTrack = filtered.filter(m => selected.has(m.fixture.id));
     if (toTrack.length === 0) return;
 
+    requestNotifPermission();
+
+    toTrack.forEach(m => {
+      if (!prevScoresRef.current[m.fixture.id]) {
+        prevScoresRef.current[m.fixture.id] = { home: m.goals?.home ?? 0, away: m.goals?.away ?? 0 };
+      }
+    });
+
     setLiveTracked(prev => {
       const existingIds = new Set(prev.map(m => m.fixture.id));
       const newOnes = toTrack.filter(m => !existingIds.has(m.fixture.id));
@@ -168,6 +286,8 @@ export default function Home() {
   };
 
   const removeFromLive = (fixtureId) => {
+    delete prevScoresRef.current[fixtureId];
+    pendingRemovalsRef.current.delete(fixtureId);
     setLiveTracked(prev => prev.filter(m => m.fixture.id !== fixtureId));
   };
 
@@ -445,7 +565,7 @@ export default function Home() {
               </div>
               {liveTracked.length > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => { setLiveTracked([]); setLiveSource(''); setLiveLastUpdate(null); }}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setLiveTracked([]); setLiveSource(''); setLiveLastUpdate(null); prevScoresRef.current = {}; pendingRemovalsRef.current.clear(); }}>
                     Limpiar todo
                   </button>
                 </div>
