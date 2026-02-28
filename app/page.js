@@ -46,6 +46,7 @@ export default function Home() {
   const [hiddenIds, setHiddenIds] = useState([]);
   const [loading, setLoading] = useState(false);
   const [fromCache, setFromCache] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   // Quota
   const [quota, setQuota] = useState({ used: 0, remaining: 200, limit: 200 });
@@ -211,15 +212,20 @@ export default function Home() {
 
   const loadMatches = useCallback(async (d) => {
     setLoading(true);
+    setLoadError('');
     try {
       const res = await fetch(`/api/matches?date=${d}`);
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (data.error) {
+        setLoadError(data.error);
+        return;
+      }
       setMatches(data.matches || []);
       setFromCache(data.fromCache);
       if (data.quota) setQuota(data.quota);
     } catch (e) {
       console.error(e);
+      setLoadError(e.message || 'Error de conexión');
     } finally {
       setLoading(false);
     }
@@ -396,8 +402,16 @@ export default function Home() {
         {/* LOADING */}
         {loading && <div className="loader"><div className="spinner" /><p>Cargando partidos...</p></div>}
 
+        {/* ERROR */}
+        {!loading && loadError && (
+          <div className="error-banner">
+            <span>Error: {loadError}</span>
+            <button onClick={() => loadMatches(date)}>Reintentar</button>
+          </div>
+        )}
+
         {/* EMPTY STATE */}
-        {!loading && filtered.length === 0 && (
+        {!loading && !loadError && filtered.length === 0 && (
           <div className="empty">
             <h3>Sin partidos</h3>
             <p>No hay partidos para esta fecha con los filtros seleccionados</p>
