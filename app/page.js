@@ -413,8 +413,22 @@ export default function Home() {
         {/* EMPTY STATE */}
         {!loading && !loadError && filtered.length === 0 && (
           <div className="empty">
-            <h3>Sin partidos</h3>
-            <p>No hay partidos para esta fecha con los filtros seleccionados</p>
+            {quota.remaining <= 0 ? (
+              <>
+                <h3>API agotada por hoy</h3>
+                <p>Se usaron {quota.used}/{quota.limit} llamadas. El limite se resetea a medianoche UTC.</p>
+                <p style={{ marginTop: 8, fontSize: '0.75rem' }}>Navega a fechas anteriores para ver partidos del cache.</p>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12 }}>
+                  <button className="chip" onClick={() => changeDate(-1)}>&#9664; Dia anterior</button>
+                  <button className="chip" onClick={() => changeDate(-2)}>2 dias atras</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3>Sin partidos</h3>
+                <p>No hay partidos para esta fecha con los filtros seleccionados</p>
+              </>
+            )}
           </div>
         )}
 
