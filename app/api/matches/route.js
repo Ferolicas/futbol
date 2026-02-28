@@ -1,21 +1,22 @@
-import { getMatches } from '../../../lib/football-api';
+import { getMatches, getAvailableApiKey } from '../../../lib/football-api';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const date = searchParams.get('date');
-  const apiKey = process.env.FOOTBALL_API_KEY;
 
   if (!date) {
     return Response.json({ error: 'date parameter required' }, { status: 400 });
   }
-  if (!apiKey) {
-    return Response.json({ error: 'FOOTBALL_API_KEY not configured' }, { status: 500 });
+
+  const keyInfo = await getAvailableApiKey();
+  if (!keyInfo) {
+    return Response.json({ error: 'No API keys available or all quota exhausted' }, { status: 500 });
   }
 
   try {
-    const result = await getMatches(date, apiKey);
+    const result = await getMatches(date, keyInfo);
     return Response.json(result);
   } catch (error) {
     console.error('Matches error:', error);
