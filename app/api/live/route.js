@@ -1,5 +1,5 @@
 import { getFromSanity, saveToSanity } from '../../../lib/sanity';
-import { getQuota } from '../../../lib/football-api';
+import { getQuota } from '../../../lib/api-football';
 
 export const dynamic = 'force-dynamic';
 

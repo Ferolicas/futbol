@@ -1,618 +1,737 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-
-const FLAGS = {
-  Germany: '🇩🇪', Spain: '🇪🇸', England: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', Italy: '🇮🇹',
-  Colombia: '🇨🇴', Brazil: '🇧🇷', France: '🇫🇷', 'Saudi Arabia': '🇸🇦', Argentina: '🇦🇷', Mexico: '🇲🇽',
-};
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import { FLAGS } from '../lib/leagues';
 
 const today = () => new Date().toISOString().split('T')[0];
 const fmtTime = (d) => new Date(d).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
 const isLive = (s) => ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(s);
-const statusText = (s) => ({ NS: 'Proximo', '1H': '1T', '2H': '2T', HT: 'HT', FT: 'Final', ET: 'Extra', P: 'Pen', AET: 'Extra', PEN: 'Pen', SUSP: 'Susp', PST: 'Post', CANC: 'Canc' }[s] || s);
 const isFinished = (s) => ['FT', 'AET', 'PEN', 'CANC', 'SUSP', 'PST', 'ABD', 'AWD', 'WO'].includes(s);
+const statusText = (s) => ({
+  NS: 'Próximo', '1H': '1T', '2H': '2T', HT: 'Entretiempo',
+  FT: 'Final', ET: 'Extra', P: 'Penales', AET: 'Extra', PEN: 'Penales',
+  SUSP: 'Suspendido', PST: 'Pospuesto', CANC: 'Cancelado',
+}[s] || s);
 
-const LIVE_STORAGE_KEY = 'futbol_live_tracked';
-
-const saveLiveToStorage = (tracked) => {
-  try {
-    const ids = tracked.map(m => m.fixture.id);
-    localStorage.setItem(LIVE_STORAGE_KEY, JSON.stringify({ ids, date: today() }));
-  } catch {}
-};
-
-const loadLiveFromStorage = () => {
-  try {
-    const raw = localStorage.getItem(LIVE_STORAGE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (data.date !== today()) {
-      localStorage.removeItem(LIVE_STORAGE_KEY);
-      return null;
-    }
-    return data;
-  } catch { return null; }
-};
-
-export default function Home() {
+export default function Dashboard() {
+  const router = useRouter();
+  const [tab, setTab] = useState('partidos');
   const [date, setDate] = useState(today());
-  const [filter, setFilter] = useState('todos'); // todos | envivo | proximos | finalizados
-  const [leagueFilter, setLeagueFilter] = useState('');
-  const [genderFilter, setGenderFilter] = useState('');
-
-  // Match data
-  const [matches, setMatches] = useState([]);
-  const [hiddenIds, setHiddenIds] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [fixtures, setFixtures] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [fromCache, setFromCache] = useState(false);
-  const [loadError, setLoadError] = useState('');
+  const [quota, setQuota] = useState({ used: 0, remaining: 100, limit: 100 });
+  const [hidden, setHidden] = useState([]);
+  const [analyzed, setAnalyzed] = useState([]);
+  const [analyzedOdds, setAnalyzedOdds] = useState({});
+  const [analyzedData, setAnalyzedData] = useState({});
+  const [standings, setStandings] = useState({});
 
-  // Quota
-  const [quota, setQuota] = useState({ used: 0, remaining: 200, limit: 200 });
+  const [sortBy, setSortBy] = useState('time');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [leagueFilter, setLeagueFilter] = useState('');
 
-  // Live tracking
-  const [liveTracked, setLiveTracked] = useState([]);
-  const [liveSource, setLiveSource] = useState('');
-  const [liveLastUpdate, setLiveLastUpdate] = useState(null);
-  const [liveError, setLiveError] = useState(false);
-  const [liveRefreshing, setLiveRefreshing] = useState(false);
-  const [liveNextRefresh, setLiveNextRefresh] = useState(0);
-  const [liveInterval, setLiveInterval] = useState(60);
-  const liveIntervalRef = useRef(null);
-  const countdownRef = useRef(null);
-  const hasRestoredRef = useRef(false);
-  const pendingRemovalsRef = useRef(new Set());
-  const prevScoresRef = useRef({});
-  const [notifPermission, setNotifPermission] = useState('default');
+  const [selected, setSelected] = useState(new Set());
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState({ current: 0, total: 0 });
 
-  const requestNotifPermission = useCallback(() => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    if (Notification.permission === 'granted') { setNotifPermission('granted'); return; }
-    if (Notification.permission === 'denied') { setNotifPermission('denied'); return; }
-    Notification.requestPermission().then(p => setNotifPermission(p)).catch(() => {});
-  }, []);
+  // For Combinada Total - selected match IDs from Combinadas tab
+  const [combinadaSelected, setCombinadaSelected] = useState(new Set());
 
-  const notifyScoreChange = useCallback((match, oldHome, oldAway, newHome, newAway) => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    if (Notification.permission !== 'granted') return;
-    const homeName = match.teams?.home?.name || '?';
-    const awayName = match.teams?.away?.name || '?';
-    const homeScored = newHome > oldHome;
-    const awayScored = newAway > oldAway;
-    const scorer = homeScored && awayScored ? 'Doble GOL!' : homeScored ? `GOL ${homeName}!` : `GOL ${awayName}!`;
-    try {
-      new Notification(scorer, {
-        body: `${homeName} ${newHome} - ${newAway} ${awayName}`,
-        icon: match.league?.logo || undefined,
-        tag: `goal-${match.fixture.id}-${newHome}-${newAway}`,
-      });
-    } catch {}
-  }, []);
-
-  // Initial load
-  useEffect(() => {
-    fetch('/api/hide').then(r => r.json()).then(d => setHiddenIds(d.hidden || [])).catch(() => {});
-    loadMatches(today());
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      setNotifPermission(Notification.permission);
-    }
-  }, []);
-
-  // Restore live tracked from localStorage
-  useEffect(() => {
-    const stored = loadLiveFromStorage();
-    if (!stored || stored.ids.length === 0) { hasRestoredRef.current = true; return; }
-    fetch(`/api/live?date=${stored.date}`)
-      .then(r => r.json())
-      .then(data => {
-        const idSet = new Set(stored.ids);
-        const now = Date.now();
-        const restored = (data.matches || []).filter(m => idSet.has(m.fixture.id))
-          .map(m => ({ ...m, _liveSource: data.source, _apiElapsed: m.fixture.status.elapsed, _apiTimestamp: now }));
-        if (restored.length > 0) {
-          const scores = {};
-          restored.forEach(m => { scores[m.fixture.id] = { home: m.goals?.home ?? 0, away: m.goals?.away ?? 0 }; });
-          prevScoresRef.current = scores;
-          setLiveTracked(restored);
-          setLiveSource(data.source || 'cache');
-          if (data.quota) setQuota(data.quota);
-        } else {
-          localStorage.removeItem(LIVE_STORAGE_KEY);
-        }
-      })
-      .catch(() => { localStorage.removeItem(LIVE_STORAGE_KEY); })
-      .finally(() => { hasRestoredRef.current = true; });
-  }, []);
-
-  // Sync liveTracked to localStorage
-  useEffect(() => {
-    if (!hasRestoredRef.current) return;
-    if (liveTracked.length > 0) {
-      saveLiveToStorage(liveTracked);
-    } else {
-      localStorage.removeItem(LIVE_STORAGE_KEY);
-    }
-  }, [liveTracked]);
-
-  // Live refresh function (extracted for manual refresh)
-  const doLiveRefresh = useCallback(async () => {
-    if (liveTracked.length === 0) return;
-    setLiveRefreshing(true);
-    try {
-      const ids = liveTracked.map(m => m.fixture.id).join(',');
-      const res = await fetch(`/api/live?date=${date}&ids=${ids}`);
-      const data = await res.json();
-      setLiveSource(data.source || 'cache');
-      setLiveLastUpdate(new Date());
-      setLiveError(false);
-      if (data.quota) setQuota(data.quota);
-      if (data.refreshInterval) setLiveInterval(data.refreshInterval);
-
-      if (data.matches && data.matches.length > 0) {
-        const now = Date.now();
-        data.matches.forEach(m => {
-          const prev = prevScoresRef.current[m.fixture.id];
-          const newHome = m.goals?.home ?? 0;
-          const newAway = m.goals?.away ?? 0;
-          if (prev && (newHome > prev.home || newAway > prev.away)) {
-            notifyScoreChange(m, prev.home, prev.away, newHome, newAway);
-          }
-          prevScoresRef.current[m.fixture.id] = { home: newHome, away: newAway };
-        });
-
-        setLiveTracked(prev => prev.map(old => {
-          const fresh = data.matches.find(u => u.fixture.id === old.fixture.id);
-          return fresh ? { ...fresh, _apiElapsed: fresh.fixture.status.elapsed, _apiTimestamp: now } : old;
-        }));
-
-        data.matches.forEach(m => {
-          if (isFinished(m.fixture.status.short) && !pendingRemovalsRef.current.has(m.fixture.id)) {
-            pendingRemovalsRef.current.add(m.fixture.id);
-            setTimeout(() => {
-              setLiveTracked(prev => prev.filter(t => t.fixture.id !== m.fixture.id));
-              delete prevScoresRef.current[m.fixture.id];
-              pendingRemovalsRef.current.delete(m.fixture.id);
-            }, 18000);
-          }
-        });
-      }
-      setLiveNextRefresh(data.refreshInterval || liveInterval);
-    } catch {
-      setLiveError(true);
-    } finally {
-      setLiveRefreshing(false);
-    }
-  }, [liveTracked, date, liveInterval, notifyScoreChange]);
-
-  // Auto-refresh interval
-  useEffect(() => {
-    if (liveTracked.length === 0) return;
-    doLiveRefresh();
-    const ms = liveInterval * 1000;
-    liveIntervalRef.current = setInterval(doLiveRefresh, ms);
-    return () => { if (liveIntervalRef.current) clearInterval(liveIntervalRef.current); };
-  }, [liveTracked.length, date, liveInterval]);
-
-  // Countdown timer
-  useEffect(() => {
-    if (liveTracked.length > 0 && liveNextRefresh > 0) {
-      countdownRef.current = setInterval(() => {
-        setLiveNextRefresh(prev => (prev > 0 ? prev - 1 : 0));
-      }, 1000);
-    }
-    return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
-  }, [liveTracked.length, liveNextRefresh > 0]);
-
-  const manualRefresh = () => {
-    if (liveIntervalRef.current) clearInterval(liveIntervalRef.current);
-    doLiveRefresh();
-    liveIntervalRef.current = setInterval(doLiveRefresh, liveInterval * 1000);
-  };
-
-  const loadMatches = useCallback(async (d) => {
+  const loadFixtures = useCallback(async (d) => {
     setLoading(true);
-    setLoadError('');
+    setError('');
     try {
-      const res = await fetch(`/api/matches?date=${d}`);
+      const res = await fetch(`/api/fixtures?date=${d}`);
       const data = await res.json();
-      if (data.error) {
-        setLoadError(data.error);
+
+      if (data.error && !data.fixtures?.length) {
+        setError(data.error);
+        if (data.quota) setQuota(data.quota);
         return;
       }
-      setMatches(data.matches || []);
-      setFromCache(data.fromCache);
+
+      setFixtures(data.fixtures || []);
+      setFromCache(data.fromCache || false);
+      setHidden(data.hidden || []);
+      setAnalyzed(data.analyzed || []);
+      setAnalyzedOdds(data.analyzedOdds || {});
+      setAnalyzedData(data.analyzedData || {});
+      setStandings(data.standings || {});
       if (data.quota) setQuota(data.quota);
+      if (data.error) setError(data.error);
     } catch (e) {
-      console.error(e);
-      setLoadError(e.message || 'Error de conexión');
+      setError(e.message || 'Error de conexión');
     } finally {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => { loadFixtures(today()); }, [loadFixtures]);
 
   const changeDate = (offset) => {
     const d = new Date(date);
     d.setDate(d.getDate() + offset);
     const nd = d.toISOString().split('T')[0];
     setDate(nd);
-    loadMatches(nd);
+    setSelected(new Set());
+    setCombinadaSelected(new Set());
+    loadFixtures(nd);
   };
 
-  const sendToLive = (match) => {
-    requestNotifPermission();
-    if (!prevScoresRef.current[match.fixture.id]) {
-      prevScoresRef.current[match.fixture.id] = { home: match.goals?.home ?? 0, away: match.goals?.away ?? 0 };
-    }
-    const now = Date.now();
-    setLiveTracked(prev => {
-      if (prev.some(m => m.fixture.id === match.fixture.id)) return prev;
-      return [...prev, { ...match, _apiElapsed: match.fixture.status.elapsed, _apiTimestamp: now }];
-    });
-  };
-
-  const removeFromLive = (fixtureId) => {
-    delete prevScoresRef.current[fixtureId];
-    pendingRemovalsRef.current.delete(fixtureId);
-    setLiveTracked(prev => prev.filter(m => m.fixture.id !== fixtureId));
-  };
-
-  const clearAllLive = () => {
-    setLiveTracked([]);
-    setLiveSource('');
-    setLiveLastUpdate(null);
-    prevScoresRef.current = {};
-    pendingRemovalsRef.current.clear();
-  };
-
-  const doHide = async (e, fixtureId) => {
-    e.stopPropagation();
-    setHiddenIds(prev => [...prev, fixtureId]);
-    try {
-      await fetch('/api/hide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fixtureId }) });
-    } catch {}
-  };
-
-  // Tracked IDs set for checking
-  const trackedIds = new Set(liveTracked.map(m => m.fixture.id));
-
-  // Apply filters
-  const filtered = matches.filter(m => {
-    if (hiddenIds.includes(m.fixture.id)) return false;
-    const meta = m.leagueMeta || {};
-    if (leagueFilter && `${meta.country}-${m.league.id}` !== leagueFilter) return false;
-    if (genderFilter && meta.gender !== genderFilter) return false;
-    if (filter === 'envivo') return isLive(m.fixture.status.short) || trackedIds.has(m.fixture.id);
-    if (filter === 'proximos') return m.fixture.status.short === 'NS';
-    if (filter === 'finalizados') return isFinished(m.fixture.status.short);
+  // Filter fixtures
+  const visible = fixtures.filter(f => {
+    if (hidden.includes(f.fixture.id)) return false;
+    const status = f.fixture.status.short;
+    if (statusFilter === 'live' && !isLive(status)) return false;
+    if (statusFilter === 'upcoming' && status !== 'NS') return false;
+    if (statusFilter === 'finished' && !isFinished(status)) return false;
+    if (leagueFilter && String(f.league.id) !== leagueFilter) return false;
     return true;
   });
 
-  const liveCount = matches.filter(m => !hiddenIds.includes(m.fixture.id) && isLive(m.fixture.status.short)).length;
+  // Sort
+  const sorted = [...visible].sort((a, b) => {
+    if (sortBy === 'time') {
+      return new Date(a.fixture.date) - new Date(b.fixture.date);
+    }
+    if (sortBy === 'odds') {
+      const oddA = getMinOdd(a, analyzedOdds);
+      const oddB = getMinOdd(b, analyzedOdds);
+      if (oddA === 0 && oddB === 0) return new Date(a.fixture.date) - new Date(b.fixture.date);
+      if (oddA === 0) return 1;
+      if (oddB === 0) return -1;
+      return oddA - oddB;
+    }
+    if (sortBy === 'probability') {
+      const aAnalyzed = analyzed.includes(a.fixture.id) ? 1 : 0;
+      const bAnalyzed = analyzed.includes(b.fixture.id) ? 1 : 0;
+      if (aAnalyzed !== bAnalyzed) return bAnalyzed - aAnalyzed;
+      // Both analyzed: sort by highest probability in combinada
+      const aProb = analyzedData[a.fixture.id]?.combinada?.combinedProbability || 0;
+      const bProb = analyzedData[b.fixture.id]?.combinada?.combinedProbability || 0;
+      if (aProb !== bProb) return bProb - aProb;
+      return new Date(a.fixture.date) - new Date(b.fixture.date);
+    }
+    return 0;
+  });
 
-  // Group matches by league
-  const grouped = {};
-  filtered.forEach(m => {
-    const key = `${m.league.id}`;
-    if (!grouped[key]) {
-      grouped[key] = {
-        league: m.league,
-        meta: m.leagueMeta || {},
-        matches: [],
+  // Toggle selection for analysis
+  const toggleSelect = (fixtureId) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(fixtureId)) next.delete(fixtureId);
+      else next.add(fixtureId);
+      return next;
+    });
+  };
+
+  // Toggle selection for combinada total
+  const toggleCombinadaSelect = (fixtureId) => {
+    setCombinadaSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(fixtureId)) next.delete(fixtureId);
+      else next.add(fixtureId);
+      return next;
+    });
+  };
+
+  // Analyze selected
+  const analyzeSelected = async () => {
+    const toAnalyze = fixtures.filter(f => selected.has(f.fixture.id));
+    if (toAnalyze.length === 0) return;
+
+    setAnalyzing(true);
+    setAnalysisProgress({ current: 0, total: toAnalyze.length });
+
+    try {
+      const res = await fetch('/api/analisis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fixtures: toAnalyze }),
+      });
+      const data = await res.json();
+
+      if (data.quota) setQuota(data.quota);
+
+      const newAnalyzed = data.analyses?.filter(a => a.success)?.map(a => a.fixtureId) || [];
+      setAnalyzed(prev => [...new Set([...prev, ...newAnalyzed])]);
+      setSelected(new Set());
+
+      if (toAnalyze.length === 1 && newAnalyzed.length === 1) {
+        router.push(`/analisis/${newAnalyzed[0]}`);
+      } else {
+        // Reload to get updated analyzed data
+        loadFixtures(date);
+      }
+    } catch (e) {
+      setError('Error al analizar: ' + e.message);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  // Hide match
+  const doHide = async (e, fixtureId) => {
+    e.stopPropagation();
+    setHidden(prev => [...prev, fixtureId]);
+    try {
+      await fetch('/api/hide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fixtureId }),
+      });
+    } catch {}
+  };
+
+  // Counts
+  const liveCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && isLive(f.fixture.status.short)).length;
+  const upcomingCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && f.fixture.status.short === 'NS').length;
+
+  // Leagues for filter
+  const leagues = {};
+  fixtures.filter(f => !hidden.includes(f.fixture.id)).forEach(f => {
+    if (!leagues[f.league.id]) {
+      leagues[f.league.id] = {
+        id: f.league.id,
+        name: f.league.name,
+        country: f.leagueMeta?.country || f.league.country,
+        logo: f.league.logo,
       };
     }
-    grouped[key].matches.push(m);
   });
-  const leagueGroups = Object.values(grouped);
 
-  // Available leagues for dropdown
-  const availableLeagues = {};
-  matches.filter(m => !hiddenIds.includes(m.fixture.id)).forEach(m => {
-    const meta = m.leagueMeta || {};
-    const key = `${meta.country}-${m.league.id}`;
-    if (!availableLeagues[key]) {
-      availableLeagues[key] = { key, name: m.league.name, country: meta.country, flag: FLAGS[meta.country] || '' };
-    }
-  });
+  // Apuesta del día - auto-computed from all analyzed matches
+  const apuestaDelDia = useMemo(() => {
+    const allBets = [];
+    Object.entries(analyzedData).forEach(([fid, data]) => {
+      if (!data?.combinada?.selections) return;
+      const fixture = fixtures.find(f => f.fixture.id === Number(fid));
+      const matchName = fixture
+        ? `${fixture.teams.home.name} vs ${fixture.teams.away.name}`
+        : `${data.homeTeam || '?'} vs ${data.awayTeam || '?'}`;
+
+      data.combinada.selections.forEach(sel => {
+        if (sel.probability >= 80) {
+          allBets.push({ ...sel, fixtureId: fid, matchName });
+        }
+      });
+    });
+
+    allBets.sort((a, b) => b.probability - a.probability);
+    const topBets = allBets.slice(0, 3);
+    if (topBets.length === 0) return null;
+
+    const combinedOdd = topBets.reduce((acc, b) => b.odd ? acc * b.odd : acc, 1);
+    const combinedProb = topBets.reduce((acc, b) => acc * (b.probability / 100), 1) * 100;
+
+    return {
+      selections: topBets,
+      combinedOdd: +combinedOdd.toFixed(2),
+      combinedProbability: +combinedProb.toFixed(1),
+    };
+  }, [analyzedData, fixtures]);
+
+  // Combinada Total computation
+  const combinadaTotal = useMemo(() => {
+    if (combinadaSelected.size < 2) return null;
+
+    const selections = [];
+    let totalOdd = 1;
+    let totalProb = 1;
+
+    combinadaSelected.forEach(fid => {
+      const data = analyzedData[fid];
+      if (!data?.combinada?.selections?.length) return;
+      const fixture = fixtures.find(f => f.fixture.id === Number(fid));
+      const matchName = fixture
+        ? `${fixture.teams.home.name} vs ${fixture.teams.away.name}`
+        : `${data.homeTeam || '?'} vs ${data.awayTeam || '?'}`;
+
+      // Take the top selection from each match
+      const topSel = data.combinada.selections[0];
+      selections.push({
+        ...topSel,
+        fixtureId: fid,
+        matchName,
+        matchOdd: data.combinada.combinedOdd,
+        matchProb: data.combinada.combinedProbability,
+      });
+      if (topSel.odd) totalOdd *= topSel.odd;
+      totalProb *= (topSel.probability / 100);
+    });
+
+    return {
+      selections,
+      combinedOdd: +totalOdd.toFixed(2),
+      combinedProbability: +(totalProb * 100).toFixed(1),
+    };
+  }, [combinadaSelected, analyzedData, fixtures]);
+
+  // Analyzed fixtures for the Analizados tab
+  const analyzedFixtures = fixtures.filter(f => analyzed.includes(f.fixture.id));
+
+  // Combinadas count
+  const combinadasCount = Object.keys(analyzedData).filter(
+    id => analyzedData[id]?.combinada?.selections?.length > 0
+  ).length;
 
   return (
     <div className="app">
       <div className="container">
         {/* HEADER */}
         <header className="header">
-          <h1>Futbol</h1>
+          <h1>Futbol Analysis</h1>
+
+          {/* APUESTA DEL DÍA */}
+          {apuestaDelDia && (
+            <div className="apuesta-del-dia">
+              <div className="apuesta-header">
+                <span className="apuesta-icon">{'\u{1F3AF}'}</span>
+                <span className="apuesta-title">Apuesta del D&iacute;a</span>
+                <span className="apuesta-prob-total">{apuestaDelDia.combinedProbability}%</span>
+              </div>
+              <div className="apuesta-selections">
+                {apuestaDelDia.selections.map((sel, i) => (
+                  <div key={i} className="apuesta-sel">
+                    <span className="apuesta-match">{sel.matchName}</span>
+                    <span className="apuesta-market">{sel.name}</span>
+                    <span className="apuesta-prob">{sel.probability}%</span>
+                    {sel.odd && <span className="apuesta-odd">{sel.odd.toFixed(2)}</span>}
+                  </div>
+                ))}
+              </div>
+              {apuestaDelDia.combinedOdd > 1 && (
+                <div className="apuesta-footer">
+                  <span>Cuota combinada: <strong>{apuestaDelDia.combinedOdd}</strong></span>
+                  <span>Probabilidad: <strong>{apuestaDelDia.combinedProbability}%</strong></span>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="date-nav">
-            <button onClick={() => changeDate(-1)} aria-label="Día anterior">&#9664;</button>
+            <button onClick={() => changeDate(-1)} aria-label="D&iacute;a anterior">{'\u25C0'}</button>
             <div className="date-display">
               {new Date(date + 'T12:00:00').toLocaleDateString('es', { weekday: 'short', day: 'numeric', month: 'short' })}
             </div>
-            <button onClick={() => changeDate(1)} aria-label="Día siguiente">&#9654;</button>
+            <button onClick={() => changeDate(1)} aria-label="D&iacute;a siguiente">{'\u25B6'}</button>
           </div>
-          <button className="btn-reload" onClick={() => loadMatches(date)} disabled={loading}>
-            {loading ? '...' : '↻'}
+          <button className="btn-reload" onClick={() => loadFixtures(date)} disabled={loading}>
+            {loading ? '...' : '\u21BB'}
           </button>
         </header>
 
-        {/* LIVE TICKER - shows when there are live tracked matches */}
-        {liveTracked.length > 0 && (
-          <div className="live-ticker">
-            <div className="live-ticker-header">
-              <div className="live-ticker-left">
-                <span className="live-dot" />
-                <span className="live-label">EN VIVO</span>
-                <span className="live-count">{liveTracked.length}</span>
-              </div>
-              <div className="live-ticker-right">
-                {liveLastUpdate && (
-                  <span className="live-sync">
-                    {liveLastUpdate.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                  </span>
-                )}
-                {liveNextRefresh > 0 && !liveRefreshing && (
-                  <span className="live-countdown">{liveNextRefresh}s</span>
-                )}
-                <button className="btn-sm-action" onClick={manualRefresh} disabled={liveRefreshing}>
-                  {liveRefreshing ? '...' : 'Actualizar'}
-                </button>
-                <button className="btn-sm-action danger" onClick={clearAllLive}>Limpiar</button>
-              </div>
-            </div>
-            <div className="live-ticker-cards">
-              {liveTracked.map(match => (
-                <LiveMiniCard key={match.fixture.id} match={match} onRemove={() => removeFromLive(match.fixture.id)} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* FILTER CHIPS */}
-        <div className="filter-bar">
-          <div className="chips">
-            {[
-              { key: 'todos', label: 'Todos' },
-              { key: 'envivo', label: 'En Vivo', count: liveCount + liveTracked.length },
-              { key: 'proximos', label: 'Próximos' },
-              { key: 'finalizados', label: 'Finalizados' },
-            ].map(c => (
-              <button
-                key={c.key}
-                className={`chip ${filter === c.key ? 'active' : ''}`}
-                onClick={() => setFilter(c.key)}
-              >
-                {c.label}
-                {c.count > 0 && <span className="chip-count">{c.count}</span>}
-              </button>
-            ))}
-          </div>
-          <div className="filters">
-            <select value={leagueFilter} onChange={e => setLeagueFilter(e.target.value)}>
-              <option value="">Liga</option>
-              {Object.values(availableLeagues).sort((a, b) => a.name.localeCompare(b.name)).map(l => (
-                <option key={l.key} value={l.key}>{l.flag} {l.name}</option>
-              ))}
-            </select>
-            <div className="gender-toggle">
-              <button className={`toggle-btn ${genderFilter === '' ? 'active' : ''}`} onClick={() => setGenderFilter('')}>Todos</button>
-              <button className={`toggle-btn ${genderFilter === 'M' ? 'active' : ''}`} onClick={() => setGenderFilter('M')}>M</button>
-              <button className={`toggle-btn ${genderFilter === 'W' ? 'active' : ''}`} onClick={() => setGenderFilter('W')}>F</button>
-            </div>
-          </div>
+        {/* TABS */}
+        <div className="tabs-bar">
+          {[
+            { key: 'partidos', label: 'Partidos', count: visible.length },
+            { key: 'analizados', label: 'Analizados', count: analyzed.length },
+            { key: 'combinadas', label: 'Combinadas', count: combinadasCount },
+            { key: 'combinadaTotal', label: 'Combinada Total', count: combinadaSelected.size },
+          ].map(t => (
+            <button
+              key={t.key}
+              className={`tab-btn ${tab === t.key ? 'active' : ''}`}
+              onClick={() => setTab(t.key)}
+            >
+              {t.label}
+              {t.count > 0 && <span className="tab-count">{t.count}</span>}
+            </button>
+          ))}
         </div>
 
-        {/* LOADING */}
-        {loading && <div className="loader"><div className="spinner" /><p>Cargando partidos...</p></div>}
-
-        {/* ERROR */}
-        {!loading && loadError && (
-          <div className="error-banner">
-            <span>Error: {loadError}</span>
-            <button onClick={() => loadMatches(date)}>Reintentar</button>
+        {/* FILTERS — only for Partidos tab */}
+        {tab === 'partidos' && (
+          <div className="filter-bar">
+            <div className="chips">
+              {[
+                { key: 'all', label: 'Todos', count: visible.length },
+                { key: 'live', label: 'En Vivo', count: liveCount },
+                { key: 'upcoming', label: 'Pr\u00F3ximos', count: upcomingCount },
+                { key: 'finished', label: 'Finalizados' },
+              ].map(c => (
+                <button
+                  key={c.key}
+                  className={`chip ${statusFilter === c.key ? 'active' : ''}`}
+                  onClick={() => setStatusFilter(c.key)}
+                >
+                  {c.label}
+                  {c.count > 0 && <span className="chip-count">{c.count}</span>}
+                </button>
+              ))}
+            </div>
+            <div className="filters">
+              <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="sort-select">
+                <option value="time">Por hora</option>
+                <option value="odds">Por cuota</option>
+                <option value="probability">Por an&aacute;lisis</option>
+              </select>
+              <select value={leagueFilter} onChange={e => setLeagueFilter(e.target.value)}>
+                <option value="">Todas las ligas</option>
+                {Object.values(leagues).sort((a, b) => a.name.localeCompare(b.name)).map(l => (
+                  <option key={l.id} value={l.id}>{FLAGS[l.country] || ''} {l.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
         )}
 
-        {/* EMPTY STATE */}
-        {!loading && !loadError && filtered.length === 0 && (
-          <div className="empty">
-            {quota.remaining <= 0 ? (
-              <>
-                <h3>API agotada por hoy</h3>
-                <p>Se usaron {quota.used}/{quota.limit} llamadas. El limite se resetea a medianoche UTC.</p>
-                <p style={{ marginTop: 8, fontSize: '0.75rem' }}>Navega a fechas anteriores para ver partidos del cache.</p>
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12 }}>
-                  <button className="chip" onClick={() => changeDate(-1)}>&#9664; Dia anterior</button>
-                  <button className="chip" onClick={() => changeDate(-2)}>2 dias atras</button>
-                </div>
-              </>
-            ) : (
-              <>
+        {/* RATE LIMIT WARNING */}
+        {error && fixtures.length > 0 && (
+          <div className="warning-banner"><span>{error}</span></div>
+        )}
+
+        {/* LOADING */}
+        {loading && (
+          <div className="loading-skeletons">
+            {[1, 2, 3, 4, 5].map(i => <div key={i} className="skeleton-match" />)}
+          </div>
+        )}
+
+        {/* ERROR (no data) */}
+        {!loading && error && fixtures.length === 0 && (
+          <div className="error-banner">
+            <span>{error}</span>
+            <button onClick={() => loadFixtures(date)}>Reintentar</button>
+          </div>
+        )}
+
+        {/* ===== TAB: PARTIDOS ===== */}
+        {!loading && tab === 'partidos' && (
+          <>
+            {sorted.length === 0 && !error && (
+              <div className="empty">
                 <h3>Sin partidos</h3>
                 <p>No hay partidos para esta fecha con los filtros seleccionados</p>
-              </>
+              </div>
             )}
+            {sorted.length > 0 && (
+              <div className="match-list">
+                {sorted.map(match => (
+                  <MatchCard
+                    key={match.fixture.id}
+                    match={match}
+                    isAnalyzed={analyzed.includes(match.fixture.id)}
+                    isSelected={selected.has(match.fixture.id)}
+                    odds={analyzedOdds[match.fixture.id]}
+                    standings={standings}
+                    onSelect={() => toggleSelect(match.fixture.id)}
+                    onHide={(e) => doHide(e, match.fixture.id)}
+                    onView={() => router.push(`/analisis/${match.fixture.id}`)}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ===== TAB: ANALIZADOS ===== */}
+        {!loading && tab === 'analizados' && (
+          <>
+            {analyzedFixtures.length === 0 ? (
+              <div className="empty">
+                <h3>Sin partidos analizados</h3>
+                <p>Selecciona partidos en la pesta&ntilde;a Partidos y anal&iacute;zalos</p>
+              </div>
+            ) : (
+              <div className="match-list">
+                {analyzedFixtures.map(match => (
+                  <MatchCard
+                    key={match.fixture.id}
+                    match={match}
+                    isAnalyzed={true}
+                    isSelected={false}
+                    odds={analyzedOdds[match.fixture.id]}
+                    standings={standings}
+                    onSelect={() => {}}
+                    onHide={(e) => doHide(e, match.fixture.id)}
+                    onView={() => router.push(`/analisis/${match.fixture.id}`)}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ===== TAB: COMBINADAS ===== */}
+        {!loading && tab === 'combinadas' && (
+          <>
+            {combinadasCount === 0 ? (
+              <div className="empty">
+                <h3>Sin combinadas</h3>
+                <p>Analiza partidos para ver sus combinadas autom&aacute;ticas</p>
+              </div>
+            ) : (
+              <div className="combinadas-list">
+                {Object.entries(analyzedData)
+                  .filter(([, data]) => data?.combinada?.selections?.length > 0)
+                  .map(([fid, data]) => {
+                    const fixture = fixtures.find(f => f.fixture.id === Number(fid));
+                    const matchName = fixture
+                      ? `${fixture.teams.home.name} vs ${fixture.teams.away.name}`
+                      : `${data.homeTeam || '?'} vs ${data.awayTeam || '?'}`;
+                    const homeLogo = fixture?.teams?.home?.logo || data.homeLogo;
+                    const awayLogo = fixture?.teams?.away?.logo || data.awayLogo;
+                    const isChecked = combinadaSelected.has(Number(fid));
+
+                    return (
+                      <div key={fid} className={`combinada-match-card ${isChecked ? 'selected' : ''}`}>
+                        <div className="combinada-match-header">
+                          <label className="match-checkbox" onClick={e => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleCombinadaSelect(Number(fid))}
+                            />
+                            <span className="checkmark" />
+                          </label>
+                          <div className="combinada-match-teams">
+                            <TeamLogo src={homeLogo} name={data.homeTeam} size={20} />
+                            <span className="combinada-match-name">{matchName}</span>
+                            <TeamLogo src={awayLogo} name={data.awayTeam} size={20} />
+                          </div>
+                          <button
+                            className="btn-view-sm"
+                            onClick={() => router.push(`/analisis/${fid}`)}
+                          >
+                            Ver
+                          </button>
+                        </div>
+                        <div className="combinada-selections-list">
+                          {data.combinada.selections.map((sel, i) => (
+                            <div key={i} className="combinada-sel-row">
+                              <span className="combinada-sel-num">#{i + 1}</span>
+                              <span className="combinada-sel-name">{sel.name}</span>
+                              <span className="combinada-sel-prob">{sel.probability}%</span>
+                              {sel.odd && <span className="combinada-sel-odd">{sel.odd.toFixed(2)}</span>}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="combinada-match-footer">
+                          <span>Cuota: <strong>{data.combinada.combinedOdd}</strong></span>
+                          <span>Prob: <strong className={data.combinada.highRisk ? 'danger' : 'safe'}>
+                            {data.combinada.combinedProbability}%
+                          </strong></span>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                {combinadaSelected.size >= 2 && (
+                  <div className="floating-bar">
+                    <button
+                      className="btn-analyze"
+                      onClick={() => setTab('combinadaTotal')}
+                    >
+                      Ver Combinada Total ({combinadaSelected.size} partidos)
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ===== TAB: COMBINADA TOTAL ===== */}
+        {!loading && tab === 'combinadaTotal' && (
+          <>
+            {!combinadaTotal ? (
+              <div className="empty">
+                <h3>Selecciona partidos</h3>
+                <p>Ve a la pesta&ntilde;a Combinadas y selecciona al menos 2 partidos para crear una combinada total</p>
+              </div>
+            ) : (
+              <div className="combinada-total-container">
+                <div className="combinada-total-card">
+                  <div className="combinada-total-header">
+                    <h3>Combinada Total &mdash; {combinadaTotal.selections.length} partidos</h3>
+                  </div>
+                  <div className="combinada-total-selections">
+                    {combinadaTotal.selections.map((sel, i) => (
+                      <div key={i} className="combinada-total-row">
+                        <div className="combinada-total-match">
+                          <span className="ct-num">#{i + 1}</span>
+                          <span className="ct-match">{sel.matchName}</span>
+                        </div>
+                        <div className="combinada-total-bet">
+                          <span className="ct-market">{sel.name}</span>
+                          <span className="ct-prob">{sel.probability}%</span>
+                          {sel.odd && <span className="ct-odd">{sel.odd.toFixed(2)}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="combinada-total-summary">
+                    <div className="ct-total-row">
+                      <span>Cuota combinada total</span>
+                      <strong className="ct-total-odd">{combinadaTotal.combinedOdd}</strong>
+                    </div>
+                    <div className="ct-total-row">
+                      <span>Probabilidad combinada</span>
+                      <strong className={combinadaTotal.combinedProbability >= 60 ? 'safe' : 'danger'}>
+                        {combinadaTotal.combinedProbability}%
+                      </strong>
+                    </div>
+                    {combinadaTotal.combinedProbability < 60 && (
+                      <div className="ct-warning">
+                        Combinada de riesgo alto &mdash; probabilidad por debajo del 60%
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <button
+                  className="btn-secondary"
+                  onClick={() => { setCombinadaSelected(new Set()); setTab('combinadas'); }}
+                  style={{ marginTop: 16 }}
+                >
+                  Limpiar selecci&oacute;n
+                </button>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* FLOATING ANALYZE BUTTON */}
+        {selected.size > 0 && tab === 'partidos' && (
+          <div className="floating-bar">
+            <button className="btn-analyze" onClick={analyzeSelected} disabled={analyzing}>
+              {analyzing
+                ? `Analizando... ${analysisProgress.current}/${analysisProgress.total}`
+                : `Analizar ${selected.size} partido${selected.size > 1 ? 's' : ''}`
+              }
+            </button>
           </div>
         )}
 
-        {/* MATCH LIST - Grouped by league */}
-        {!loading && leagueGroups.map(group => (
-          <div key={group.league.id} className="league-group">
-            <div className="league-header">
-              {group.league.logo && <img src={group.league.logo} alt="" className="league-logo" />}
-              <span className="league-name">{FLAGS[group.meta.country] || ''} {group.league.name}</span>
-              {group.meta.gender === 'W' && <span className="gender-tag">F</span>}
-              <span className="league-count">{group.matches.length}</span>
+        {/* ANALYZING OVERLAY */}
+        {analyzing && (
+          <div className="analyzing-overlay">
+            <div className="analyzing-card">
+              <div className="analyzing-spinner" />
+              <p>Analizando {selected.size} partido{selected.size > 1 ? 's' : ''}...</p>
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: '100%' }} />
+              </div>
+              <span className="analyzing-note">Esto puede tomar unos segundos</span>
             </div>
-            {group.matches.map(match => (
-              <MatchRow
-                key={match.fixture.id}
-                match={match}
-                isTracked={trackedIds.has(match.fixture.id)}
-                onTrack={() => sendToLive(match)}
-                onHide={(e) => doHide(e, match.fixture.id)}
-              />
-            ))}
           </div>
-        ))}
+        )}
 
         {/* FOOTER */}
         <div className="footer">
-          <span>API: {quota.used}/{quota.limit}</span>
+          <span>Llamadas: {quota.used}/{quota.limit}</span>
           <span>{fromCache ? 'Cache' : 'API'}</span>
+          <span>{sorted.length} partidos</span>
         </div>
       </div>
     </div>
   );
 }
 
-// ==================== MATCH ROW ====================
-function MatchRow({ match, isTracked, onTrack, onHide }) {
+// ===================== MATCH CARD =====================
+
+function MatchCard({ match, isAnalyzed, isSelected, odds, standings, onSelect, onHide, onView }) {
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
+  const meta = match.leagueMeta || {};
+  const flag = FLAGS[meta.country] || '';
+  const statusLbl = live ? 'EN VIVO' : finished ? 'FINALIZADO' : 'PR\u00D3XIMO';
+  const homePos = standings?.[match.teams.home.id];
+  const awayPos = standings?.[match.teams.away.id];
 
   return (
-    <div className={`match-row ${live ? 'live' : ''} ${finished ? 'finished' : ''}`}>
-      <div className="match-time">
-        {live ? (
-          <span className="time-live">{match.fixture.status.elapsed || ''}&apos;</span>
-        ) : finished ? (
-          <span className="time-ft">{statusText(match.fixture.status.short)}</span>
-        ) : (
-          <span className="time-ns">{fmtTime(match.fixture.date)}</span>
-        )}
-      </div>
-      <div className="match-teams-col">
-        <div className="team-line">
-          {match.teams.home.logo && <img src={match.teams.home.logo} alt="" />}
-          <span className="team-name">{match.teams.home.name}</span>
-        </div>
-        <div className="team-line">
-          {match.teams.away.logo && <img src={match.teams.away.logo} alt="" />}
-          <span className="team-name">{match.teams.away.name}</span>
+    <div className={`match-card ${live ? 'live' : ''} ${finished ? 'finished' : ''} ${isSelected ? 'selected' : ''}`}>
+      <div className="match-card-left">
+        <label className="match-checkbox" onClick={e => e.stopPropagation()}>
+          <input type="checkbox" checked={isSelected} onChange={onSelect} />
+          <span className="checkmark" />
+        </label>
+        <div className="match-time-col">
+          {live ? (
+            <span className="time-live">{match.fixture.status.elapsed}&apos;</span>
+          ) : finished ? (
+            <span className="time-ft">{statusText(match.fixture.status.short)}</span>
+          ) : (
+            <span className="time-ns">{fmtTime(match.fixture.date)}</span>
+          )}
+          <span className={`status-micro ${live ? 'live' : finished ? 'ft' : 'ns'}`}>{statusLbl}</span>
         </div>
       </div>
-      <div className="match-score-col">
-        {hasScore ? (
-          <>
-            <span className={`score ${live ? 'live' : ''}`}>{match.goals.home}</span>
-            <span className={`score ${live ? 'live' : ''}`}>{match.goals.away}</span>
-          </>
-        ) : (
-          <>
-            <span className="score empty">-</span>
-            <span className="score empty">-</span>
-          </>
+
+      <div className="match-card-center">
+        <div className="match-league-line">
+          {match.league.logo && <img src={match.league.logo} alt="" className="league-micro" />}
+          <span>{flag} {match.league.name}</span>
+        </div>
+        <div className="match-teams-row">
+          <div className="team-row">
+            <div className="team-with-pos">
+              {homePos && <span className="pos-badge">{homePos}{'\u00B0'}</span>}
+              <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} />
+            </div>
+            <span className="team-name">{match.teams.home.name}</span>
+          </div>
+          <div className="match-score-center">
+            {hasScore ? (
+              <span className={`score-display ${live ? 'live' : ''}`}>
+                {match.goals.home} - {match.goals.away}
+              </span>
+            ) : (
+              <span className="score-display dim">vs</span>
+            )}
+          </div>
+          <div className="team-row right">
+            <span className="team-name">{match.teams.away.name}</span>
+            <div className="team-with-pos">
+              <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} />
+              {awayPos && <span className="pos-badge">{awayPos}{'\u00B0'}</span>}
+            </div>
+          </div>
+        </div>
+        {odds && (
+          <div className="card-odds-row">
+            <span className="card-odd">{odds.home?.toFixed(2)}</span>
+            <span className="card-odd draw">{odds.draw?.toFixed(2)}</span>
+            <span className="card-odd">{odds.away?.toFixed(2)}</span>
+          </div>
         )}
       </div>
-      <div className="match-actions">
-        <button
-          className={`btn-track ${isTracked ? 'tracked' : ''}`}
-          onClick={onTrack}
-          title={isTracked ? 'Ya en seguimiento' : 'Seguir en vivo'}
-          disabled={isTracked}
-        >
-          {isTracked ? '●' : '◉'}
-        </button>
-        <a
-          href="https://streamtp10.com/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="btn-stream"
-          title="Ver streaming"
-          onClick={e => e.stopPropagation()}
-        >
-          ▶
-        </a>
-        <button className="btn-hide" onClick={onHide} title="Ocultar">×</button>
+
+      <div className="match-card-right">
+        {isAnalyzed ? (
+          <button className="btn-view-analysis" onClick={onView}>
+            <span className="analyzed-badge">ANALIZADO</span>
+            Ver
+          </button>
+        ) : (
+          <button className="btn-select" onClick={onSelect}>
+            {isSelected ? '\u2713' : 'Analizar'}
+          </button>
+        )}
+        <button className="btn-hide-sm" onClick={onHide} title="Ocultar">{'\u00D7'}</button>
       </div>
     </div>
   );
 }
 
-// ==================== LIVE CLOCK ====================
-function LiveClock({ elapsed, status, apiTimestamp }) {
-  const [display, setDisplay] = useState('');
-
-  useEffect(() => {
-    if (!isLive(status)) {
-      if (status === 'HT') setDisplay('HT');
-      else setDisplay(statusText(status));
-      return;
-    }
-
-    const baseMin = elapsed || 0;
-    const baseTime = apiTimestamp || Date.now();
-
-    const tick = () => {
-      const secsSinceUpdate = Math.max(0, Math.floor((Date.now() - baseTime) / 1000));
-      const currentMin = baseMin + Math.floor(secsSinceUpdate / 60);
-      const currentSec = secsSinceUpdate % 60;
-
-      if (status === '1H' && currentMin >= 45) {
-        setDisplay(`45+${currentMin - 45}:${String(currentSec).padStart(2, '0')}`);
-      } else if (status === '2H' && currentMin >= 90) {
-        setDisplay(`90+${currentMin - 90}:${String(currentSec).padStart(2, '0')}`);
-      } else {
-        setDisplay(`${currentMin}:${String(currentSec).padStart(2, '0')}`);
-      }
-    };
-
-    tick();
-    const interval = setInterval(tick, 1000);
-    return () => clearInterval(interval);
-  }, [elapsed, status, apiTimestamp]);
-
-  return <span>{display}</span>;
+function TeamLogo({ src, name, size = 24 }) {
+  const [err, setErr] = useState(false);
+  if (!src || err) {
+    return (
+      <div className="team-logo-fallback" style={{ width: size, height: size, fontSize: size * 0.4 }}>
+        {(name || '?').slice(0, 2).toUpperCase()}
+      </div>
+    );
+  }
+  return <img src={src} alt={name} width={size} height={size} className="team-crest" onError={() => setErr(true)} />;
 }
 
-// ==================== LIVE MINI CARD (ticker) ====================
-function LiveMiniCard({ match, onRemove }) {
-  const live = isLive(match.fixture.status.short);
-  const finished = isFinished(match.fixture.status.short);
-  const hasScore = live || finished;
-  const status = match.fixture.status.short;
-  const elapsed = match._apiElapsed || match.fixture.status.elapsed || 0;
-
-  return (
-    <div className={`live-mini ${live ? 'is-live' : ''} ${finished ? 'is-finished' : ''}`}>
-      <div className="live-mini-status">
-        {live ? (
-          <>
-            <span className="mini-dot" />
-            <LiveClock elapsed={elapsed} status={status} apiTimestamp={match._apiTimestamp} />
-          </>
-        ) : finished ? (
-          <span className="mini-ft">{statusText(status)}</span>
-        ) : (
-          <span className="mini-ns">{fmtTime(match.fixture.date)}</span>
-        )}
-      </div>
-      <div className="live-mini-teams">
-        <div className="mini-team">
-          {match.teams.home.logo && <img src={match.teams.home.logo} alt="" />}
-          <span>{match.teams.home.name}</span>
-        </div>
-        <div className="mini-team">
-          {match.teams.away.logo && <img src={match.teams.away.logo} alt="" />}
-          <span>{match.teams.away.name}</span>
-        </div>
-      </div>
-      <div className="live-mini-score">
-        {hasScore ? (
-          <>
-            <span className={live ? 'live' : ''}>{match.goals.home}</span>
-            <span className={live ? 'live' : ''}>{match.goals.away}</span>
-          </>
-        ) : (
-          <>
-            <span>-</span>
-            <span>-</span>
-          </>
-        )}
-      </div>
-      <div className="live-mini-actions">
-        <a href="https://streamtp10.com/" target="_blank" rel="noopener noreferrer" className="btn-stream-mini" title="Ver">▶</a>
-        <button className="btn-remove-mini" onClick={onRemove} title="Quitar">×</button>
-      </div>
-    </div>
-  );
+function getMinOdd(fixture, analyzedOdds) {
+  const odds = analyzedOdds?.[fixture.fixture.id];
+  if (!odds) return 0;
+  return Math.min(odds.home || 99, odds.draw || 99, odds.away || 99);
 }

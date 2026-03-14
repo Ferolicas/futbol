@@ -1,4 +1,4 @@
-import { getMatches } from '../../../lib/football-api';
+import { getFixtures, getQuota } from '../../../lib/api-football';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,8 +11,13 @@ export async function GET(request) {
   }
 
   try {
-    const result = await getMatches(date);
-    return Response.json(result);
+    const result = await getFixtures(date);
+    const quota = await getQuota();
+    return Response.json({
+      matches: result.fixtures || [],
+      fromCache: result.fromCache || false,
+      quota,
+    });
   } catch (error) {
     console.error('Matches error:', error);
     return Response.json({ error: error.message }, { status: 500 });

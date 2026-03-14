@@ -1,4 +1,4 @@
-import { hideMatch, unhideMatch, getHiddenMatches } from '../../../lib/football-api';
+import { hideMatch, unhideMatch, getHiddenMatches } from '../../../lib/api-football';
 
 export const dynamic = 'force-dynamic';
 

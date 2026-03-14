@@ -1,8 +1,8 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'Futbol Analysis - Partidos del Dia',
-  description: 'Analisis de partidos de futbol con estadisticas, H2H, cuotas y mas',
+  title: 'Futbol Analysis - Betting Analysis Dashboard',
+  description: 'Análisis estadístico de partidos de fútbol: H2H, probabilidades, cuotas, combinadas automáticas',
 };
 
 export const viewport = {
