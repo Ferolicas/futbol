@@ -1,17 +1,3 @@
 {
-  "framework": "nextjs",
-  "crons": [
-    {
-      "path": "/api/cron/fixtures",
-      "schedule": "0 8 * * *"
-    },
-    {
-      "path": "/api/cron/live",
-      "schedule": "*/1 * * * *"
-    },
-    {
-      "path": "/api/cron/lineups",
-      "schedule": "*/5 * * * *"
-    }
-  ]
+  "framework": "nextjs"
 }
