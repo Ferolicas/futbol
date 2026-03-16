@@ -293,7 +293,7 @@ export default function Dashboard() {
       <div className="container">
         {/* HEADER */}
         <header className="header">
-          <h1 className="brand">CF<span className="brand-accent">analisis</span><span className="brand-dim">.com</span></h1>
+          <img src="/vflogo.png" alt="CFanalisis" className="brand-logo" />
           <button className="btn-reload" onClick={() => loadFixtures(date)} disabled={loading}>
             <span className={loading ? 'spin' : ''}>&#8635;</span>
           </button>
