@@ -9,8 +9,14 @@
   },
   "dependencies": {
     "@sanity/client": "^6.24.1",
+    "@stripe/stripe-js": "^8.10.0",
+    "bcryptjs": "^3.0.3",
     "next": "^14.2.21",
+    "next-auth": "^4.24.13",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "resend": "^6.9.4",
+    "stripe": "^20.4.1",
+    "zod": "^4.3.6"
   }
 }

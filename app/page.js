@@ -1,830 +1,390 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { FLAGS } from '../lib/leagues';
+import { useSession } from 'next-auth/react';
 
-const today = () => new Date().toISOString().split('T')[0];
-const fmtTime = (d) => new Date(d).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
-const isLive = (s) => ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(s);
-const isFinished = (s) => ['FT', 'AET', 'PEN', 'CANC', 'SUSP', 'PST', 'ABD', 'AWD', 'WO'].includes(s);
-const statusText = (s) => ({
-  NS: 'Proximo', '1H': '1T', '2H': '2T', HT: 'Entretiempo',
-  FT: 'Final', ET: 'Extra', P: 'Penales', AET: 'Extra', PEN: 'Penales',
-  SUSP: 'Suspendido', PST: 'Pospuesto', CANC: 'Cancelado',
-}[s] || s);
-
-export default function Dashboard() {
+export default function LandingPage() {
   const router = useRouter();
-  const [splash, setSplash] = useState(true);
-  const [splashFade, setSplashFade] = useState(false);
-  const [tab, setTab] = useState('partidos');
-  const [date, setDate] = useState(today());
-  const [fixtures, setFixtures] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { data: session } = useSession();
+  const [showModal, setShowModal] = useState(false);
+  const [step, setStep] = useState(1);
+  const [formData, setFormData] = useState({ name: '', email: '', password: '', country: '' });
+  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [prices, setPrices] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [fromCache, setFromCache] = useState(false);
-  const [quota, setQuota] = useState({ used: 0, remaining: 100, limit: 100 });
-  const [hidden, setHidden] = useState([]);
-  const [analyzed, setAnalyzed] = useState([]);
-  const [analyzedOdds, setAnalyzedOdds] = useState({});
-  const [analyzedData, setAnalyzedData] = useState({});
-  const [standings, setStandings] = useState({});
-  const [sortBy, setSortBy] = useState('time');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [leagueFilter, setLeagueFilter] = useState('');
-  const [selected, setSelected] = useState(new Set());
-  const [analyzing, setAnalyzing] = useState(false);
-  // Accordion for Analizados
-  const [expandedMatch, setExpandedMatch] = useState(null);
-  // Custom combinada: { fixtureId: { marketId: marketObj } }
-  const [selectedMarkets, setSelectedMarkets] = useState({});
-  const [showApuesta, setShowApuesta] = useState(true);
+  const [userId, setUserId] = useState(null);
 
-  const loadFixtures = useCallback(async (d) => {
-    setLoading(true);
+  // If already logged in, redirect to dashboard
+  useEffect(() => {
+    if (session?.user) router.push('/dashboard');
+  }, [session, router]);
+
+  // Detect user country for currency
+  useEffect(() => {
+    fetch('https://ipapi.co/json/')
+      .then(r => r.json())
+      .then(data => {
+        if (data.country_code) {
+          setFormData(prev => ({ ...prev, country: data.country_code }));
+          // Fetch prices in local currency
+          fetch(`/api/currency?country=${data.country_code}`)
+            .then(r => r.json())
+            .then(setPrices)
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Scroll-driven animations with IntersectionObserver
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+          }
+        });
+      },
+      { threshold: 0.1, rootMargin: '0px 0px -50px 0px' }
+    );
+
+    // Observe all animatable elements
+    const selectors = '.feature-card, .step, .step-arrow, .plan-card, .section-title, .section-sub, .reveal, .reveal-left, .reveal-right, .reveal-scale';
+    document.querySelectorAll(selectors).forEach(el => observer.observe(el));
+
+    return () => observer.disconnect();
+  }, []);
+
+  const handleStep1 = async (e) => {
+    e.preventDefault();
     setError('');
+    setLoading(true);
+
     try {
-      const res = await fetch(`/api/fixtures?date=${d}`);
+      const res = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
       const data = await res.json();
-      if (data.error && !data.fixtures?.length) {
-        setError(data.error);
-        if (data.quota) setQuota(data.quota);
+
+      if (!res.ok) {
+        setError(data.error || 'Error al registrar');
         return;
       }
-      setFixtures(data.fixtures || []);
-      setFromCache(data.fromCache || false);
-      setHidden(data.hidden || []);
-      setAnalyzed(data.analyzed || []);
-      setAnalyzedOdds(data.analyzedOdds || {});
-      setAnalyzedData(data.analyzedData || {});
-      setStandings(data.standings || {});
-      if (data.quota) setQuota(data.quota);
-      if (data.error) setError(data.error);
-    } catch (e) {
-      setError(e.message || 'Error de conexion');
+
+      setUserId(data.userId);
+      setStep(2);
+    } catch {
+      setError('Error de conexion');
     } finally {
       setLoading(false);
     }
-  }, []);
-
-  useEffect(() => { loadFixtures(today()); }, [loadFixtures]);
-
-  // Track loading via ref so splash effect can read latest value
-  const loadingRef = useRef(loading);
-  useEffect(() => { loadingRef.current = loading; }, [loading]);
-
-  // Splash screen: show for minimum 2.5s, then fade out when data loaded
-  useEffect(() => {
-    const minTime = new Promise(r => setTimeout(r, 2500));
-    const dataReady = new Promise(r => {
-      const check = () => !loadingRef.current ? r() : setTimeout(check, 100);
-      check();
-    });
-    Promise.all([minTime, dataReady]).then(() => {
-      setSplashFade(true);
-      setTimeout(() => setSplash(false), 600);
-    });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const changeDate = (offset) => {
-    const d = new Date(date);
-    d.setDate(d.getDate() + offset);
-    const nd = d.toISOString().split('T')[0];
-    setDate(nd);
-    setSelected(new Set());
-    setSelectedMarkets({});
-    setExpandedMatch(null);
-    loadFixtures(nd);
   };
 
-  const visible = fixtures.filter(f => {
-    if (hidden.includes(f.fixture.id)) return false;
-    const status = f.fixture.status.short;
-    if (statusFilter === 'live' && !isLive(status)) return false;
-    if (statusFilter === 'upcoming' && status !== 'NS') return false;
-    if (statusFilter === 'finished' && !isFinished(status)) return false;
-    if (leagueFilter && String(f.league.id) !== leagueFilter) return false;
-    return true;
-  });
+  const handleSelectPlan = async (plan) => {
+    setSelectedPlan(plan);
+    setLoading(true);
+    setError('');
 
-  const sorted = [...visible].sort((a, b) => {
-    if (sortBy === 'time') return new Date(a.fixture.date) - new Date(b.fixture.date);
-    if (sortBy === 'odds') {
-      const oddA = getMinOdd(a, analyzedOdds), oddB = getMinOdd(b, analyzedOdds);
-      if (oddA === 0 && oddB === 0) return new Date(a.fixture.date) - new Date(b.fixture.date);
-      if (oddA === 0) return 1;
-      if (oddB === 0) return -1;
-      return oddA - oddB;
-    }
-    if (sortBy === 'probability') {
-      const aA = analyzed.includes(a.fixture.id) ? 1 : 0;
-      const bA = analyzed.includes(b.fixture.id) ? 1 : 0;
-      if (aA !== bA) return bA - aA;
-      const aP = analyzedData[a.fixture.id]?.combinada?.combinedProbability || 0;
-      const bP = analyzedData[b.fixture.id]?.combinada?.combinedProbability || 0;
-      if (aP !== bP) return bP - aP;
-      return new Date(a.fixture.date) - new Date(b.fixture.date);
-    }
-    return 0;
-  });
-
-  const toggleSelect = (fid) => {
-    setSelected(prev => {
-      const n = new Set(prev);
-      n.has(fid) ? n.delete(fid) : n.add(fid);
-      return n;
-    });
-  };
-
-  const toggleMarket = (fixtureId, market, matchName) => {
-    setSelectedMarkets(prev => {
-      const n = { ...prev };
-      n[fixtureId] = { ...(n[fixtureId] || {}) };
-      if (n[fixtureId][market.id]) {
-        delete n[fixtureId][market.id];
-        if (Object.keys(n[fixtureId]).length === 0) delete n[fixtureId];
-      } else {
-        n[fixtureId][market.id] = { ...market, matchName };
-      }
-      return n;
-    });
-  };
-
-  const analyzeSelected = async () => {
-    const toAnalyze = fixtures.filter(f => selected.has(f.fixture.id));
-    if (toAnalyze.length === 0) return;
-    setAnalyzing(true);
     try {
-      const res = await fetch('/api/analisis', {
+      const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fixtures: toAnalyze }),
+        body: JSON.stringify({
+          plan,
+          userId,
+          email: formData.email,
+          localCurrency: prices?.currency || 'USD',
+          exchangeRate: prices?.rate || 1,
+        }),
       });
       const data = await res.json();
-      if (data.quota) setQuota(data.quota);
-      const newAnalyzed = data.analyses?.filter(a => a.success)?.map(a => a.fixtureId) || [];
-      setAnalyzed(prev => [...new Set([...prev, ...newAnalyzed])]);
-      setSelected(new Set());
-      loadFixtures(date);
-      if (newAnalyzed.length > 0) setTab('analizados');
-    } catch (e) {
-      setError('Error al analizar: ' + e.message);
-    } finally {
-      setAnalyzing(false);
-    }
-  };
 
-  const doHide = async (e, fixtureId) => {
-    e.stopPropagation();
-    setHidden(prev => [...prev, fixtureId]);
-    try {
-      await fetch('/api/hide', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fixtureId }),
-      });
-    } catch {}
-  };
-
-  const liveCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && isLive(f.fixture.status.short)).length;
-  const upcomingCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && f.fixture.status.short === 'NS').length;
-
-  const leagues = {};
-  fixtures.filter(f => !hidden.includes(f.fixture.id)).forEach(f => {
-    if (!leagues[f.league.id]) {
-      leagues[f.league.id] = { id: f.league.id, name: f.league.name, country: f.leagueMeta?.country || f.league.country };
-    }
-  });
-
-  const apuestaDelDia = useMemo(() => {
-    const now = new Date();
-    const allBets = [];
-    Object.entries(analyzedData).forEach(([fid, data]) => {
-      if (!data?.combinada?.selections) return;
-      const fx = fixtures.find(f => f.fixture.id === Number(fid));
-      const status = fx?.fixture?.status?.short;
-      const matchTime = fx ? new Date(fx.fixture.date) : null;
-      // Priority: upcoming > live > finished (prefer matches not yet played)
-      let priority = 0;
-      if (status === 'NS') priority = 2;
-      else if (isLive(status)) priority = 1;
-      else if (isFinished(status)) priority = 0;
-      const mn = fx ? `${fx.teams.home.name} vs ${fx.teams.away.name}` : `${data.homeTeam || '?'} vs ${data.awayTeam || '?'}`;
-      const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
-      const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
-      data.combinada.selections.forEach(sel => {
-        if (sel.probability >= 65) {
-          allBets.push({ ...sel, fixtureId: fid, matchName: mn, priority, matchTime, homeTeam, awayTeam });
-        }
-      });
-    });
-    // Sort: priority desc (upcoming first), then probability desc
-    allBets.sort((a, b) => b.priority - a.priority || b.probability - a.probability);
-    // Pick from different matches/teams - at least 3 from different teams
-    const picked = [];
-    const usedTeams = new Set();
-    const usedMatches = new Set();
-    for (const bet of allBets) {
-      if (picked.length >= 5) break;
-      // Skip if both teams in this match are already used
-      if (usedTeams.has(bet.homeTeam) && usedTeams.has(bet.awayTeam)) continue;
-      // Limit 1 pick per match to spread across games
-      if (usedMatches.has(bet.fixtureId) && picked.length < 3) continue;
-      picked.push(bet);
-      usedTeams.add(bet.homeTeam);
-      usedTeams.add(bet.awayTeam);
-      usedMatches.add(bet.fixtureId);
-    }
-    // If we still have < 3, fill with remaining high-prob bets from any match
-    if (picked.length < 3) {
-      for (const bet of allBets) {
-        if (picked.length >= 3) break;
-        if (picked.some(p => p.fixtureId === bet.fixtureId && p.id === bet.id)) continue;
-        picked.push(bet);
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setError(data.error || 'Error al procesar pago');
       }
+    } catch {
+      setError('Error de conexion');
+    } finally {
+      setLoading(false);
     }
-    const top = picked.slice(0, 5);
-    if (top.length === 0) return null;
-    const co = top.reduce((a, b) => b.odd ? a * b.odd : a, 1);
-    const cp = top.reduce((a, b) => a * (b.probability / 100), 1) * 100;
-    return { selections: top, combinedOdd: +co.toFixed(2), combinedProbability: +cp.toFixed(1) };
-  }, [analyzedData, fixtures]);
+  };
 
-  const customCombinada = useMemo(() => {
-    const all = [];
-    Object.entries(selectedMarkets).forEach(([fid, markets]) => {
-      Object.values(markets).forEach(m => all.push({ ...m, fixtureId: fid }));
-    });
-    if (all.length === 0) return null;
-    const co = all.reduce((a, m) => m.odd ? a * m.odd : a, 1);
-    const cp = all.reduce((a, m) => a * (m.probability / 100), 1) * 100;
-    return { selections: all, combinedOdd: +co.toFixed(2), combinedProbability: +cp.toFixed(1), highRisk: cp < 60 };
-  }, [selectedMarkets]);
+  const fmtPrice = (usd, local, currency) => {
+    if (!local || currency === 'USD') return `$${usd} USD`;
+    return `$${usd} USD (~${currency} ${local.toLocaleString()})`;
+  };
 
-  const totalSel = Object.values(selectedMarkets).reduce((a, m) => a + Object.keys(m).length, 0);
-  const analyzedFixtures = fixtures.filter(f => analyzed.includes(f.fixture.id));
-
-  if (splash) {
-    return (
-      <div className={`splash ${splashFade ? 'fade-out' : ''}`}>
-        <div className="splash-content">
-          <div className="splash-logo-wrap">
-            <img src="/logo.png" alt="CFanalisis" className="splash-logo" />
-          </div>
-          <div className="splash-text">
-            <span className="splash-welcome">Bienvenido a tu casa de</span>
-            <span className="splash-brand">Analisis</span>
-          </div>
-          <div className="splash-loader">
-            <div className="splash-bar"><div className="splash-bar-fill" /></div>
-            <span className="splash-loading">Cargando partidos...</span>
-          </div>
-          <div className="splash-dots">
-            <span className="splash-dot" /><span className="splash-dot" /><span className="splash-dot" />
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const features = [
+    { icon: '&#128200;', title: 'Analisis Estadistico', desc: 'H2H, forma reciente, goles, rendimiento local y visitante con datos reales' },
+    { icon: '&#127919;', title: 'Apuesta del Dia', desc: 'Algoritmo inteligente selecciona las mejores apuestas del dia automaticamente' },
+    { icon: '&#127920;', title: 'Combinadas Auto', desc: 'Sistema genera combinadas con probabilidades reales y cuotas calculadas' },
+    { icon: '&#9889;', title: 'Marcadores en Vivo', desc: 'Actualizacion cada minuto de todos los partidos en juego' },
+    { icon: '&#127758;', title: '15+ Ligas', desc: 'Premier, La Liga, Serie A, Bundesliga, Ligue 1, Liga MX, BetPlay y mas' },
+    { icon: '&#127183;', title: 'Corners y Tarjetas', desc: 'Probabilidades de corners, tarjetas y BTTS basadas en datos historicos' },
+    { icon: '&#128101;', title: 'XI Titulares', desc: 'Alineaciones confirmadas y bajas 45 min antes del partido' },
+    { icon: '&#128202;', title: 'Cuotas en Tiempo Real', desc: 'Cuotas de casas de apuestas integradas para cada mercado' },
+  ];
 
   return (
-    <div className="app">
-      <div className="container">
-        {/* HEADER */}
-        <header className="header">
-          <img src="/vflogo.png" alt="CFanalisis" className="brand-logo" />
-          <button className="btn-reload" onClick={() => loadFixtures(date)} disabled={loading}>
-            <span className={loading ? 'spin' : ''}>&#8635;</span>
-          </button>
-        </header>
-
-        {/* CONTROLS: Date + Filters */}
-        <div className="controls-row">
-          <div className="date-nav">
-            <button onClick={() => changeDate(-1)}>&#9664;</button>
-            <span className="date-display">
-              {new Date(date + 'T12:00:00').toLocaleDateString('es', { weekday: 'short', day: 'numeric', month: 'short' })}
-            </span>
-            <button onClick={() => changeDate(1)}>&#9654;</button>
+    <div className="landing">
+      {/* HERO */}
+      <section className="hero">
+        <div className="hero-bg" />
+        <div className="hero-content">
+          <img src="/vflogo.png" alt="CFanalisis" className="hero-logo" />
+          <h1 className="hero-title">
+            Tu ventaja en<br />
+            <span className="hero-accent">cada apuesta</span>
+          </h1>
+          <p className="hero-sub">
+            Plataforma avanzada de analisis de futbol. Estadisticas reales, combinadas inteligentes
+            y probabilidades calculadas con datos de mas de 15 ligas internacionales.
+          </p>
+          <div className="hero-btns">
+            <button className="btn-hero" onClick={() => setShowModal(true)}>
+              Empezar Ahora
+            </button>
+            <a href="#features" className="btn-hero-sec">Ver funciones</a>
           </div>
-          <div className="filters-row">
-            <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="filter-sel">
-              <option value="time">Hora</option>
-              <option value="odds">Cuota</option>
-              <option value="probability">Analisis</option>
-            </select>
-            <select value={leagueFilter} onChange={e => setLeagueFilter(e.target.value)} className="filter-sel">
-              <option value="">Ligas</option>
-              {Object.values(leagues).sort((a, b) => a.name.localeCompare(b.name)).map(l => (
-                <option key={l.id} value={l.id}>{FLAGS[l.country] || ''} {l.name}</option>
-              ))}
-            </select>
+          <div className="hero-stats">
+            <div className="hero-stat"><span className="hero-stat-n">15+</span><span className="hero-stat-l">Ligas</span></div>
+            <div className="hero-stat"><span className="hero-stat-n">500+</span><span className="hero-stat-l">Partidos/dia</span></div>
+            <div className="hero-stat"><span className="hero-stat-n">12+</span><span className="hero-stat-l">Mercados</span></div>
           </div>
         </div>
+      </section>
 
-        {/* TABS */}
-        <div className="tabs">
-          {[
-            { key: 'partidos', label: 'Partidos', count: visible.length },
-            { key: 'analizados', label: 'Analizados', count: analyzed.length },
-            { key: 'combinada', label: 'Combinada', count: totalSel },
-          ].map(t => (
-            <button key={t.key} className={`tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
-              {t.label}
-              {t.count > 0 && <span className="tab-badge">{t.count}</span>}
-            </button>
+      {/* FEATURES */}
+      <section className="features" id="features">
+        <h2 className="section-title">Todo lo que necesitas para apostar con ventaja</h2>
+        <p className="section-sub">Herramientas profesionales de analisis en una sola plataforma</p>
+        <div className="features-grid">
+          {features.map((f, i) => (
+            <div key={i} className="feature-card" style={{ '--i': i }}>
+              <div className="feature-icon" dangerouslySetInnerHTML={{ __html: f.icon }} />
+              <h3>{f.title}</h3>
+              <p>{f.desc}</p>
+            </div>
           ))}
         </div>
+      </section>
 
-        {/* STATUS CHIPS */}
-        {tab === 'partidos' && (
-          <div className="chips">
-            {[
-              { key: 'all', label: 'Todos', count: visible.length },
-              { key: 'live', label: 'En Vivo', count: liveCount },
-              { key: 'upcoming', label: 'Proximos', count: upcomingCount },
-              { key: 'finished', label: 'Finalizados' },
-            ].map(c => (
-              <button key={c.key} className={`chip ${statusFilter === c.key ? 'active' : ''} ${c.key === 'live' && liveCount > 0 ? 'pulse' : ''}`} onClick={() => setStatusFilter(c.key)}>
-                {c.key === 'live' && liveCount > 0 && <span className="dot-live" />}
-                {c.label}
-                {c.count > 0 && <span className="chip-n">{c.count}</span>}
-              </button>
-            ))}
+      {/* HOW IT WORKS */}
+      <section className="how-it-works">
+        <h2 className="section-title">Como funciona</h2>
+        <div className="steps">
+          <div className="step">
+            <div className="step-n">1</div>
+            <h3>Registrate</h3>
+            <p>Crea tu cuenta en 30 segundos con tu email</p>
           </div>
-        )}
-
-        {/* APUESTA DEL DIA */}
-        {apuestaDelDia && tab === 'partidos' && (
-          <div className={`apuesta ${showApuesta ? 'open' : ''}`}>
-            <button className="apuesta-head" onClick={() => setShowApuesta(!showApuesta)}>
-              <span className="apuesta-left">&#127919; Apuesta del Dia</span>
-              <span className="apuesta-right">
-                <span className="apuesta-pct">{apuestaDelDia.combinedProbability}%</span>
-                <span className={`chev ${showApuesta ? 'up' : ''}`}>&#9662;</span>
-              </span>
-            </button>
-            {showApuesta && (
-              <div className="apuesta-body">
-                {apuestaDelDia.selections.map((sel, i) => (
-                  <div key={i} className={`apuesta-item ${sel.priority === 2 ? 'upcoming' : sel.priority === 1 ? 'live' : 'done'}`}>
-                    <span className="apuesta-match">
-                      {sel.priority === 2 && <span className="apuesta-status ns">&#9679;</span>}
-                      {sel.priority === 1 && <span className="apuesta-status live">EN VIVO</span>}
-                      {sel.priority === 0 && <span className="apuesta-status fin">FIN</span>}
-                      {sel.matchName}
-                    </span>
-                    <span className="apuesta-mkt">{sel.name}</span>
-                    <span className="apuesta-prob">{sel.probability}%</span>
-                    {sel.odd && <span className="apuesta-odd">{sel.odd.toFixed(2)}</span>}
-                  </div>
-                ))}
-                {apuestaDelDia.combinedOdd > 1 && (
-                  <div className="apuesta-foot">
-                    <span>Cuota: <b>{apuestaDelDia.combinedOdd}</b></span>
-                    <span>Prob: <b>{apuestaDelDia.combinedProbability}%</b></span>
-                  </div>
-                )}
-              </div>
-            )}
+          <div className="step-arrow">&#8594;</div>
+          <div className="step">
+            <div className="step-n">2</div>
+            <h3>Elige tu plan</h3>
+            <p>Plataforma o Asesoria segun tus necesidades</p>
           </div>
-        )}
-
-        {/* WARNING */}
-        {error && fixtures.length > 0 && <div className="warn fade-in">{error}</div>}
-
-        {/* LOADING */}
-        {loading && (
-          <div className="skeletons">
-            {[0,1,2,3,4].map(i => <div key={i} className="skel" style={{ animationDelay: `${i * 0.1}s` }} />)}
+          <div className="step-arrow">&#8594;</div>
+          <div className="step">
+            <div className="step-n">3</div>
+            <h3>Empieza a ganar</h3>
+            <p>Accede a analisis y combinadas inteligentes</p>
           </div>
-        )}
+        </div>
+      </section>
 
-        {/* ERROR */}
-        {!loading && error && fixtures.length === 0 && (
-          <div className="empty-state fade-in">
-            <div className="empty-icon">&#9889;</div>
-            <h3>Sin conexion</h3>
-            <p>{error}</p>
-            <button className="btn-primary" onClick={() => loadFixtures(date)}>Reintentar</button>
-          </div>
-        )}
-
-        {/* TAB: PARTIDOS */}
-        {!loading && tab === 'partidos' && (
-          <>
-            {sorted.length === 0 && !error && (
-              <div className="empty-state fade-in">
-                <div className="empty-icon">&#9917;</div>
-                <h3>Sin partidos</h3>
-                <p>No hay partidos para esta fecha</p>
-              </div>
-            )}
-            {sorted.length > 0 && (
-              <div className="match-list">
-                {sorted.map((m, i) => (
-                  <MatchCard
-                    key={m.fixture.id}
-                    match={m}
-                    isAnalyzed={analyzed.includes(m.fixture.id)}
-                    isSelected={selected.has(m.fixture.id)}
-                    odds={analyzedOdds[m.fixture.id]}
-                    standings={standings}
-                    onSelect={() => toggleSelect(m.fixture.id)}
-                    onHide={(e) => doHide(e, m.fixture.id)}
-                    onView={() => router.push(`/analisis/${m.fixture.id}`)}
-                    idx={i}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        )}
-
-        {/* TAB: ANALIZADOS */}
-        {!loading && tab === 'analizados' && (
-          <>
-            {analyzedFixtures.length === 0 ? (
-              <div className="empty-state fade-in">
-                <div className="empty-icon">&#128269;</div>
-                <h3>Sin analisis</h3>
-                <p>Selecciona partidos y analízalos</p>
-              </div>
-            ) : (
-              <div className="match-list">
-                {analyzedFixtures.map((m, i) => (
-                  <AccordionCard
-                    key={m.fixture.id}
-                    match={m}
-                    data={analyzedData[m.fixture.id]}
-                    odds={analyzedOdds[m.fixture.id]}
-                    standings={standings}
-                    isExpanded={expandedMatch === m.fixture.id}
-                    onToggle={() => setExpandedMatch(expandedMatch === m.fixture.id ? null : m.fixture.id)}
-                    selMarkets={selectedMarkets[m.fixture.id] || {}}
-                    onToggleMarket={(mkt) => toggleMarket(m.fixture.id, mkt, `${m.teams.home.name} vs ${m.teams.away.name}`)}
-                    onViewFull={() => router.push(`/analisis/${m.fixture.id}`)}
-                    idx={i}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        )}
-
-        {/* TAB: COMBINADA */}
-        {!loading && tab === 'combinada' && (
-          <>
-            {!customCombinada ? (
-              <div className="empty-state fade-in">
-                <div className="empty-icon">&#127920;</div>
-                <h3>Combinada vacia</h3>
-                <p>Ve a Analizados, abre un partido y selecciona apuestas</p>
-              </div>
-            ) : (
-              <div className="comb-builder fade-in">
-                <h3 className="comb-title">Tu Combinada &mdash; {customCombinada.selections.length} selecciones</h3>
-                <div className="comb-list">
-                  {customCombinada.selections.map((sel, i) => (
-                    <div key={`${sel.fixtureId}-${sel.id}`} className="comb-item">
-                      <div className="comb-item-match">{sel.matchName}</div>
-                      <div className="comb-item-row">
-                        <span className="comb-item-name">{sel.name}</span>
-                        <span className={`comb-item-prob ${sel.probability >= 75 ? 'high' : sel.probability >= 50 ? 'mid' : 'low'}`}>{sel.probability}%</span>
-                        {sel.odd && <span className="comb-item-odd">{sel.odd.toFixed(2)}</span>}
-                        <button className="comb-item-rm" onClick={() => toggleMarket(sel.fixtureId, sel, sel.matchName)}>&#10005;</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="comb-summary">
-                  <div className="comb-sum-row">
-                    <span>Cuota total</span>
-                    <strong className="comb-odd-total">{customCombinada.combinedOdd}</strong>
-                  </div>
-                  <div className="comb-sum-row">
-                    <span>Probabilidad</span>
-                    <strong className={customCombinada.highRisk ? 'danger' : 'safe'}>{customCombinada.combinedProbability}%</strong>
-                  </div>
-                  {customCombinada.highRisk && <div className="comb-warn">Combinada de alto riesgo</div>}
-                </div>
-                <button className="btn-clear" onClick={() => setSelectedMarkets({})}>Limpiar seleccion</button>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* FLOATING: Analyze */}
-        {selected.size > 0 && tab === 'partidos' && (
-          <div className="float-bar slide-up">
-            <button className="btn-analyze" onClick={analyzeSelected} disabled={analyzing}>
-              {analyzing ? 'Analizando...' : `Analizar ${selected.size} partido${selected.size > 1 ? 's' : ''}`}
-            </button>
-          </div>
-        )}
-
-        {/* FLOATING: Combinada counter */}
-        {totalSel > 0 && tab === 'analizados' && (
-          <div className="float-bar slide-up">
-            <button className="btn-comb-float" onClick={() => setTab('combinada')}>
-              &#127920; Ver Combinada ({totalSel})
-              {customCombinada && <span className="float-odd">{customCombinada.combinedOdd}x</span>}
-            </button>
-          </div>
-        )}
-
-        {/* ANALYZING OVERLAY */}
-        {analyzing && (
-          <div className="overlay">
-            <div className="overlay-card">
-              <div className="spinner" />
-              <p>Analizando {selected.size} partido{selected.size > 1 ? 's' : ''}...</p>
-              <div className="progress"><div className="progress-bar" /></div>
-              <small>Recopilando estadisticas</small>
+      {/* PRICING */}
+      <section className="pricing" id="pricing">
+        <h2 className="section-title">Planes de acceso</h2>
+        <p className="section-sub">Invierte en tu ventaja. Primer mes con 50% de descuento.</p>
+        <div className="pricing-grid">
+          {/* Plan 1: Plataforma */}
+          <div className="plan-card">
+            <div className="plan-badge">Popular</div>
+            <h3 className="plan-name">Plan Plataforma</h3>
+            <p className="plan-desc">Acceso total a estadisticas, analisis y herramientas de apuesta</p>
+            <div className="plan-price">
+              <span className="plan-amount">{fmtPrice(15, prices?.plans?.plataforma?.firstMonth?.local, prices?.currency)}</span>
+              <span className="plan-period">primer mes (50% dto.)</span>
             </div>
+            <div className="plan-after">Luego {fmtPrice(30, prices?.plans?.plataforma?.regular?.local, prices?.currency)}/mes</div>
+            <ul className="plan-features">
+              <li>Analisis estadistico completo</li>
+              <li>Apuesta del Dia inteligente</li>
+              <li>Combinadas automaticas</li>
+              <li>Marcadores en vivo</li>
+              <li>15+ ligas internacionales</li>
+              <li>Corners, tarjetas, BTTS</li>
+            </ul>
+            <button className="btn-plan" onClick={() => { setSelectedPlan('plataforma'); setShowModal(true); }}>
+              Empezar Ahora
+            </button>
           </div>
-        )}
 
-        {/* FOOTER */}
-        <div className="footer">
-          <span>{quota.used}/{quota.limit} API</span>
-          <span>{fromCache ? 'Cache' : 'API'}</span>
-          <span>{visible.length} partidos</span>
+          {/* Plan 2: Asesoria */}
+          <div className="plan-card premium">
+            <div className="plan-badge premium">VIP</div>
+            <h3 className="plan-name">Plan Asesoria</h3>
+            <p className="plan-desc">Formacion en apuestas, estrategias, bankroll + acceso total a plataforma</p>
+            <div className="plan-price">
+              <span className="plan-amount">{fmtPrice(100, prices?.plans?.asesoria?.initial?.local, prices?.currency)}</span>
+              <span className="plan-period">pago inicial (1 mes asesoria + plataforma)</span>
+            </div>
+            <div className="plan-after">
+              Mes 2: {fmtPrice(15, prices?.plans?.asesoria?.secondMonth?.local, prices?.currency)} (50% dto.) &bull;
+              Mes 3+: {fmtPrice(30, prices?.plans?.asesoria?.regular?.local, prices?.currency)}/mes
+            </div>
+            <ul className="plan-features">
+              <li>Todo lo del Plan Plataforma</li>
+              <li>Formacion personalizada en apuestas</li>
+              <li>Estrategias de bankroll management</li>
+              <li>Soporte prioritario 1 a 1</li>
+              <li>Sesiones de asesoria mensual</li>
+              <li>Acceso a comunidad VIP</li>
+            </ul>
+            <button className="btn-plan premium" onClick={() => { setSelectedPlan('asesoria'); setShowModal(true); }}>
+              Quiero Asesoria VIP
+            </button>
+          </div>
         </div>
-      </div>
-    </div>
-  );
-}
+      </section>
 
-/* ======================== MATCH CARD ======================== */
+      {/* FOOTER */}
+      <footer className="landing-footer">
+        <img src="/vflogo.png" alt="CFanalisis" className="footer-logo" />
+        <p>CFanalisis.com &mdash; Tu ventaja en cada apuesta</p>
+        <div className="footer-links">
+          <a href="/login">Iniciar sesion</a>
+          <a href="#features">Funciones</a>
+          <a href="#pricing">Precios</a>
+        </div>
+      </footer>
 
-function MatchCard({ match, isAnalyzed, isSelected, odds, standings, onSelect, onHide, onView, idx }) {
-  const live = isLive(match.fixture.status.short);
-  const finished = isFinished(match.fixture.status.short);
-  const hasScore = live || finished;
-  const meta = match.leagueMeta || {};
-  const flag = FLAGS[meta.country] || '';
+      {/* REGISTRATION MODAL */}
+      {showModal && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) { setShowModal(false); setStep(1); setError(''); } }}>
+          <div className="modal-card">
+            <button className="modal-close" onClick={() => { setShowModal(false); setStep(1); setError(''); }}>&times;</button>
 
-  return (
-    <div
-      className={`mcard ${live ? 'live' : ''} ${finished ? 'fin' : ''} ${isSelected ? 'sel' : ''} ${isAnalyzed ? 'done' : ''} stagger`}
-      style={{ '--i': idx }}
-      onClick={isAnalyzed ? onView : onSelect}
-    >
-      <div className="mcard-top">
-        <div className="mcard-league">
-          {match.league.logo && <img src={match.league.logo} alt="" className="league-ico" />}
-          <span>{flag} {match.league.name}</span>
-        </div>
-        <div className="mcard-time">
-          {live ? (
-            <span className="badge-live"><span className="dot-live" />{match.fixture.status.elapsed}&apos;</span>
-          ) : finished ? (
-            <span className="badge-ft">{statusText(match.fixture.status.short)}</span>
-          ) : (
-            <span className="badge-ns">{fmtTime(match.fixture.date)}</span>
-          )}
-        </div>
-      </div>
+            {/* Progress indicator */}
+            <div className="modal-steps">
+              <div className={`modal-step ${step >= 1 ? 'active' : ''}`}>
+                <span className="modal-step-n">1</span>
+                <span>Datos</span>
+              </div>
+              <div className="modal-step-line" />
+              <div className={`modal-step ${step >= 2 ? 'active' : ''}`}>
+                <span className="modal-step-n">2</span>
+                <span>Plan</span>
+              </div>
+            </div>
 
-      <div className="mcard-body">
-        <div className="mcard-team">
-          <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} />
-          <span className="mcard-tname">{match.teams.home.name}</span>
-          {standings?.[match.teams.home.id] && <span className="mcard-pos">{standings[match.teams.home.id]}&#176;</span>}
-        </div>
-        <div className="mcard-score">
-          {hasScore
-            ? <span className={`score-num ${live ? 'live' : ''}`}>{match.goals.home} - {match.goals.away}</span>
-            : <span className="score-vs">vs</span>
-          }
-        </div>
-        <div className="mcard-team right">
-          <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} />
-          <span className="mcard-tname">{match.teams.away.name}</span>
-          {standings?.[match.teams.away.id] && <span className="mcard-pos">{standings[match.teams.away.id]}&#176;</span>}
-        </div>
-      </div>
+            {/* Step 1: User Data */}
+            {step === 1 && (
+              <form onSubmit={handleStep1} className="modal-form">
+                <h2>Crea tu cuenta</h2>
+                <p className="modal-sub">Completa tus datos para empezar</p>
 
-      {odds && (
-        <div className="mcard-odds">
-          <span className="odd-chip">{odds.home?.toFixed(2)}</span>
-          <span className="odd-chip x">{odds.draw?.toFixed(2)}</span>
-          <span className="odd-chip">{odds.away?.toFixed(2)}</span>
+                {error && <div className="modal-error">{error}</div>}
+
+                <div className="modal-field">
+                  <label>Nombre completo</label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="Tu nombre"
+                    required
+                    autoComplete="name"
+                  />
+                </div>
+
+                <div className="modal-field">
+                  <label>Email</label>
+                  <input
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                    placeholder="tu@email.com"
+                    required
+                    autoComplete="email"
+                  />
+                </div>
+
+                <div className="modal-field">
+                  <label>Contrasena</label>
+                  <input
+                    type="password"
+                    value={formData.password}
+                    onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                    placeholder="Minimo 6 caracteres"
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                  />
+                </div>
+
+                <button type="submit" className="modal-btn" disabled={loading}>
+                  {loading ? 'Registrando...' : 'Siguiente'}
+                </button>
+
+                <p className="modal-login">
+                  Ya tienes cuenta? <a href="/login">Inicia sesion</a>
+                </p>
+              </form>
+            )}
+
+            {/* Step 2: Plan Selection */}
+            {step === 2 && (
+              <div className="modal-plans">
+                <h2>Elige tu plan</h2>
+                <p className="modal-sub">Selecciona el plan que mejor se adapte a ti</p>
+
+                {error && <div className="modal-error">{error}</div>}
+
+                <div className="modal-plan-cards">
+                  <div className={`modal-plan ${selectedPlan === 'plataforma' ? 'selected' : ''}`}
+                    onClick={() => !loading && handleSelectPlan('plataforma')}>
+                    <div className="modal-plan-head">
+                      <h3>Plan Plataforma</h3>
+                      <span className="modal-plan-price">
+                        {fmtPrice(15, prices?.plans?.plataforma?.firstMonth?.local, prices?.currency)}
+                      </span>
+                    </div>
+                    <p>Acceso total a estadisticas y herramientas</p>
+                    <span className="modal-plan-after">Luego {fmtPrice(30, prices?.plans?.plataforma?.regular?.local, prices?.currency)}/mes</span>
+                    {loading && selectedPlan === 'plataforma' && <div className="modal-loading">Redirigiendo a pago...</div>}
+                  </div>
+
+                  <div className={`modal-plan premium ${selectedPlan === 'asesoria' ? 'selected' : ''}`}
+                    onClick={() => !loading && handleSelectPlan('asesoria')}>
+                    <div className="modal-plan-badge">VIP</div>
+                    <div className="modal-plan-head">
+                      <h3>Plan Asesoria</h3>
+                      <span className="modal-plan-price">
+                        {fmtPrice(100, prices?.plans?.asesoria?.initial?.local, prices?.currency)}
+                      </span>
+                    </div>
+                    <p>Formacion + Estrategias + Plataforma completa</p>
+                    <span className="modal-plan-after">
+                      Mes 2: {fmtPrice(15, prices?.plans?.asesoria?.secondMonth?.local, prices?.currency)} |
+                      Mes 3+: {fmtPrice(30, prices?.plans?.asesoria?.regular?.local, prices?.currency)}/mes
+                    </span>
+                    {loading && selectedPlan === 'asesoria' && <div className="modal-loading">Redirigiendo a pago...</div>}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
-
-      <div className="mcard-foot">
-        {isAnalyzed ? (
-          <span className="tag-done">&#10003; ANALIZADO</span>
-        ) : (
-          <label className="mcard-cb" onClick={e => e.stopPropagation()}>
-            <input type="checkbox" checked={isSelected} onChange={onSelect} />
-            <span className="cb-mark" />
-          </label>
-        )}
-        <button className="btn-x" onClick={(e) => { e.stopPropagation(); onHide(e); }}>&#10005;</button>
-      </div>
     </div>
   );
-}
-
-/* ======================== ACCORDION CARD ======================== */
-
-function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, idx }) {
-  const live = isLive(match.fixture.status.short);
-  const finished = isFinished(match.fixture.status.short);
-  const hasScore = live || finished;
-  const meta = match.leagueMeta || {};
-  const flag = FLAGS[meta.country] || '';
-  const selCount = Object.keys(selMarkets).length;
-
-  const markets = useMemo(() => {
-    if (!data?.calculatedProbabilities) return [];
-    const p = data.calculatedProbabilities;
-    const o = data.odds;
-    const m = [];
-    if (p.btts >= 50) m.push({ id: 'btts-yes', name: 'Ambos marcan SI', probability: p.btts, odd: o?.btts?.yes || null, cat: 'BTTS' });
-    if (p.bttsNo >= 50) m.push({ id: 'btts-no', name: 'Ambos marcan NO', probability: p.bttsNo, odd: o?.btts?.no || null, cat: 'BTTS' });
-    if (p.winner?.home >= 30) m.push({ id: 'w-h', name: `Gana ${match.teams.home.name}`, probability: p.winner.home, odd: o?.matchWinner?.home || null, cat: 'Ganador' });
-    if (p.winner?.draw >= 20) m.push({ id: 'w-d', name: 'Empate', probability: p.winner.draw, odd: o?.matchWinner?.draw || null, cat: 'Ganador' });
-    if (p.winner?.away >= 30) m.push({ id: 'w-a', name: `Gana ${match.teams.away.name}`, probability: p.winner.away, odd: o?.matchWinner?.away || null, cat: 'Ganador' });
-    if (p.overUnder) {
-      m.push({ id: 'o15', name: 'Over 1.5 goles', probability: p.overUnder.over15, odd: o?.overUnder?.['Over_1_5'] || null, cat: 'Goles' });
-      m.push({ id: 'o25', name: 'Over 2.5 goles', probability: p.overUnder.over25, odd: o?.overUnder?.['Over_2_5'] || null, cat: 'Goles' });
-      m.push({ id: 'o35', name: 'Over 3.5 goles', probability: p.overUnder.over35, odd: o?.overUnder?.['Over_3_5'] || null, cat: 'Goles' });
-      m.push({ id: 'u25', name: 'Under 2.5 goles', probability: p.overUnder.under25, odd: o?.overUnder?.['Under_2_5'] || null, cat: 'Goles' });
-    }
-    if (p.corners) {
-      m.push({ id: 'c85', name: 'Over 8.5 corners', probability: p.corners.over85, odd: null, cat: 'Corners' });
-      m.push({ id: 'c95', name: 'Over 9.5 corners', probability: p.corners.over95, odd: null, cat: 'Corners' });
-    }
-    if (p.cards) {
-      m.push({ id: 'k25', name: 'Over 2.5 tarjetas', probability: p.cards.over25, odd: null, cat: 'Tarjetas' });
-      m.push({ id: 'k35', name: 'Over 3.5 tarjetas', probability: p.cards.over35, odd: null, cat: 'Tarjetas' });
-    }
-    return m.sort((a, b) => b.probability - a.probability);
-  }, [data, match]);
-
-  return (
-    <div className={`acc-card ${isExpanded ? 'open' : ''} stagger`} style={{ '--i': idx }}>
-      {/* Header */}
-      <div className="acc-head" onClick={onToggle}>
-        <div className="mcard-top">
-          <div className="mcard-league">
-            {match.league.logo && <img src={match.league.logo} alt="" className="league-ico" />}
-            <span>{flag} {match.league.name}</span>
-          </div>
-          <div className="mcard-time">
-            {live ? <span className="badge-live"><span className="dot-live" />{match.fixture.status.elapsed}&apos;</span>
-              : finished ? <span className="badge-ft">{statusText(match.fixture.status.short)}</span>
-              : <span className="badge-ns">{fmtTime(match.fixture.date)}</span>}
-          </div>
-        </div>
-        <div className="mcard-body">
-          <div className="mcard-team">
-            <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} />
-            <span className="mcard-tname">{match.teams.home.name}</span>
-          </div>
-          <div className="mcard-score">
-            {hasScore
-              ? <span className={`score-num ${live ? 'live' : ''}`}>{match.goals.home} - {match.goals.away}</span>
-              : <span className="score-vs">vs</span>}
-          </div>
-          <div className="mcard-team right">
-            <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} />
-            <span className="mcard-tname">{match.teams.away.name}</span>
-          </div>
-        </div>
-        {odds && (
-          <div className="mcard-odds">
-            <span className="odd-chip">{odds.home?.toFixed(2)}</span>
-            <span className="odd-chip x">{odds.draw?.toFixed(2)}</span>
-            <span className="odd-chip">{odds.away?.toFixed(2)}</span>
-          </div>
-        )}
-        <div className="acc-indicator">
-          {selCount > 0 && <span className="acc-sel-count">{selCount} sel.</span>}
-          {data?.combinada && (
-            <span className="acc-mini">{data.combinada.combinedProbability}% | {data.combinada.combinedOdd}x</span>
-          )}
-          <span className={`chev-ico ${isExpanded ? 'up' : ''}`}>&#9662;</span>
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className={`acc-content ${isExpanded ? 'open' : ''}`}>
-        <div className="acc-inner">
-          {data ? (
-            <>
-              {/* Auto combinada */}
-              {data.combinada?.selections?.length > 0 && (
-                <div className="auto-comb">
-                  <div className="auto-comb-head">
-                    <span>&#127942; Combinada Auto</span>
-                    <span className={`auto-comb-val ${data.combinada.highRisk ? 'danger' : 'safe'}`}>
-                      {data.combinada.combinedProbability}% &middot; {data.combinada.combinedOdd}x
-                    </span>
-                  </div>
-                  <div className="auto-comb-chips">
-                    {data.combinada.selections.map((s, i) => (
-                      <span key={i} className="auto-chip">{s.name} <b>{s.probability}%</b></span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Form summary */}
-              {data.calculatedProbabilities?.homeForm && (
-                <div className="form-mini">
-                  <div className="form-mini-team">
-                    <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} size={18} />
-                    <span className="form-mini-name">{match.teams.home.name}</span>
-                    <div className="form-mini-dots">
-                      {data.calculatedProbabilities.homeForm.results?.map((r, i) => (
-                        <span key={i} className={`fdot ${r.result.toLowerCase()}`}>{r.result}</span>
-                      ))}
-                    </div>
-                    <span className="form-mini-pts">{data.calculatedProbabilities.homeForm.points}/{data.calculatedProbabilities.homeForm.maxPoints}</span>
-                  </div>
-                  <div className="form-mini-team">
-                    <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} size={18} />
-                    <span className="form-mini-name">{match.teams.away.name}</span>
-                    <div className="form-mini-dots">
-                      {data.calculatedProbabilities.awayForm?.results?.map((r, i) => (
-                        <span key={i} className={`fdot ${r.result.toLowerCase()}`}>{r.result}</span>
-                      ))}
-                    </div>
-                    <span className="form-mini-pts">{data.calculatedProbabilities.awayForm?.points}/{data.calculatedProbabilities.awayForm?.maxPoints}</span>
-                  </div>
-                  {data.calculatedProbabilities.h2hSummary?.total > 0 && (
-                    <div className="h2h-mini">
-                      <span className="h2h-mini-n green">{data.calculatedProbabilities.h2hSummary.homeWins}</span>
-                      <span className="h2h-mini-l">{match.teams.home.name.split(' ')[0]}</span>
-                      <span className="h2h-mini-n yellow">{data.calculatedProbabilities.h2hSummary.draws}</span>
-                      <span className="h2h-mini-l">Emp</span>
-                      <span className="h2h-mini-n red">{data.calculatedProbabilities.h2hSummary.awayWins}</span>
-                      <span className="h2h-mini-l">{match.teams.away.name.split(' ')[0]}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Selectable markets */}
-              <div className="markets">
-                <h4 className="markets-title">Selecciona para tu combinada</h4>
-                <div className="markets-grid">
-                  {markets.map(mkt => {
-                    const checked = !!selMarkets[mkt.id];
-                    return (
-                      <button
-                        key={mkt.id}
-                        className={`mkt ${checked ? 'on' : ''} ${mkt.probability >= 75 ? 'hi' : mkt.probability >= 50 ? 'md' : 'lo'}`}
-                        onClick={(e) => { e.stopPropagation(); onToggleMarket(mkt); }}
-                      >
-                        <span className="mkt-name">{mkt.name}</span>
-                        <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${mkt.probability}%` }} /></div>
-                        <div className="mkt-nums">
-                          <span className="mkt-pct">{mkt.probability}%</span>
-                          {mkt.odd && <span className="mkt-odd">{mkt.odd.toFixed(2)}</span>}
-                          {checked && <span className="mkt-chk">&#10003;</span>}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <button className="btn-full" onClick={(e) => { e.stopPropagation(); onViewFull(); }}>
-                Ver analisis completo &#8594;
-              </button>
-            </>
-          ) : (
-            <div className="no-data-inline">Sin datos de analisis</div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ======================== SHARED ======================== */
-
-function TeamLogo({ src, name, size = 24 }) {
-  const [err, setErr] = useState(false);
-  if (!src || err) {
-    return (
-      <div className="team-logo-fallback" style={{ width: size, height: size, fontSize: size * 0.4 }}>
-        {(name || '?').slice(0, 2).toUpperCase()}
-      </div>
-    );
-  }
-  return <img src={src} alt={name} width={size} height={size} className="team-crest" onError={() => setErr(true)} />;
-}
-
-function getMinOdd(fixture, analyzedOdds) {
-  const odds = analyzedOdds?.[fixture.fixture.id];
-  if (!odds) return 0;
-  return Math.min(odds.home || 99, odds.draw || 99, odds.away || 99);
 }

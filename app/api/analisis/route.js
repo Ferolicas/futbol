@@ -1,9 +1,15 @@
 import { analyzeMatch, getQuota } from '../../../lib/api-football';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../../../lib/auth';
+import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
   try {
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
+
     const { fixtures } = await request.json();
 
     if (!fixtures || !Array.isArray(fixtures) || fixtures.length === 0) {
@@ -12,7 +18,6 @@ export async function POST(request) {
 
     // Limit to 5 matches per request
     const toAnalyze = fixtures.slice(0, 5);
-    const results = [];
     let totalApiCalls = 0;
 
     // Analyze in parallel
@@ -31,6 +36,27 @@ export async function POST(request) {
         }
       })
     );
+
+    // Save analyzed fixture IDs per-user
+    const successfulIds = analyses.filter(a => a.success).map(a => a.fixtureId);
+    if (userId && successfulIds.length > 0) {
+      const date = new Date().toISOString().split('T')[0];
+      const docId = `analyzed-${userId.replace('cfaUser-', '')}-${date}`;
+      const existing = await queryFromSanity(
+        `*[_type == "cfaUserData" && userId == $userId && dataType == "analyzed" && date == $date][0]`,
+        { userId, date }
+      );
+      const ids = existing?.fixtureIds || [];
+      successfulIds.forEach(id => { if (!ids.includes(id)) ids.push(id); });
+
+      await saveToSanity('cfaUserData', docId, {
+        userId,
+        dataType: 'analyzed',
+        date,
+        fixtureIds: ids,
+        updatedAt: new Date().toISOString(),
+      });
+    }
 
     const quota = await getQuota();
 

@@ -1,8 +1,10 @@
 import './globals.css';
+import Providers from './providers';
 
 export const metadata = {
-  title: 'CFanalisis.com - Analisis de Futbol',
-  description: 'Analisis estadistico de partidos de futbol: H2H, probabilidades, cuotas, combinadas automaticas',
+  title: 'CFanalisis.com - Analisis de Futbol Profesional',
+  description: 'Plataforma avanzada de analisis de futbol y apuestas deportivas. Estadisticas, combinadas inteligentes, marcadores en vivo.',
+  keywords: 'futbol, apuestas, analisis, estadisticas, combinadas, probabilidades',
 };
 
 export const viewport = {
@@ -14,7 +16,9 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="es">
-      <body>{children}</body>
+      <body>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { computeAllProbabilities } from '../../../lib/calculations';
-import { buildCombinada } from '../../../lib/combinada';
+import { computeAllProbabilities } from '../../../../lib/calculations';
+import { buildCombinada } from '../../../../lib/combinada';
 
 const fmtTime = (d) => new Date(d).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
 const fmtDate = (d) => new Date(d).toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -97,7 +97,7 @@ export default function AnalisisPage() {
   if (error) {
     return (
       <div className="analysis-page"><div className="analysis-container">
-        <button className="back-btn" onClick={() => router.push('/')}>&#9664; Volver</button>
+        <button className="back-btn" onClick={() => router.push('/dashboard')}>&#9664; Volver</button>
         <div className="analysis-error">
           <h3>Error</h3><p>{error}</p>
           <button className="btn-primary" onClick={loadAnalysis}>Reintentar</button>
@@ -118,7 +118,7 @@ export default function AnalisisPage() {
       <div className="analysis-container">
         {/* TOP BAR */}
         <div className="analysis-top-bar">
-          <button className="back-btn" onClick={() => router.push('/')}>&#9664; Volver</button>
+          <button className="back-btn" onClick={() => router.push('/dashboard')}>&#9664; Volver</button>
           {quota && <span className="quota-badge">Llamadas usadas hoy: {quota.used}/{quota.limit}</span>}
         </div>
 
