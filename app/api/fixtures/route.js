@@ -1,14 +1,16 @@
-import { getFixtures, getQuota, getCachedStandingsPositions } from '../../../lib/api-football';
+import { getFixtures, getQuota } from '../../../lib/api-football';
 import { getAnalyzedMatchesFull } from '../../../lib/sanity-cache';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../lib/auth';
-import { queryFromSanity } from '../../../lib/sanity';
+import { queryFromSanity, getFromSanity } from '../../../lib/sanity';
+import { getCachedStandingsPositions } from '../../../lib/api-football';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
+  const today = new Date().toISOString().split('T')[0];
 
   try {
     let fixtures = [];
@@ -25,6 +27,21 @@ export async function GET(request) {
       error = e.message === 'RATE_LIMIT'
         ? 'Limite de llamadas alcanzado. Usando datos en cache.'
         : e.message;
+    }
+
+    // Auto-trigger daily batch if first visit of the day (only for today's date)
+    if (date === today && fixtures.length > 0) {
+      const batchFlag = await getFromSanity('appConfig', `dailyBatch-${today}`);
+      if (!batchFlag?.started) {
+        // First visit of the day — trigger full analysis batch in background
+        const baseUrl = process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
+          ? `https://${process.env.VERCEL_URL}`
+          : 'http://localhost:3000');
+
+        fetch(`${baseUrl}/api/cron/daily`, {
+          headers: { 'x-internal-trigger': 'true' },
+        }).catch(() => {}); // Fire and forget
+      }
     }
 
     // Get user-specific data
@@ -48,12 +65,25 @@ export async function GET(request) {
       analyzed = analyzedDoc?.fixtureIds || [];
     }
 
-    const quota = await getQuota();
+    // Get globally analyzed matches (from daily batch)
+    // Query Sanity for which of today's fixtures have analysis cached
+    const fixtureIds = fixtures.map(f => f.fixture.id);
+    let globallyAnalyzed = [];
 
-    // Get analyzed match data (odds + full data) in single parallel batch
-    const { analyzedOdds, analyzedData } = analyzed.length > 0
-      ? await getAnalyzedMatchesFull(analyzed)
+    if (fixtureIds.length > 0) {
+      const analyzedDocs = await queryFromSanity(
+        `*[_type == "footballMatchAnalysis" && fixtureId in $ids]{ fixtureId }`,
+        { ids: fixtureIds }
+      );
+      globallyAnalyzed = (analyzedDocs || []).map(d => d.fixtureId);
+    }
+
+    // Only fetch full data for analyzed matches
+    const { analyzedOdds, analyzedData } = globallyAnalyzed.length > 0
+      ? await getAnalyzedMatchesFull(globallyAnalyzed)
       : { analyzedOdds: {}, analyzedData: {} };
+
+    const quota = await getQuota();
 
     // Get cached standings positions
     let standings = {};
@@ -64,16 +94,25 @@ export async function GET(request) {
       } catch {}
     }
 
+    // Batch status
+    const batchFlag = date === today
+      ? await getFromSanity('appConfig', `dailyBatch-${today}`)
+      : null;
+
     return Response.json({
       fixtures,
       fromCache,
       stale,
       quota,
       hidden,
-      analyzed,
+      analyzed: globallyAnalyzed,
       analyzedOdds,
       analyzedData,
       standings,
+      batchStatus: batchFlag ? {
+        started: batchFlag.started || false,
+        completed: batchFlag.completed || false,
+      } : null,
       ...(error ? { error } : {}),
     });
   } catch (e) {
