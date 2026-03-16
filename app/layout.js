@@ -1,8 +1,8 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'Futbol Analysis - Betting Analysis Dashboard',
-  description: 'Análisis estadístico de partidos de fútbol: H2H, probabilidades, cuotas, combinadas automáticas',
+  title: 'CFanalisis.com - Analisis de Futbol',
+  description: 'Analisis estadistico de partidos de futbol: H2H, probabilidades, cuotas, combinadas automaticas',
 };
 
 export const viewport = {

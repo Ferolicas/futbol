@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { FLAGS } from '../lib/leagues';
 
@@ -9,13 +9,15 @@ const fmtTime = (d) => new Date(d).toLocaleTimeString('es', { hour: '2-digit', m
 const isLive = (s) => ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(s);
 const isFinished = (s) => ['FT', 'AET', 'PEN', 'CANC', 'SUSP', 'PST', 'ABD', 'AWD', 'WO'].includes(s);
 const statusText = (s) => ({
-  NS: 'Próximo', '1H': '1T', '2H': '2T', HT: 'Entretiempo',
+  NS: 'Proximo', '1H': '1T', '2H': '2T', HT: 'Entretiempo',
   FT: 'Final', ET: 'Extra', P: 'Penales', AET: 'Extra', PEN: 'Penales',
   SUSP: 'Suspendido', PST: 'Pospuesto', CANC: 'Cancelado',
 }[s] || s);
 
 export default function Dashboard() {
   const router = useRouter();
+  const [splash, setSplash] = useState(true);
+  const [splashFade, setSplashFade] = useState(false);
   const [tab, setTab] = useState('partidos');
   const [date, setDate] = useState(today());
   const [fixtures, setFixtures] = useState([]);
@@ -28,17 +30,16 @@ export default function Dashboard() {
   const [analyzedOdds, setAnalyzedOdds] = useState({});
   const [analyzedData, setAnalyzedData] = useState({});
   const [standings, setStandings] = useState({});
-
   const [sortBy, setSortBy] = useState('time');
   const [statusFilter, setStatusFilter] = useState('all');
   const [leagueFilter, setLeagueFilter] = useState('');
-
   const [selected, setSelected] = useState(new Set());
   const [analyzing, setAnalyzing] = useState(false);
-  const [analysisProgress, setAnalysisProgress] = useState({ current: 0, total: 0 });
-
-  // For Combinada Total - selected match IDs from Combinadas tab
-  const [combinadaSelected, setCombinadaSelected] = useState(new Set());
+  // Accordion for Analizados
+  const [expandedMatch, setExpandedMatch] = useState(null);
+  // Custom combinada: { fixtureId: { marketId: marketObj } }
+  const [selectedMarkets, setSelectedMarkets] = useState({});
+  const [showApuesta, setShowApuesta] = useState(true);
 
   const loadFixtures = useCallback(async (d) => {
     setLoading(true);
@@ -46,13 +47,11 @@ export default function Dashboard() {
     try {
       const res = await fetch(`/api/fixtures?date=${d}`);
       const data = await res.json();
-
       if (data.error && !data.fixtures?.length) {
         setError(data.error);
         if (data.quota) setQuota(data.quota);
         return;
       }
-
       setFixtures(data.fixtures || []);
       setFromCache(data.fromCache || false);
       setHidden(data.hidden || []);
@@ -63,7 +62,7 @@ export default function Dashboard() {
       if (data.quota) setQuota(data.quota);
       if (data.error) setError(data.error);
     } catch (e) {
-      setError(e.message || 'Error de conexión');
+      setError(e.message || 'Error de conexion');
     } finally {
       setLoading(false);
     }
@@ -71,17 +70,34 @@ export default function Dashboard() {
 
   useEffect(() => { loadFixtures(today()); }, [loadFixtures]);
 
+  // Track loading via ref so splash effect can read latest value
+  const loadingRef = useRef(loading);
+  useEffect(() => { loadingRef.current = loading; }, [loading]);
+
+  // Splash screen: show for minimum 2.5s, then fade out when data loaded
+  useEffect(() => {
+    const minTime = new Promise(r => setTimeout(r, 2500));
+    const dataReady = new Promise(r => {
+      const check = () => !loadingRef.current ? r() : setTimeout(check, 100);
+      check();
+    });
+    Promise.all([minTime, dataReady]).then(() => {
+      setSplashFade(true);
+      setTimeout(() => setSplash(false), 600);
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const changeDate = (offset) => {
     const d = new Date(date);
     d.setDate(d.getDate() + offset);
     const nd = d.toISOString().split('T')[0];
     setDate(nd);
     setSelected(new Set());
-    setCombinadaSelected(new Set());
+    setSelectedMarkets({});
+    setExpandedMatch(null);
     loadFixtures(nd);
   };
 
-  // Filter fixtures
   const visible = fixtures.filter(f => {
     if (hidden.includes(f.fixture.id)) return false;
     const status = f.fixture.status.short;
@@ -92,60 +108,53 @@ export default function Dashboard() {
     return true;
   });
 
-  // Sort
   const sorted = [...visible].sort((a, b) => {
-    if (sortBy === 'time') {
-      return new Date(a.fixture.date) - new Date(b.fixture.date);
-    }
+    if (sortBy === 'time') return new Date(a.fixture.date) - new Date(b.fixture.date);
     if (sortBy === 'odds') {
-      const oddA = getMinOdd(a, analyzedOdds);
-      const oddB = getMinOdd(b, analyzedOdds);
+      const oddA = getMinOdd(a, analyzedOdds), oddB = getMinOdd(b, analyzedOdds);
       if (oddA === 0 && oddB === 0) return new Date(a.fixture.date) - new Date(b.fixture.date);
       if (oddA === 0) return 1;
       if (oddB === 0) return -1;
       return oddA - oddB;
     }
     if (sortBy === 'probability') {
-      const aAnalyzed = analyzed.includes(a.fixture.id) ? 1 : 0;
-      const bAnalyzed = analyzed.includes(b.fixture.id) ? 1 : 0;
-      if (aAnalyzed !== bAnalyzed) return bAnalyzed - aAnalyzed;
-      // Both analyzed: sort by highest probability in combinada
-      const aProb = analyzedData[a.fixture.id]?.combinada?.combinedProbability || 0;
-      const bProb = analyzedData[b.fixture.id]?.combinada?.combinedProbability || 0;
-      if (aProb !== bProb) return bProb - aProb;
+      const aA = analyzed.includes(a.fixture.id) ? 1 : 0;
+      const bA = analyzed.includes(b.fixture.id) ? 1 : 0;
+      if (aA !== bA) return bA - aA;
+      const aP = analyzedData[a.fixture.id]?.combinada?.combinedProbability || 0;
+      const bP = analyzedData[b.fixture.id]?.combinada?.combinedProbability || 0;
+      if (aP !== bP) return bP - aP;
       return new Date(a.fixture.date) - new Date(b.fixture.date);
     }
     return 0;
   });
 
-  // Toggle selection for analysis
-  const toggleSelect = (fixtureId) => {
+  const toggleSelect = (fid) => {
     setSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(fixtureId)) next.delete(fixtureId);
-      else next.add(fixtureId);
-      return next;
+      const n = new Set(prev);
+      n.has(fid) ? n.delete(fid) : n.add(fid);
+      return n;
     });
   };
 
-  // Toggle selection for combinada total
-  const toggleCombinadaSelect = (fixtureId) => {
-    setCombinadaSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(fixtureId)) next.delete(fixtureId);
-      else next.add(fixtureId);
-      return next;
+  const toggleMarket = (fixtureId, market, matchName) => {
+    setSelectedMarkets(prev => {
+      const n = { ...prev };
+      n[fixtureId] = { ...(n[fixtureId] || {}) };
+      if (n[fixtureId][market.id]) {
+        delete n[fixtureId][market.id];
+        if (Object.keys(n[fixtureId]).length === 0) delete n[fixtureId];
+      } else {
+        n[fixtureId][market.id] = { ...market, matchName };
+      }
+      return n;
     });
   };
 
-  // Analyze selected
   const analyzeSelected = async () => {
     const toAnalyze = fixtures.filter(f => selected.has(f.fixture.id));
     if (toAnalyze.length === 0) return;
-
     setAnalyzing(true);
-    setAnalysisProgress({ current: 0, total: toAnalyze.length });
-
     try {
       const res = await fetch('/api/analisis', {
         method: 'POST',
@@ -153,19 +162,12 @@ export default function Dashboard() {
         body: JSON.stringify({ fixtures: toAnalyze }),
       });
       const data = await res.json();
-
       if (data.quota) setQuota(data.quota);
-
       const newAnalyzed = data.analyses?.filter(a => a.success)?.map(a => a.fixtureId) || [];
       setAnalyzed(prev => [...new Set([...prev, ...newAnalyzed])]);
       setSelected(new Set());
-
-      if (toAnalyze.length === 1 && newAnalyzed.length === 1) {
-        router.push(`/analisis/${newAnalyzed[0]}`);
-      } else {
-        // Reload to get updated analyzed data
-        loadFixtures(date);
-      }
+      loadFixtures(date);
+      if (newAnalyzed.length > 0) setTab('analizados');
     } catch (e) {
       setError('Error al analizar: ' + e.message);
     } finally {
@@ -173,7 +175,6 @@ export default function Dashboard() {
     }
   };
 
-  // Hide match
   const doHide = async (e, fixtureId) => {
     e.stopPropagation();
     setHidden(prev => [...prev, fixtureId]);
@@ -186,537 +187,629 @@ export default function Dashboard() {
     } catch {}
   };
 
-  // Counts
   const liveCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && isLive(f.fixture.status.short)).length;
   const upcomingCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && f.fixture.status.short === 'NS').length;
 
-  // Leagues for filter
   const leagues = {};
   fixtures.filter(f => !hidden.includes(f.fixture.id)).forEach(f => {
     if (!leagues[f.league.id]) {
-      leagues[f.league.id] = {
-        id: f.league.id,
-        name: f.league.name,
-        country: f.leagueMeta?.country || f.league.country,
-        logo: f.league.logo,
-      };
+      leagues[f.league.id] = { id: f.league.id, name: f.league.name, country: f.leagueMeta?.country || f.league.country };
     }
   });
 
-  // Apuesta del día - auto-computed from all analyzed matches
   const apuestaDelDia = useMemo(() => {
+    const now = new Date();
     const allBets = [];
     Object.entries(analyzedData).forEach(([fid, data]) => {
       if (!data?.combinada?.selections) return;
-      const fixture = fixtures.find(f => f.fixture.id === Number(fid));
-      const matchName = fixture
-        ? `${fixture.teams.home.name} vs ${fixture.teams.away.name}`
-        : `${data.homeTeam || '?'} vs ${data.awayTeam || '?'}`;
-
+      const fx = fixtures.find(f => f.fixture.id === Number(fid));
+      const status = fx?.fixture?.status?.short;
+      const matchTime = fx ? new Date(fx.fixture.date) : null;
+      // Priority: upcoming > live > finished (prefer matches not yet played)
+      let priority = 0;
+      if (status === 'NS') priority = 2;
+      else if (isLive(status)) priority = 1;
+      else if (isFinished(status)) priority = 0;
+      const mn = fx ? `${fx.teams.home.name} vs ${fx.teams.away.name}` : `${data.homeTeam || '?'} vs ${data.awayTeam || '?'}`;
+      const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
+      const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
       data.combinada.selections.forEach(sel => {
-        if (sel.probability >= 80) {
-          allBets.push({ ...sel, fixtureId: fid, matchName });
+        if (sel.probability >= 65) {
+          allBets.push({ ...sel, fixtureId: fid, matchName: mn, priority, matchTime, homeTeam, awayTeam });
         }
       });
     });
-
-    allBets.sort((a, b) => b.probability - a.probability);
-    const topBets = allBets.slice(0, 3);
-    if (topBets.length === 0) return null;
-
-    const combinedOdd = topBets.reduce((acc, b) => b.odd ? acc * b.odd : acc, 1);
-    const combinedProb = topBets.reduce((acc, b) => acc * (b.probability / 100), 1) * 100;
-
-    return {
-      selections: topBets,
-      combinedOdd: +combinedOdd.toFixed(2),
-      combinedProbability: +combinedProb.toFixed(1),
-    };
+    // Sort: priority desc (upcoming first), then probability desc
+    allBets.sort((a, b) => b.priority - a.priority || b.probability - a.probability);
+    // Pick from different matches/teams - at least 3 from different teams
+    const picked = [];
+    const usedTeams = new Set();
+    const usedMatches = new Set();
+    for (const bet of allBets) {
+      if (picked.length >= 5) break;
+      // Skip if both teams in this match are already used
+      if (usedTeams.has(bet.homeTeam) && usedTeams.has(bet.awayTeam)) continue;
+      // Limit 1 pick per match to spread across games
+      if (usedMatches.has(bet.fixtureId) && picked.length < 3) continue;
+      picked.push(bet);
+      usedTeams.add(bet.homeTeam);
+      usedTeams.add(bet.awayTeam);
+      usedMatches.add(bet.fixtureId);
+    }
+    // If we still have < 3, fill with remaining high-prob bets from any match
+    if (picked.length < 3) {
+      for (const bet of allBets) {
+        if (picked.length >= 3) break;
+        if (picked.some(p => p.fixtureId === bet.fixtureId && p.id === bet.id)) continue;
+        picked.push(bet);
+      }
+    }
+    const top = picked.slice(0, 5);
+    if (top.length === 0) return null;
+    const co = top.reduce((a, b) => b.odd ? a * b.odd : a, 1);
+    const cp = top.reduce((a, b) => a * (b.probability / 100), 1) * 100;
+    return { selections: top, combinedOdd: +co.toFixed(2), combinedProbability: +cp.toFixed(1) };
   }, [analyzedData, fixtures]);
 
-  // Combinada Total computation
-  const combinadaTotal = useMemo(() => {
-    if (combinadaSelected.size < 2) return null;
-
-    const selections = [];
-    let totalOdd = 1;
-    let totalProb = 1;
-
-    combinadaSelected.forEach(fid => {
-      const data = analyzedData[fid];
-      if (!data?.combinada?.selections?.length) return;
-      const fixture = fixtures.find(f => f.fixture.id === Number(fid));
-      const matchName = fixture
-        ? `${fixture.teams.home.name} vs ${fixture.teams.away.name}`
-        : `${data.homeTeam || '?'} vs ${data.awayTeam || '?'}`;
-
-      // Take the top selection from each match
-      const topSel = data.combinada.selections[0];
-      selections.push({
-        ...topSel,
-        fixtureId: fid,
-        matchName,
-        matchOdd: data.combinada.combinedOdd,
-        matchProb: data.combinada.combinedProbability,
-      });
-      if (topSel.odd) totalOdd *= topSel.odd;
-      totalProb *= (topSel.probability / 100);
+  const customCombinada = useMemo(() => {
+    const all = [];
+    Object.entries(selectedMarkets).forEach(([fid, markets]) => {
+      Object.values(markets).forEach(m => all.push({ ...m, fixtureId: fid }));
     });
+    if (all.length === 0) return null;
+    const co = all.reduce((a, m) => m.odd ? a * m.odd : a, 1);
+    const cp = all.reduce((a, m) => a * (m.probability / 100), 1) * 100;
+    return { selections: all, combinedOdd: +co.toFixed(2), combinedProbability: +cp.toFixed(1), highRisk: cp < 60 };
+  }, [selectedMarkets]);
 
-    return {
-      selections,
-      combinedOdd: +totalOdd.toFixed(2),
-      combinedProbability: +(totalProb * 100).toFixed(1),
-    };
-  }, [combinadaSelected, analyzedData, fixtures]);
-
-  // Analyzed fixtures for the Analizados tab
+  const totalSel = Object.values(selectedMarkets).reduce((a, m) => a + Object.keys(m).length, 0);
   const analyzedFixtures = fixtures.filter(f => analyzed.includes(f.fixture.id));
 
-  // Combinadas count
-  const combinadasCount = Object.keys(analyzedData).filter(
-    id => analyzedData[id]?.combinada?.selections?.length > 0
-  ).length;
+  if (splash) {
+    return (
+      <div className={`splash ${splashFade ? 'fade-out' : ''}`}>
+        <div className="splash-content">
+          <div className="splash-logo-wrap">
+            <img src="/logo.png" alt="CFanalisis" className="splash-logo" />
+          </div>
+          <div className="splash-text">
+            <span className="splash-welcome">Bienvenido a tu casa de</span>
+            <span className="splash-brand">Analisis</span>
+          </div>
+          <div className="splash-loader">
+            <div className="splash-bar"><div className="splash-bar-fill" /></div>
+            <span className="splash-loading">Cargando partidos...</span>
+          </div>
+          <div className="splash-dots">
+            <span className="splash-dot" /><span className="splash-dot" /><span className="splash-dot" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app">
       <div className="container">
         {/* HEADER */}
         <header className="header">
-          <h1>Futbol Analysis</h1>
-
-          {/* APUESTA DEL DÍA */}
-          {apuestaDelDia && (
-            <div className="apuesta-del-dia">
-              <div className="apuesta-header">
-                <span className="apuesta-icon">{'\u{1F3AF}'}</span>
-                <span className="apuesta-title">Apuesta del D&iacute;a</span>
-                <span className="apuesta-prob-total">{apuestaDelDia.combinedProbability}%</span>
-              </div>
-              <div className="apuesta-selections">
-                {apuestaDelDia.selections.map((sel, i) => (
-                  <div key={i} className="apuesta-sel">
-                    <span className="apuesta-match">{sel.matchName}</span>
-                    <span className="apuesta-market">{sel.name}</span>
-                    <span className="apuesta-prob">{sel.probability}%</span>
-                    {sel.odd && <span className="apuesta-odd">{sel.odd.toFixed(2)}</span>}
-                  </div>
-                ))}
-              </div>
-              {apuestaDelDia.combinedOdd > 1 && (
-                <div className="apuesta-footer">
-                  <span>Cuota combinada: <strong>{apuestaDelDia.combinedOdd}</strong></span>
-                  <span>Probabilidad: <strong>{apuestaDelDia.combinedProbability}%</strong></span>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="date-nav">
-            <button onClick={() => changeDate(-1)} aria-label="D&iacute;a anterior">{'\u25C0'}</button>
-            <div className="date-display">
-              {new Date(date + 'T12:00:00').toLocaleDateString('es', { weekday: 'short', day: 'numeric', month: 'short' })}
-            </div>
-            <button onClick={() => changeDate(1)} aria-label="D&iacute;a siguiente">{'\u25B6'}</button>
-          </div>
+          <h1 className="brand">CF<span className="brand-accent">analisis</span><span className="brand-dim">.com</span></h1>
           <button className="btn-reload" onClick={() => loadFixtures(date)} disabled={loading}>
-            {loading ? '...' : '\u21BB'}
+            <span className={loading ? 'spin' : ''}>&#8635;</span>
           </button>
         </header>
 
+        {/* CONTROLS: Date + Filters */}
+        <div className="controls-row">
+          <div className="date-nav">
+            <button onClick={() => changeDate(-1)}>&#9664;</button>
+            <span className="date-display">
+              {new Date(date + 'T12:00:00').toLocaleDateString('es', { weekday: 'short', day: 'numeric', month: 'short' })}
+            </span>
+            <button onClick={() => changeDate(1)}>&#9654;</button>
+          </div>
+          <div className="filters-row">
+            <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="filter-sel">
+              <option value="time">Hora</option>
+              <option value="odds">Cuota</option>
+              <option value="probability">Analisis</option>
+            </select>
+            <select value={leagueFilter} onChange={e => setLeagueFilter(e.target.value)} className="filter-sel">
+              <option value="">Ligas</option>
+              {Object.values(leagues).sort((a, b) => a.name.localeCompare(b.name)).map(l => (
+                <option key={l.id} value={l.id}>{FLAGS[l.country] || ''} {l.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         {/* TABS */}
-        <div className="tabs-bar">
+        <div className="tabs">
           {[
             { key: 'partidos', label: 'Partidos', count: visible.length },
             { key: 'analizados', label: 'Analizados', count: analyzed.length },
-            { key: 'combinadas', label: 'Combinadas', count: combinadasCount },
-            { key: 'combinadaTotal', label: 'Combinada Total', count: combinadaSelected.size },
+            { key: 'combinada', label: 'Combinada', count: totalSel },
           ].map(t => (
-            <button
-              key={t.key}
-              className={`tab-btn ${tab === t.key ? 'active' : ''}`}
-              onClick={() => setTab(t.key)}
-            >
+            <button key={t.key} className={`tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
               {t.label}
-              {t.count > 0 && <span className="tab-count">{t.count}</span>}
+              {t.count > 0 && <span className="tab-badge">{t.count}</span>}
             </button>
           ))}
         </div>
 
-        {/* FILTERS — only for Partidos tab */}
+        {/* STATUS CHIPS */}
         {tab === 'partidos' && (
-          <div className="filter-bar">
-            <div className="chips">
-              {[
-                { key: 'all', label: 'Todos', count: visible.length },
-                { key: 'live', label: 'En Vivo', count: liveCount },
-                { key: 'upcoming', label: 'Pr\u00F3ximos', count: upcomingCount },
-                { key: 'finished', label: 'Finalizados' },
-              ].map(c => (
-                <button
-                  key={c.key}
-                  className={`chip ${statusFilter === c.key ? 'active' : ''}`}
-                  onClick={() => setStatusFilter(c.key)}
-                >
-                  {c.label}
-                  {c.count > 0 && <span className="chip-count">{c.count}</span>}
-                </button>
-              ))}
-            </div>
-            <div className="filters">
-              <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="sort-select">
-                <option value="time">Por hora</option>
-                <option value="odds">Por cuota</option>
-                <option value="probability">Por an&aacute;lisis</option>
-              </select>
-              <select value={leagueFilter} onChange={e => setLeagueFilter(e.target.value)}>
-                <option value="">Todas las ligas</option>
-                {Object.values(leagues).sort((a, b) => a.name.localeCompare(b.name)).map(l => (
-                  <option key={l.id} value={l.id}>{FLAGS[l.country] || ''} {l.name}</option>
-                ))}
-              </select>
-            </div>
+          <div className="chips">
+            {[
+              { key: 'all', label: 'Todos', count: visible.length },
+              { key: 'live', label: 'En Vivo', count: liveCount },
+              { key: 'upcoming', label: 'Proximos', count: upcomingCount },
+              { key: 'finished', label: 'Finalizados' },
+            ].map(c => (
+              <button key={c.key} className={`chip ${statusFilter === c.key ? 'active' : ''} ${c.key === 'live' && liveCount > 0 ? 'pulse' : ''}`} onClick={() => setStatusFilter(c.key)}>
+                {c.key === 'live' && liveCount > 0 && <span className="dot-live" />}
+                {c.label}
+                {c.count > 0 && <span className="chip-n">{c.count}</span>}
+              </button>
+            ))}
           </div>
         )}
 
-        {/* RATE LIMIT WARNING */}
-        {error && fixtures.length > 0 && (
-          <div className="warning-banner"><span>{error}</span></div>
-        )}
-
-        {/* LOADING */}
-        {loading && (
-          <div className="loading-skeletons">
-            {[1, 2, 3, 4, 5].map(i => <div key={i} className="skeleton-match" />)}
-          </div>
-        )}
-
-        {/* ERROR (no data) */}
-        {!loading && error && fixtures.length === 0 && (
-          <div className="error-banner">
-            <span>{error}</span>
-            <button onClick={() => loadFixtures(date)}>Reintentar</button>
-          </div>
-        )}
-
-        {/* ===== TAB: PARTIDOS ===== */}
-        {!loading && tab === 'partidos' && (
-          <>
-            {sorted.length === 0 && !error && (
-              <div className="empty">
-                <h3>Sin partidos</h3>
-                <p>No hay partidos para esta fecha con los filtros seleccionados</p>
-              </div>
-            )}
-            {sorted.length > 0 && (
-              <div className="match-list">
-                {sorted.map(match => (
-                  <MatchCard
-                    key={match.fixture.id}
-                    match={match}
-                    isAnalyzed={analyzed.includes(match.fixture.id)}
-                    isSelected={selected.has(match.fixture.id)}
-                    odds={analyzedOdds[match.fixture.id]}
-                    standings={standings}
-                    onSelect={() => toggleSelect(match.fixture.id)}
-                    onHide={(e) => doHide(e, match.fixture.id)}
-                    onView={() => router.push(`/analisis/${match.fixture.id}`)}
-                  />
+        {/* APUESTA DEL DIA */}
+        {apuestaDelDia && tab === 'partidos' && (
+          <div className={`apuesta ${showApuesta ? 'open' : ''}`}>
+            <button className="apuesta-head" onClick={() => setShowApuesta(!showApuesta)}>
+              <span className="apuesta-left">&#127919; Apuesta del Dia</span>
+              <span className="apuesta-right">
+                <span className="apuesta-pct">{apuestaDelDia.combinedProbability}%</span>
+                <span className={`chev ${showApuesta ? 'up' : ''}`}>&#9662;</span>
+              </span>
+            </button>
+            {showApuesta && (
+              <div className="apuesta-body">
+                {apuestaDelDia.selections.map((sel, i) => (
+                  <div key={i} className={`apuesta-item ${sel.priority === 2 ? 'upcoming' : sel.priority === 1 ? 'live' : 'done'}`}>
+                    <span className="apuesta-match">
+                      {sel.priority === 2 && <span className="apuesta-status ns">&#9679;</span>}
+                      {sel.priority === 1 && <span className="apuesta-status live">EN VIVO</span>}
+                      {sel.priority === 0 && <span className="apuesta-status fin">FIN</span>}
+                      {sel.matchName}
+                    </span>
+                    <span className="apuesta-mkt">{sel.name}</span>
+                    <span className="apuesta-prob">{sel.probability}%</span>
+                    {sel.odd && <span className="apuesta-odd">{sel.odd.toFixed(2)}</span>}
+                  </div>
                 ))}
-              </div>
-            )}
-          </>
-        )}
-
-        {/* ===== TAB: ANALIZADOS ===== */}
-        {!loading && tab === 'analizados' && (
-          <>
-            {analyzedFixtures.length === 0 ? (
-              <div className="empty">
-                <h3>Sin partidos analizados</h3>
-                <p>Selecciona partidos en la pesta&ntilde;a Partidos y anal&iacute;zalos</p>
-              </div>
-            ) : (
-              <div className="match-list">
-                {analyzedFixtures.map(match => (
-                  <MatchCard
-                    key={match.fixture.id}
-                    match={match}
-                    isAnalyzed={true}
-                    isSelected={false}
-                    odds={analyzedOdds[match.fixture.id]}
-                    standings={standings}
-                    onSelect={() => {}}
-                    onHide={(e) => doHide(e, match.fixture.id)}
-                    onView={() => router.push(`/analisis/${match.fixture.id}`)}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        )}
-
-        {/* ===== TAB: COMBINADAS ===== */}
-        {!loading && tab === 'combinadas' && (
-          <>
-            {combinadasCount === 0 ? (
-              <div className="empty">
-                <h3>Sin combinadas</h3>
-                <p>Analiza partidos para ver sus combinadas autom&aacute;ticas</p>
-              </div>
-            ) : (
-              <div className="combinadas-list">
-                {Object.entries(analyzedData)
-                  .filter(([, data]) => data?.combinada?.selections?.length > 0)
-                  .map(([fid, data]) => {
-                    const fixture = fixtures.find(f => f.fixture.id === Number(fid));
-                    const matchName = fixture
-                      ? `${fixture.teams.home.name} vs ${fixture.teams.away.name}`
-                      : `${data.homeTeam || '?'} vs ${data.awayTeam || '?'}`;
-                    const homeLogo = fixture?.teams?.home?.logo || data.homeLogo;
-                    const awayLogo = fixture?.teams?.away?.logo || data.awayLogo;
-                    const isChecked = combinadaSelected.has(Number(fid));
-
-                    return (
-                      <div key={fid} className={`combinada-match-card ${isChecked ? 'selected' : ''}`}>
-                        <div className="combinada-match-header">
-                          <label className="match-checkbox" onClick={e => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => toggleCombinadaSelect(Number(fid))}
-                            />
-                            <span className="checkmark" />
-                          </label>
-                          <div className="combinada-match-teams">
-                            <TeamLogo src={homeLogo} name={data.homeTeam} size={20} />
-                            <span className="combinada-match-name">{matchName}</span>
-                            <TeamLogo src={awayLogo} name={data.awayTeam} size={20} />
-                          </div>
-                          <button
-                            className="btn-view-sm"
-                            onClick={() => router.push(`/analisis/${fid}`)}
-                          >
-                            Ver
-                          </button>
-                        </div>
-                        <div className="combinada-selections-list">
-                          {data.combinada.selections.map((sel, i) => (
-                            <div key={i} className="combinada-sel-row">
-                              <span className="combinada-sel-num">#{i + 1}</span>
-                              <span className="combinada-sel-name">{sel.name}</span>
-                              <span className="combinada-sel-prob">{sel.probability}%</span>
-                              {sel.odd && <span className="combinada-sel-odd">{sel.odd.toFixed(2)}</span>}
-                            </div>
-                          ))}
-                        </div>
-                        <div className="combinada-match-footer">
-                          <span>Cuota: <strong>{data.combinada.combinedOdd}</strong></span>
-                          <span>Prob: <strong className={data.combinada.highRisk ? 'danger' : 'safe'}>
-                            {data.combinada.combinedProbability}%
-                          </strong></span>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                {combinadaSelected.size >= 2 && (
-                  <div className="floating-bar">
-                    <button
-                      className="btn-analyze"
-                      onClick={() => setTab('combinadaTotal')}
-                    >
-                      Ver Combinada Total ({combinadaSelected.size} partidos)
-                    </button>
+                {apuestaDelDia.combinedOdd > 1 && (
+                  <div className="apuesta-foot">
+                    <span>Cuota: <b>{apuestaDelDia.combinedOdd}</b></span>
+                    <span>Prob: <b>{apuestaDelDia.combinedProbability}%</b></span>
                   </div>
                 )}
               </div>
             )}
-          </>
+          </div>
         )}
 
-        {/* ===== TAB: COMBINADA TOTAL ===== */}
-        {!loading && tab === 'combinadaTotal' && (
+        {/* WARNING */}
+        {error && fixtures.length > 0 && <div className="warn fade-in">{error}</div>}
+
+        {/* LOADING */}
+        {loading && (
+          <div className="skeletons">
+            {[0,1,2,3,4].map(i => <div key={i} className="skel" style={{ animationDelay: `${i * 0.1}s` }} />)}
+          </div>
+        )}
+
+        {/* ERROR */}
+        {!loading && error && fixtures.length === 0 && (
+          <div className="empty-state fade-in">
+            <div className="empty-icon">&#9889;</div>
+            <h3>Sin conexion</h3>
+            <p>{error}</p>
+            <button className="btn-primary" onClick={() => loadFixtures(date)}>Reintentar</button>
+          </div>
+        )}
+
+        {/* TAB: PARTIDOS */}
+        {!loading && tab === 'partidos' && (
           <>
-            {!combinadaTotal ? (
-              <div className="empty">
-                <h3>Selecciona partidos</h3>
-                <p>Ve a la pesta&ntilde;a Combinadas y selecciona al menos 2 partidos para crear una combinada total</p>
+            {sorted.length === 0 && !error && (
+              <div className="empty-state fade-in">
+                <div className="empty-icon">&#9917;</div>
+                <h3>Sin partidos</h3>
+                <p>No hay partidos para esta fecha</p>
               </div>
-            ) : (
-              <div className="combinada-total-container">
-                <div className="combinada-total-card">
-                  <div className="combinada-total-header">
-                    <h3>Combinada Total &mdash; {combinadaTotal.selections.length} partidos</h3>
-                  </div>
-                  <div className="combinada-total-selections">
-                    {combinadaTotal.selections.map((sel, i) => (
-                      <div key={i} className="combinada-total-row">
-                        <div className="combinada-total-match">
-                          <span className="ct-num">#{i + 1}</span>
-                          <span className="ct-match">{sel.matchName}</span>
-                        </div>
-                        <div className="combinada-total-bet">
-                          <span className="ct-market">{sel.name}</span>
-                          <span className="ct-prob">{sel.probability}%</span>
-                          {sel.odd && <span className="ct-odd">{sel.odd.toFixed(2)}</span>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="combinada-total-summary">
-                    <div className="ct-total-row">
-                      <span>Cuota combinada total</span>
-                      <strong className="ct-total-odd">{combinadaTotal.combinedOdd}</strong>
-                    </div>
-                    <div className="ct-total-row">
-                      <span>Probabilidad combinada</span>
-                      <strong className={combinadaTotal.combinedProbability >= 60 ? 'safe' : 'danger'}>
-                        {combinadaTotal.combinedProbability}%
-                      </strong>
-                    </div>
-                    {combinadaTotal.combinedProbability < 60 && (
-                      <div className="ct-warning">
-                        Combinada de riesgo alto &mdash; probabilidad por debajo del 60%
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <button
-                  className="btn-secondary"
-                  onClick={() => { setCombinadaSelected(new Set()); setTab('combinadas'); }}
-                  style={{ marginTop: 16 }}
-                >
-                  Limpiar selecci&oacute;n
-                </button>
+            )}
+            {sorted.length > 0 && (
+              <div className="match-list">
+                {sorted.map((m, i) => (
+                  <MatchCard
+                    key={m.fixture.id}
+                    match={m}
+                    isAnalyzed={analyzed.includes(m.fixture.id)}
+                    isSelected={selected.has(m.fixture.id)}
+                    odds={analyzedOdds[m.fixture.id]}
+                    standings={standings}
+                    onSelect={() => toggleSelect(m.fixture.id)}
+                    onHide={(e) => doHide(e, m.fixture.id)}
+                    onView={() => router.push(`/analisis/${m.fixture.id}`)}
+                    idx={i}
+                  />
+                ))}
               </div>
             )}
           </>
         )}
 
-        {/* FLOATING ANALYZE BUTTON */}
+        {/* TAB: ANALIZADOS */}
+        {!loading && tab === 'analizados' && (
+          <>
+            {analyzedFixtures.length === 0 ? (
+              <div className="empty-state fade-in">
+                <div className="empty-icon">&#128269;</div>
+                <h3>Sin analisis</h3>
+                <p>Selecciona partidos y analízalos</p>
+              </div>
+            ) : (
+              <div className="match-list">
+                {analyzedFixtures.map((m, i) => (
+                  <AccordionCard
+                    key={m.fixture.id}
+                    match={m}
+                    data={analyzedData[m.fixture.id]}
+                    odds={analyzedOdds[m.fixture.id]}
+                    standings={standings}
+                    isExpanded={expandedMatch === m.fixture.id}
+                    onToggle={() => setExpandedMatch(expandedMatch === m.fixture.id ? null : m.fixture.id)}
+                    selMarkets={selectedMarkets[m.fixture.id] || {}}
+                    onToggleMarket={(mkt) => toggleMarket(m.fixture.id, mkt, `${m.teams.home.name} vs ${m.teams.away.name}`)}
+                    onViewFull={() => router.push(`/analisis/${m.fixture.id}`)}
+                    idx={i}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* TAB: COMBINADA */}
+        {!loading && tab === 'combinada' && (
+          <>
+            {!customCombinada ? (
+              <div className="empty-state fade-in">
+                <div className="empty-icon">&#127920;</div>
+                <h3>Combinada vacia</h3>
+                <p>Ve a Analizados, abre un partido y selecciona apuestas</p>
+              </div>
+            ) : (
+              <div className="comb-builder fade-in">
+                <h3 className="comb-title">Tu Combinada &mdash; {customCombinada.selections.length} selecciones</h3>
+                <div className="comb-list">
+                  {customCombinada.selections.map((sel, i) => (
+                    <div key={`${sel.fixtureId}-${sel.id}`} className="comb-item">
+                      <div className="comb-item-match">{sel.matchName}</div>
+                      <div className="comb-item-row">
+                        <span className="comb-item-name">{sel.name}</span>
+                        <span className={`comb-item-prob ${sel.probability >= 75 ? 'high' : sel.probability >= 50 ? 'mid' : 'low'}`}>{sel.probability}%</span>
+                        {sel.odd && <span className="comb-item-odd">{sel.odd.toFixed(2)}</span>}
+                        <button className="comb-item-rm" onClick={() => toggleMarket(sel.fixtureId, sel, sel.matchName)}>&#10005;</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="comb-summary">
+                  <div className="comb-sum-row">
+                    <span>Cuota total</span>
+                    <strong className="comb-odd-total">{customCombinada.combinedOdd}</strong>
+                  </div>
+                  <div className="comb-sum-row">
+                    <span>Probabilidad</span>
+                    <strong className={customCombinada.highRisk ? 'danger' : 'safe'}>{customCombinada.combinedProbability}%</strong>
+                  </div>
+                  {customCombinada.highRisk && <div className="comb-warn">Combinada de alto riesgo</div>}
+                </div>
+                <button className="btn-clear" onClick={() => setSelectedMarkets({})}>Limpiar seleccion</button>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* FLOATING: Analyze */}
         {selected.size > 0 && tab === 'partidos' && (
-          <div className="floating-bar">
+          <div className="float-bar slide-up">
             <button className="btn-analyze" onClick={analyzeSelected} disabled={analyzing}>
-              {analyzing
-                ? `Analizando... ${analysisProgress.current}/${analysisProgress.total}`
-                : `Analizar ${selected.size} partido${selected.size > 1 ? 's' : ''}`
-              }
+              {analyzing ? 'Analizando...' : `Analizar ${selected.size} partido${selected.size > 1 ? 's' : ''}`}
+            </button>
+          </div>
+        )}
+
+        {/* FLOATING: Combinada counter */}
+        {totalSel > 0 && tab === 'analizados' && (
+          <div className="float-bar slide-up">
+            <button className="btn-comb-float" onClick={() => setTab('combinada')}>
+              &#127920; Ver Combinada ({totalSel})
+              {customCombinada && <span className="float-odd">{customCombinada.combinedOdd}x</span>}
             </button>
           </div>
         )}
 
         {/* ANALYZING OVERLAY */}
         {analyzing && (
-          <div className="analyzing-overlay">
-            <div className="analyzing-card">
-              <div className="analyzing-spinner" />
+          <div className="overlay">
+            <div className="overlay-card">
+              <div className="spinner" />
               <p>Analizando {selected.size} partido{selected.size > 1 ? 's' : ''}...</p>
-              <div className="progress-bar">
-                <div className="progress-fill" style={{ width: '100%' }} />
-              </div>
-              <span className="analyzing-note">Esto puede tomar unos segundos</span>
+              <div className="progress"><div className="progress-bar" /></div>
+              <small>Recopilando estadisticas</small>
             </div>
           </div>
         )}
 
         {/* FOOTER */}
         <div className="footer">
-          <span>Llamadas: {quota.used}/{quota.limit}</span>
+          <span>{quota.used}/{quota.limit} API</span>
           <span>{fromCache ? 'Cache' : 'API'}</span>
-          <span>{sorted.length} partidos</span>
+          <span>{visible.length} partidos</span>
         </div>
       </div>
     </div>
   );
 }
 
-// ===================== MATCH CARD =====================
+/* ======================== MATCH CARD ======================== */
 
-function MatchCard({ match, isAnalyzed, isSelected, odds, standings, onSelect, onHide, onView }) {
+function MatchCard({ match, isAnalyzed, isSelected, odds, standings, onSelect, onHide, onView, idx }) {
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
   const meta = match.leagueMeta || {};
   const flag = FLAGS[meta.country] || '';
-  const statusLbl = live ? 'EN VIVO' : finished ? 'FINALIZADO' : 'PR\u00D3XIMO';
-  const homePos = standings?.[match.teams.home.id];
-  const awayPos = standings?.[match.teams.away.id];
 
   return (
-    <div className={`match-card ${live ? 'live' : ''} ${finished ? 'finished' : ''} ${isSelected ? 'selected' : ''}`}>
-      <div className="match-card-left">
-        <label className="match-checkbox" onClick={e => e.stopPropagation()}>
-          <input type="checkbox" checked={isSelected} onChange={onSelect} />
-          <span className="checkmark" />
-        </label>
-        <div className="match-time-col">
-          {live ? (
-            <span className="time-live">{match.fixture.status.elapsed}&apos;</span>
-          ) : finished ? (
-            <span className="time-ft">{statusText(match.fixture.status.short)}</span>
-          ) : (
-            <span className="time-ns">{fmtTime(match.fixture.date)}</span>
-          )}
-          <span className={`status-micro ${live ? 'live' : finished ? 'ft' : 'ns'}`}>{statusLbl}</span>
-        </div>
-      </div>
-
-      <div className="match-card-center">
-        <div className="match-league-line">
-          {match.league.logo && <img src={match.league.logo} alt="" className="league-micro" />}
+    <div
+      className={`mcard ${live ? 'live' : ''} ${finished ? 'fin' : ''} ${isSelected ? 'sel' : ''} ${isAnalyzed ? 'done' : ''} stagger`}
+      style={{ '--i': idx }}
+      onClick={isAnalyzed ? onView : onSelect}
+    >
+      <div className="mcard-top">
+        <div className="mcard-league">
+          {match.league.logo && <img src={match.league.logo} alt="" className="league-ico" />}
           <span>{flag} {match.league.name}</span>
         </div>
-        <div className="match-teams-row">
-          <div className="team-row">
-            <div className="team-with-pos">
-              {homePos && <span className="pos-badge">{homePos}{'\u00B0'}</span>}
-              <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} />
-            </div>
-            <span className="team-name">{match.teams.home.name}</span>
-          </div>
-          <div className="match-score-center">
-            {hasScore ? (
-              <span className={`score-display ${live ? 'live' : ''}`}>
-                {match.goals.home} - {match.goals.away}
-              </span>
-            ) : (
-              <span className="score-display dim">vs</span>
-            )}
-          </div>
-          <div className="team-row right">
-            <span className="team-name">{match.teams.away.name}</span>
-            <div className="team-with-pos">
-              <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} />
-              {awayPos && <span className="pos-badge">{awayPos}{'\u00B0'}</span>}
-            </div>
-          </div>
+        <div className="mcard-time">
+          {live ? (
+            <span className="badge-live"><span className="dot-live" />{match.fixture.status.elapsed}&apos;</span>
+          ) : finished ? (
+            <span className="badge-ft">{statusText(match.fixture.status.short)}</span>
+          ) : (
+            <span className="badge-ns">{fmtTime(match.fixture.date)}</span>
+          )}
         </div>
-        {odds && (
-          <div className="card-odds-row">
-            <span className="card-odd">{odds.home?.toFixed(2)}</span>
-            <span className="card-odd draw">{odds.draw?.toFixed(2)}</span>
-            <span className="card-odd">{odds.away?.toFixed(2)}</span>
-          </div>
-        )}
       </div>
 
-      <div className="match-card-right">
+      <div className="mcard-body">
+        <div className="mcard-team">
+          <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} />
+          <span className="mcard-tname">{match.teams.home.name}</span>
+          {standings?.[match.teams.home.id] && <span className="mcard-pos">{standings[match.teams.home.id]}&#176;</span>}
+        </div>
+        <div className="mcard-score">
+          {hasScore
+            ? <span className={`score-num ${live ? 'live' : ''}`}>{match.goals.home} - {match.goals.away}</span>
+            : <span className="score-vs">vs</span>
+          }
+        </div>
+        <div className="mcard-team right">
+          <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} />
+          <span className="mcard-tname">{match.teams.away.name}</span>
+          {standings?.[match.teams.away.id] && <span className="mcard-pos">{standings[match.teams.away.id]}&#176;</span>}
+        </div>
+      </div>
+
+      {odds && (
+        <div className="mcard-odds">
+          <span className="odd-chip">{odds.home?.toFixed(2)}</span>
+          <span className="odd-chip x">{odds.draw?.toFixed(2)}</span>
+          <span className="odd-chip">{odds.away?.toFixed(2)}</span>
+        </div>
+      )}
+
+      <div className="mcard-foot">
         {isAnalyzed ? (
-          <button className="btn-view-analysis" onClick={onView}>
-            <span className="analyzed-badge">ANALIZADO</span>
-            Ver
-          </button>
+          <span className="tag-done">&#10003; ANALIZADO</span>
         ) : (
-          <button className="btn-select" onClick={onSelect}>
-            {isSelected ? '\u2713' : 'Analizar'}
-          </button>
+          <label className="mcard-cb" onClick={e => e.stopPropagation()}>
+            <input type="checkbox" checked={isSelected} onChange={onSelect} />
+            <span className="cb-mark" />
+          </label>
         )}
-        <button className="btn-hide-sm" onClick={onHide} title="Ocultar">{'\u00D7'}</button>
+        <button className="btn-x" onClick={(e) => { e.stopPropagation(); onHide(e); }}>&#10005;</button>
       </div>
     </div>
   );
 }
+
+/* ======================== ACCORDION CARD ======================== */
+
+function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, idx }) {
+  const live = isLive(match.fixture.status.short);
+  const finished = isFinished(match.fixture.status.short);
+  const hasScore = live || finished;
+  const meta = match.leagueMeta || {};
+  const flag = FLAGS[meta.country] || '';
+  const selCount = Object.keys(selMarkets).length;
+
+  const markets = useMemo(() => {
+    if (!data?.calculatedProbabilities) return [];
+    const p = data.calculatedProbabilities;
+    const o = data.odds;
+    const m = [];
+    if (p.btts >= 50) m.push({ id: 'btts-yes', name: 'Ambos marcan SI', probability: p.btts, odd: o?.btts?.yes || null, cat: 'BTTS' });
+    if (p.bttsNo >= 50) m.push({ id: 'btts-no', name: 'Ambos marcan NO', probability: p.bttsNo, odd: o?.btts?.no || null, cat: 'BTTS' });
+    if (p.winner?.home >= 30) m.push({ id: 'w-h', name: `Gana ${match.teams.home.name}`, probability: p.winner.home, odd: o?.matchWinner?.home || null, cat: 'Ganador' });
+    if (p.winner?.draw >= 20) m.push({ id: 'w-d', name: 'Empate', probability: p.winner.draw, odd: o?.matchWinner?.draw || null, cat: 'Ganador' });
+    if (p.winner?.away >= 30) m.push({ id: 'w-a', name: `Gana ${match.teams.away.name}`, probability: p.winner.away, odd: o?.matchWinner?.away || null, cat: 'Ganador' });
+    if (p.overUnder) {
+      m.push({ id: 'o15', name: 'Over 1.5 goles', probability: p.overUnder.over15, odd: o?.overUnder?.['Over_1_5'] || null, cat: 'Goles' });
+      m.push({ id: 'o25', name: 'Over 2.5 goles', probability: p.overUnder.over25, odd: o?.overUnder?.['Over_2_5'] || null, cat: 'Goles' });
+      m.push({ id: 'o35', name: 'Over 3.5 goles', probability: p.overUnder.over35, odd: o?.overUnder?.['Over_3_5'] || null, cat: 'Goles' });
+      m.push({ id: 'u25', name: 'Under 2.5 goles', probability: p.overUnder.under25, odd: o?.overUnder?.['Under_2_5'] || null, cat: 'Goles' });
+    }
+    if (p.corners) {
+      m.push({ id: 'c85', name: 'Over 8.5 corners', probability: p.corners.over85, odd: null, cat: 'Corners' });
+      m.push({ id: 'c95', name: 'Over 9.5 corners', probability: p.corners.over95, odd: null, cat: 'Corners' });
+    }
+    if (p.cards) {
+      m.push({ id: 'k25', name: 'Over 2.5 tarjetas', probability: p.cards.over25, odd: null, cat: 'Tarjetas' });
+      m.push({ id: 'k35', name: 'Over 3.5 tarjetas', probability: p.cards.over35, odd: null, cat: 'Tarjetas' });
+    }
+    return m.sort((a, b) => b.probability - a.probability);
+  }, [data, match]);
+
+  return (
+    <div className={`acc-card ${isExpanded ? 'open' : ''} stagger`} style={{ '--i': idx }}>
+      {/* Header */}
+      <div className="acc-head" onClick={onToggle}>
+        <div className="mcard-top">
+          <div className="mcard-league">
+            {match.league.logo && <img src={match.league.logo} alt="" className="league-ico" />}
+            <span>{flag} {match.league.name}</span>
+          </div>
+          <div className="mcard-time">
+            {live ? <span className="badge-live"><span className="dot-live" />{match.fixture.status.elapsed}&apos;</span>
+              : finished ? <span className="badge-ft">{statusText(match.fixture.status.short)}</span>
+              : <span className="badge-ns">{fmtTime(match.fixture.date)}</span>}
+          </div>
+        </div>
+        <div className="mcard-body">
+          <div className="mcard-team">
+            <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} />
+            <span className="mcard-tname">{match.teams.home.name}</span>
+          </div>
+          <div className="mcard-score">
+            {hasScore
+              ? <span className={`score-num ${live ? 'live' : ''}`}>{match.goals.home} - {match.goals.away}</span>
+              : <span className="score-vs">vs</span>}
+          </div>
+          <div className="mcard-team right">
+            <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} />
+            <span className="mcard-tname">{match.teams.away.name}</span>
+          </div>
+        </div>
+        {odds && (
+          <div className="mcard-odds">
+            <span className="odd-chip">{odds.home?.toFixed(2)}</span>
+            <span className="odd-chip x">{odds.draw?.toFixed(2)}</span>
+            <span className="odd-chip">{odds.away?.toFixed(2)}</span>
+          </div>
+        )}
+        <div className="acc-indicator">
+          {selCount > 0 && <span className="acc-sel-count">{selCount} sel.</span>}
+          {data?.combinada && (
+            <span className="acc-mini">{data.combinada.combinedProbability}% | {data.combinada.combinedOdd}x</span>
+          )}
+          <span className={`chev-ico ${isExpanded ? 'up' : ''}`}>&#9662;</span>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className={`acc-content ${isExpanded ? 'open' : ''}`}>
+        <div className="acc-inner">
+          {data ? (
+            <>
+              {/* Auto combinada */}
+              {data.combinada?.selections?.length > 0 && (
+                <div className="auto-comb">
+                  <div className="auto-comb-head">
+                    <span>&#127942; Combinada Auto</span>
+                    <span className={`auto-comb-val ${data.combinada.highRisk ? 'danger' : 'safe'}`}>
+                      {data.combinada.combinedProbability}% &middot; {data.combinada.combinedOdd}x
+                    </span>
+                  </div>
+                  <div className="auto-comb-chips">
+                    {data.combinada.selections.map((s, i) => (
+                      <span key={i} className="auto-chip">{s.name} <b>{s.probability}%</b></span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Form summary */}
+              {data.calculatedProbabilities?.homeForm && (
+                <div className="form-mini">
+                  <div className="form-mini-team">
+                    <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} size={18} />
+                    <span className="form-mini-name">{match.teams.home.name}</span>
+                    <div className="form-mini-dots">
+                      {data.calculatedProbabilities.homeForm.results?.map((r, i) => (
+                        <span key={i} className={`fdot ${r.result.toLowerCase()}`}>{r.result}</span>
+                      ))}
+                    </div>
+                    <span className="form-mini-pts">{data.calculatedProbabilities.homeForm.points}/{data.calculatedProbabilities.homeForm.maxPoints}</span>
+                  </div>
+                  <div className="form-mini-team">
+                    <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} size={18} />
+                    <span className="form-mini-name">{match.teams.away.name}</span>
+                    <div className="form-mini-dots">
+                      {data.calculatedProbabilities.awayForm?.results?.map((r, i) => (
+                        <span key={i} className={`fdot ${r.result.toLowerCase()}`}>{r.result}</span>
+                      ))}
+                    </div>
+                    <span className="form-mini-pts">{data.calculatedProbabilities.awayForm?.points}/{data.calculatedProbabilities.awayForm?.maxPoints}</span>
+                  </div>
+                  {data.calculatedProbabilities.h2hSummary?.total > 0 && (
+                    <div className="h2h-mini">
+                      <span className="h2h-mini-n green">{data.calculatedProbabilities.h2hSummary.homeWins}</span>
+                      <span className="h2h-mini-l">{match.teams.home.name.split(' ')[0]}</span>
+                      <span className="h2h-mini-n yellow">{data.calculatedProbabilities.h2hSummary.draws}</span>
+                      <span className="h2h-mini-l">Emp</span>
+                      <span className="h2h-mini-n red">{data.calculatedProbabilities.h2hSummary.awayWins}</span>
+                      <span className="h2h-mini-l">{match.teams.away.name.split(' ')[0]}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Selectable markets */}
+              <div className="markets">
+                <h4 className="markets-title">Selecciona para tu combinada</h4>
+                <div className="markets-grid">
+                  {markets.map(mkt => {
+                    const checked = !!selMarkets[mkt.id];
+                    return (
+                      <button
+                        key={mkt.id}
+                        className={`mkt ${checked ? 'on' : ''} ${mkt.probability >= 75 ? 'hi' : mkt.probability >= 50 ? 'md' : 'lo'}`}
+                        onClick={(e) => { e.stopPropagation(); onToggleMarket(mkt); }}
+                      >
+                        <span className="mkt-name">{mkt.name}</span>
+                        <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${mkt.probability}%` }} /></div>
+                        <div className="mkt-nums">
+                          <span className="mkt-pct">{mkt.probability}%</span>
+                          {mkt.odd && <span className="mkt-odd">{mkt.odd.toFixed(2)}</span>}
+                          {checked && <span className="mkt-chk">&#10003;</span>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <button className="btn-full" onClick={(e) => { e.stopPropagation(); onViewFull(); }}>
+                Ver analisis completo &#8594;
+              </button>
+            </>
+          ) : (
+            <div className="no-data-inline">Sin datos de analisis</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ======================== SHARED ======================== */
 
 function TeamLogo({ src, name, size = 24 }) {
   const [err, setErr] = useState(false);

@@ -1,5 +1,5 @@
 import { getFixtures, getQuota, getHiddenMatches, getCachedStandingsPositions } from '../../../lib/api-football';
-import { getAnalyzedFixtureIds, getAnalyzedOdds, getAnalyzedMatchesData } from '../../../lib/sanity-cache';
+import { getAnalyzedFixtureIds, getAnalyzedMatchesFull } from '../../../lib/sanity-cache';
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -28,11 +28,10 @@ export async function GET(request) {
       getAnalyzedFixtureIds(date),
     ]);
 
-    // Get analyzed match data (odds, combinadas, positions) in parallel
-    const [analyzedOdds, analyzedData] = await Promise.all([
-      analyzed.length > 0 ? getAnalyzedOdds(analyzed) : {},
-      analyzed.length > 0 ? getAnalyzedMatchesData(analyzed) : {},
-    ]);
+    // Get analyzed match data (odds + full data) in single parallel batch
+    const { analyzedOdds, analyzedData } = analyzed.length > 0
+      ? await getAnalyzedMatchesFull(analyzed)
+      : { analyzedOdds: {}, analyzedData: {} };
 
     // Get cached standings positions for all leagues in today's fixtures
     let standings = {};
