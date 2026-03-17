@@ -36,7 +36,9 @@ export default function AnalisisPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`/api/match/${fixtureId}`);
+      const d = new Date();
+      const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const res = await fetch(`/api/match/${fixtureId}?date=${localDate}`);
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
 
@@ -291,23 +293,23 @@ export default function AnalisisPage() {
                 <ProbBar label={a.awayTeam} value={p.winner.away} />
               </div>
               <div className="prob-card">
-                <h4>Over/Under goles</h4>
+                <h4>Más/Menos goles</h4>
                 <div className="prob-expected">Esperado: {p.overUnder.expectedTotal} goles</div>
-                <ProbBar label="Over 1.5" value={p.overUnder.over15} />
-                <ProbBar label="Over 2.5" value={p.overUnder.over25} />
-                <ProbBar label="Over 3.5" value={p.overUnder.over35} />
+                <ProbBar label="Más de 1.5" value={p.overUnder.over15} />
+                <ProbBar label="Más de 2.5" value={p.overUnder.over25} />
+                <ProbBar label="Más de 3.5" value={p.overUnder.over35} />
               </div>
               <div className="prob-card">
                 <h4>Córners totales</h4>
-                <ProbBar label="Over 8.5" value={p.corners.over85} />
-                <ProbBar label="Over 9.5" value={p.corners.over95} />
-                <ProbBar label="Over 10.5" value={p.corners.over105} />
+                <ProbBar label="Más de 8.5" value={p.corners.over85} />
+                <ProbBar label="Más de 9.5" value={p.corners.over95} />
+                <ProbBar label="Más de 10.5" value={p.corners.over105} />
               </div>
               <div className="prob-card">
                 <h4>Tarjetas totales</h4>
-                <ProbBar label="Over 2.5" value={p.cards.over25} />
-                <ProbBar label="Over 3.5" value={p.cards.over35} />
-                <ProbBar label="Over 4.5" value={p.cards.over45} />
+                <ProbBar label="Más de 2.5" value={p.cards.over25} />
+                <ProbBar label="Más de 3.5" value={p.cards.over35} />
+                <ProbBar label="Más de 4.5" value={p.cards.over45} />
               </div>
             </div>
           </Section>

@@ -10,7 +10,6 @@ export const dynamic = 'force-dynamic';
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
-  const today = new Date().toISOString().split('T')[0];
 
   try {
     let fixtures = [];
@@ -29,16 +28,16 @@ export async function GET(request) {
         : e.message;
     }
 
-    // Auto-trigger daily batch if first visit of the day (only for today's date)
-    if (date === today && fixtures.length > 0) {
-      const batchFlag = await getFromSanity('appConfig', `dailyBatch-${today}`);
+    // Auto-trigger daily batch if first visit of the day (using client's date)
+    if (fixtures.length > 0) {
+      const batchFlag = await getFromSanity('appConfig', `dailyBatch-${date}`);
       if (!batchFlag?.started) {
         // First visit of the day — trigger full analysis batch in background
         const baseUrl = process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
           ? `https://${process.env.VERCEL_URL}`
           : 'http://localhost:3000');
 
-        fetch(`${baseUrl}/api/cron/daily`, {
+        fetch(`${baseUrl}/api/cron/daily?date=${date}`, {
           headers: { 'x-internal-trigger': 'true' },
         }).catch(() => {}); // Fire and forget
       }
@@ -95,9 +94,7 @@ export async function GET(request) {
     }
 
     // Batch status
-    const batchFlag = date === today
-      ? await getFromSanity('appConfig', `dailyBatch-${today}`)
-      : null;
+    const batchFlag = await getFromSanity('appConfig', `dailyBatch-${date}`);
 
     return Response.json({
       fixtures,

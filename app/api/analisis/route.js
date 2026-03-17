@@ -10,11 +10,14 @@ export async function POST(request) {
     const session = await getServerSession(authOptions);
     const userId = session?.user?.id;
 
-    const { fixtures } = await request.json();
+    const { fixtures, date: clientDate } = await request.json();
 
     if (!fixtures || !Array.isArray(fixtures) || fixtures.length === 0) {
       return Response.json({ error: 'fixtures array required' }, { status: 400 });
     }
+
+    // Use client-provided date, fallback to UTC
+    const date = clientDate || new Date().toISOString().split('T')[0];
 
     // Limit to 5 matches per request
     const toAnalyze = fixtures.slice(0, 5);
@@ -24,7 +27,7 @@ export async function POST(request) {
     const analyses = await Promise.all(
       toAnalyze.map(async (fixture) => {
         try {
-          const result = await analyzeMatch(fixture);
+          const result = await analyzeMatch(fixture, { date });
           totalApiCalls += result.apiCalls;
           return { fixtureId: fixture.fixture.id, success: true, ...result };
         } catch (e) {
@@ -40,7 +43,6 @@ export async function POST(request) {
     // Save analyzed fixture IDs per-user
     const successfulIds = analyses.filter(a => a.success).map(a => a.fixtureId);
     if (userId && successfulIds.length > 0) {
-      const date = new Date().toISOString().split('T')[0];
       const docId = `analyzed-${userId.replace('cfaUser-', '')}-${date}`;
       const existing = await queryFromSanity(
         `*[_type == "cfaUserData" && userId == $userId && dataType == "analyzed" && date == $date][0]`,

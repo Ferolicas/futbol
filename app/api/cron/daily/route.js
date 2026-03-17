@@ -15,7 +15,8 @@ export async function GET(request) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const today = new Date().toISOString().split('T')[0];
+  // Use client-provided date if available, fallback to UTC
+  const today = searchParams.get('date') || new Date().toISOString().split('T')[0];
 
   // Check if batch already ran today
   const batchFlag = await getFromSanity('appConfig', `dailyBatch-${today}`);

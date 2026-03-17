@@ -95,7 +95,7 @@ export async function GET(request) {
           apiCalls += 2;
 
           // Get existing analysis if any
-          const existing = await getCachedAnalysis(fixtureId);
+          const existing = await getCachedAnalysis(fixtureId, today);
 
           if (existing) {
             // Update analysis with lineups and injuries, recalculate

@@ -5,13 +5,15 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request, { params }) {
   const { id } = params;
+  const { searchParams } = new URL(request.url);
+  const clientDate = searchParams.get('date');
 
   if (!id) {
     return Response.json({ error: 'fixture id required' }, { status: 400 });
   }
 
   try {
-    const analysis = await getCachedAnalysis(id);
+    const analysis = await getCachedAnalysis(id, clientDate);
 
     if (!analysis) {
       return Response.json({ error: 'Match not analyzed yet', notFound: true }, { status: 404 });

@@ -5,7 +5,10 @@ import { useRouter } from 'next/navigation';
 import { useSession, signOut } from 'next-auth/react';
 import { FLAGS } from '../../lib/leagues';
 
-const today = () => new Date().toISOString().split('T')[0];
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 const fmtTime = (d) => new Date(d).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
 const isLive = (s) => ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(s);
 const isFinished = (s) => ['FT', 'AET', 'PEN', 'CANC', 'SUSP', 'PST', 'ABD', 'AWD', 'WO'].includes(s);
@@ -110,7 +113,7 @@ export default function Dashboard() {
   const changeDate = (offset) => {
     const d = new Date(date);
     d.setDate(d.getDate() + offset);
-    const nd = d.toISOString().split('T')[0];
+    const nd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     setDate(nd);
     setSelected(new Set());
     setSelectedMarkets({});
@@ -179,7 +182,7 @@ export default function Dashboard() {
       const res = await fetch('/api/analisis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fixtures: toAnalyze }),
+        body: JSON.stringify({ fixtures: toAnalyze, date }),
       });
       const data = await res.json();
       if (data.quota) setQuota(data.quota);
@@ -774,18 +777,18 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
     if (p.winner?.draw >= 20) m.push({ id: 'w-d', name: 'Empate', probability: p.winner.draw, odd: o?.matchWinner?.draw || null, cat: 'Ganador' });
     if (p.winner?.away >= 30) m.push({ id: 'w-a', name: `Gana ${match.teams.away.name}`, probability: p.winner.away, odd: o?.matchWinner?.away || null, cat: 'Ganador' });
     if (p.overUnder) {
-      m.push({ id: 'o15', name: 'Over 1.5 goles', probability: p.overUnder.over15, odd: o?.overUnder?.['Over_1_5'] || null, cat: 'Goles' });
-      m.push({ id: 'o25', name: 'Over 2.5 goles', probability: p.overUnder.over25, odd: o?.overUnder?.['Over_2_5'] || null, cat: 'Goles' });
-      m.push({ id: 'o35', name: 'Over 3.5 goles', probability: p.overUnder.over35, odd: o?.overUnder?.['Over_3_5'] || null, cat: 'Goles' });
-      m.push({ id: 'u25', name: 'Under 2.5 goles', probability: p.overUnder.under25, odd: o?.overUnder?.['Under_2_5'] || null, cat: 'Goles' });
+      m.push({ id: 'o15', name: 'Más de 1.5 goles', probability: p.overUnder.over15, odd: o?.overUnder?.['Over_1_5'] || null, cat: 'Goles' });
+      m.push({ id: 'o25', name: 'Más de 2.5 goles', probability: p.overUnder.over25, odd: o?.overUnder?.['Over_2_5'] || null, cat: 'Goles' });
+      m.push({ id: 'o35', name: 'Más de 3.5 goles', probability: p.overUnder.over35, odd: o?.overUnder?.['Over_3_5'] || null, cat: 'Goles' });
+      m.push({ id: 'u25', name: 'Menos de 2.5 goles', probability: p.overUnder.under25, odd: o?.overUnder?.['Under_2_5'] || null, cat: 'Goles' });
     }
     if (p.corners) {
-      m.push({ id: 'c85', name: 'Over 8.5 corners', probability: p.corners.over85, odd: null, cat: 'Corners' });
-      m.push({ id: 'c95', name: 'Over 9.5 corners', probability: p.corners.over95, odd: null, cat: 'Corners' });
+      m.push({ id: 'c85', name: 'Más de 8.5 córners', probability: p.corners.over85, odd: null, cat: 'Córners' });
+      m.push({ id: 'c95', name: 'Más de 9.5 córners', probability: p.corners.over95, odd: null, cat: 'Córners' });
     }
     if (p.cards) {
-      m.push({ id: 'k25', name: 'Over 2.5 tarjetas', probability: p.cards.over25, odd: null, cat: 'Tarjetas' });
-      m.push({ id: 'k35', name: 'Over 3.5 tarjetas', probability: p.cards.over35, odd: null, cat: 'Tarjetas' });
+      m.push({ id: 'k25', name: 'Más de 2.5 tarjetas', probability: p.cards.over25, odd: null, cat: 'Tarjetas' });
+      m.push({ id: 'k35', name: 'Más de 3.5 tarjetas', probability: p.cards.over35, odd: null, cat: 'Tarjetas' });
     }
     return m.sort((a, b) => b.probability - a.probability);
   }, [data, match]);

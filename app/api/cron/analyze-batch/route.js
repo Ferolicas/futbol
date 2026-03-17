@@ -45,7 +45,7 @@ export async function POST(request) {
     await Promise.all(
       batch.map(async (fixture) => {
         try {
-          const result = await analyzeMatch(fixture);
+          const result = await analyzeMatch(fixture, { date });
           if (result.fromCache) cached++;
           else analyzed++;
         } catch (e) {

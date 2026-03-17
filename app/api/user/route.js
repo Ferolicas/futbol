@@ -55,9 +55,9 @@ export async function POST(request) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { type, data } = await request.json();
+  const { type, data, date: clientDate } = await request.json();
   const userId = session.user.id;
-  const date = new Date().toISOString().split('T')[0];
+  const date = clientDate || new Date().toISOString().split('T')[0];
 
   try {
     if (type === 'hide') {
