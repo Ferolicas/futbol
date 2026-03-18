@@ -28,6 +28,30 @@ export async function GET(request) {
         : e.message;
     }
 
+    // When serving cached fixtures, merge latest statuses from matchDay
+    // (updated every minute by the live cron) so the initial load is fresh
+    if (fromCache && fixtures.length > 0) {
+      const matchDay = await getFromSanity('matchDay', date);
+      if (matchDay?.matches && matchDay.liveUpdatedAt) {
+        const statusMap = {};
+        matchDay.matches.forEach(m => {
+          statusMap[m.fixture.id] = { status: m.fixture.status, goals: m.goals, score: m.score };
+        });
+        fixtures = fixtures.map(f => {
+          const live = statusMap[f.fixture.id];
+          if (live?.status) {
+            return {
+              ...f,
+              fixture: { ...f.fixture, status: live.status },
+              goals: live.goals || f.goals,
+              score: live.score || f.score,
+            };
+          }
+          return f;
+        });
+      }
+    }
+
     // Auto-trigger daily batch if first visit of the day (using client's date)
     if (fixtures.length > 0) {
       const batchFlag = await getFromSanity('appConfig', `dailyBatch-${date}`);

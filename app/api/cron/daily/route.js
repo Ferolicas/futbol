@@ -1,6 +1,7 @@
 import { getFixtures, getQuota, analyzeMatch } from '../../../../lib/api-football';
 import { getFromSanity, saveToSanity } from '../../../../lib/sanity';
 import { getCachedFixturesRaw } from '../../../../lib/sanity-cache';
+import { triggerEvent } from '../../../../lib/pusher';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -90,6 +91,13 @@ export async function GET(request) {
 
     const quota = await getQuota();
     console.log(`[DAILY-BATCH] Done: ${totalAnalyzed} analyzed, ${totalCached} cached, ${totalFailed} failed`);
+
+    // Notify open dashboards that analysis is ready
+    await triggerEvent('analysis', 'batch-complete', {
+      date: today,
+      fixtureCount: allFixtures.length,
+      analyzed: totalAnalyzed,
+    });
 
     return Response.json({
       success: true,

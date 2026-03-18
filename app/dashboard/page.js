@@ -32,29 +32,35 @@ const statusText = (s) => ({
 // Display cap: internally probabilities can be 100%, but we show max 95% to the user
 const cap = (v) => Math.min(95, v);
 
+// Module-level cache — survives component remounts during SPA navigation
+// (e.g., going to match detail and back). Reset only on full page reload.
+let _dashCache = null;
+let _splashDone = false;
+
 export default function Dashboard() {
   const router = useRouter();
   const { user } = useUser();
   const { signOut } = useClerk();
-  const [splash, setSplash] = useState(true);
+  const [splash, setSplash] = useState(!_splashDone);
   const [splashFade, setSplashFade] = useState(false);
   const [tab, setTab] = useState('partidos');
   const [date, setDate] = useState(today());
-  const [fixtures, setFixtures] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [fixtures, setFixtures] = useState(_dashCache?.fixtures || []);
+  const [loading, setLoading] = useState(!_dashCache);
   const [error, setError] = useState('');
-  const [fromCache, setFromCache] = useState(false);
-  const [quota, setQuota] = useState({ used: 0, remaining: 100, limit: 100 });
-  const [hidden, setHidden] = useState([]);
-  const [analyzed, setAnalyzed] = useState([]);
-  const [analyzedOdds, setAnalyzedOdds] = useState({});
-  const [analyzedData, setAnalyzedData] = useState({});
-  const [standings, setStandings] = useState({});
+  const [fromCache, setFromCache] = useState(_dashCache?.fromCache || false);
+  const [quota, setQuota] = useState(_dashCache?.quota || { used: 0, remaining: 100, limit: 100 });
+  const [hidden, setHidden] = useState(_dashCache?.hidden || []);
+  const [analyzed, setAnalyzed] = useState(_dashCache?.analyzed || []);
+  const [analyzedOdds, setAnalyzedOdds] = useState(_dashCache?.analyzedOdds || {});
+  const [analyzedData, setAnalyzedData] = useState(_dashCache?.analyzedData || {});
+  const [standings, setStandings] = useState(_dashCache?.standings || {});
   const [sortBy, setSortBy] = useState('time');
   const [statusFilter, setStatusFilter] = useState('all');
   const [leagueFilter, setLeagueFilter] = useState('');
   const [selected, setSelected] = useState(new Set());
   const [analyzing, setAnalyzing] = useState(false);
+  const [batchRunning, setBatchRunning] = useState(false);
   // Accordion for Analizados
   const [expandedMatch, setExpandedMatch] = useState(null);
   // Custom combinada: { fixtureId: { marketId: marketObj } }
@@ -64,10 +70,10 @@ export default function Dashboard() {
   const [savedCombinadas, setSavedCombinadas] = useState([]);
   const [savingComb, setSavingComb] = useState(false);
   // Live match stats (corners, cards, scorers)
-  const [liveStats, setLiveStats] = useState({});
+  const [liveStats, setLiveStats] = useState(_dashCache?.liveStats || {});
 
-  const loadFixtures = useCallback(async (d) => {
-    setLoading(true);
+  const loadFixtures = useCallback(async (d, { silent } = {}) => {
+    if (!silent) setLoading(true);
     setError('');
     try {
       const res = await fetch(`/api/fixtures?date=${d}`);
@@ -77,7 +83,8 @@ export default function Dashboard() {
         if (data.quota) setQuota(data.quota);
         return;
       }
-      setFixtures(data.fixtures || []);
+      const fx = data.fixtures || [];
+      setFixtures(fx);
       setFromCache(data.fromCache || false);
       setHidden(data.hidden || []);
       setAnalyzed(data.analyzed || []);
@@ -86,6 +93,47 @@ export default function Dashboard() {
       setStandings(data.standings || {});
       if (data.quota) setQuota(data.quota);
       if (data.error) setError(data.error);
+      // Track if daily analysis batch is still running
+      if (data.batchStatus?.started && !data.batchStatus?.completed) {
+        setBatchRunning(true);
+      } else {
+        setBatchRunning(false);
+      }
+
+      // Persist to module cache for instant back-navigation
+      _dashCache = {
+        fixtures: fx, analyzed: data.analyzed || [], analyzedOdds: data.analyzedOdds || {},
+        analyzedData: data.analyzedData || {}, standings: data.standings || {},
+        hidden: data.hidden || [], fromCache: data.fromCache || false,
+        quota: data.quota || { used: 0, remaining: 100, limit: 100 },
+      };
+
+      // Immediately fetch truly fresh statuses from /api/live
+      // (calls API-Football directly if matchDay is stale)
+      if (fx.length > 0) {
+        fetch(`/api/live?date=${d}`)
+          .then(r => r.json())
+          .then(liveData => {
+            if (!liveData.matches?.length) return;
+            setFixtures(prev => {
+              const updated = prev.map(f => {
+                const fresh = liveData.matches.find(m => m.fixture.id === f.fixture.id);
+                if (fresh) {
+                  return {
+                    ...f,
+                    fixture: { ...f.fixture, status: fresh.fixture.status },
+                    goals: fresh.goals || f.goals,
+                    score: fresh.score || f.score,
+                  };
+                }
+                return f;
+              });
+              if (_dashCache) _dashCache.fixtures = updated;
+              return updated;
+            });
+          })
+          .catch(() => {});
+      }
     } catch (e) {
       setError(e.message || 'Error de conexion');
     } finally {
@@ -93,7 +141,8 @@ export default function Dashboard() {
     }
   }, []);
 
-  useEffect(() => { loadFixtures(today()); }, [loadFixtures]);
+  // On mount: if we have cached data (back-navigation), refresh silently in background
+  useEffect(() => { loadFixtures(today(), { silent: !!_dashCache }); }, [loadFixtures]);
 
   // Load saved combinadas per-user on mount
   useEffect(() => {
@@ -114,14 +163,16 @@ export default function Dashboard() {
   const loadingRef = useRef(loading);
   useEffect(() => { loadingRef.current = loading; }, [loading]);
 
-  // Splash screen: show for minimum 2.5s, then fade out when data loaded
+  // Splash screen: show for minimum 2.5s on FIRST visit only, then fade out when data loaded
   useEffect(() => {
+    if (_splashDone) { setSplash(false); return; }
     const minTime = new Promise(r => setTimeout(r, 2500));
     const dataReady = new Promise(r => {
       const check = () => !loadingRef.current ? r() : setTimeout(check, 100);
       check();
     });
     Promise.all([minTime, dataReady]).then(() => {
+      _splashDone = true;
       setSplashFade(true);
       setTimeout(() => setSplash(false), 600);
     });
@@ -163,6 +214,7 @@ export default function Dashboard() {
           };
         }
       });
+      if (_dashCache) _dashCache.liveStats = next;
       return next;
     });
   }, []));
@@ -174,18 +226,34 @@ export default function Dashboard() {
     loadFixtures(date);
   }, [date, loadFixtures]));
 
-  // Analysis batch: reload when complete
+  // Analysis batch: reload when complete (via Pusher)
   usePusherEvent('analysis', 'batch-complete', useCallback((data) => {
     if (data?.date === date) {
+      setBatchRunning(false);
       loadFixtures(date);
     }
   }, [date, loadFixtures]));
+
+  // Polling fallback: if batch is running, poll every 20s until it completes
+  useEffect(() => {
+    if (!batchRunning) return;
+    const pollBatch = setInterval(() => {
+      loadFixtures(date);
+    }, 20000);
+    return () => clearInterval(pollBatch);
+  }, [batchRunning, date, loadFixtures]);
 
   // Polling fallback for live stats (works when Pusher is unavailable)
   useEffect(() => {
     const hasLive = fixtures.some(f => isLive(f.fixture.status.short));
     const hasFinishedToday = fixtures.some(f => isFinished(f.fixture.status.short));
-    if (!hasLive && !hasFinishedToday) return;
+    // Also check if any match has kicked off based on time (cache may still show NS)
+    const now = Date.now();
+    const hasKickedOff = fixtures.some(f => {
+      const kickoff = new Date(f.fixture.date).getTime();
+      return kickoff < now && !isFinished(f.fixture.status.short) && !isPostponed(f.fixture.status.short);
+    });
+    if (!hasLive && !hasFinishedToday && !hasKickedOff) return;
 
     const poll = async () => {
       try {
@@ -195,6 +263,7 @@ export default function Dashboard() {
           const statsMap = {};
           data.liveStats.forEach(s => { statsMap[s.fixtureId] = s; });
           setLiveStats(statsMap);
+          if (_dashCache) _dashCache.liveStats = statsMap;
           // Also update fixture scores/status from live stats
           setFixtures(prev => prev.map(f => {
             const ls = statsMap[f.fixture.id];
@@ -213,7 +282,7 @@ export default function Dashboard() {
     };
 
     poll(); // Initial fetch
-    const interval = setInterval(poll, 30000); // Every 30 seconds
+    const interval = setInterval(poll, 15000); // Every 15 seconds
     return () => clearInterval(interval);
   }, [date, fixtures.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -230,8 +299,6 @@ export default function Dashboard() {
 
   const visible = fixtures.filter(f => {
     if (hidden.includes(f.fixture.id)) return false;
-    // Only show matches that have been analyzed
-    if (!analyzed.includes(f.fixture.id)) return false;
     const status = f.fixture.status.short;
     // Hide postponed/cancelled/suspended/abandoned matches
     if (isPostponed(status)) return false;
@@ -630,6 +697,14 @@ export default function Dashboard() {
             <h3>Sin conexion</h3>
             <p>{error}</p>
             <button className="btn-primary" onClick={() => loadFixtures(date)}>Reintentar</button>
+          </div>
+        )}
+
+        {/* BATCH ANALYSIS RUNNING BANNER */}
+        {batchRunning && !loading && fixtures.length > 0 && (
+          <div className="batch-banner fade-in">
+            <div className="spinner-sm" />
+            <span>Analizando partidos del dia... Los datos se actualizan automaticamente.</span>
           </div>
         )}
 
