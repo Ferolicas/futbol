@@ -137,6 +137,7 @@ export async function GET(request) {
       batchStatus: batchFlag ? {
         started: batchFlag.started || false,
         completed: batchFlag.completed || false,
+        startedAt: batchFlag.startedAt || null,
       } : null,
       ...(error ? { error } : {}),
     });

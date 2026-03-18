@@ -93,8 +93,10 @@ export default function Dashboard() {
       setStandings(data.standings || {});
       if (data.quota) setQuota(data.quota);
       if (data.error) setError(data.error);
-      // Track if daily analysis batch is still running
-      if (data.batchStatus?.started && !data.batchStatus?.completed) {
+      // Track if daily analysis batch is still running (timeout after 10 min)
+      const batchAge = data.batchStatus?.startedAt
+        ? Date.now() - new Date(data.batchStatus.startedAt).getTime() : 0;
+      if (data.batchStatus?.started && !data.batchStatus?.completed && batchAge < 600000) {
         setBatchRunning(true);
       } else {
         setBatchRunning(false);
