@@ -1572,19 +1572,27 @@ body {
 
 /* ===== DARK THEME (default) ===== */
 
-/* Card & container */
-.cl-cardBox { box-shadow: none !important; }
-.cl-card {
-  background: rgba(30, 30, 50, 0.97) !important;
-  border: 1px solid rgba(255,255,255,0.08) !important;
+/* Card & ALL wrapper containers — force website colors everywhere */
+.cl-rootBox { background: transparent !important; }
+.cl-cardBox { box-shadow: none !important; background: transparent !important; }
+.cl-signUp-root, .cl-signIn-root { background: transparent !important; }
+.cl-modalContent { background: transparent !important; }
+.cl-card,
+.cl-card.cl-card {
+  background: linear-gradient(180deg, #06060b 0%, #0c0c14 40%, #0f1018 100%) !important;
+  border: 1px solid rgba(0,230,118,0.12) !important;
   border-radius: 20px !important;
-  box-shadow: 0 12px 48px rgba(0,0,0,0.5) !important;
+  box-shadow: 0 0 60px rgba(0,230,118,0.08), 0 12px 48px rgba(0,0,0,0.5) !important;
   padding: 0 24px 12px 24px !important;
   gap: 0px !important;
   overflow: hidden;
   position: relative !important;
   animation: clerkCardIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+/* Override any Clerk internal background on card wrappers only */
+[class*="cl-card"] { background: linear-gradient(180deg, #06060b 0%, #0c0c14 40%, #0f1018 100%) !important; }
+.cl-card > [class*="cl-internal"],
+.cl-cardBox > [class*="cl-internal"] { background-color: transparent !important; }
 
 /* Logo: 0 padding, tight */
 .cl-logoBox {
@@ -1620,24 +1628,26 @@ body {
 .cl-dividerRow { margin: 2px 0 !important; }
 .cl-form { gap: 2px !important; }
 
-/* Social icon buttons - dark: white border */
+/* Social icon buttons - green accent border */
 .cl-socialButtonsIconButton {
-  background: rgba(255,255,255,0.06) !important;
-  border: 1px solid rgba(255,255,255,0.85) !important;
+  background: rgba(0,230,118,0.06) !important;
+  border: 1px solid rgba(0,230,118,0.25) !important;
   border-radius: 10px !important;
   transition: transform 0.2s ease, border-color 0.3s ease, background 0.3s ease !important;
 }
 .cl-socialButtonsIconButton:hover {
   transform: translateY(-2px) !important;
-  background: rgba(255,255,255,0.12) !important;
-  border-color: #fff !important;
+  background: rgba(0,230,118,0.12) !important;
+  border-color: rgba(0,230,118,0.5) !important;
 }
 .cl-socialButtonsIconButton:active { transform: scale(0.95) !important; }
+/* Apple icon is black - invert it on dark bg */
+.cl-socialButtonsProviderIcon__apple { filter: invert(1) !important; }
 .cl-socialButtons { margin-bottom: 4px !important; }
 
 /* Divider */
-.cl-dividerLine { background: rgba(255,255,255,0.1) !important; }
-.cl-dividerText { color: rgba(255,255,255,0.4) !important; }
+.cl-dividerLine { background: rgba(0,230,118,0.1) !important; }
+.cl-dividerText { color: rgba(255,255,255,0.3) !important; }
 
 /* Form fields */
 .cl-formFieldLabel { color: rgba(255,255,255,0.75) !important; font-size: 0.8rem !important; }
@@ -1645,8 +1655,8 @@ body {
 .cl-formFieldLabelRow { margin-bottom: 2px !important; }
 .cl-formField { margin-bottom: 2px !important; }
 .cl-formFieldInput {
-  background: rgba(255,255,255,0.06) !important;
-  border: 1px solid rgba(255,255,255,0.12) !important;
+  background: rgba(0,230,118,0.04) !important;
+  border: 1px solid rgba(0,230,118,0.15) !important;
   color: #fff !important;
   border-radius: 10px !important; padding: 10px 12px !important; font-size: 0.9rem !important;
   transition: border-color 0.3s ease, box-shadow 0.3s ease !important;
@@ -1656,7 +1666,7 @@ body {
   box-shadow: 0 0 0 3px rgba(0,230,118,0.1) !important;
 }
 .cl-formFieldInput::placeholder { color: rgba(255,255,255,0.3) !important; }
-.cl-formFieldInputShowPasswordButton { color: rgba(255,255,255,0.5) !important; }
+.cl-formFieldInputShowPasswordButton { color: rgba(0,230,118,0.5) !important; }
 
 /* Form rows stagger */
 .cl-formFieldRow { animation: clerkFadeUp 0.35s ease both; }
@@ -1678,12 +1688,15 @@ body {
 }
 .cl-formButtonPrimary:active { transform: translateY(0) scale(0.97) !important; }
 
-/* Footer */
+/* Footer - hide "Secured by Clerk" and "Development mode" */
 .cl-footer {
   padding-top: 8px !important;
-  background: rgba(30, 30, 50, 0.97) !important;
-  border-top: 1px solid rgba(255,255,255,0.06) !important;
+  background: #0c0c14 !important;
+  border-top: 1px solid rgba(0,230,118,0.08) !important;
 }
+.cl-footer > div:last-child { display: none !important; }
+.cl-internal-b3fm6y { display: none !important; }
+[data-mode="development"] { display: none !important; }
 .cl-footerActionLink { color: #00e676 !important; }
 .cl-footerActionLink:hover { text-decoration: underline !important; }
 .cl-footerActionText { color: rgba(255,255,255,0.5) !important; }
@@ -1693,11 +1706,11 @@ body {
   position: absolute !important;
   top: 8px !important; right: 8px !important;
   z-index: 10 !important;
-  color: rgba(255,255,255,0.6) !important;
+  color: rgba(0,230,118,0.5) !important;
   transition: color 0.2s ease, transform 0.3s ease !important;
 }
 .cl-modalCloseButton:hover {
-  color: #fff !important;
+  color: #00e676 !important;
   transform: rotate(90deg) scale(1.1) !important;
 }
 
@@ -1708,6 +1721,13 @@ body {
   animation: clerkBackdropIn 0.3s ease forwards;
 }
 .cl-modalContent { padding: 0 !important; }
+
+/* Hide Clerk branding and dev badge */
+.cl-footerPagesLink { display: none !important; }
+.cl-badge { display: none !important; }
+a[href*="clerk.com"] { display: none !important; }
+div[data-testid*="development"] { display: none !important; }
+.cl-card::after { display: none !important; }
 
 /* OTP */
 .cl-otpCodeFieldInput {
