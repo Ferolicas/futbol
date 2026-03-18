@@ -1,11 +1,11 @@
-import { getFixtures, getQuota } from '../../../../lib/api-football';
+import { getFixtures, getQuota, analyzeMatch } from '../../../../lib/api-football';
 import { getFromSanity, saveToSanity } from '../../../../lib/sanity';
+import { getCachedFixturesRaw } from '../../../../lib/sanity-cache';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 300;
 
-// Master daily batch: fetches fixtures + triggers analysis of ALL matches
-// Auto-triggered by first user of the day OR called externally
+// Master daily batch: fetches fixtures + analyzes ALL matches inline
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const secret = searchParams.get('secret') || request.headers.get('authorization')?.replace('Bearer ', '');
@@ -15,15 +15,14 @@ export async function GET(request) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Use client-provided date if available, fallback to UTC
   const today = searchParams.get('date') || new Date().toISOString().split('T')[0];
 
-  // Check if batch already ran today
+  // Check if batch already completed today
   const batchFlag = await getFromSanity('appConfig', `dailyBatch-${today}`);
-  if (batchFlag?.started) {
+  if (batchFlag?.completed) {
     return Response.json({
       success: true,
-      message: batchFlag.completed ? 'Batch already completed today' : 'Batch already running',
+      message: 'Batch already completed today',
       date: today,
       fixtureCount: batchFlag.fixtureCount || 0,
     });
@@ -47,52 +46,56 @@ export async function GET(request) {
 
     if (fixtures.length === 0) {
       await saveToSanity('appConfig', `dailyBatch-${today}`, {
-        date: today,
-        started: true,
-        completed: true,
-        fixtureCount: 0,
-        completedAt: new Date().toISOString(),
+        date: today, started: true, completed: true,
+        fixtureCount: 0, completedAt: new Date().toISOString(),
       });
       return Response.json({ success: true, date: today, fixtureCount: 0, message: 'No fixtures today' });
     }
 
-    // 2. Fire first analysis batch (non-blocking chain)
+    // 2. Analyze ALL matches inline in batches of 3
     const batchSize = 3;
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : 'http://localhost:3000');
+    let totalAnalyzed = 0;
+    let totalCached = 0;
+    let totalFailed = 0;
 
-    fetch(`${baseUrl}/api/cron/analyze-batch`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-internal-trigger': 'true',
-      },
-      body: JSON.stringify({
-        offset: 0,
-        batchSize,
-        date: today,
-        totalFixtures: fixtures.length,
-      }),
-    }).catch(() => {});
+    const allFixtures = await getCachedFixturesRaw(today) || fixtures;
 
-    // Update batch flag with fixture count
+    for (let offset = 0; offset < allFixtures.length; offset += batchSize) {
+      const batch = allFixtures.slice(offset, offset + batchSize);
+      console.log(`[DAILY-BATCH] Batch ${offset}/${allFixtures.length} (${batch.length} matches)`);
+
+      await Promise.all(
+        batch.map(async (fixture) => {
+          try {
+            const r = await analyzeMatch(fixture, { date: today });
+            if (r.fromCache) totalCached++;
+            else totalAnalyzed++;
+          } catch (e) {
+            totalFailed++;
+            console.error(`[DAILY-BATCH] Failed ${fixture.fixture?.id}:`, e.message);
+          }
+        })
+      );
+    }
+
+    // Mark complete
     await saveToSanity('appConfig', `dailyBatch-${today}`, {
-      date: today,
-      started: true,
-      completed: false,
-      fixtureCount: fixtures.length,
-      totalBatches: Math.ceil(fixtures.length / batchSize),
-      startedAt: new Date().toISOString(),
+      date: today, started: true, completed: true,
+      fixtureCount: allFixtures.length,
+      completedAt: new Date().toISOString(),
     });
 
     const quota = await getQuota();
+    console.log(`[DAILY-BATCH] Done: ${totalAnalyzed} analyzed, ${totalCached} cached, ${totalFailed} failed`);
 
     return Response.json({
       success: true,
       date: today,
-      fixtureCount: fixtures.length,
-      message: `Analyzing ${fixtures.length} matches in background...`,
+      fixtureCount: allFixtures.length,
+      analyzed: totalAnalyzed,
+      cached: totalCached,
+      failed: totalFailed,
+      message: `Completed: ${totalAnalyzed} analyzed, ${totalCached} cached, ${totalFailed} failed`,
       quota,
     });
   } catch (error) {
