@@ -1343,7 +1343,7 @@ body {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .hero-logo {
-  width: 140px; height: auto; margin-bottom: 24px;
+  width: 200px; height: auto; margin-bottom: 16px; margin-top: -20px;
   filter: drop-shadow(0 0 30px rgba(0,230,118,0.3));
   animation: heroIn 1s var(--bounce) both, logoPulse 3s ease-in-out 1.5s infinite;
 }
