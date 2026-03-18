@@ -50,23 +50,23 @@ export async function GET(request) {
     const sanityUser = clerkId ? await getSanityUserByClerkId(clerkId) : null;
     const userId = sanityUser?._id;
 
+    let userRemovedAnalyzed = [];
     if (userId) {
-      const [hiddenDoc, analyzedDoc] = await Promise.all([
+      const [hiddenDoc, removedDoc] = await Promise.all([
         queryFromSanity(
           `*[_type == "cfaUserData" && userId == $userId && dataType == "hidden"][0]`,
           { userId }
         ),
         queryFromSanity(
-          `*[_type == "cfaUserData" && userId == $userId && dataType == "analyzed" && date == $date][0]`,
+          `*[_type == "cfaUserData" && userId == $userId && dataType == "removedAnalyzed" && date == $date][0]`,
           { userId, date }
         ),
       ]);
       hidden = hiddenDoc?.fixtureIds || [];
-      analyzed = analyzedDoc?.fixtureIds || [];
+      userRemovedAnalyzed = removedDoc?.fixtureIds || [];
     }
 
     // Get globally analyzed matches (from daily batch)
-    // Query Sanity for which of today's fixtures have analysis cached
     const fixtureIds = fixtures.map(f => f.fixture.id);
     let globallyAnalyzed = [];
 
@@ -77,6 +77,9 @@ export async function GET(request) {
       );
       globallyAnalyzed = (analyzedDocs || []).map(d => d.fixtureId);
     }
+
+    // Filter out matches the user has personally removed from their analyzed tab
+    const userAnalyzed = globallyAnalyzed.filter(id => !userRemovedAnalyzed.includes(id));
 
     // Only fetch full data for analyzed matches
     const { analyzedOdds, analyzedData } = globallyAnalyzed.length > 0
@@ -103,7 +106,7 @@ export async function GET(request) {
       stale,
       quota,
       hidden,
-      analyzed: globallyAnalyzed,
+      analyzed: userAnalyzed,
       analyzedOdds,
       analyzedData,
       standings,

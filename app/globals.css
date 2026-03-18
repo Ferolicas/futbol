@@ -723,7 +723,7 @@ body {
 }
 .form-mini-name { font-weight: 600; min-width: 0; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .form-mini-dots { display: flex; gap: 3px; margin-left: auto; }
-.form-mini-pts { font-size: .65rem; color: var(--t3); white-space: nowrap; }
+.form-mini-pts { font-size: .65rem; color: var(--t3); white-space: nowrap; margin-left: auto; }
 
 .fdot {
   width: 22px; height: 22px;
@@ -1222,6 +1222,172 @@ body {
 .hp-dot.scored { background: var(--green); color: #000; }
 .hp-dot.miss { background: var(--bg-0); color: var(--t3); border: 1px solid var(--brd); }
 
+/* Probability Badge Large (header) */
+.prob-badge-lg {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 48px; height: 28px; padding: 0 10px;
+  background: linear-gradient(135deg, rgba(0,230,118,0.15), rgba(0,230,118,0.05));
+  border: 1px solid rgba(0,230,118,0.3);
+  color: var(--green); border-radius: 14px;
+  font-size: .82rem; font-weight: 800; letter-spacing: .3px;
+}
+
+/* Position Badge Large (header) */
+.pos-badge-lg {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 32px; height: 26px; padding: 0 10px;
+  background: linear-gradient(135deg, rgba(68,138,255,0.2), rgba(68,138,255,0.08));
+  border: 1px solid rgba(68,138,255,0.3);
+  color: var(--blue); border-radius: 13px;
+  font-size: .78rem; font-weight: 700;
+}
+
+/* Last 5 Enriched Matches */
+.last5-match {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: var(--rx); font-size: .78rem;
+  transition: background .15s;
+}
+.last5-match:nth-child(odd) { background: rgba(255,255,255,.02); }
+.last5-match:hover { background: rgba(255,255,255,.04); }
+.last5-result-dot {
+  width: 24px; height: 24px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .62rem; font-weight: 800; color: #000; flex-shrink: 0;
+}
+.last5-result-dot.w { background: var(--green); }
+.last5-result-dot.d { background: var(--yellow); }
+.last5-result-dot.l { background: var(--red); }
+.last5-match-score {
+  font-weight: 700; font-variant-numeric: tabular-nums;
+  min-width: 32px; text-align: center; color: var(--t1);
+}
+.last5-match-venue {
+  font-size: .62rem; font-weight: 700; color: var(--t3);
+  min-width: 16px; text-align: center;
+  padding: 2px 4px; background: var(--bg-0); border-radius: 3px;
+}
+.last5-opp-logo { width: 16px; height: 16px; object-fit: contain; flex-shrink: 0; }
+.last5-match-opponent {
+  flex: 1; color: var(--t2); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: .75rem;
+}
+
+/* Bookmaker Odds Info */
+.odds-bk-info {
+  display: flex; align-items: center; gap: 6px;
+  margin-left: 4px;
+}
+.odds-bk-logo { width: 20px; height: 20px; object-fit: contain; border-radius: 3px; }
+
+/* Per-Team Predictions */
+.perteam-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.perteam-col {
+  background: var(--bg-1); border-radius: var(--rs); padding: 14px;
+}
+.perteam-col-header {
+  display: flex; align-items: center; gap: 8px;
+  font-size: .82rem; font-weight: 700; margin-bottom: 12px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--brd);
+}
+.perteam-category { margin-bottom: 12px; }
+.perteam-category:last-child { margin-bottom: 0; }
+.perteam-cat-label {
+  display: block; font-size: .68rem; font-weight: 700; color: var(--t3);
+  text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px;
+}
+.perteam-item {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 5px; font-size: .75rem;
+}
+.perteam-threshold {
+  min-width: 36px; font-weight: 600; color: var(--t2);
+  font-variant-numeric: tabular-nums;
+}
+.perteam-bar-track {
+  flex: 1; height: 5px; background: var(--bg-0);
+  border-radius: 3px; overflow: hidden;
+}
+.perteam-bar-fill {
+  height: 100%; border-radius: 3px;
+  transition: width .6s ease-out;
+}
+.perteam-prob {
+  min-width: 32px; text-align: right; font-weight: 700;
+  font-variant-numeric: tabular-nums; font-size: .72rem;
+}
+
+/* Goal Timing */
+.timing-section { display: flex; flex-direction: column; gap: 16px; }
+.timing-grid {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg-1); border-radius: var(--rs); padding: 12px;
+  overflow-x: auto;
+}
+.timing-header-row, .timing-data-row {
+  display: grid; grid-template-columns: 100px repeat(6, 1fr);
+  gap: 4px; align-items: center;
+}
+.timing-period-label {
+  font-size: .62rem; font-weight: 700; color: var(--t3);
+  text-align: center; padding: 4px 0;
+}
+.timing-team-label {
+  font-size: .72rem; font-weight: 600; color: var(--t2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding-right: 6px;
+}
+.timing-cell {
+  text-align: center; padding: 6px 4px; border-radius: 4px;
+  font-size: .68rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  transition: background .2s;
+}
+.timing-cell.timing-high { background: rgba(0,230,118,0.15); color: var(--green); }
+.timing-cell.timing-mid { background: rgba(255,215,64,0.12); color: var(--yellow); }
+.timing-cell.timing-low { background: rgba(255,255,255,0.03); color: var(--t3); }
+.timing-combined-row { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--brd); }
+
+/* Timing Halves */
+.timing-halves { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.timing-half-card {
+  background: var(--bg-1); border-radius: var(--rs); padding: 12px;
+}
+.timing-half-title {
+  display: block; font-size: .72rem; font-weight: 700; color: var(--t3);
+  text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px;
+  text-align: center;
+}
+.timing-half-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 3px 0; font-size: .75rem;
+}
+.timing-half-team {
+  color: var(--t2); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; max-width: 60%;
+}
+.timing-half-val {
+  font-weight: 700; font-variant-numeric: tabular-nums;
+  padding: 2px 8px; border-radius: 4px; font-size: .72rem;
+}
+.timing-half-val.timing-high { background: rgba(0,230,118,0.15); color: var(--green); }
+.timing-half-val.timing-mid { background: rgba(255,215,64,0.12); color: var(--yellow); }
+.timing-half-val.timing-low { background: rgba(255,255,255,0.03); color: var(--t3); }
+.timing-half-combined {
+  margin-top: 4px; padding-top: 6px;
+  border-top: 1px solid var(--brd);
+}
+
+/* Alta Probabilidad Badge */
+.combinada-item.alta-prob { border-left: 3px solid var(--green); }
+.alta-prob-badge {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px; border-radius: 10px;
+  background: rgba(0,230,118,0.12); color: var(--green);
+  font-size: .58rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .3px;
+  white-space: nowrap;
+}
+
 /* Loading */
 .analysis-loading { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
 .skeleton-header { height: 160px; background: var(--bg-2); border-radius: var(--r); animation: shimmer 1.8s ease-in-out infinite; background: linear-gradient(90deg, var(--bg-2) 25%, var(--bg-3) 50%, var(--bg-2) 75%); background-size: 200% 100%; }
@@ -1252,7 +1418,7 @@ body {
   .header-team-name { font-size: .82rem; }
   .header-score { font-size: 1.4rem; }
 
-  .lineups-grid, .last5-grid, .stats-grid, .prob-grid { grid-template-columns: 1fr; }
+  .lineups-grid, .last5-grid, .stats-grid, .prob-grid, .perteam-grid, .timing-halves { grid-template-columns: 1fr; }
   .h2h-summary { gap: 16px; }
   .h2h-stat { font-size: 1.4rem; }
 
@@ -1261,6 +1427,14 @@ body {
   .highlight-player { flex-wrap: wrap; gap: 6px; }
   .hp-name { min-width: 100px; }
   .hp-indicators { margin-left: 0; }
+
+  .prob-badge-lg { min-width: 40px; height: 24px; font-size: .72rem; padding: 0 8px; }
+  .pos-badge-lg { min-width: 28px; height: 22px; font-size: .68rem; padding: 0 8px; }
+
+  .timing-header-row, .timing-data-row { grid-template-columns: 70px repeat(6, 1fr); }
+  .timing-team-label { font-size: .62rem; }
+  .timing-cell { font-size: .58rem; padding: 4px 2px; }
+  .timing-period-label { font-size: .55rem; }
 }
 
 @media (max-width: 480px) {
@@ -2279,4 +2453,236 @@ div[data-testid*="development"] { display: none !important; }
   .plan-card { padding: 28px 20px; }
   .chat-panel { width: 300px; right: -10px; }
   .modal-card { padding: 28px 20px; }
+}
+
+/* ===================== MATCH CARD: TEAM COLUMN (badges above logo) ===================== */
+.mcard-team-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.pos-badge {
+  font-size: .55rem;
+  font-weight: 700;
+  color: var(--blue);
+  background: rgba(68,138,255,.12);
+  padding: 1px 5px;
+  border-radius: 6px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.prob-badge {
+  font-size: .55rem;
+  font-weight: 700;
+  color: var(--green);
+  background: rgba(0,230,118,.10);
+  padding: 1px 5px;
+  border-radius: 6px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* ===================== FORM MATCHES (enriched last 5) ===================== */
+.form-matches {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+  padding-left: 24px;
+}
+
+.form-match {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: .68rem;
+  color: var(--t2);
+  line-height: 1.3;
+}
+
+.form-match .fdot {
+  width: 18px;
+  height: 18px;
+  font-size: .5rem;
+  flex-shrink: 0;
+}
+
+.form-score {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--t1);
+  min-width: 24px;
+}
+
+.form-vs {
+  color: var(--t3);
+  font-size: .6rem;
+}
+
+.form-opp-logo {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.form-opp {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 80px;
+  color: var(--t2);
+}
+
+/* ===================== PER-TEAM SECTION ===================== */
+.perteam-section {
+  margin-bottom: 12px;
+  padding: 10px;
+  background: var(--bg-1);
+  border-radius: var(--rs);
+  border: 1px solid var(--brd);
+}
+
+.perteam-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.perteam-group:last-child {
+  margin-bottom: 0;
+}
+
+.perteam-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: .72rem;
+}
+
+.perteam-label {
+  color: var(--t2);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.perteam-prob {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: .68rem;
+  flex-shrink: 0;
+}
+
+.perteam-prob.hi {
+  color: var(--green);
+  background: rgba(0,230,118,.10);
+}
+
+.perteam-prob.md {
+  color: var(--yellow);
+  background: rgba(255,215,64,.10);
+}
+
+/* ===================== TIMING SECTION ===================== */
+.timing-section {
+  margin-bottom: 12px;
+  padding: 10px;
+  background: var(--bg-1);
+  border-radius: var(--rs);
+  border: 1px solid var(--brd);
+}
+
+.timing-title {
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--t2);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+
+.timing-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.timing-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--rx);
+  background: var(--bg-2);
+  border: 1px solid var(--brd);
+  font-size: .7rem;
+}
+
+.timing-item.hot {
+  border-color: rgba(0,230,118,.25);
+  background: rgba(0,230,118,.06);
+}
+
+.timing-period {
+  color: var(--t2);
+  white-space: nowrap;
+}
+
+.timing-prob {
+  font-weight: 700;
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+}
+
+.timing-none {
+  font-size: .68rem;
+  color: var(--t3);
+  font-style: italic;
+}
+
+/* ===================== BOOKMAKER LOGO IN MARKETS ===================== */
+.mkt-bk {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 2px;
+}
+
+.bk-logo {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  border-radius: 3px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+/* ===================== RESPONSIVE: NEW ELEMENTS ===================== */
+@media (max-width: 768px) {
+  .form-matches { padding-left: 20px; }
+  .form-opp { max-width: 60px; }
+  .perteam-label { font-size: .65rem; }
+  .timing-grid { gap: 4px; }
+  .timing-item { padding: 4px 8px; font-size: .65rem; }
+}
+
+@media (max-width: 480px) {
+  .mcard-team-col { gap: 1px; }
+  .pos-badge, .prob-badge { font-size: .5rem; padding: 0px 4px; }
+  .form-matches { padding-left: 16px; }
+  .form-match { font-size: .62rem; gap: 3px; }
+  .form-match .fdot { width: 16px; height: 16px; font-size: .45rem; }
+  .form-opp { max-width: 50px; }
+  .perteam-row { font-size: .65rem; }
+  .timing-grid { flex-direction: column; }
 }

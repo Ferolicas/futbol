@@ -130,22 +130,24 @@ export async function POST(request) {
     }
 
     if (type === 'remove-analyzed') {
-      const docId = `analyzed-${userId.replace('cfaUser-', '')}-${date}`;
+      // Store the fixture ID in the user's "removed" list so it stays hidden on refresh
+      const docId = `removed-analyzed-${userId.replace('cfaUser-', '')}-${date}`;
       const existing = await queryFromSanity(
-        `*[_type == "cfaUserData" && userId == $userId && dataType == "analyzed" && date == $date][0]`,
+        `*[_type == "cfaUserData" && userId == $userId && dataType == "removedAnalyzed" && date == $date][0]`,
         { userId, date }
       );
-      const ids = (existing?.fixtureIds || []).filter(id => id !== data.fixtureId);
+      const ids = existing?.fixtureIds || [];
+      if (!ids.includes(data.fixtureId)) ids.push(data.fixtureId);
 
       await saveToSanity('cfaUserData', docId, {
         userId,
-        dataType: 'analyzed',
+        dataType: 'removedAnalyzed',
         date,
         fixtureIds: ids,
         updatedAt: new Date().toISOString(),
       });
 
-      return Response.json({ analyzed: ids });
+      return Response.json({ removed: ids });
     }
 
     if (type === 'save-combinada') {

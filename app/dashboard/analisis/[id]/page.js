@@ -4,6 +4,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { computeAllProbabilities } from '../../../../lib/calculations';
 import { buildCombinada } from '../../../../lib/combinada';
+import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY, COUNTRY_BOOKMAKERS } from '../../../../lib/bookmakers';
+
+function detectCountry() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return TIMEZONE_TO_COUNTRY[tz] || 'default';
+  } catch { return 'default'; }
+}
 
 const fmtTime = (d) => new Date(d).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
 const fmtDate = (d) => new Date(d).toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -29,6 +37,9 @@ export default function AnalisisPage() {
   const [collapsed, setCollapsed] = useState({});
   const [refreshingLineups, setRefreshingLineups] = useState(false);
   const [refreshingInjuries, setRefreshingInjuries] = useState(false);
+  const [userCountry, setUserCountry] = useState('default');
+
+  useEffect(() => { setUserCountry(detectCountry()); }, []);
 
   const toggleSection = (key) => setCollapsed(prev => ({ ...prev, [key]: !prev[key] }));
 
@@ -135,7 +146,10 @@ export default function AnalisisPage() {
           </div>
           <div className="match-header-teams">
             <div className="header-team">
-              {a.homePosition && <span className="position-badge">{a.homePosition}°</span>}
+              {a.homePosition && <span className="pos-badge-lg">{a.homePosition}°</span>}
+              {a.calculatedProbabilities?.winner?.home != null && (
+                <span className="prob-badge-lg">{a.calculatedProbabilities.winner.home}%</span>
+              )}
               <TeamLogo src={a.homeLogo} name={a.homeTeam} size={64} />
               <span className="header-team-name">{a.homeTeam}</span>
             </div>
@@ -148,18 +162,16 @@ export default function AnalisisPage() {
               <span className="header-date">{fmtDate(a.kickoff)}</span>
             </div>
             <div className="header-team">
-              {a.awayPosition && <span className="position-badge">{a.awayPosition}°</span>}
+              {a.awayPosition && <span className="pos-badge-lg">{a.awayPosition}°</span>}
+              {a.calculatedProbabilities?.winner?.away != null && (
+                <span className="prob-badge-lg">{a.calculatedProbabilities.winner.away}%</span>
+              )}
               <TeamLogo src={a.awayLogo} name={a.awayTeam} size={64} />
               <span className="header-team-name">{a.awayTeam}</span>
             </div>
           </div>
           {a.odds?.matchWinner && (
-            <div className="odds-row">
-              <OddBadge label="1" value={a.odds.matchWinner.home} />
-              <OddBadge label="X" value={a.odds.matchWinner.draw} />
-              <OddBadge label="2" value={a.odds.matchWinner.away} />
-              {a.odds.bookmaker && <span className="odds-source">{a.odds.bookmaker}</span>}
-            </div>
+            <OddsWithBookmaker odds={a.odds} allBookmakerOdds={a.odds?.allBookmakerOdds} userCountry={userCountry} />
           )}
         </div>
 
@@ -227,8 +239,8 @@ export default function AnalisisPage() {
         {p && (
           <Section title="Últimos 5 partidos" icon="5" sectionKey="last5" collapsed={collapsed} toggle={toggleSection}>
             <div className="last5-grid">
-              <Last5Table team={a.homeTeam} logo={a.homeLogo} teamId={a.homeId} form={p.homeForm} />
-              <Last5Table team={a.awayTeam} logo={a.awayLogo} teamId={a.awayId} form={p.awayForm} />
+              <Last5Table team={a.homeTeam} logo={a.homeLogo} teamId={a.homeId} form={p.homeForm} lastFive={a.homeLastFive} />
+              <Last5Table team={a.awayTeam} logo={a.awayLogo} teamId={a.awayId} form={p.awayForm} lastFive={a.awayLastFive} />
             </div>
           </Section>
         )}
@@ -269,6 +281,20 @@ export default function AnalisisPage() {
                 { label: 'Total amarillas prom.', value: p.cardAvg },
               ]} />
             </div>
+          </Section>
+        )}
+
+        {/* ===== SECCIÓN 6B — POR EQUIPO ===== */}
+        {p?.perTeam && (
+          <Section title="Predicciones por equipo" icon="&#9878;" sectionKey="perteam" collapsed={collapsed} toggle={toggleSection}>
+            <PerTeamSection perTeam={p.perTeam} homeTeam={a.homeTeam} awayTeam={a.awayTeam} homeLogo={a.homeLogo} awayLogo={a.awayLogo} />
+          </Section>
+        )}
+
+        {/* ===== SECCIÓN 6C — TIMING DE GOL ===== */}
+        {p?.goalTiming && (
+          <Section title="Probabilidad de gol por periodo" icon="&#9201;" sectionKey="timing" collapsed={collapsed} toggle={toggleSection}>
+            <GoalTimingSection goalTiming={p.goalTiming} homeTeam={a.homeTeam} awayTeam={a.awayTeam} />
           </Section>
         )}
 
@@ -325,19 +351,23 @@ export default function AnalisisPage() {
                 </div>
               )}
               <div className="combinada-selections">
-                {c.selections.map((sel, i) => (
-                  <div key={i} className="combinada-item">
-                    <div className="combinada-item-info">
-                      <span className="combinada-num">#{i + 1}</span>
-                      <span className="combinada-market">{sel.name}</span>
+                {c.selections.map((sel, i) => {
+                  const isHighProb = sel.probability >= 70 && sel.probability <= 95;
+                  return (
+                    <div key={i} className={`combinada-item ${isHighProb ? 'alta-prob' : ''}`}>
+                      <div className="combinada-item-info">
+                        <span className="combinada-num">#{i + 1}</span>
+                        <span className="combinada-market">{sel.name}</span>
+                        {isHighProb && <span className="alta-prob-badge">Alta prob.</span>}
+                      </div>
+                      <div className="combinada-item-data">
+                        <ProbBar label="" value={sel.probability} compact />
+                        <span className="combinada-prob">{sel.probability}%</span>
+                        {sel.odd && <span className="combinada-odd">{sel.odd.toFixed(2)}</span>}
+                      </div>
                     </div>
-                    <div className="combinada-item-data">
-                      <ProbBar label="" value={sel.probability} compact />
-                      <span className="combinada-prob">{sel.probability}%</span>
-                      {sel.odd && <span className="combinada-odd">{sel.odd.toFixed(2)}</span>}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="combinada-footer">
                 <div className="combinada-total">
@@ -443,7 +473,7 @@ function PlayerHighlights({ highlights }) {
 
       {shooters && shooters.length > 0 && (
         <div className="highlight-group">
-          <h5>&#127919; Rematadores consistentes <small>(remate a puerta en 3+ de últimos 5)</small></h5>
+          <h5>&#127919; Rematadores consistentes <small>(remate a puerta en 4+ de últimos 5)</small></h5>
           {shooters.map((p, i) => (
             <div key={i} className="highlight-player">
               <span className="hp-name">{p.name}</span>
@@ -503,7 +533,7 @@ function OddBadge({ label, value }) {
 }
 
 function ProbBar({ label, value, compact = false }) {
-  const barColor = value >= 75 ? 'var(--accent-green)' : value >= 50 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+  const barColor = value >= 75 ? 'var(--green)' : value >= 50 ? 'var(--yellow)' : 'var(--red)';
   return (
     <div className={`prob-bar-row ${compact ? 'compact' : ''}`}>
       {label && <span className="prob-label">{label}</span>}
@@ -529,8 +559,11 @@ function StatCard({ title, items }) {
   );
 }
 
-function Last5Table({ team, logo, teamId, form }) {
+function Last5Table({ team, logo, teamId, form, lastFive }) {
   if (!form || !form.results.length) return <div className="no-data-section"><p>Sin datos</p></div>;
+
+  // Use enriched data from lastFive if available, otherwise fall back to form.results
+  const hasEnriched = lastFive && lastFive.length > 0 && lastFive[0]?._enriched;
 
   return (
     <div className="last5-team">
@@ -547,15 +580,34 @@ function Last5Table({ team, logo, teamId, form }) {
         ))}
       </div>
       <div className="last5-table">
-        {form.results.map((r, i) => (
-          <div key={i} className="last5-row">
-            <span className="last5-date">{r.date ? fmtShortDate(r.date) : ''}</span>
-            <span className={`result-badge ${r.result.toLowerCase()}`}>{r.result}</span>
-            <span className="last5-venue">{r.wasHome ? 'L' : 'V'}</span>
-            <span className="last5-opponent">{r.opponent}</span>
-            <span className="last5-score">{r.goalsFor}-{r.goalsAgainst}</span>
-          </div>
-        ))}
+        {hasEnriched ? (
+          lastFive.map((match, i) => {
+            const e = match._enriched;
+            return (
+              <div key={i} className="last5-match">
+                <span className={`last5-result-dot ${e.result.toLowerCase()}`}>{e.result}</span>
+                <span className="last5-match-score">{e.score}</span>
+                <span className="last5-match-venue">{e.isHome ? 'L' : 'V'}</span>
+                {e.opponentLogo && (
+                  <img src={e.opponentLogo} alt="" className="last5-opp-logo" />
+                )}
+                <span className="last5-match-opponent">{e.opponentName}</span>
+              </div>
+            );
+          })
+        ) : (
+          form.results.map((r, i) => (
+            <div key={i} className="last5-match">
+              <span className={`last5-result-dot ${r.result.toLowerCase()}`}>{r.result}</span>
+              <span className="last5-match-score">{r.goalsFor}-{r.goalsAgainst}</span>
+              <span className="last5-match-venue">{r.wasHome ? 'L' : 'V'}</span>
+              {r.opponentLogo && (
+                <img src={r.opponentLogo} alt="" className="last5-opp-logo" />
+              )}
+              <span className="last5-match-opponent">{r.opponent}</span>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
@@ -592,6 +644,189 @@ function H2HSection({ h2h, homeTeam, awayTeam, homeId, summary }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ===================== ODDS WITH BOOKMAKER =====================
+
+function OddsWithBookmaker({ odds, allBookmakerOdds, userCountry }) {
+  // Use selectBookmakerOdds with the full odds object to pick the best bookmaker for matchWinner
+  const selected = selectBookmakerOdds(odds, 'matchWinner', userCountry);
+  const mw = selected?.odds || odds.matchWinner;
+  const bkName = selected?.bookmaker || odds.bookmaker;
+  const bkNameLower = bkName ? bkName.toLowerCase() : '';
+  const bkLogo = bkNameLower ? BOOKMAKER_LOGOS[bkNameLower] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => bkNameLower.includes(k))?.[1] : null;
+
+  return (
+    <div className="odds-row">
+      <OddBadge label="1" value={mw?.home} />
+      <OddBadge label="X" value={mw?.draw} />
+      <OddBadge label="2" value={mw?.away} />
+      <span className="odds-bk-info">
+        {bkLogo && <img src={bkLogo} alt={bkName} className="odds-bk-logo" />}
+        <span className="odds-source">{bkName}</span>
+      </span>
+    </div>
+  );
+}
+
+// ===================== PER-TEAM SECTION =====================
+
+function PerTeamSection({ perTeam, homeTeam, awayTeam, homeLogo, awayLogo }) {
+  const thresholdLabels = {
+    corners: { over05: '+0.5', over15: '+1.5', over25: '+2.5', over35: '+3.5', over45: '+4.5', over55: '+5.5' },
+    cards: { over05: '+0.5', over15: '+1.5', over25: '+2.5', over35: '+3.5' },
+    goals: { over05: '+0.5', over15: '+1.5', over25: '+2.5' },
+  };
+
+  const categoryLabels = { corners: 'Corners', cards: 'Tarjetas', goals: 'Goles' };
+
+  function renderTeamCol(teamData, teamName, teamLogo) {
+    return (
+      <div className="perteam-col">
+        <div className="perteam-col-header">
+          <TeamLogo src={teamLogo} name={teamName} size={20} />
+          <span>{teamName}</span>
+        </div>
+        {Object.entries(categoryLabels).map(([cat, label]) => {
+          const catData = teamData?.[cat];
+          if (!catData) return null;
+          const entries = Object.entries(catData)
+            .filter(([, prob]) => prob >= 50)
+            .map(([key, prob]) => ({ label: thresholdLabels[cat]?.[key] || key, prob }));
+          if (entries.length === 0) return null;
+          return (
+            <div key={cat} className="perteam-category">
+              <span className="perteam-cat-label">{label}</span>
+              {entries.map((e, i) => (
+                <div key={i} className="perteam-item">
+                  <span className="perteam-threshold">{e.label}</span>
+                  <div className="perteam-bar-track">
+                    <div
+                      className="perteam-bar-fill"
+                      style={{
+                        width: `${e.prob}%`,
+                        background: e.prob >= 75 ? 'var(--green)' : e.prob >= 60 ? 'var(--yellow)' : 'var(--blue)',
+                      }}
+                    />
+                  </div>
+                  <span className="perteam-prob">{e.prob}%</span>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div className="perteam-grid">
+      {renderTeamCol(perTeam.home, homeTeam, homeLogo)}
+      {renderTeamCol(perTeam.away, awayTeam, awayLogo)}
+    </div>
+  );
+}
+
+// ===================== GOAL TIMING SECTION =====================
+
+function GoalTimingSection({ goalTiming, homeTeam, awayTeam }) {
+  const periods = ['0-15', '15-30', '30-45', '45-60', '60-75', '75-90'];
+
+  function getTimingColor(prob) {
+    if (prob >= 70) return 'timing-high';
+    if (prob >= 50) return 'timing-mid';
+    return 'timing-low';
+  }
+
+  // Aggregate halves
+  const aggregate = (data, startIdx, endIdx) => {
+    if (!data || data.length === 0) return 0;
+    let sum = 0;
+    for (let i = startIdx; i <= endIdx; i++) {
+      sum += data[i]?.probability || 0;
+    }
+    return Math.min(95, Math.round(sum / (endIdx - startIdx + 1)));
+  };
+
+  const home1H = aggregate(goalTiming.home, 0, 2);
+  const home2H = aggregate(goalTiming.home, 3, 5);
+  const away1H = aggregate(goalTiming.away, 0, 2);
+  const away2H = aggregate(goalTiming.away, 3, 5);
+  const comb1H = aggregate(goalTiming.combined, 0, 2);
+  const comb2H = aggregate(goalTiming.combined, 3, 5);
+
+  return (
+    <div className="timing-section">
+      {/* Period grid */}
+      <div className="timing-grid">
+        <div className="timing-header-row">
+          <span className="timing-team-label"></span>
+          {periods.map(p => <span key={p} className="timing-period-label">{p}'</span>)}
+        </div>
+        {/* Home */}
+        <div className="timing-data-row">
+          <span className="timing-team-label">{homeTeam}</span>
+          {goalTiming.home.map((d, i) => (
+            <span key={i} className={`timing-cell ${getTimingColor(d.probability)}`}>
+              {d.probability}%
+            </span>
+          ))}
+        </div>
+        {/* Away */}
+        <div className="timing-data-row">
+          <span className="timing-team-label">{awayTeam}</span>
+          {goalTiming.away.map((d, i) => (
+            <span key={i} className={`timing-cell ${getTimingColor(d.probability)}`}>
+              {d.probability}%
+            </span>
+          ))}
+        </div>
+        {/* Combined */}
+        <div className="timing-data-row timing-combined-row">
+          <span className="timing-team-label">Combinado</span>
+          {goalTiming.combined.map((d, i) => (
+            <span key={i} className={`timing-cell ${getTimingColor(d.probability)}`}>
+              {d.probability}%
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Half aggregates */}
+      <div className="timing-halves">
+        <div className="timing-half-card">
+          <span className="timing-half-title">1ra mitad</span>
+          <div className="timing-half-row">
+            <span className="timing-half-team">{homeTeam}</span>
+            <span className={`timing-half-val ${getTimingColor(home1H)}`}>{home1H}%</span>
+          </div>
+          <div className="timing-half-row">
+            <span className="timing-half-team">{awayTeam}</span>
+            <span className={`timing-half-val ${getTimingColor(away1H)}`}>{away1H}%</span>
+          </div>
+          <div className="timing-half-row timing-half-combined">
+            <span className="timing-half-team">Combinado</span>
+            <span className={`timing-half-val ${getTimingColor(comb1H)}`}>{comb1H}%</span>
+          </div>
+        </div>
+        <div className="timing-half-card">
+          <span className="timing-half-title">2da mitad</span>
+          <div className="timing-half-row">
+            <span className="timing-half-team">{homeTeam}</span>
+            <span className={`timing-half-val ${getTimingColor(home2H)}`}>{home2H}%</span>
+          </div>
+          <div className="timing-half-row">
+            <span className="timing-half-team">{awayTeam}</span>
+            <span className={`timing-half-val ${getTimingColor(away2H)}`}>{away2H}%</span>
+          </div>
+          <div className="timing-half-row timing-half-combined">
+            <span className="timing-half-team">Combinado</span>
+            <span className={`timing-half-val ${getTimingColor(comb2H)}`}>{comb2H}%</span>
+          </div>
+        </div>
       </div>
     </div>
   );

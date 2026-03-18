@@ -6,6 +6,14 @@ import { useUser, useClerk } from '@clerk/nextjs';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
+import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
+
+function detectCountry() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return TIMEZONE_TO_COUNTRY[tz] || 'default';
+  } catch { return 'default'; }
+}
 
 const today = () => {
   const d = new Date();
@@ -587,6 +595,7 @@ export default function Dashboard() {
                     isSelected={selected.has(m.fixture.id)}
                     odds={analyzedOdds[m.fixture.id]}
                     standings={standings}
+                    matchData={analyzedData[m.fixture.id]}
                     onSelect={() => toggleSelect(m.fixture.id)}
                     onHide={(e) => doHide(e, m.fixture.id)}
                     onView={() => router.push(`/dashboard/analisis/${m.fixture.id}`)}
@@ -752,12 +761,15 @@ export default function Dashboard() {
 
 /* ======================== MATCH CARD ======================== */
 
-function MatchCard({ match, isAnalyzed, isSelected, odds, standings, onSelect, onHide, onView, idx }) {
+function MatchCard({ match, isAnalyzed, isSelected, odds, standings, matchData, onSelect, onHide, onView, idx }) {
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
   const meta = match.leagueMeta || {};
   const flag = FLAGS[meta.country] || '';
+  const winProb = matchData?.calculatedProbabilities?.winner;
+  const homePos = matchData?.homePosition || standings?.[match.teams.home.id];
+  const awayPos = matchData?.awayPosition || standings?.[match.teams.away.id];
 
   return (
     <motion.div
@@ -788,9 +800,12 @@ function MatchCard({ match, isAnalyzed, isSelected, odds, standings, onSelect, o
 
       <div className="mcard-body">
         <div className="mcard-team">
-          <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} />
+          <div className="mcard-team-col">
+            {homePos && <span className="pos-badge">{homePos}&#176;</span>}
+            {winProb?.home != null && <span className="prob-badge">{winProb.home}%</span>}
+            <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} />
+          </div>
           <span className="mcard-tname">{match.teams.home.name}</span>
-          {standings?.[match.teams.home.id] && <span className="mcard-pos">{standings[match.teams.home.id]}&#176;</span>}
         </div>
         <div className="mcard-score">
           {hasScore
@@ -799,9 +814,12 @@ function MatchCard({ match, isAnalyzed, isSelected, odds, standings, onSelect, o
           }
         </div>
         <div className="mcard-team right">
-          <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} />
+          <div className="mcard-team-col">
+            {awayPos && <span className="pos-badge">{awayPos}&#176;</span>}
+            {winProb?.away != null && <span className="prob-badge">{winProb.away}%</span>}
+            <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} />
+          </div>
           <span className="mcard-tname">{match.teams.away.name}</span>
-          {standings?.[match.teams.away.id] && <span className="mcard-pos">{standings[match.teams.away.id]}&#176;</span>}
         </div>
       </div>
 
@@ -862,7 +880,9 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
       m.push({ id: 'k25', name: 'Más de 2.5 tarjetas', probability: p.cards.over25, odd: null, cat: 'Tarjetas' });
       m.push({ id: 'k35', name: 'Más de 3.5 tarjetas', probability: p.cards.over35, odd: null, cat: 'Tarjetas' });
     }
-    return m.sort((a, b) => b.probability - a.probability);
+    return m
+      .filter(x => x.probability >= 70 && x.probability <= 95)
+      .sort((a, b) => b.probability - a.probability);
   }, [data, match]);
 
   return (
@@ -942,22 +962,34 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
                   <div className="form-mini-team">
                     <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} size={18} />
                     <span className="form-mini-name">{match.teams.home.name}</span>
-                    <div className="form-mini-dots">
-                      {data.calculatedProbabilities.homeForm.results?.map((r, i) => (
-                        <span key={i} className={`fdot ${r.result.toLowerCase()}`}>{r.result}</span>
-                      ))}
-                    </div>
                     <span className="form-mini-pts">{data.calculatedProbabilities.homeForm.points}/{data.calculatedProbabilities.homeForm.maxPoints}</span>
+                  </div>
+                  <div className="form-matches">
+                    {data.calculatedProbabilities.homeForm.results?.map((r, i) => (
+                      <div key={i} className="form-match">
+                        <span className={`fdot ${r.result.toLowerCase()}`}>{r.result}</span>
+                        <span className="form-score">{r.goalsFor}-{r.goalsAgainst}</span>
+                        <span className="form-vs">vs</span>
+                        {r.opponentLogo && <img src={r.opponentLogo} alt="" className="form-opp-logo" />}
+                        <span className="form-opp">{(r.opponent || '?').slice(0, 10)}</span>
+                      </div>
+                    ))}
                   </div>
                   <div className="form-mini-team">
                     <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} size={18} />
                     <span className="form-mini-name">{match.teams.away.name}</span>
-                    <div className="form-mini-dots">
-                      {data.calculatedProbabilities.awayForm?.results?.map((r, i) => (
-                        <span key={i} className={`fdot ${r.result.toLowerCase()}`}>{r.result}</span>
-                      ))}
-                    </div>
                     <span className="form-mini-pts">{data.calculatedProbabilities.awayForm?.points}/{data.calculatedProbabilities.awayForm?.maxPoints}</span>
+                  </div>
+                  <div className="form-matches">
+                    {data.calculatedProbabilities.awayForm?.results?.map((r, i) => (
+                      <div key={i} className="form-match">
+                        <span className={`fdot ${r.result.toLowerCase()}`}>{r.result}</span>
+                        <span className="form-score">{r.goalsFor}-{r.goalsAgainst}</span>
+                        <span className="form-vs">vs</span>
+                        {r.opponentLogo && <img src={r.opponentLogo} alt="" className="form-opp-logo" />}
+                        <span className="form-opp">{(r.opponent || '?').slice(0, 10)}</span>
+                      </div>
+                    ))}
                   </div>
                   {data.calculatedProbabilities.h2hSummary?.total > 0 && (
                     <div className="h2h-mini">
@@ -978,6 +1010,12 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
                 <div className="markets-grid">
                   {markets.map(mkt => {
                     const checked = !!selMarkets[mkt.id];
+                    const bkInfo = (() => {
+                      if (!data?.odds) return null;
+                      const country = detectCountry();
+                      const catMap = { 'BTTS': 'btts', 'Ganador': 'matchWinner', 'Goles': 'overUnder', 'Corners': 'corners', 'Tarjetas': 'cards' };
+                      return selectBookmakerOdds(data.odds, catMap[mkt.cat] || mkt.cat, country);
+                    })();
                     return (
                       <button
                         key={mkt.id}
@@ -989,6 +1027,11 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
                         <div className="mkt-nums">
                           <span className="mkt-pct">{mkt.probability}%</span>
                           {mkt.odd && <span className="mkt-odd">{mkt.odd.toFixed(2)}</span>}
+                          {bkInfo && (
+                            <span className="mkt-bk">
+                              <img src={BOOKMAKER_LOGOS[bkInfo.bookmaker] || ''} alt={bkInfo.bookmaker} className="bk-logo" />
+                            </span>
+                          )}
                           {checked && <span className="mkt-chk">&#10003;</span>}
                         </div>
                       </button>
@@ -996,6 +1039,74 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
                   })}
                 </div>
               </div>
+
+              {/* Per-team breakdown */}
+              {data.calculatedProbabilities?.perTeam && (
+                <div className="perteam-section">
+                  {[
+                    { key: 'home', name: match.teams.home.name, team: data.calculatedProbabilities.perTeam.home },
+                    { key: 'away', name: match.teams.away.name, team: data.calculatedProbabilities.perTeam.away },
+                  ].map(({ key, name, team }) => {
+                    if (!team) return null;
+                    const rows = [];
+                    if (team.corners) {
+                      Object.entries(team.corners).forEach(([k, v]) => {
+                        if (v >= 70) {
+                          const threshold = k.replace('over', '').replace('5', '.5');
+                          rows.push({ label: `Corners ${name}: Mas de ${threshold}`, prob: v, cat: 'corners' });
+                        }
+                      });
+                    }
+                    if (team.cards) {
+                      Object.entries(team.cards).forEach(([k, v]) => {
+                        if (v >= 70) {
+                          const threshold = k.replace('over', '').replace('5', '.5');
+                          rows.push({ label: `Tarjetas ${name}: Mas de ${threshold}`, prob: v, cat: 'cards' });
+                        }
+                      });
+                    }
+                    if (team.goals) {
+                      Object.entries(team.goals).forEach(([k, v]) => {
+                        if (v >= 70) {
+                          const threshold = k.replace('over', '').replace('5', '.5');
+                          rows.push({ label: `Goles ${name}: Mas de ${threshold}`, prob: v, cat: 'goals' });
+                        }
+                      });
+                    }
+                    if (rows.length === 0) return null;
+                    return (
+                      <div key={key} className="perteam-group">
+                        {rows.sort((a, b) => b.prob - a.prob).map((r, i) => (
+                          <div key={i} className="perteam-row">
+                            <span className="perteam-label">{r.label}</span>
+                            <span className={`perteam-prob ${r.prob >= 80 ? 'hi' : 'md'}`}>{r.prob}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Goal timing */}
+              {data.calculatedProbabilities?.goalTiming?.combined && (
+                <div className="timing-section">
+                  <h4 className="timing-title">Probabilidad de gol por periodo</h4>
+                  <div className="timing-grid">
+                    {data.calculatedProbabilities.goalTiming.combined
+                      .filter(p => p.probability >= 70)
+                      .map((p, i) => (
+                        <div key={i} className={`timing-item ${p.highlight ? 'hot' : ''}`}>
+                          <span className="timing-period">Gol {p.period} min</span>
+                          <span className="timing-prob">{p.probability}%</span>
+                        </div>
+                      ))}
+                  </div>
+                  {data.calculatedProbabilities.goalTiming.combined.filter(p => p.probability >= 70).length === 0 && (
+                    <span className="timing-none">Sin periodos con probabilidad alta (&ge;70%)</span>
+                  )}
+                </div>
+              )}
 
               <button className="btn-full" onClick={(e) => { e.stopPropagation(); onViewFull(); }}>
                 Ver analisis completo &#8594;
