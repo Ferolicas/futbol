@@ -16,16 +16,19 @@ export async function GET(request) {
   }
 
   const today = searchParams.get('date') || new Date().toISOString().split('T')[0];
+  const force = searchParams.get('force') === 'true';
 
-  // Check if batch already completed today
-  const batchFlag = await getFromSanity('appConfig', `dailyBatch-${today}`);
-  if (batchFlag?.completed) {
-    return Response.json({
-      success: true,
-      message: 'Batch already completed today',
-      date: today,
-      fixtureCount: batchFlag.fixtureCount || 0,
-    });
+  // Check if batch already completed today (skip if force=true)
+  if (!force) {
+    const batchFlag = await getFromSanity('appConfig', `dailyBatch-${today}`);
+    if (batchFlag?.completed) {
+      return Response.json({
+        success: true,
+        message: 'Batch already completed today',
+        date: today,
+        fixtureCount: batchFlag.fixtureCount || 0,
+      });
+    }
   }
 
   // Mark batch as started
