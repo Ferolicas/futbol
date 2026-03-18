@@ -21,7 +21,8 @@ const today = () => {
 };
 const fmtTime = (d) => new Date(d).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
 const isLive = (s) => ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(s);
-const isFinished = (s) => ['FT', 'AET', 'PEN', 'CANC', 'SUSP', 'PST', 'ABD', 'AWD', 'WO'].includes(s);
+const isFinished = (s) => ['FT', 'AET', 'PEN', 'AWD', 'WO'].includes(s);
+const isPostponed = (s) => ['PST', 'CANC', 'SUSP', 'ABD'].includes(s);
 const statusText = (s) => ({
   NS: 'Proximo', '1H': '1T', '2H': '2T', HT: 'Entretiempo',
   FT: 'Final', ET: 'Extra', P: 'Penales', AET: 'Extra', PEN: 'Penales',
@@ -62,6 +63,8 @@ export default function Dashboard() {
   // Multiple saved combinadas
   const [savedCombinadas, setSavedCombinadas] = useState([]);
   const [savingComb, setSavingComb] = useState(false);
+  // Live match stats (corners, cards, scorers)
+  const [liveStats, setLiveStats] = useState({});
 
   const loadFixtures = useCallback(async (d) => {
     setLoading(true);
@@ -126,7 +129,7 @@ export default function Dashboard() {
 
   // === PUSHER REAL-TIME EVENTS ===
 
-  // Live scores: update fixtures in real-time
+  // Live scores: update fixtures and live stats in real-time
   usePusherEvent('live-scores', 'update', useCallback((data) => {
     if (!data?.matches) return;
     setFixtures(prev => prev.map(f => {
@@ -141,6 +144,27 @@ export default function Dashboard() {
       }
       return f;
     }));
+    // Update live stats from Pusher data
+    setLiveStats(prev => {
+      const next = { ...prev };
+      data.matches.forEach(m => {
+        if (m.corners || m.yellowCards || m.redCards || m.goalScorers?.length) {
+          next[m.fixtureId] = {
+            ...next[m.fixtureId],
+            fixtureId: m.fixtureId,
+            status: m.status,
+            goals: m.goals,
+            score: m.score,
+            corners: m.corners,
+            yellowCards: m.yellowCards,
+            redCards: m.redCards,
+            goalScorers: m.goalScorers,
+            missedPenalties: m.missedPenalties,
+          };
+        }
+      });
+      return next;
+    });
   }, []));
 
   // Lineups: notify that lineups are available
@@ -157,6 +181,42 @@ export default function Dashboard() {
     }
   }, [date, loadFixtures]));
 
+  // Polling fallback for live stats (works when Pusher is unavailable)
+  useEffect(() => {
+    const hasLive = fixtures.some(f => isLive(f.fixture.status.short));
+    const hasFinishedToday = fixtures.some(f => isFinished(f.fixture.status.short));
+    if (!hasLive && !hasFinishedToday) return;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/live-poll?date=${date}`);
+        const data = await res.json();
+        if (data.liveStats?.length > 0) {
+          const statsMap = {};
+          data.liveStats.forEach(s => { statsMap[s.fixtureId] = s; });
+          setLiveStats(statsMap);
+          // Also update fixture scores/status from live stats
+          setFixtures(prev => prev.map(f => {
+            const ls = statsMap[f.fixture.id];
+            if (ls?.status) {
+              return {
+                ...f,
+                fixture: { ...f.fixture, status: ls.status },
+                goals: ls.goals || f.goals,
+                score: ls.score || f.score,
+              };
+            }
+            return f;
+          }));
+        }
+      } catch {}
+    };
+
+    poll(); // Initial fetch
+    const interval = setInterval(poll, 30000); // Every 30 seconds
+    return () => clearInterval(interval);
+  }, [date, fixtures.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const changeDate = (offset) => {
     const d = new Date(date);
     d.setDate(d.getDate() + offset);
@@ -170,7 +230,11 @@ export default function Dashboard() {
 
   const visible = fixtures.filter(f => {
     if (hidden.includes(f.fixture.id)) return false;
+    // Only show matches that have been analyzed
+    if (!analyzed.includes(f.fixture.id)) return false;
     const status = f.fixture.status.short;
+    // Hide postponed/cancelled/suspended/abandoned matches
+    if (isPostponed(status)) return false;
     if (statusFilter === 'live' && !isLive(status)) return false;
     if (statusFilter === 'upcoming' && status !== 'NS') return false;
     if (statusFilter === 'finished' && !isFinished(status)) return false;
@@ -535,7 +599,7 @@ export default function Dashboard() {
                     </span>
                     <span className="apuesta-mkt">{sel.name}</span>
                     <span className="apuesta-prob">{cap(sel.probability)}%</span>
-                    {sel.odd && <span className="apuesta-odd">{sel.odd.toFixed(2)}</span>}
+                    <span className="apuesta-odd">{sel.odd ? sel.odd.toFixed(2) : '—'}</span>
                   </div>
                 ))}
                 {apuestaDelDia.combinedOdd > 1 && (
@@ -590,6 +654,7 @@ export default function Dashboard() {
                     odds={analyzedOdds[m.fixture.id]}
                     standings={standings}
                     matchData={analyzedData[m.fixture.id]}
+                    liveStats={liveStats[m.fixture.id]}
                     onSelect={() => toggleSelect(m.fixture.id)}
                     onHide={(e) => doHide(e, m.fixture.id)}
                     onView={() => router.push(`/dashboard/analisis/${m.fixture.id}`)}
@@ -619,6 +684,7 @@ export default function Dashboard() {
                     data={analyzedData[m.fixture.id]}
                     odds={analyzedOdds[m.fixture.id]}
                     standings={standings}
+                    liveStats={liveStats[m.fixture.id]}
                     isExpanded={expandedMatch === m.fixture.id}
                     onToggle={() => setExpandedMatch(expandedMatch === m.fixture.id ? null : m.fixture.id)}
                     selMarkets={selectedMarkets[m.fixture.id] || {}}
@@ -652,7 +718,7 @@ export default function Dashboard() {
                       <div className="comb-item-row">
                         <span className="comb-item-name">{sel.name}</span>
                         <span className={`comb-item-prob ${sel.probability >= 75 ? 'high' : sel.probability >= 50 ? 'mid' : 'low'}`}>{cap(sel.probability)}%</span>
-                        {sel.odd && <span className="comb-item-odd">{sel.odd.toFixed(2)}</span>}
+                        <span className="comb-item-odd">{sel.odd ? sel.odd.toFixed(2) : '—'}</span>
                         <button className="comb-item-rm" onClick={() => toggleMarket(sel.fixtureId, sel, sel.matchName)}>&#10005;</button>
                       </div>
                     </div>
@@ -755,7 +821,7 @@ export default function Dashboard() {
 
 /* ======================== MATCH CARD ======================== */
 
-function MatchCard({ match, isAnalyzed, isSelected, odds, standings, matchData, onSelect, onHide, onView, idx }) {
+function MatchCard({ match, isAnalyzed, isSelected, odds, standings, matchData, liveStats, onSelect, onHide, onView, idx }) {
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
@@ -783,7 +849,10 @@ function MatchCard({ match, isAnalyzed, isSelected, odds, standings, matchData, 
         </div>
         <div className="mcard-time">
           {live ? (
-            <span className="badge-live"><span className="dot-live" />{match.fixture.status.elapsed}&apos;</span>
+            <span className="badge-live">
+              <span className="dot-live" />
+              <MatchTimer elapsed={match.fixture.status.elapsed} status={match.fixture.status.short} />
+            </span>
           ) : finished ? (
             <span className="badge-ft">{statusText(match.fixture.status.short)}</span>
           ) : (
@@ -817,6 +886,26 @@ function MatchCard({ match, isAnalyzed, isSelected, odds, standings, matchData, 
         </div>
       </div>
 
+      {/* Live stats bar: corners, cards */}
+      {(live || finished) && liveStats && <LiveStatsBar stats={liveStats} />}
+
+      {/* Goal scorers compact */}
+      {(live || finished) && liveStats?.goalScorers?.length > 0 && (
+        <div className="mcard-scorers">
+          {liveStats.goalScorers.map((g, i) => (
+            <span key={i} className={`scorer-chip ${g.type === 'Own Goal' ? 'og' : ''}`}>
+              {g.minute}{g.extra ? `+${g.extra}` : ''}&apos; {g.player?.split(' ').pop()}
+              {g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
+            </span>
+          ))}
+          {liveStats.missedPenalties?.map((p, i) => (
+            <span key={`mp-${i}`} className="scorer-chip missed">
+              {p.minute}&apos; {p.player?.split(' ').pop()} (Penal fallado)
+            </span>
+          ))}
+        </div>
+      )}
+
       {odds && (
         <div className="mcard-odds">
           <span className="odd-chip">{odds.home?.toFixed(2)}</span>
@@ -842,7 +931,7 @@ function MatchCard({ match, isAnalyzed, isSelected, odds, standings, matchData, 
 
 /* ======================== ACCORDION CARD ======================== */
 
-function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, onRemove, idx }) {
+function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, onRemove, idx }) {
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
@@ -889,7 +978,7 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
             <span>{flag} {match.league.name}</span>
           </div>
           <div className="mcard-time">
-            {live ? <span className="badge-live"><span className="dot-live" />{match.fixture.status.elapsed}&apos;</span>
+            {live ? <span className="badge-live"><span className="dot-live" /><MatchTimer elapsed={match.fixture.status.elapsed} status={match.fixture.status.short} /></span>
               : finished ? <span className="badge-ft">{statusText(match.fixture.status.short)}</span>
               : <span className="badge-ns">{fmtTime(match.fixture.date)}</span>}
           </div>
@@ -909,6 +998,8 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
             <span className="mcard-tname">{match.teams.away.name}</span>
           </div>
         </div>
+        {/* Live stats bar in accordion header */}
+        {(live || finished) && liveStats && <LiveStatsBar stats={liveStats} />}
         {odds && (
           <div className="mcard-odds">
             <span className="odd-chip">{odds.home?.toFixed(2)}</span>
@@ -933,6 +1024,11 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
         <div className="acc-inner">
           {data ? (
             <>
+              {/* Live match details */}
+              {(live || finished) && liveStats && (
+                <LiveMatchDetails stats={liveStats} homeTeam={match.teams.home} awayTeam={match.teams.away} />
+              )}
+
               {/* Auto combinada */}
               {data.combinada?.selections?.length > 0 && (
                 <div className="auto-comb">
@@ -1020,12 +1116,11 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
                         <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${cap(mkt.probability)}%` }} /></div>
                         <div className="mkt-nums">
                           <span className="mkt-pct">{cap(mkt.probability)}%</span>
-                          {mkt.odd && <span className="mkt-odd">{mkt.odd.toFixed(2)}</span>}
-                          {bkInfo && (
-                            <span className="mkt-bk">
-                              <img src={BOOKMAKER_LOGOS[bkInfo.bookmaker] || ''} alt={bkInfo.bookmaker} className="bk-logo" />
-                            </span>
-                          )}
+                          <span className="mkt-odd">{mkt.odd ? mkt.odd.toFixed(2) : '—'}</span>
+                          {bkInfo && (() => {
+                            const logo = BOOKMAKER_LOGOS[bkInfo.bookmaker?.toLowerCase()] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => bkInfo.bookmaker?.toLowerCase()?.includes(k))?.[1];
+                            return logo ? <span className="mkt-bk"><img src={logo} alt="" className="bk-logo-lg" /></span> : null;
+                          })()}
                           {checked && <span className="mkt-chk">&#10003;</span>}
                         </div>
                       </button>
@@ -1111,6 +1206,131 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ======================== LIVE STATS COMPONENTS ======================== */
+
+function MatchTimer({ elapsed, status }) {
+  const [seconds, setSeconds] = useState(0);
+
+  useEffect(() => {
+    if (status === '1H' || status === '2H' || status === 'ET') {
+      setSeconds(0);
+      const interval = setInterval(() => {
+        setSeconds(prev => (prev + 1) % 60);
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [status, elapsed]);
+
+  if (status === 'HT') return <span>ET</span>;
+  if (status === 'BT') return <span>Descanso ET</span>;
+  if (status === 'P') return <span>Penales</span>;
+
+  return <span>{elapsed}:{String(seconds).padStart(2, '0')}</span>;
+}
+
+function LiveStatsBar({ stats }) {
+  if (!stats) return null;
+  const { corners, yellowCards, redCards } = stats;
+  const hasData = corners || yellowCards || redCards;
+  if (!hasData) return null;
+
+  return (
+    <div className="live-stats-bar">
+      {corners && (
+        <span className="ls-item" title="Corners">
+          <span className="ls-icon corner-icon">&#9873;</span>
+          {corners.home}-{corners.away}
+          <span className="ls-total">({corners.total})</span>
+        </span>
+      )}
+      {yellowCards && (
+        <span className="ls-item" title="Tarjetas amarillas">
+          <span className="ls-icon yellow-card" />
+          {yellowCards.home}-{yellowCards.away}
+        </span>
+      )}
+      {redCards && (redCards.home > 0 || redCards.away > 0) && (
+        <span className="ls-item" title="Tarjetas rojas">
+          <span className="ls-icon red-card" />
+          {redCards.home}-{redCards.away}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function LiveMatchDetails({ stats, homeTeam, awayTeam }) {
+  if (!stats) return null;
+
+  return (
+    <div className="live-details">
+      {/* Stats table */}
+      <div className="live-stats-table">
+        <div className="lst-header">
+          <span className="lst-team-name">{homeTeam.name}</span>
+          <span className="lst-label">Estadistica</span>
+          <span className="lst-team-name">{awayTeam.name}</span>
+        </div>
+        {stats.corners && (
+          <div className="lst-row">
+            <span className="lst-val">{stats.corners.home}</span>
+            <span className="lst-label">Corners</span>
+            <span className="lst-val">{stats.corners.away}</span>
+          </div>
+        )}
+        <div className="lst-row">
+          <span className="lst-val">{stats.goals?.home ?? 0}</span>
+          <span className="lst-label">Goles</span>
+          <span className="lst-val">{stats.goals?.away ?? 0}</span>
+        </div>
+        {stats.yellowCards && (
+          <div className="lst-row">
+            <span className="lst-val"><span className="yellow-card-sm" /> {stats.yellowCards.home}</span>
+            <span className="lst-label">Amarillas</span>
+            <span className="lst-val">{stats.yellowCards.away} <span className="yellow-card-sm" /></span>
+          </div>
+        )}
+        {stats.redCards && (stats.redCards.home > 0 || stats.redCards.away > 0) && (
+          <div className="lst-row">
+            <span className="lst-val"><span className="red-card-sm" /> {stats.redCards.home}</span>
+            <span className="lst-label">Rojas</span>
+            <span className="lst-val">{stats.redCards.away} <span className="red-card-sm" /></span>
+          </div>
+        )}
+      </div>
+
+      {/* Goal scorers */}
+      {stats.goalScorers?.length > 0 && (
+        <div className="live-scorers">
+          <h4 className="live-section-title">Goles</h4>
+          {stats.goalScorers.map((g, i) => (
+            <div key={i} className={`live-scorer ${g.teamId === homeTeam.id ? 'home' : 'away'} ${g.type === 'Own Goal' ? 'og' : ''}`}>
+              <span className="scorer-min">{g.minute}{g.extra ? `+${g.extra}` : ''}&apos;</span>
+              <span className="scorer-type">
+                {g.type === 'Penalty' ? '(P)' : g.type === 'Own Goal' ? '(AG)' : ''}
+              </span>
+              <span className="scorer-name">{g.player}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Missed penalties */}
+      {stats.missedPenalties?.length > 0 && (
+        <div className="live-scorers">
+          <h4 className="live-section-title">Penales fallados</h4>
+          {stats.missedPenalties.map((p, i) => (
+            <div key={i} className={`live-scorer missed ${p.teamId === homeTeam.id ? 'home' : 'away'}`}>
+              <span className="scorer-min">{p.minute}{p.extra ? `+${p.extra}` : ''}&apos;</span>
+              <span className="scorer-name">{p.player}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -70,7 +70,7 @@ export async function GET(request) {
       await Promise.all(
         batch.map(async (fixture) => {
           try {
-            const r = await analyzeMatch(fixture, { date: today });
+            const r = await analyzeMatch(fixture, { date: today, force });
             if (r.fromCache) totalCached++;
             else totalAnalyzed++;
           } catch (e) {

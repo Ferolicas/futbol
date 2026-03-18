@@ -26,7 +26,7 @@ export default function LandingPage() {
       { threshold: 0.1, rootMargin: '0px 0px -50px 0px' }
     );
 
-    const selectors = '.feature-card, .step, .step-arrow, .plan-card, .section-title, .section-sub, .reveal, .reveal-left, .reveal-right, .reveal-scale';
+    const selectors = '.feature-card, .step, .step-arrow, .plan-card, .landing-section-title, .section-sub, .reveal, .reveal-left, .reveal-right, .reveal-scale';
     document.querySelectorAll(selectors).forEach(el => observer.observe(el));
 
     return () => observer.disconnect();
@@ -96,7 +96,7 @@ export default function LandingPage() {
 
       {/* FEATURES */}
       <section className="features" id="features">
-        <h2 className="section-title">Todo lo que necesitas para apostar con ventaja</h2>
+        <h2 className="landing-section-title">Todo lo que necesitas para apostar con ventaja</h2>
         <p className="section-sub">Herramientas profesionales de analisis en una sola plataforma</p>
         <div className="features-grid">
           {features.map((f, i) => (
@@ -111,7 +111,7 @@ export default function LandingPage() {
 
       {/* HOW IT WORKS */}
       <section className="how-it-works">
-        <h2 className="section-title">Como funciona</h2>
+        <h2 className="landing-section-title">Como funciona</h2>
         <div className="steps">
           <div className="step">
             <div className="step-n">1</div>
@@ -135,7 +135,7 @@ export default function LandingPage() {
 
       {/* PRICING */}
       <section className="pricing" id="pricing">
-        <h2 className="section-title">Planes de acceso</h2>
+        <h2 className="landing-section-title">Planes de acceso</h2>
         <p className="section-sub">Invierte en tu ventaja. Primer mes con 50% de descuento.</p>
         <div className="pricing-grid">
           {/* Plan 1: Plataforma */}

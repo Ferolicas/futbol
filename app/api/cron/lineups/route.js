@@ -112,7 +112,8 @@ export async function GET(request) {
 
             const probs = computeAllProbabilities(updatedAnalysis);
             updatedAnalysis.calculatedProbabilities = probs;
-            updatedAnalysis.combinada = buildCombinada(probs, updatedAnalysis.odds, updatedAnalysis.playerHighlights);
+            const teamNames = { home: updatedAnalysis.homeTeam, away: updatedAnalysis.awayTeam };
+            updatedAnalysis.combinada = buildCombinada(probs, updatedAnalysis.odds, updatedAnalysis.playerHighlights, teamNames);
 
             await cacheAnalysis(fixtureId, updatedAnalysis);
             updated++;

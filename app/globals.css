@@ -1279,6 +1279,7 @@ body {
   margin-left: 4px;
 }
 .odds-bk-logo { width: 20px; height: 20px; object-fit: contain; border-radius: 3px; }
+.odds-bk-logo-lg { width: 60px; height: 60px; object-fit: contain; border-radius: 4px; }
 
 /* Per-Team Predictions */
 .perteam-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -1585,12 +1586,12 @@ body {
 
 /* Features */
 .features { padding: 80px 20px; max-width: 1100px; margin: 0 auto; }
-.section-title {
+.landing-section-title {
   font-size: 2rem; font-weight: 800; text-align: center; margin-bottom: 12px; color: var(--t1);
   opacity: 0; transform: translateY(20px);
   transition: opacity .6s var(--ease), transform .6s var(--ease);
 }
-.section-title.visible { opacity: 1; transform: translateY(0); }
+.landing-section-title.visible { opacity: 1; transform: translateY(0); }
 .section-sub {
   text-align: center; color: var(--t2); font-size: 1rem; margin-bottom: 48px;
   opacity: 0; transform: translateY(20px);
@@ -2446,7 +2447,7 @@ div[data-testid*="development"] { display: none !important; }
   .hero-sub { font-size: .95rem; }
   .hero-stats { gap: 24px; }
   .hero-stat-n { font-size: 1.5rem; }
-  .section-title { font-size: 1.5rem; }
+  .landing-section-title { font-size: 1.5rem; }
   .steps { flex-direction: column; }
   .step-arrow { transform: rotate(90deg); }
   .pricing-grid { grid-template-columns: 1fr; }
@@ -2666,6 +2667,13 @@ div[data-testid*="development"] { display: none !important; }
   opacity: 0.7;
   flex-shrink: 0;
 }
+.bk-logo-lg {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
 
 /* ===================== RESPONSIVE: NEW ELEMENTS ===================== */
 @media (max-width: 768px) {
@@ -2685,4 +2693,218 @@ div[data-testid*="development"] { display: none !important; }
   .form-opp { max-width: 50px; }
   .perteam-row { font-size: .65rem; }
   .timing-grid { flex-direction: column; }
+}
+
+/* ===================== LIVE STATS ===================== */
+
+/* Live stats bar (compact, shown in match cards) */
+.live-stats-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 4px 0;
+  border-top: 1px solid var(--brd);
+  font-size: .72rem;
+  color: var(--t2);
+}
+.ls-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+}
+.ls-total {
+  color: var(--t3);
+  font-size: .65rem;
+}
+.ls-icon {
+  font-size: .8rem;
+}
+.corner-icon {
+  color: var(--t2);
+}
+.yellow-card {
+  display: inline-block;
+  width: 10px;
+  height: 13px;
+  background: #ffd740;
+  border-radius: 2px;
+}
+.red-card {
+  display: inline-block;
+  width: 10px;
+  height: 13px;
+  background: #ff3d57;
+  border-radius: 2px;
+}
+.yellow-card-sm {
+  display: inline-block;
+  width: 8px;
+  height: 11px;
+  background: #ffd740;
+  border-radius: 1px;
+  vertical-align: middle;
+}
+.red-card-sm {
+  display: inline-block;
+  width: 8px;
+  height: 11px;
+  background: #ff3d57;
+  border-radius: 1px;
+  vertical-align: middle;
+}
+
+/* Goal scorers chips (compact, shown in match cards) */
+.mcard-scorers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 10px;
+  justify-content: center;
+}
+.scorer-chip {
+  font-size: .62rem;
+  color: var(--t2);
+  background: rgba(0,230,118,0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.scorer-chip.og {
+  background: rgba(255,61,87,0.12);
+  color: var(--red);
+}
+.scorer-chip.missed {
+  background: rgba(255,61,87,0.08);
+  color: var(--t3);
+  text-decoration: line-through;
+}
+
+/* Live match details (expanded, inside accordion) */
+.live-details {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--brd);
+  margin-bottom: 8px;
+}
+
+/* Stats table */
+.live-stats-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+.lst-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: .68rem;
+  font-weight: 600;
+  color: var(--t2);
+  text-transform: uppercase;
+  letter-spacing: .02em;
+}
+.lst-header .lst-team-name:last-child {
+  text-align: right;
+}
+.lst-header .lst-label {
+  text-align: center;
+}
+.lst-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: .75rem;
+  background: rgba(255,255,255,0.02);
+  border-radius: var(--rx);
+}
+.lst-row:nth-child(even) {
+  background: rgba(255,255,255,0.04);
+}
+.lst-val {
+  font-weight: 600;
+  color: var(--t1);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.lst-row .lst-val:last-child {
+  justify-content: flex-end;
+}
+.lst-row .lst-label {
+  text-align: center;
+  color: var(--t3);
+  font-size: .68rem;
+}
+
+/* Goal scorers list */
+.live-scorers {
+  padding: 4px 0;
+}
+.live-section-title {
+  font-size: .68rem;
+  color: var(--t3);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 4px;
+  padding: 0 8px;
+}
+.live-scorer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: .72rem;
+}
+.live-scorer.home {
+  color: var(--green);
+}
+.live-scorer.away {
+  color: var(--blue);
+  justify-content: flex-end;
+  flex-direction: row-reverse;
+}
+.live-scorer.og {
+  color: var(--red);
+}
+.live-scorer.missed {
+  color: var(--t3);
+  text-decoration: line-through;
+}
+.scorer-min {
+  font-size: .65rem;
+  color: var(--t3);
+  min-width: 28px;
+}
+.scorer-type {
+  font-size: .6rem;
+  color: var(--t3);
+}
+.scorer-name {
+  font-weight: 500;
+}
+
+/* Live section card on analysis page */
+.live-section-card {
+  border: 1px solid rgba(0,230,118,0.2) !important;
+  background: rgba(0,230,118,0.03) !important;
+}
+.live-detail-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.live-scorers-detail {
+  padding: 4px 0;
+}
+
+@media (max-width: 480px) {
+  .live-stats-bar { gap: 8px; font-size: .65rem; }
+  .lst-header { font-size: .6rem; }
+  .lst-row { font-size: .68rem; }
+  .live-scorer { font-size: .65rem; }
+  .scorer-chip { font-size: .58rem; }
 }

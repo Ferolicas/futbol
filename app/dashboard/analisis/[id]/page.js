@@ -39,6 +39,7 @@ export default function AnalisisPage() {
   const [refreshingLineups, setRefreshingLineups] = useState(false);
   const [refreshingInjuries, setRefreshingInjuries] = useState(false);
   const [userCountry, setUserCountry] = useState('default');
+  const [liveStats, setLiveStats] = useState(null);
 
   useEffect(() => { setUserCountry(detectCountry()); }, []);
 
@@ -61,7 +62,8 @@ export default function AnalisisPage() {
       const probs = data.analysis.calculatedProbabilities || computeAllProbabilities(data.analysis);
       setProbabilities(probs);
       // Use server-computed combinada if available
-      setCombinada(data.analysis.combinada || buildCombinada(probs, data.analysis.odds, data.analysis.playerHighlights));
+      const teamNames = { home: data.analysis.homeTeam, away: data.analysis.awayTeam };
+      setCombinada(data.analysis.combinada || buildCombinada(probs, data.analysis.odds, data.analysis.playerHighlights, teamNames));
     } catch (e) {
       setError(e.message || 'Error loading analysis');
     } finally {
@@ -70,6 +72,41 @@ export default function AnalisisPage() {
   }, [fixtureId]);
 
   useEffect(() => { loadAnalysis(); }, [loadAnalysis]);
+
+  // Poll live stats for this match
+  useEffect(() => {
+    if (!analysis) return;
+    const statusShort = analysis.status?.short || 'NS';
+    const isLive = isLiveStatus(statusShort);
+    const isFinished = ['FT', 'AET', 'PEN'].includes(statusShort);
+    if (!isLive && !isFinished) return;
+
+    const d = new Date();
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/live-poll?date=${dateStr}`);
+        const data = await res.json();
+        const matchStats = data.liveStats?.find(s => s.fixtureId === Number(fixtureId));
+        if (matchStats) {
+          setLiveStats(matchStats);
+          // Update score and status
+          if (matchStats.status) {
+            setAnalysis(prev => prev ? ({
+              ...prev,
+              status: matchStats.status,
+              goals: matchStats.goals || prev.goals,
+            }) : prev);
+          }
+        }
+      } catch {}
+    };
+
+    poll();
+    const interval = isLive ? setInterval(poll, 30000) : null;
+    return () => { if (interval) clearInterval(interval); };
+  }, [analysis?.status?.short, fixtureId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const doRefreshLineups = async () => {
     setRefreshingLineups(true);
@@ -176,8 +213,103 @@ export default function AnalisisPage() {
           )}
         </div>
 
+        {/* ===== LIVE STATS ===== */}
+        {liveStats && (
+          <div className="section-card live-section-card">
+            <div className="section-header">
+              <span className="section-icon">&#9889;</span>
+              <span className="section-title">
+                {live ? 'En Vivo' : 'Estadisticas del Partido'}
+              </span>
+            </div>
+            <div className="live-detail-grid">
+              {/* Stats table */}
+              <div className="live-stats-table">
+                <div className="lst-header">
+                  <span className="lst-team-name">{a.homeTeam}</span>
+                  <span className="lst-label">Stat</span>
+                  <span className="lst-team-name">{a.awayTeam}</span>
+                </div>
+                <div className="lst-row">
+                  <span className="lst-val">{a.goals?.home ?? liveStats.goals?.home ?? 0}</span>
+                  <span className="lst-label">Goles</span>
+                  <span className="lst-val">{a.goals?.away ?? liveStats.goals?.away ?? 0}</span>
+                </div>
+                {liveStats.corners && (
+                  <div className="lst-row">
+                    <span className="lst-val">{liveStats.corners.home}</span>
+                    <span className="lst-label">Corners</span>
+                    <span className="lst-val">{liveStats.corners.away}</span>
+                  </div>
+                )}
+                {liveStats.yellowCards && (
+                  <div className="lst-row">
+                    <span className="lst-val"><span className="yellow-card-sm" /> {liveStats.yellowCards.home}</span>
+                    <span className="lst-label">Amarillas</span>
+                    <span className="lst-val">{liveStats.yellowCards.away} <span className="yellow-card-sm" /></span>
+                  </div>
+                )}
+                {liveStats.redCards && (liveStats.redCards.home > 0 || liveStats.redCards.away > 0) && (
+                  <div className="lst-row">
+                    <span className="lst-val"><span className="red-card-sm" /> {liveStats.redCards.home}</span>
+                    <span className="lst-label">Rojas</span>
+                    <span className="lst-val">{liveStats.redCards.away} <span className="red-card-sm" /></span>
+                  </div>
+                )}
+              </div>
+
+              {/* Goal scorers */}
+              {liveStats.goalScorers?.length > 0 && (
+                <div className="live-scorers-detail">
+                  <h4 className="live-section-title">Goles</h4>
+                  {liveStats.goalScorers.map((g, i) => (
+                    <div key={i} className={`live-scorer ${g.teamId === a.homeId ? 'home' : 'away'} ${g.type === 'Own Goal' ? 'og' : ''}`}>
+                      <span className="scorer-min">{g.minute}{g.extra ? `+${g.extra}` : ''}&apos;</span>
+                      <span className="scorer-type">
+                        {g.type === 'Penalty' ? '(P)' : g.type === 'Own Goal' ? '(AG)' : ''}
+                      </span>
+                      <span className="scorer-name">{g.player}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Missed penalties */}
+              {liveStats.missedPenalties?.length > 0 && (
+                <div className="live-scorers-detail">
+                  <h4 className="live-section-title">Penales fallados</h4>
+                  {liveStats.missedPenalties.map((p, i) => (
+                    <div key={i} className={`live-scorer missed ${p.teamId === a.homeId ? 'home' : 'away'}`}>
+                      <span className="scorer-min">{p.minute}{p.extra ? `+${p.extra}` : ''}&apos;</span>
+                      <span className="scorer-name">{p.player}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Card events */}
+              {liveStats.cardEvents?.length > 0 && (
+                <div className="live-scorers-detail">
+                  <h4 className="live-section-title">Tarjetas</h4>
+                  {liveStats.cardEvents.map((c, i) => (
+                    <div key={i} className={`live-scorer ${c.teamId === a.homeId ? 'home' : 'away'}`}>
+                      <span className="scorer-min">{c.minute}&apos;</span>
+                      <span className="scorer-type">
+                        {c.type === 'Yellow Card' ? <span className="yellow-card-sm" /> :
+                         c.type === 'Red Card' ? <span className="red-card-sm" /> :
+                         <><span className="yellow-card-sm" /><span className="red-card-sm" /></>}
+                      </span>
+                      <span className="scorer-name">{c.player}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ===== SECCIÓN 2 — ALINEACIONES ===== */}
-        <Section title="Alineaciones" icon="XI" sectionKey="lineups" collapsed={collapsed} toggle={toggleSection}>
+        <Section title="Alineación Titular" icon="XI" sectionKey="lineups" collapsed={collapsed} toggle={toggleSection}>
           {a.lineups?.available ? (
             <div className="lineups-grid">
               {a.lineups.data.map((team, idx) => (
@@ -667,8 +799,7 @@ function OddsWithBookmaker({ odds, allBookmakerOdds, userCountry }) {
       <OddBadge label="X" value={mw?.draw} />
       <OddBadge label="2" value={mw?.away} />
       <span className="odds-bk-info">
-        {bkLogo && <img src={bkLogo} alt={bkName} className="odds-bk-logo" />}
-        <span className="odds-source">{bkName}</span>
+        {bkLogo && <img src={bkLogo} alt={bkName} className="odds-bk-logo-lg" />}
       </span>
     </div>
   );
