@@ -28,6 +28,9 @@ const statusText = (s) => ({
   SUSP: 'Suspendido', PST: 'Pospuesto', CANC: 'Cancelado',
 }[s] || s);
 
+// Display cap: internally probabilities can be 100%, but we show max 95% to the user
+const cap = (v) => Math.min(95, v);
+
 export default function Dashboard() {
   const router = useRouter();
   const { user } = useUser();
@@ -330,9 +333,8 @@ export default function Dashboard() {
       const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
       data.combinada.selections.forEach(sel => {
-        const prob = Math.min(95, sel.probability);
-        if (prob >= 65) {
-          allBets.push({ ...sel, probability: prob, fixtureId: fid, matchName: mn, priority, matchTime, homeTeam, awayTeam });
+        if (sel.probability >= 65) {
+          allBets.push({ ...sel, fixtureId: fid, matchName: mn, priority, matchTime, homeTeam, awayTeam });
         }
       });
     });
@@ -364,7 +366,7 @@ export default function Dashboard() {
     const top = picked.slice(0, 5);
     if (top.length === 0) return null;
     const co = top.reduce((a, b) => b.odd ? a * b.odd : a, 1);
-    const cp = top.reduce((a, b) => a * (b.probability / 100), 1) * 100;
+    const cp = top.reduce((a, b) => a + b.probability, 0) / top.length;
     return { selections: top, combinedOdd: +co.toFixed(2), combinedProbability: +cp.toFixed(1) };
   }, [analyzedData, fixtures]);
 
@@ -375,7 +377,7 @@ export default function Dashboard() {
     });
     if (all.length === 0) return null;
     const co = all.reduce((a, m) => m.odd ? a * m.odd : a, 1);
-    const cp = all.reduce((a, m) => a * (m.probability / 100), 1) * 100;
+    const cp = all.reduce((a, m) => a + m.probability, 0) / all.length;
     return { selections: all, combinedOdd: +co.toFixed(2), combinedProbability: +cp.toFixed(1), highRisk: cp < 60 };
   }, [selectedMarkets]);
 
@@ -517,7 +519,7 @@ export default function Dashboard() {
             <button className="apuesta-head" onClick={() => setShowApuesta(!showApuesta)}>
               <span className="apuesta-left">&#127919; Apuesta del Dia</span>
               <span className="apuesta-right">
-                <span className="apuesta-pct">{apuestaDelDia.combinedProbability}%</span>
+                <span className="apuesta-pct">{cap(apuestaDelDia.combinedProbability)}%</span>
                 <span className={`chev ${showApuesta ? 'up' : ''}`}>&#9662;</span>
               </span>
             </button>
@@ -532,14 +534,14 @@ export default function Dashboard() {
                       {sel.matchName}
                     </span>
                     <span className="apuesta-mkt">{sel.name}</span>
-                    <span className="apuesta-prob">{sel.probability}%</span>
+                    <span className="apuesta-prob">{cap(sel.probability)}%</span>
                     {sel.odd && <span className="apuesta-odd">{sel.odd.toFixed(2)}</span>}
                   </div>
                 ))}
                 {apuestaDelDia.combinedOdd > 1 && (
                   <div className="apuesta-foot">
                     <span>Cuota: <b>{apuestaDelDia.combinedOdd}</b></span>
-                    <span>Prob: <b>{apuestaDelDia.combinedProbability}%</b></span>
+                    <span>Prob: <b>{cap(apuestaDelDia.combinedProbability)}%</b></span>
                   </div>
                 )}
               </div>
@@ -649,7 +651,7 @@ export default function Dashboard() {
                       <div className="comb-item-match">{sel.matchName}</div>
                       <div className="comb-item-row">
                         <span className="comb-item-name">{sel.name}</span>
-                        <span className={`comb-item-prob ${sel.probability >= 75 ? 'high' : sel.probability >= 50 ? 'mid' : 'low'}`}>{sel.probability}%</span>
+                        <span className={`comb-item-prob ${sel.probability >= 75 ? 'high' : sel.probability >= 50 ? 'mid' : 'low'}`}>{cap(sel.probability)}%</span>
                         {sel.odd && <span className="comb-item-odd">{sel.odd.toFixed(2)}</span>}
                         <button className="comb-item-rm" onClick={() => toggleMarket(sel.fixtureId, sel, sel.matchName)}>&#10005;</button>
                       </div>
@@ -663,13 +665,13 @@ export default function Dashboard() {
                   </div>
                   <div className="comb-sum-row">
                     <span>Probabilidad compuesta</span>
-                    <strong className={customCombinada.highRisk ? 'danger' : 'safe'}>{customCombinada.combinedProbability}%</strong>
+                    <strong className={customCombinada.highRisk ? 'danger' : 'safe'}>{cap(customCombinada.combinedProbability)}%</strong>
                   </div>
                   <div className="comb-formula">
                     {customCombinada.selections.map((s, i) => (
-                      <span key={i}>{i > 0 && ' x '}{s.probability}%</span>
+                      <span key={i}>{i > 0 && ' x '}{cap(s.probability)}%</span>
                     ))}
-                    <span> = {customCombinada.combinedProbability}%</span>
+                    <span> = {cap(customCombinada.combinedProbability)}%</span>
                   </div>
                   {customCombinada.highRisk && <div className="comb-warn">Combinada de alto riesgo (&lt;60%)</div>}
                 </div>
@@ -693,7 +695,7 @@ export default function Dashboard() {
                         <div className="saved-comb-info">
                           <span>{comb.selections.length} sel.</span>
                           <span className="saved-comb-odd">{comb.combinedOdd}x</span>
-                          <span className={comb.combinedProbability >= 60 ? 'safe' : 'danger'}>{comb.combinedProbability}%</span>
+                          <span className={comb.combinedProbability >= 60 ? 'safe' : 'danger'}>{cap(comb.combinedProbability)}%</span>
                         </div>
                         <div className="saved-comb-sels">
                           {comb.selections.map((s, i) => (
@@ -920,7 +922,7 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
           )}
           {selCount > 0 && <span className="acc-sel-count">{selCount} sel.</span>}
           {data?.combinada && (
-            <span className="acc-mini">{data.combinada.combinedProbability}% | {data.combinada.combinedOdd}x</span>
+            <span className="acc-mini">{cap(data.combinada.combinedProbability)}% | {data.combinada.combinedOdd}x</span>
           )}
           <span className={`chev-ico ${isExpanded ? 'up' : ''}`}>&#9662;</span>
         </div>
@@ -937,12 +939,12 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
                   <div className="auto-comb-head">
                     <span>&#127942; Combinada Auto</span>
                     <span className={`auto-comb-val ${data.combinada.highRisk ? 'danger' : 'safe'}`}>
-                      {data.combinada.combinedProbability}% &middot; {data.combinada.combinedOdd}x
+                      {cap(data.combinada.combinedProbability)}% &middot; {data.combinada.combinedOdd}x
                     </span>
                   </div>
                   <div className="auto-comb-chips">
                     {data.combinada.selections.map((s, i) => (
-                      <span key={i} className="auto-chip">{s.name} <b>{s.probability}%</b></span>
+                      <span key={i} className="auto-chip">{s.name} <b>{cap(s.probability)}%</b></span>
                     ))}
                   </div>
                 </div>
@@ -1015,9 +1017,9 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
                         onClick={(e) => { e.stopPropagation(); onToggleMarket(mkt); }}
                       >
                         <span className="mkt-name">{mkt.name}</span>
-                        <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${mkt.probability}%` }} /></div>
+                        <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${cap(mkt.probability)}%` }} /></div>
                         <div className="mkt-nums">
-                          <span className="mkt-pct">{mkt.probability}%</span>
+                          <span className="mkt-pct">{cap(mkt.probability)}%</span>
                           {mkt.odd && <span className="mkt-odd">{mkt.odd.toFixed(2)}</span>}
                           {bkInfo && (
                             <span className="mkt-bk">
@@ -1090,7 +1092,7 @@ function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, sel
                       .map((p, i) => (
                         <div key={i} className={`timing-item ${p.highlight ? 'hot' : ''}`}>
                           <span className="timing-period">Gol {p.period} min</span>
-                          <span className="timing-prob">{p.probability}%</span>
+                          <span className="timing-prob">{cap(p.probability)}%</span>
                         </div>
                       ))}
                   </div>

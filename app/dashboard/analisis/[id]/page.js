@@ -13,6 +13,7 @@ function detectCountry() {
   } catch { return 'default'; }
 }
 
+const cap = (v) => Math.min(95, v);
 const fmtTime = (d) => new Date(d).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
 const fmtDate = (d) => new Date(d).toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' });
 const fmtShortDate = (d) => new Date(d).toLocaleDateString('es', { day: '2-digit', month: 'short' });
@@ -148,7 +149,7 @@ export default function AnalisisPage() {
             <div className="header-team">
               {a.homePosition && <span className="pos-badge-lg">{a.homePosition}°</span>}
               {a.calculatedProbabilities?.winner?.home != null && (
-                <span className="prob-badge-lg">{a.calculatedProbabilities.winner.home}%</span>
+                <span className="prob-badge-lg">{cap(a.calculatedProbabilities.winner.home)}%</span>
               )}
               <TeamLogo src={a.homeLogo} name={a.homeTeam} size={64} />
               <span className="header-team-name">{a.homeTeam}</span>
@@ -164,7 +165,7 @@ export default function AnalisisPage() {
             <div className="header-team">
               {a.awayPosition && <span className="pos-badge-lg">{a.awayPosition}°</span>}
               {a.calculatedProbabilities?.winner?.away != null && (
-                <span className="prob-badge-lg">{a.calculatedProbabilities.winner.away}%</span>
+                <span className="prob-badge-lg">{cap(a.calculatedProbabilities.winner.away)}%</span>
               )}
               <TeamLogo src={a.awayLogo} name={a.awayTeam} size={64} />
               <span className="header-team-name">{a.awayTeam}</span>
@@ -347,7 +348,7 @@ export default function AnalisisPage() {
             <div className="combinada-card">
               {c.highRisk && (
                 <div className="combinada-warning">
-                  &#9888; Combinada de riesgo alto — probabilidad combinada: {c.combinedProbability}%
+                  &#9888; Combinada de riesgo alto — probabilidad combinada: {cap(c.combinedProbability)}%
                 </div>
               )}
               <div className="combinada-selections">
@@ -362,7 +363,7 @@ export default function AnalisisPage() {
                       </div>
                       <div className="combinada-item-data">
                         <ProbBar label="" value={sel.probability} compact />
-                        <span className="combinada-prob">{sel.probability}%</span>
+                        <span className="combinada-prob">{cap(sel.probability)}%</span>
                         {sel.odd && <span className="combinada-odd">{sel.odd.toFixed(2)}</span>}
                       </div>
                     </div>
@@ -376,7 +377,7 @@ export default function AnalisisPage() {
                 </div>
                 <div className="combinada-total">
                   <span>Probabilidad combinada</span>
-                  <strong className={c.highRisk ? 'danger' : 'safe'}>{c.combinedProbability}%</strong>
+                  <strong className={c.highRisk ? 'danger' : 'safe'}>{cap(c.combinedProbability)}%</strong>
                 </div>
               </div>
             </div>
@@ -533,14 +534,15 @@ function OddBadge({ label, value }) {
 }
 
 function ProbBar({ label, value, compact = false }) {
-  const barColor = value >= 75 ? 'var(--green)' : value >= 50 ? 'var(--yellow)' : 'var(--red)';
+  const display = cap(value);
+  const barColor = display >= 75 ? 'var(--green)' : display >= 50 ? 'var(--yellow)' : 'var(--red)';
   return (
     <div className={`prob-bar-row ${compact ? 'compact' : ''}`}>
       {label && <span className="prob-label">{label}</span>}
       <div className="prob-bar-track">
-        <div className="prob-bar-fill" style={{ width: `${value}%`, background: barColor }} />
+        <div className="prob-bar-fill" style={{ width: `${display}%`, background: barColor }} />
       </div>
-      {!compact && <span className="prob-value">{value}%</span>}
+      {!compact && <span className="prob-value">{display}%</span>}
     </div>
   );
 }
@@ -707,12 +709,12 @@ function PerTeamSection({ perTeam, homeTeam, awayTeam, homeLogo, awayLogo }) {
                     <div
                       className="perteam-bar-fill"
                       style={{
-                        width: `${e.prob}%`,
+                        width: `${cap(e.prob)}%`,
                         background: e.prob >= 75 ? 'var(--green)' : e.prob >= 60 ? 'var(--yellow)' : 'var(--blue)',
                       }}
                     />
                   </div>
-                  <span className="perteam-prob">{e.prob}%</span>
+                  <span className="perteam-prob">{cap(e.prob)}%</span>
                 </div>
               ))}
             </div>
@@ -771,7 +773,7 @@ function GoalTimingSection({ goalTiming, homeTeam, awayTeam }) {
           <span className="timing-team-label">{homeTeam}</span>
           {goalTiming.home.map((d, i) => (
             <span key={i} className={`timing-cell ${getTimingColor(d.probability)}`}>
-              {d.probability}%
+              {cap(d.probability)}%
             </span>
           ))}
         </div>
@@ -780,7 +782,7 @@ function GoalTimingSection({ goalTiming, homeTeam, awayTeam }) {
           <span className="timing-team-label">{awayTeam}</span>
           {goalTiming.away.map((d, i) => (
             <span key={i} className={`timing-cell ${getTimingColor(d.probability)}`}>
-              {d.probability}%
+              {cap(d.probability)}%
             </span>
           ))}
         </div>
@@ -789,7 +791,7 @@ function GoalTimingSection({ goalTiming, homeTeam, awayTeam }) {
           <span className="timing-team-label">Combinado</span>
           {goalTiming.combined.map((d, i) => (
             <span key={i} className={`timing-cell ${getTimingColor(d.probability)}`}>
-              {d.probability}%
+              {cap(d.probability)}%
             </span>
           ))}
         </div>
