@@ -1,17 +1,21 @@
 import { getFixtures, getQuota } from '../../../../lib/api-football';
 import { saveToSanity } from '../../../../lib/sanity';
 
-// Cron: runs at 10:00 AM Spain time (08:00 UTC in winter, 08:00 UTC in summer)
-// This ensures all LATAM countries (Mexico UTC-6 = 4AM, Colombia UTC-5 = 5AM) have the correct date
-// Vercel cron schedule: "0 8 * * *"
+// Cron: runs at 10:00 AM Spain time (08:00 UTC)
+// cron-job.org: GET /api/cron/fixtures?secret=CRON_SECRET
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+function verifyCronAuth(request) {
+  const { searchParams } = new URL(request.url);
+  const secret = searchParams.get('secret')
+    || request.headers.get('authorization')?.replace('Bearer ', '');
+  return secret === process.env.CRON_SECRET || process.env.NODE_ENV !== 'production';
+}
+
 export async function GET(request) {
-  // Verify cron secret (Vercel sends this header)
-  const authHeader = request.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && process.env.NODE_ENV === 'production') {
+  if (!verifyCronAuth(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -19,11 +23,9 @@ export async function GET(request) {
     const today = new Date().toISOString().split('T')[0];
     console.log(`[CRON] Loading fixtures for ${today}...`);
 
-    // Load all fixtures for today
     const result = await getFixtures(today);
     const fixtures = result.fixtures || [];
 
-    // Also pre-load tomorrow's fixtures if API budget allows
     const quota = await getQuota();
     let tomorrowCount = 0;
 

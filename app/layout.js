@@ -1,5 +1,6 @@
 import './globals.css';
-import Providers from './providers';
+import { ClerkProvider } from '@clerk/nextjs';
+import { esES } from '@clerk/localizations';
 
 export const metadata = {
   title: 'CFanalisis.com - Analisis de Futbol Profesional',
@@ -13,11 +14,145 @@ export const viewport = {
   maximumScale: 1,
 };
 
+const clerkAppearance = {
+  layout: {
+    logoImageUrl: '/vflogo.png',
+    logoPlacement: 'inside',
+  },
+  variables: {
+    colorPrimary: '#00e676',
+    colorBackground: 'rgba(30, 30, 50, 0.97)',
+    colorText: '#ffffff',
+    colorTextSecondary: 'rgba(255,255,255,0.55)',
+    colorInputBackground: 'rgba(255,255,255,0.06)',
+    colorInputText: '#ffffff',
+    borderRadius: '12px',
+  },
+  elements: {
+    rootBox: { width: '100%', maxWidth: '420px' },
+    cardBox: {
+      boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
+    },
+    card: {
+      background: 'rgba(30, 30, 50, 0.97)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '20px',
+      padding: '0 24px 16px 24px',
+      animation: 'clerkCardIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+    },
+    logoBox: {
+      justifyContent: 'center',
+      alignItems: 'center',
+      height: '130px',
+      overflow: 'hidden',
+      margin: '0',
+      padding: '0',
+      animation: 'clerkLogoIn 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both',
+    },
+    logoImage: {
+      width: '200px',
+      height: '200px',
+      filter: 'drop-shadow(0 4px 20px rgba(0,230,118,0.3))',
+    },
+    header: {
+      padding: '0',
+      margin: '0',
+      gap: '0',
+    },
+    headerTitle: {
+      color: '#fff',
+      fontSize: '1.15rem',
+      margin: '0 0 2px 0',
+      padding: '0',
+      animation: 'clerkFadeUp 0.4s ease 0.3s both',
+    },
+    headerSubtitle: {
+      color: 'rgba(255,255,255,0.55)',
+      fontSize: '0.82rem',
+      margin: '0 0 6px 0',
+      padding: '0',
+      animation: 'clerkFadeUp 0.4s ease 0.35s both',
+    },
+    main: {
+      gap: '8px',
+    },
+    formFieldLabel: {
+      color: 'rgba(255,255,255,0.75)',
+      fontSize: '0.8rem',
+    },
+    formFieldHintText: {
+      color: 'rgba(255,255,255,0.4)',
+    },
+    formFieldInput: {
+      background: 'rgba(255,255,255,0.06)',
+      border: '1px solid rgba(255,255,255,0.12)',
+      color: '#fff',
+      borderRadius: '10px',
+      padding: '10px 12px',
+      fontSize: '0.9rem',
+    },
+    formButtonPrimary: {
+      background: 'linear-gradient(135deg, #00e676, #00b0ff)',
+      color: '#000',
+      fontWeight: 700,
+      borderRadius: '12px',
+      padding: '10px 16px',
+      fontSize: '0.9rem',
+      animation: 'clerkFadeUp 0.4s ease 0.5s both',
+    },
+    socialButtonsIconButton: {
+      background: 'rgba(255,255,255,0.06)',
+      border: '1px solid rgba(255,255,255,0.85)',
+      borderRadius: '10px',
+      transition: 'transform 0.2s ease, border-color 0.3s ease, background 0.3s ease',
+    },
+    socialButtonsProviderIcon: {
+      filter: 'brightness(1.1)',
+    },
+    dividerLine: { background: 'rgba(255,255,255,0.1)' },
+    dividerText: { color: 'rgba(255,255,255,0.4)' },
+    footerActionLink: { color: '#00e676' },
+    footerActionText: { color: 'rgba(255,255,255,0.5)', fontSize: '0.82rem' },
+    footer: {
+      background: 'rgba(30, 30, 50, 0.97)',
+      borderTop: '1px solid rgba(255,255,255,0.06)',
+    },
+    formFieldInputShowPasswordButton: { color: 'rgba(255,255,255,0.5)' },
+    identityPreviewEditButton: { color: '#00e676' },
+    formResendCodeLink: { color: '#00e676' },
+    otpCodeFieldInput: {
+      background: 'rgba(255,255,255,0.06)',
+      border: '1px solid rgba(255,255,255,0.15)',
+      color: '#fff',
+    },
+    alertText: { color: 'rgba(255,255,255,0.7)' },
+    modalBackdrop: {
+      backgroundColor: 'rgba(0, 0, 0, 0.75)',
+      backdropFilter: 'blur(8px)',
+      animation: 'clerkBackdropIn 0.3s ease forwards',
+    },
+    modalCloseButton: {
+      color: 'rgba(255,255,255,0.6)',
+      transition: 'color 0.2s ease, transform 0.3s ease',
+    },
+    modalContent: {
+      padding: '0',
+    },
+  },
+};
+
 export default function RootLayout({ children }) {
   return (
     <html lang="es">
       <body>
-        <Providers>{children}</Providers>
+        <ClerkProvider
+          localization={esES}
+          appearance={clerkAppearance}
+          signUpForceRedirectUrl="/planes"
+          signInForceRedirectUrl="/dashboard"
+        >
+          {children}
+        </ClerkProvider>
       </body>
     </html>
   );

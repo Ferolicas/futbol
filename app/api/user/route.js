@@ -1,20 +1,25 @@
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../../lib/auth';
+import { auth } from '@clerk/nextjs/server';
+import { getSanityUserByClerkId } from '../../../lib/clerk-sync';
 import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
 
 export const dynamic = 'force-dynamic';
 
 // GET: Get user-specific data (hidden, analyzed, combinadas)
 export async function GET(request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const sanityUser = await getSanityUserByClerkId(clerkId);
+  if (!sanityUser?._id) {
+    return Response.json({ error: 'User not found' }, { status: 404 });
+  }
+
   const { searchParams } = new URL(request.url);
-  const type = searchParams.get('type'); // 'hidden', 'analyzed', 'combinadas'
+  const type = searchParams.get('type');
   const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
-  const userId = session.user.id;
+  const userId = sanityUser._id;
 
   try {
     if (type === 'hidden') {
@@ -50,18 +55,22 @@ export async function GET(request) {
 
 // POST: Save user-specific data
 export async function POST(request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const sanityUser = await getSanityUserByClerkId(clerkId);
+  if (!sanityUser?._id) {
+    return Response.json({ error: 'User not found' }, { status: 404 });
+  }
+
   const { type, data, date: clientDate } = await request.json();
-  const userId = session.user.id;
+  const userId = sanityUser._id;
   const date = clientDate || new Date().toISOString().split('T')[0];
 
   try {
     if (type === 'hide') {
-      // Add fixture to user's hidden list
       const docId = `hidden-${userId.replace('cfaUser-', '')}`;
       const existing = await queryFromSanity(
         `*[_type == "cfaUserData" && userId == $userId && dataType == "hidden"][0]`,
@@ -99,7 +108,6 @@ export async function POST(request) {
     }
 
     if (type === 'analyze') {
-      // Mark fixture as analyzed for this user
       const docId = `analyzed-${userId.replace('cfaUser-', '')}-${date}`;
       const existing = await queryFromSanity(
         `*[_type == "cfaUserData" && userId == $userId && dataType == "analyzed" && date == $date][0]`,
@@ -122,7 +130,6 @@ export async function POST(request) {
     }
 
     if (type === 'remove-analyzed') {
-      // Remove a fixture from analyzed list
       const docId = `analyzed-${userId.replace('cfaUser-', '')}-${date}`;
       const existing = await queryFromSanity(
         `*[_type == "cfaUserData" && userId == $userId && dataType == "analyzed" && date == $date][0]`,
@@ -142,7 +149,6 @@ export async function POST(request) {
     }
 
     if (type === 'save-combinada') {
-      // Save a custom combinada for this user
       const docId = `comb-${userId.replace('cfaUser-', '')}-${Date.now()}`;
 
       await saveToSanity('cfaCombinada', docId, {
@@ -158,7 +164,6 @@ export async function POST(request) {
     }
 
     if (type === 'delete-combinada') {
-      // Delete a saved combinada
       const { deleteFromSanity } = await import('../../../lib/sanity');
       const docId = data.combinadaId?.replace('cfaCombinada-', '');
       if (docId) await deleteFromSanity('cfaCombinada', docId);

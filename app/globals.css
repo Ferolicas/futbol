@@ -1535,6 +1535,248 @@ body {
 .footer-links { display: flex; gap: 20px; justify-content: center; }
 .footer-links a { color: var(--t3); font-size: .85rem; text-decoration: none; transition: color .2s; }
 .footer-links a:hover { color: var(--green); }
+.footer-link-btn {
+  background: none; border: none; color: var(--t3); font-size: .85rem;
+  cursor: pointer; padding: 0; font-family: inherit; transition: color .2s;
+}
+.footer-link-btn:hover { color: var(--green); }
+
+/* ===================== CLERK MODAL ANIMATIONS ===================== */
+
+/* Keyframes */
+@keyframes clerkBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes clerkCardIn {
+  from { opacity: 0; transform: scale(0.88) translateY(30px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes clerkLogoIn {
+  from { opacity: 0; transform: scale(0.3) rotate(-10deg); }
+  60% { transform: scale(1.1) rotate(3deg); }
+  to { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+@keyframes clerkFadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes clerkPulse {
+  0%, 100% { filter: drop-shadow(0 4px 20px rgba(0,230,118,0.3)); }
+  50% { filter: drop-shadow(0 4px 30px rgba(0,230,118,0.5)); }
+}
+@keyframes clerkPulseLight {
+  0%, 100% { filter: drop-shadow(0 4px 16px rgba(0,0,0,0.15)); }
+  50% { filter: drop-shadow(0 4px 24px rgba(0,0,0,0.25)); }
+}
+
+/* ===== DARK THEME (default) ===== */
+
+/* Card & container */
+.cl-cardBox { box-shadow: none !important; }
+.cl-card {
+  background: rgba(30, 30, 50, 0.97) !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  border-radius: 20px !important;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.5) !important;
+  padding: 0 24px 12px 24px !important;
+  gap: 0px !important;
+  overflow: hidden;
+  position: relative !important;
+  animation: clerkCardIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Logo: 0 padding, tight */
+.cl-logoBox {
+  height: 130px !important; overflow: hidden !important;
+  margin: 0 !important; padding: 0 !important;
+  min-height: 0 !important;
+  align-items: center !important;
+}
+.cl-logoImage {
+  padding: 0 !important;
+  width: 200px !important; height: 200px !important;
+  animation: clerkPulse 3s ease-in-out infinite !important;
+}
+.cl-logoBox a { line-height: 0 !important; display: flex !important; }
+
+/* Header: zero gaps */
+.cl-header { padding: 0 !important; margin: 0 !important; gap: 0 !important; }
+.cl-header > div { gap: 0 !important; margin: 0 !important; padding: 0 !important; }
+.cl-headerTitle {
+  margin: 0 0 2px 0 !important; padding: 0 !important;
+  color: #fff !important; font-size: 1.15rem !important;
+  animation: clerkFadeUp 0.4s ease 0.3s both;
+}
+.cl-headerSubtitle {
+  margin: 0 0 8px 0 !important; padding: 0 !important;
+  color: rgba(255,255,255,0.55) !important; font-size: 0.82rem !important;
+  animation: clerkFadeUp 0.4s ease 0.35s both;
+}
+
+/* Main area compact */
+.cl-main { padding: 0 !important; margin: 0 !important; gap: 4px !important; }
+.cl-socialButtonsRoot { margin: 0 !important; }
+.cl-dividerRow { margin: 2px 0 !important; }
+.cl-form { gap: 2px !important; }
+
+/* Social icon buttons - dark: white border */
+.cl-socialButtonsIconButton {
+  background: rgba(255,255,255,0.06) !important;
+  border: 1px solid rgba(255,255,255,0.85) !important;
+  border-radius: 10px !important;
+  transition: transform 0.2s ease, border-color 0.3s ease, background 0.3s ease !important;
+}
+.cl-socialButtonsIconButton:hover {
+  transform: translateY(-2px) !important;
+  background: rgba(255,255,255,0.12) !important;
+  border-color: #fff !important;
+}
+.cl-socialButtonsIconButton:active { transform: scale(0.95) !important; }
+.cl-socialButtons { margin-bottom: 4px !important; }
+
+/* Divider */
+.cl-dividerLine { background: rgba(255,255,255,0.1) !important; }
+.cl-dividerText { color: rgba(255,255,255,0.4) !important; }
+
+/* Form fields */
+.cl-formFieldLabel { color: rgba(255,255,255,0.75) !important; font-size: 0.8rem !important; }
+.cl-formFieldHintText { color: rgba(255,255,255,0.4) !important; }
+.cl-formFieldLabelRow { margin-bottom: 2px !important; }
+.cl-formField { margin-bottom: 2px !important; }
+.cl-formFieldInput {
+  background: rgba(255,255,255,0.06) !important;
+  border: 1px solid rgba(255,255,255,0.12) !important;
+  color: #fff !important;
+  border-radius: 10px !important; padding: 10px 12px !important; font-size: 0.9rem !important;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease !important;
+}
+.cl-formFieldInput:focus {
+  border-color: rgba(0,230,118,0.5) !important;
+  box-shadow: 0 0 0 3px rgba(0,230,118,0.1) !important;
+}
+.cl-formFieldInput::placeholder { color: rgba(255,255,255,0.3) !important; }
+.cl-formFieldInputShowPasswordButton { color: rgba(255,255,255,0.5) !important; }
+
+/* Form rows stagger */
+.cl-formFieldRow { animation: clerkFadeUp 0.35s ease both; }
+.cl-formFieldRow:nth-child(1) { animation-delay: 0.35s; }
+.cl-formFieldRow:nth-child(2) { animation-delay: 0.42s; }
+.cl-formFieldRow:nth-child(3) { animation-delay: 0.49s; }
+
+/* Primary button */
+.cl-formButtonPrimary {
+  background: linear-gradient(135deg, #00e676, #00b0ff) !important;
+  color: #000 !important; font-weight: 700 !important;
+  border-radius: 12px !important; padding: 10px 16px !important; font-size: 0.9rem !important;
+  transition: transform 0.2s ease, box-shadow 0.3s ease !important;
+  animation: clerkFadeUp 0.4s ease 0.5s both;
+}
+.cl-formButtonPrimary:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 24px rgba(0,230,118,0.35) !important;
+}
+.cl-formButtonPrimary:active { transform: translateY(0) scale(0.97) !important; }
+
+/* Footer */
+.cl-footer {
+  padding-top: 8px !important;
+  background: rgba(30, 30, 50, 0.97) !important;
+  border-top: 1px solid rgba(255,255,255,0.06) !important;
+}
+.cl-footerActionLink { color: #00e676 !important; }
+.cl-footerActionLink:hover { text-decoration: underline !important; }
+.cl-footerActionText { color: rgba(255,255,255,0.5) !important; }
+
+/* Close button: absolute so it doesn't push content down */
+.cl-modalCloseButton {
+  position: absolute !important;
+  top: 8px !important; right: 8px !important;
+  z-index: 10 !important;
+  color: rgba(255,255,255,0.6) !important;
+  transition: color 0.2s ease, transform 0.3s ease !important;
+}
+.cl-modalCloseButton:hover {
+  color: #fff !important;
+  transform: rotate(90deg) scale(1.1) !important;
+}
+
+/* Backdrop */
+.cl-modalBackdrop {
+  background-color: rgba(0, 0, 0, 0.75) !important;
+  backdrop-filter: blur(8px) !important;
+  animation: clerkBackdropIn 0.3s ease forwards;
+}
+.cl-modalContent { padding: 0 !important; }
+
+/* OTP */
+.cl-otpCodeFieldInput {
+  background: rgba(255,255,255,0.06) !important;
+  border: 1px solid rgba(255,255,255,0.15) !important;
+  color: #fff !important;
+  animation: clerkFadeUp 0.3s ease 0.2s both;
+}
+.cl-identityPreviewEditButton { color: #00e676 !important; }
+.cl-formResendCodeLink { color: #00e676 !important; }
+.cl-alertText { color: rgba(255,255,255,0.7) !important; }
+
+/* ===== LIGHT THEME ADAPTATION ===== */
+@media (prefers-color-scheme: light) {
+  .cl-card {
+    background: rgba(255, 255, 255, 0.97) !important;
+    border: 1px solid rgba(0,0,0,0.1) !important;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.15) !important;
+  }
+  .cl-headerTitle { color: #111 !important; }
+  .cl-headerSubtitle { color: rgba(0,0,0,0.55) !important; }
+  .cl-formFieldLabel { color: rgba(0,0,0,0.7) !important; }
+  .cl-formFieldHintText { color: rgba(0,0,0,0.4) !important; }
+  .cl-formFieldInput {
+    background: rgba(0,0,0,0.04) !important;
+    border: 1px solid rgba(0,0,0,0.15) !important;
+    color: #111 !important;
+  }
+  .cl-formFieldInput::placeholder { color: rgba(0,0,0,0.35) !important; }
+  .cl-formFieldInput:focus {
+    border-color: rgba(0,180,100,0.5) !important;
+    box-shadow: 0 0 0 3px rgba(0,180,100,0.1) !important;
+  }
+  .cl-formFieldInputShowPasswordButton { color: rgba(0,0,0,0.5) !important; }
+  .cl-socialButtonsIconButton {
+    background: rgba(0,0,0,0.03) !important;
+    border: 1px solid rgba(0,0,0,0.7) !important;
+  }
+  .cl-socialButtonsIconButton:hover {
+    background: rgba(0,0,0,0.07) !important;
+    border-color: #000 !important;
+  }
+  .cl-dividerLine { background: rgba(0,0,0,0.12) !important; }
+  .cl-dividerText { color: rgba(0,0,0,0.4) !important; }
+  .cl-footer {
+    background: rgba(255,255,255,0.97) !important;
+    border-top: 1px solid rgba(0,0,0,0.06) !important;
+  }
+  .cl-footerActionText { color: rgba(0,0,0,0.5) !important; }
+  .cl-footerActionLink { color: #00875a !important; }
+  .cl-modalCloseButton { color: rgba(0,0,0,0.5) !important; }
+  .cl-modalCloseButton:hover { color: #111 !important; }
+  .cl-modalBackdrop { background-color: rgba(0,0,0,0.4) !important; }
+  .cl-formButtonPrimary {
+    background: linear-gradient(135deg, #00c853, #0091ea) !important;
+    color: #fff !important;
+  }
+  .cl-logoImage {
+    filter: drop-shadow(0 4px 16px rgba(0,0,0,0.15)) !important;
+    animation: clerkPulseLight 3s ease-in-out infinite !important;
+  }
+  .cl-identityPreviewEditButton { color: #00875a !important; }
+  .cl-otpCodeFieldInput {
+    background: rgba(0,0,0,0.04) !important;
+    border: 1px solid rgba(0,0,0,0.15) !important;
+    color: #111 !important;
+  }
+  .cl-alertText { color: rgba(0,0,0,0.7) !important; }
+}
 
 /* ===================== REGISTRATION MODAL ===================== */
 .modal-overlay {
@@ -1939,6 +2181,70 @@ body {
   display: flex; align-items: center; justify-content: center;
 }
 .acc-rm:hover { background: rgba(255,61,87,0.2) !important; }
+
+/* ===================== PLANES PAGE ===================== */
+.planes-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 40px 20px;
+}
+.planes-bg {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 50%, #0a0a1a 100%);
+  z-index: -1;
+}
+.planes-container {
+  max-width: 900px;
+  width: 100%;
+}
+.planes-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+.planes-logo {
+  height: 60px;
+  margin-bottom: 16px;
+}
+.planes-header h1 {
+  font-size: 1.8rem;
+  color: #fff;
+  margin-bottom: 8px;
+}
+.planes-header p {
+  color: rgba(255,255,255,0.6);
+  font-size: 1rem;
+}
+.planes-footer {
+  text-align: center;
+  margin-top: 32px;
+}
+.planes-signout {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.15);
+  color: rgba(255,255,255,0.5);
+  padding: 8px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: .85rem;
+  transition: all .2s;
+}
+.planes-signout:hover {
+  border-color: rgba(255,255,255,0.3);
+  color: #fff;
+}
+.planes-page .plan-card {
+  cursor: pointer;
+  opacity: 1;
+  transform: none;
+}
+.planes-page .plan-card.selected {
+  border-color: var(--green, #00e676);
+  box-shadow: 0 0 20px rgba(0,230,118,0.2);
+}
 
 /* ===================== MOBILE LANDING ===================== */
 @media (max-width: 640px) {

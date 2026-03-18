@@ -1,31 +1,35 @@
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../../lib/auth';
+import { auth } from '@clerk/nextjs/server';
+import { getSanityUserByClerkId } from '../../../lib/clerk-sync';
 import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
 import { sendChatNotification } from '../../../lib/resend-email';
+import { triggerEvent } from '../../../lib/pusher';
 
 export const dynamic = 'force-dynamic';
 
 // GET: Fetch chat messages for current user (or all for admin)
 export async function GET(request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const sanityUser = await getSanityUserByClerkId(clerkId);
+  if (!sanityUser?._id) {
+    return Response.json({ error: 'User not found' }, { status: 404 });
+  }
+
   const { searchParams } = new URL(request.url);
-  const targetUserId = searchParams.get('userId'); // Admin can query specific user
-  const isAdmin = session.user.role === 'admin';
+  const targetUserId = searchParams.get('userId');
+  const isAdmin = sanityUser.role === 'admin';
 
   try {
     if (isAdmin && !targetUserId) {
-      // Admin: get all chat conversations (grouped by user)
       const messages = await queryFromSanity(
         `*[_type == "cfaChat"] | order(_createdAt desc) {
           _id, userId, userName, userEmail, message, sender, read, createdAt
         }[0..200]`
       );
 
-      // Group by userId
       const conversations = {};
       (messages || []).forEach(m => {
         if (!conversations[m.userId]) {
@@ -46,8 +50,7 @@ export async function GET(request) {
       return Response.json({ conversations: Object.values(conversations) });
     }
 
-    // Regular user or admin querying specific user
-    const userId = isAdmin && targetUserId ? targetUserId : session.user.id;
+    const userId = isAdmin && targetUserId ? targetUserId : sanityUser._id;
     const messages = await queryFromSanity(
       `*[_type == "cfaChat" && userId == $userId] | order(createdAt asc) {
         _id, message, sender, read, createdAt
@@ -64,9 +67,14 @@ export async function GET(request) {
 
 // POST: Send a chat message
 export async function POST(request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const sanityUser = await getSanityUserByClerkId(clerkId);
+  if (!sanityUser?._id) {
+    return Response.json({ error: 'User not found' }, { status: 404 });
   }
 
   const { message, targetUserId } = await request.json();
@@ -74,30 +82,45 @@ export async function POST(request) {
     return Response.json({ error: 'Message required' }, { status: 400 });
   }
 
-  const isAdmin = session.user.role === 'admin';
+  const isAdmin = sanityUser.role === 'admin';
   const sender = isAdmin ? 'agent' : 'user';
-  const userId = isAdmin && targetUserId ? targetUserId : session.user.id;
+  const userId = isAdmin && targetUserId ? targetUserId : sanityUser._id;
 
   const msgId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
   try {
     await saveToSanity('cfaChat', msgId, {
       userId,
-      userName: session.user.name,
-      userEmail: session.user.email,
+      userName: sanityUser.name,
+      userEmail: sanityUser.email,
       message: message.trim(),
       sender,
       read: false,
       createdAt: new Date().toISOString(),
     });
 
-    // Send email notification to admin when user sends message
+    // Push real-time via Pusher
+    await triggerEvent(`chat-${userId}`, 'new-message', {
+      _id: `cfaChat-${msgId}`,
+      message: message.trim(),
+      sender,
+      createdAt: new Date().toISOString(),
+    });
+
+    // Also notify admin channel
     if (sender === 'user') {
-      sendChatNotification({
-        userName: session.user.name,
-        userEmail: session.user.email,
+      await triggerEvent('chat-admin', 'new-message', {
+        userId,
+        userName: sanityUser.name,
         message: message.trim(),
-      }).catch(() => {}); // Fire and forget
+        createdAt: new Date().toISOString(),
+      });
+
+      sendChatNotification({
+        userName: sanityUser.name,
+        userEmail: sanityUser.email,
+        message: message.trim(),
+      }).catch(() => {});
     }
 
     return Response.json({ success: true, id: msgId });
@@ -109,8 +132,8 @@ export async function POST(request) {
 
 // PATCH: Mark messages as read
 export async function PATCH(request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -118,7 +141,6 @@ export async function PATCH(request) {
   if (!messageIds?.length) return Response.json({ success: true });
 
   try {
-    // Mark each message as read
     await Promise.all(
       messageIds.map(async (id) => {
         const doc = await queryFromSanity(

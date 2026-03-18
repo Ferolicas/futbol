@@ -58,7 +58,7 @@ export async function GET(request) {
 
     // 2. Fire first analysis batch (non-blocking chain)
     const batchSize = 3;
-    const baseUrl = process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
       : 'http://localhost:3000');
 

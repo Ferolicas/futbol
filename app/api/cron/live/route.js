@@ -1,9 +1,9 @@
 import { getFromSanity, saveToSanity } from '../../../../lib/sanity';
-import { ALL_LEAGUE_IDS, LEAGUES } from '../../../../lib/leagues';
+import { ALL_LEAGUE_IDS } from '../../../../lib/leagues';
+import { triggerEvent } from '../../../../lib/pusher';
 
 // Cron: runs every 1 minute during active hours
-// Vercel cron schedule: "* * * * *" (or use external scheduler)
-// Budget: ~1440 calls/day for live scores
+// cron-job.org: GET /api/cron/live?secret=CRON_SECRET
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -12,6 +12,13 @@ const API_HOST = 'v3.football.api-sports.io';
 
 function getApiKey() {
   return process.env.FOOTBALL_API_KEY;
+}
+
+function verifyCronAuth(request) {
+  const { searchParams } = new URL(request.url);
+  const secret = searchParams.get('secret')
+    || request.headers.get('authorization')?.replace('Bearer ', '');
+  return secret === process.env.CRON_SECRET || process.env.NODE_ENV !== 'production';
 }
 
 async function fetchLiveScores() {
@@ -35,22 +42,19 @@ async function fetchLiveScores() {
 }
 
 export async function GET(request) {
-  const authHeader = request.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && process.env.NODE_ENV === 'production') {
+  if (!verifyCronAuth(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
     const today = new Date().toISOString().split('T')[0];
 
-    // Fetch live scores (single API call)
     const allLive = await fetchLiveScores();
 
     if (!allLive) {
       return Response.json({ success: false, error: 'API fetch failed', timestamp: new Date().toISOString() });
     }
 
-    // Filter to our tracked leagues
     const tracked = allLive.filter(m => ALL_LEAGUE_IDS.includes(m.league.id));
 
     if (tracked.length === 0) {
@@ -80,6 +84,21 @@ export async function GET(request) {
         ...cached,
         matches,
         liveUpdatedAt: new Date().toISOString(),
+      });
+
+      // Push real-time update via Pusher
+      const liveUpdates = tracked.map(m => ({
+        fixtureId: m.fixture.id,
+        status: m.fixture.status,
+        goals: m.goals,
+        score: m.score,
+      }));
+
+      await triggerEvent('live-scores', 'update', {
+        date: today,
+        liveCount: tracked.length,
+        matches: liveUpdates,
+        timestamp: new Date().toISOString(),
       });
     }
 

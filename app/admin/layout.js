@@ -1,21 +1,39 @@
 'use client';
 
-import { useSession, signOut } from 'next-auth/react';
+import { useUser, useClerk } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 export default function AdminLayout({ children }) {
-  const { data: session, status } = useSession();
+  const { user, isLoaded } = useUser();
+  const { signOut } = useClerk();
   const router = useRouter();
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    if (status === 'authenticated' && session?.user?.role !== 'admin') {
-      router.push('/dashboard');
+    if (!isLoaded) return;
+    if (!user) {
+      router.push('/sign-in');
+      return;
     }
-  }, [session, status, router]);
 
-  if (status === 'loading') return <div className="admin-layout"><p>Cargando...</p></div>;
-  if (session?.user?.role !== 'admin') return null;
+    // Check admin role from Sanity
+    fetch('/api/user/role')
+      .then(r => r.json())
+      .then(data => {
+        if (data.role === 'admin') {
+          setIsAdmin(true);
+        } else {
+          router.push('/dashboard');
+        }
+      })
+      .catch(() => router.push('/dashboard'))
+      .finally(() => setChecking(false));
+  }, [user, isLoaded, router]);
+
+  if (!isLoaded || checking) return <div className="admin-layout"><p>Cargando...</p></div>;
+  if (!isAdmin) return null;
 
   return (
     <div className="admin-layout">
@@ -26,7 +44,7 @@ export default function AdminLayout({ children }) {
         </div>
         <div className="admin-header-right">
           <a href="/dashboard" className="admin-link">Dashboard</a>
-          <button className="admin-signout" onClick={() => signOut({ callbackUrl: '/login' })}>Salir</button>
+          <button className="admin-signout" onClick={() => signOut({ redirectUrl: '/' })}>Salir</button>
         </div>
       </header>
       {children}

@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { useSession } from 'next-auth/react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useUser } from '@clerk/nextjs';
+import { usePusherEvent } from '../../lib/use-pusher';
 
 export default function ChatWidget() {
-  const { data: session } = useSession();
+  const { user } = useUser();
   const [isOpen, setIsOpen] = useState(false);
   const [view, setView] = useState('menu'); // 'menu', 'ticket', 'chat', 'ticket-sent'
   const [messages, setMessages] = useState([]);
@@ -13,19 +14,45 @@ export default function ChatWidget() {
   const [ticketId, setTicketId] = useState('');
   const [sending, setSending] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [sanityUserId, setSanityUserId] = useState(null);
   const messagesEndRef = useRef(null);
   const pollRef = useRef(null);
 
-  // Load messages when chat opens
+  // Get Sanity user ID for Pusher channel
   useEffect(() => {
-    if (isOpen && view === 'chat' && session?.user) {
+    if (user) {
+      fetch('/api/user/role')
+        .then(r => r.json())
+        .catch(() => null);
+      // We use the Clerk userId as channel identifier
+      setSanityUserId(user.id);
+    }
+  }, [user]);
+
+  // Real-time chat messages via Pusher
+  usePusherEvent(
+    sanityUserId ? `chat-${sanityUserId}` : null,
+    'new-message',
+    useCallback((msg) => {
+      setMessages(prev => {
+        // Avoid duplicates
+        if (prev.some(m => m._id === msg._id)) return prev;
+        return [...prev, msg];
+      });
+      if (msg.sender === 'agent') setUnread(prev => prev + 1);
+    }, [])
+  );
+
+  // Load messages when chat opens (initial load + fallback polling)
+  useEffect(() => {
+    if (isOpen && view === 'chat' && user) {
       loadMessages();
-      // Poll for new messages every 5 seconds
-      pollRef.current = setInterval(loadMessages, 5000);
+      // Reduced polling as Pusher handles real-time (fallback every 30s)
+      pollRef.current = setInterval(loadMessages, 30000);
       return () => clearInterval(pollRef.current);
     }
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [isOpen, view, session]);
+  }, [isOpen, view, user]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -90,7 +117,7 @@ export default function ChatWidget() {
 
   const fmtTime = (d) => new Date(d).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
 
-  if (!session?.user) return null;
+  if (!user) return null;
 
   return (
     <div className="chat-widget">
@@ -108,7 +135,7 @@ export default function ChatWidget() {
           {view === 'menu' && (
             <div className="chat-menu">
               <p style={{ color: 'var(--t2)', fontSize: '.85rem', marginBottom: '8px' }}>
-                Hola {session.user.name?.split(' ')[0]}! Como podemos ayudarte?
+                Hola {user?.firstName || 'Usuario'}! Como podemos ayudarte?
               </p>
               <button className="chat-menu-btn" onClick={() => setView('ticket')}>
                 <span className="chat-menu-icon">&#127758;</span>

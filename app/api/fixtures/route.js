@@ -1,7 +1,7 @@
 import { getFixtures, getQuota } from '../../../lib/api-football';
 import { getAnalyzedMatchesFull } from '../../../lib/sanity-cache';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../../lib/auth';
+import { auth } from '@clerk/nextjs/server';
+import { getSanityUserByClerkId } from '../../../lib/clerk-sync';
 import { queryFromSanity, getFromSanity } from '../../../lib/sanity';
 import { getCachedStandingsPositions } from '../../../lib/api-football';
 
@@ -33,7 +33,7 @@ export async function GET(request) {
       const batchFlag = await getFromSanity('appConfig', `dailyBatch-${date}`);
       if (!batchFlag?.started) {
         // First visit of the day — trigger full analysis batch in background
-        const baseUrl = process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
           ? `https://${process.env.VERCEL_URL}`
           : 'http://localhost:3000');
 
@@ -46,8 +46,9 @@ export async function GET(request) {
     // Get user-specific data
     let hidden = [];
     let analyzed = [];
-    const session = await getServerSession(authOptions);
-    const userId = session?.user?.id;
+    const { userId: clerkId } = await auth();
+    const sanityUser = clerkId ? await getSanityUserByClerkId(clerkId) : null;
+    const userId = sanityUser?._id;
 
     if (userId) {
       const [hiddenDoc, analyzedDoc] = await Promise.all([

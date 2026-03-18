@@ -8,12 +8,17 @@
     "start": "next start"
   },
   "dependencies": {
+    "@clerk/localizations": "^4.2.2",
+    "@clerk/nextjs": "^6.39.0",
     "@sanity/client": "^6.24.1",
     "@stripe/stripe-js": "^8.10.0",
     "bcryptjs": "^3.0.3",
+    "framer-motion": "^12.38.0",
     "next": "^14.2.21",
     "next-auth": "^4.24.13",
     "next-sanity": "^9.12.3",
+    "pusher": "^5.3.2",
+    "pusher-js": "^8.4.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "resend": "^6.9.4",
@@ -21,5 +26,8 @@
     "stripe": "^20.4.1",
     "styled-components": "^6.3.11",
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "playwright": "^1.58.2"
   }
 }

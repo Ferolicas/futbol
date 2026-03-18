@@ -2,8 +2,10 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useSession, signOut } from 'next-auth/react';
+import { useUser, useClerk } from '@clerk/nextjs';
+import { motion, AnimatePresence } from 'framer-motion';
 import { FLAGS } from '../../lib/leagues';
+import { usePusherEvent } from '../../lib/use-pusher';
 
 const today = () => {
   const d = new Date();
@@ -20,7 +22,8 @@ const statusText = (s) => ({
 
 export default function Dashboard() {
   const router = useRouter();
-  const { data: session } = useSession();
+  const { user } = useUser();
+  const { signOut } = useClerk();
   const [splash, setSplash] = useState(true);
   const [splashFade, setSplashFade] = useState(false);
   const [tab, setTab] = useState('partidos');
@@ -109,6 +112,39 @@ export default function Dashboard() {
       setTimeout(() => setSplash(false), 600);
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // === PUSHER REAL-TIME EVENTS ===
+
+  // Live scores: update fixtures in real-time
+  usePusherEvent('live-scores', 'update', useCallback((data) => {
+    if (!data?.matches) return;
+    setFixtures(prev => prev.map(f => {
+      const liveMatch = data.matches.find(m => m.fixtureId === f.fixture.id);
+      if (liveMatch) {
+        return {
+          ...f,
+          fixture: { ...f.fixture, status: liveMatch.status },
+          goals: liveMatch.goals,
+          score: liveMatch.score,
+        };
+      }
+      return f;
+    }));
+  }, []));
+
+  // Lineups: notify that lineups are available
+  usePusherEvent('match-updates', 'lineups-ready', useCallback((data) => {
+    if (!data?.fixtureIds) return;
+    // Reload fixtures to get updated analysis with lineups
+    loadFixtures(date);
+  }, [date, loadFixtures]));
+
+  // Analysis batch: reload when complete
+  usePusherEvent('analysis', 'batch-complete', useCallback((data) => {
+    if (data?.date === date) {
+      loadFixtures(date);
+    }
+  }, [date, loadFixtures]));
 
   const changeDate = (offset) => {
     const d = new Date(date);
@@ -348,45 +384,76 @@ export default function Dashboard() {
 
   if (splash) {
     return (
-      <div className={`splash ${splashFade ? 'fade-out' : ''}`}>
+      <motion.div
+        className={`splash ${splashFade ? 'fade-out' : ''}`}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.6 }}
+      >
         <div className="splash-content">
-          <div className="splash-logo-wrap">
+          <motion.div
+            className="splash-logo-wrap"
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
+          >
             <img src="/logo.png" alt="CFanalisis" className="splash-logo" />
-          </div>
-          <div className="splash-text">
+          </motion.div>
+          <motion.div
+            className="splash-text"
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.5, duration: 0.5 }}
+          >
             <span className="splash-welcome">Bienvenido a tu casa de</span>
             <span className="splash-brand">Analisis</span>
-          </div>
-          <div className="splash-loader">
+          </motion.div>
+          <motion.div
+            className="splash-loader"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.8 }}
+          >
             <div className="splash-bar"><div className="splash-bar-fill" /></div>
             <span className="splash-loading">Cargando partidos...</span>
-          </div>
+          </motion.div>
           <div className="splash-dots">
             <span className="splash-dot" /><span className="splash-dot" /><span className="splash-dot" />
           </div>
         </div>
-      </div>
+      </motion.div>
     );
   }
 
   return (
-    <div className="app">
+    <motion.div
+      className="app"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.4 }}
+    >
       <div className="container">
         {/* HEADER */}
-        <header className="header">
+        <motion.header
+          className="header"
+          initial={{ y: -20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ duration: 0.4, delay: 0.1 }}
+        >
           <img src="/vflogo.png" alt="CFanalisis" className="brand-logo" />
           <div className="header-right">
-            {session?.user && (
+            {user && (
               <div className="user-badge">
-                <span className="user-name">{session.user.name?.split(' ')[0]}</span>
-                <button className="btn-signout" onClick={() => signOut({ callbackUrl: '/' })}>Salir</button>
+                <span className="user-name">{user.firstName || user.emailAddresses?.[0]?.emailAddress?.split('@')[0]}</span>
+                <button className="btn-signout" onClick={() => signOut({ redirectUrl: '/' })}>Salir</button>
               </div>
             )}
             <button className="btn-reload" onClick={() => loadFixtures(date)} disabled={loading}>
               <span className={loading ? 'spin' : ''}>&#8635;</span>
             </button>
           </div>
-        </header>
+        </motion.header>
 
         {/* CONTROLS: Date + Filters */}
         <div className="controls-row">
@@ -679,7 +746,7 @@ export default function Dashboard() {
           <span>{visible.length} partidos</span>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -693,10 +760,15 @@ function MatchCard({ match, isAnalyzed, isSelected, odds, standings, onSelect, o
   const flag = FLAGS[meta.country] || '';
 
   return (
-    <div
+    <motion.div
       className={`mcard ${live ? 'live' : ''} ${finished ? 'fin' : ''} ${isSelected ? 'sel' : ''} ${isAnalyzed ? 'done' : ''} stagger`}
       style={{ '--i': idx }}
       onClick={isAnalyzed ? onView : onSelect}
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: idx * 0.03 }}
+      whileHover={{ scale: 1.01 }}
+      layout
     >
       <div className="mcard-top">
         <div className="mcard-league">
@@ -752,7 +824,7 @@ function MatchCard({ match, isAnalyzed, isSelected, odds, standings, onSelect, o
         )}
         <button className="btn-x" onClick={(e) => { e.stopPropagation(); onHide(e); }}>&#10005;</button>
       </div>
-    </div>
+    </motion.div>
   );
 }
 

@@ -1,18 +1,23 @@
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../../lib/auth';
+import { auth } from '@clerk/nextjs/server';
+import { getSanityUserByClerkId } from '../../../lib/clerk-sync';
 import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
 import { sendTicketNotification } from '../../../lib/resend-email';
 
 export const dynamic = 'force-dynamic';
 
 // GET: List tickets
-export async function GET(request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+export async function GET() {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const isAdmin = session.user.role === 'admin';
+  const sanityUser = await getSanityUserByClerkId(clerkId);
+  if (!sanityUser?._id) {
+    return Response.json({ error: 'User not found' }, { status: 404 });
+  }
+
+  const isAdmin = sanityUser.role === 'admin';
 
   try {
     let tickets;
@@ -27,7 +32,7 @@ export async function GET(request) {
         `*[_type == "cfaTicket" && userId == $userId] | order(createdAt desc) {
           _id, ticketId, message, status, reply, createdAt, repliedAt
         }`,
-        { userId: session.user.id }
+        { userId: sanityUser._id }
       );
     }
 
@@ -39,13 +44,18 @@ export async function GET(request) {
 
 // POST: Create a ticket or reply to one
 export async function POST(request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const sanityUser = await getSanityUserByClerkId(clerkId);
+  if (!sanityUser?._id) {
+    return Response.json({ error: 'User not found' }, { status: 404 });
+  }
+
   const { message, ticketDocId, reply } = await request.json();
-  const isAdmin = session.user.role === 'admin';
+  const isAdmin = sanityUser.role === 'admin';
 
   try {
     // Admin replying to a ticket
@@ -73,7 +83,6 @@ export async function POST(request) {
       return Response.json({ error: 'Message required' }, { status: 400 });
     }
 
-    // Generate ticket ID: CFA_1000 + incremental
     const existingTickets = await queryFromSanity(
       `count(*[_type == "cfaTicket"])`
     );
@@ -83,21 +92,20 @@ export async function POST(request) {
     const docId = `ticket-${Date.now()}`;
     await saveToSanity('cfaTicket', docId, {
       ticketId,
-      userId: session.user.id,
-      userName: session.user.name,
-      userEmail: session.user.email,
+      userId: sanityUser._id,
+      userName: sanityUser.name,
+      userEmail: sanityUser.email,
       message: message.trim(),
       status: 'open',
       createdAt: new Date().toISOString(),
     });
 
-    // Send email notification
     sendTicketNotification({
       ticketId,
       message: message.trim(),
-      userEmail: session.user.email,
-      userName: session.user.name,
-    }).catch(() => {}); // Fire and forget
+      userEmail: sanityUser.email,
+      userName: sanityUser.name,
+    }).catch(() => {});
 
     return Response.json({ success: true, ticketId });
   } catch (error) {

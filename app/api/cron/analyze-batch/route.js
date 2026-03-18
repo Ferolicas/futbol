@@ -1,6 +1,7 @@
 import { analyzeMatch } from '../../../../lib/api-football';
 import { getFromSanity, saveToSanity } from '../../../../lib/sanity';
 import { getCachedFixturesRaw } from '../../../../lib/sanity-cache';
+import { triggerEvent } from '../../../../lib/pusher';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -32,6 +33,11 @@ export async function POST(request) {
         completedAt: new Date().toISOString(),
       });
       console.log(`[ANALYZE-BATCH] All done for ${date}`);
+      await triggerEvent('analysis', 'batch-complete', {
+        date,
+        fixtureCount: totalFixtures || allFixtures.length,
+        timestamp: new Date().toISOString(),
+      });
       return Response.json({ success: true, message: 'All batches complete' });
     }
 
@@ -55,12 +61,21 @@ export async function POST(request) {
       })
     );
 
+    // Push progress event
+    await triggerEvent('analysis', 'batch-progress', {
+      date,
+      progress: `${Math.min(offset + batchSize, allFixtures.length)}/${allFixtures.length}`,
+      analyzed,
+      cached,
+      failed,
+    });
+
     // Chain to next batch (non-blocking)
     const nextOffset = offset + batchSize;
     const hasMore = nextOffset < allFixtures.length;
 
     if (hasMore) {
-      const baseUrl = process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
         ? `https://${process.env.VERCEL_URL}`
         : 'http://localhost:3000');
 
@@ -87,6 +102,13 @@ export async function POST(request) {
         completedAt: new Date().toISOString(),
       });
       console.log(`[ANALYZE-BATCH] All batches complete for ${date}`);
+
+      // Notify clients via Pusher
+      await triggerEvent('analysis', 'batch-complete', {
+        date,
+        fixtureCount: allFixtures.length,
+        timestamp: new Date().toISOString(),
+      });
     }
 
     return Response.json({
