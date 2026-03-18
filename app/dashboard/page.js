@@ -330,8 +330,9 @@ export default function Dashboard() {
       const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
       data.combinada.selections.forEach(sel => {
-        if (sel.probability >= 65) {
-          allBets.push({ ...sel, fixtureId: fid, matchName: mn, priority, matchTime, homeTeam, awayTeam });
+        const prob = Math.min(95, sel.probability);
+        if (prob >= 65) {
+          allBets.push({ ...sel, probability: prob, fixtureId: fid, matchName: mn, priority, matchTime, homeTeam, awayTeam });
         }
       });
     });
