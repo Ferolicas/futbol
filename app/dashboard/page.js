@@ -242,45 +242,36 @@ export default function Dashboard() {
     }
   };
 
-  const doHide = async (e, fixtureId) => {
+  // Unified dismiss: removes from both Partidos AND Analizados tabs
+  const dismissMatch = async (e, fixtureId) => {
     e.stopPropagation();
-    setHidden(prev => [...prev, fixtureId]);
-    // Also remove from analyzed if present (synchronized deletion)
+    setHidden(prev => prev.includes(fixtureId) ? prev : [...prev, fixtureId]);
     setAnalyzed(prev => prev.filter(id => id !== fixtureId));
-    // Remove from selectedMarkets too
     setSelectedMarkets(prev => {
       const n = { ...prev };
       delete n[fixtureId];
       return n;
     });
+    // Persist both: hide from Partidos + remove from Analizados
     try {
-      await fetch('/api/hide', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fixtureId }),
-      });
+      await Promise.all([
+        fetch('/api/hide', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fixtureId }),
+        }),
+        fetch('/api/user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'remove-analyzed', data: { fixtureId } }),
+        }),
+      ]);
     } catch {}
   };
 
-  // Remove match from Analizados tab (per-user)
-  const removeFromAnalyzed = async (e, fixtureId) => {
-    e.stopPropagation();
-    setAnalyzed(prev => prev.filter(id => id !== fixtureId));
-    // Also clean selectedMarkets for this match
-    setSelectedMarkets(prev => {
-      const n = { ...prev };
-      delete n[fixtureId];
-      return n;
-    });
-    // Persist removal per-user
-    try {
-      await fetch('/api/user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'remove-analyzed', data: { fixtureId } }),
-      });
-    } catch {}
-  };
+  // Keep backward-compatible aliases
+  const doHide = dismissMatch;
+  const removeFromAnalyzed = dismissMatch;
 
   // Save current combinada
   const saveCombinada = async () => {
