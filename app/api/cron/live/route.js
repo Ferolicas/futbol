@@ -10,6 +10,9 @@ export const maxDuration = 55;
 
 const API_HOST = 'v3.football.api-sports.io';
 
+// Only these statuses represent a FINISHED match — safe to persist in Sanity
+const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
+
 function getApiKey() {
   return process.env.FOOTBALL_API_KEY;
 }
@@ -124,7 +127,7 @@ export async function GET(request) {
 
     const tracked = allLive.filter(m => ALL_LEAGUE_IDS.includes(m.league.id));
 
-    // ── 1. Process currently-live matches: events, stats, persist ──
+    // ── 1. Fetch events & stats for currently-live matches ──
     const liveDetailsMap = {};
     if (tracked.length > 0) {
       await Promise.all(tracked.map(async (match) => {
@@ -139,35 +142,25 @@ export async function GET(request) {
         liveData.date = today;
         liveDetailsMap[fid] = liveData;
 
-        await saveToSanity('liveMatchStats', String(fid), liveData);
+        // RULE: Only persist to Sanity if match is FINISHED
+        if (FINISHED_STATUSES.includes(match.fixture.status.short)) {
+          await saveToSanity('liveMatchStats', String(fid), liveData);
+        }
       }));
     }
 
-    // ── 2. Sync matchDay: apply live scores + detect recently-finished matches ──
-    const cached = await getFromSanity('matchDay', today);
-    let staleFixedCount = 0;
+    // ── 2. Detect recently-finished matches (were live in cache, now dropped from live feed) ──
     const finishedUpdates = [];
+    let staleFixedCount = 0;
 
-    if (cached?.matches) {
-      // Apply live scores to matchDay
-      let matches = cached.matches.map(m => {
-        const liveMatch = tracked.find(l => l.fixture.id === m.fixture.id);
-        if (liveMatch) {
-          return {
-            ...m,
-            fixture: { ...m.fixture, status: liveMatch.fixture.status },
-            goals: liveMatch.goals,
-            score: liveMatch.score,
-          };
-        }
-        return m;
-      });
-
-      // Detect matches that show live status but dropped from the live feed (just finished)
+    const fixturesDoc = await getFromSanity('footballFixturesCache', today);
+    if (fixturesDoc?.fixtures) {
       const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
       const currentLiveIds = new Set(tracked.map(m => m.fixture.id));
-      const staleMatches = matches.filter(m =>
-        LIVE_STATUSES.includes(m.fixture?.status?.short) && !currentLiveIds.has(m.fixture.id)
+
+      // Matches that show live status in cache but are no longer in the live feed
+      const staleMatches = fixturesDoc.fixtures.filter(f =>
+        LIVE_STATUSES.includes(f.fixture?.status?.short) && !currentLiveIds.has(f.fixture.id)
       );
 
       if (staleMatches.length > 0) {
@@ -176,59 +169,61 @@ export async function GET(request) {
           apiCalls++;
           if (data?.[0]) {
             const fresh = data[0];
-            const idx = matches.findIndex(m => m.fixture.id === stale.fixture.id);
-            if (idx >= 0) {
-              matches[idx] = {
-                ...matches[idx],
-                fixture: { ...matches[idx].fixture, status: fresh.fixture.status },
+            const freshStatus = fresh.fixture.status.short;
+
+            // Only persist if the match is now truly finished
+            if (FINISHED_STATUSES.includes(freshStatus)) {
+              const finalStats = {
+                fixtureId: stale.fixture.id,
+                date: today,
+                status: fresh.fixture.status,
                 goals: fresh.goals,
                 score: fresh.score,
+                updatedAt: new Date().toISOString(),
               };
+              await saveToSanity('liveMatchStats', String(stale.fixture.id), finalStats);
+              staleFixedCount++;
             }
-            // Update liveMatchStats with final status, preserving existing stats
-            const existing = await getFromSanity('liveMatchStats', String(stale.fixture.id));
-            const updatedStats = {
-              ...(existing || { fixtureId: stale.fixture.id, date: today }),
-              status: fresh.fixture.status,
-              goals: fresh.goals,
-              score: fresh.score,
-              updatedAt: new Date().toISOString(),
-            };
-            await saveToSanity('liveMatchStats', String(stale.fixture.id), updatedStats);
-            // Include persisted corners/cards so frontend retains stats after FT
+
+            // Push update via Pusher regardless (client needs to know)
             finishedUpdates.push({
               fixtureId: stale.fixture.id,
               status: fresh.fixture.status,
               goals: fresh.goals,
               score: fresh.score,
-              corners: existing?.corners || null,
-              yellowCards: existing?.yellowCards || null,
-              redCards: existing?.redCards || null,
-              goalScorers: existing?.goalScorers || [],
-              missedPenalties: existing?.missedPenalties || [],
-              cardEvents: existing?.cardEvents || [],
             });
-            staleFixedCount++;
           }
         }));
       }
 
-      // Save updated matchDay
-      await saveToSanity('matchDay', today, {
-        ...cached,
-        matches,
-        liveUpdatedAt: new Date().toISOString(),
+      // ── 3. Update footballFixturesCache — ONLY for finished matches ──
+      const finishedStatusMap = {};
+
+      // From currently-tracked matches that just finished
+      tracked.forEach(m => {
+        if (FINISHED_STATUSES.includes(m.fixture.status.short)) {
+          finishedStatusMap[m.fixture.id] = {
+            status: m.fixture.status,
+            goals: m.goals,
+            score: m.score,
+          };
+        }
       });
 
-      // ── 3. Sync footballFixturesCache so /api/fixtures serves fresh statuses ──
-      const fixturesDoc = await getFromSanity('footballFixturesCache', today);
-      if (fixturesDoc?.fixtures) {
-        const statusMap = {};
-        matches.forEach(m => {
-          statusMap[m.fixture.id] = { status: m.fixture.status, goals: m.goals, score: m.score };
-        });
+      // From stale-detected matches that are now confirmed finished
+      finishedUpdates.forEach(u => {
+        if (FINISHED_STATUSES.includes(u.status.short)) {
+          finishedStatusMap[u.fixtureId] = {
+            status: u.status,
+            goals: u.goals,
+            score: u.score,
+          };
+        }
+      });
+
+      if (Object.keys(finishedStatusMap).length > 0) {
         const updatedFixtures = fixturesDoc.fixtures.map(f => {
-          const u = statusMap[f.fixture.id];
+          const u = finishedStatusMap[f.fixture.id];
           if (u) {
             return {
               ...f,
@@ -246,24 +241,22 @@ export async function GET(request) {
       }
     }
 
-    // ── 4. Push real-time update via Pusher ──
+    // ── 4. Push real-time update via Pusher (ALL live data, never filtered) ──
     const allPusherUpdates = [];
-    if (tracked.length > 0) {
-      tracked.forEach(m => {
-        const details = liveDetailsMap[m.fixture.id];
-        allPusherUpdates.push({
-          fixtureId: m.fixture.id,
-          status: m.fixture.status,
-          goals: m.goals,
-          score: m.score,
-          corners: details?.corners || null,
-          yellowCards: details?.yellowCards || null,
-          redCards: details?.redCards || null,
-          goalScorers: details?.goalScorers || [],
-          missedPenalties: details?.missedPenalties || [],
-        });
+    tracked.forEach(m => {
+      const details = liveDetailsMap[m.fixture.id];
+      allPusherUpdates.push({
+        fixtureId: m.fixture.id,
+        status: m.fixture.status,
+        goals: m.goals,
+        score: m.score,
+        corners: details?.corners || null,
+        yellowCards: details?.yellowCards || null,
+        redCards: details?.redCards || null,
+        goalScorers: details?.goalScorers || [],
+        missedPenalties: details?.missedPenalties || [],
       });
-    }
+    });
     // Include recently-finished matches so open dashboards update immediately
     allPusherUpdates.push(...finishedUpdates);
 

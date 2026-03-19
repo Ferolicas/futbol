@@ -7,6 +7,9 @@ import { getCachedStandingsPositions } from '../../../lib/api-football';
 
 export const dynamic = 'force-dynamic';
 
+const API_HOST = 'v3.football.api-sports.io';
+const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
@@ -28,27 +31,55 @@ export async function GET(request) {
         : e.message;
     }
 
-    // When serving cached fixtures, merge latest statuses from matchDay
-    // (updated every minute by the live cron) so the initial load is fresh
-    if (fromCache && fixtures.length > 0) {
-      const matchDay = await getFromSanity('matchDay', date);
-      if (matchDay?.matches && matchDay.liveUpdatedAt) {
-        const statusMap = {};
-        matchDay.matches.forEach(m => {
-          statusMap[m.fixture.id] = { status: m.fixture.status, goals: m.goals, score: m.score };
-        });
-        fixtures = fixtures.map(f => {
-          const live = statusMap[f.fixture.id];
-          if (live?.status) {
-            return {
-              ...f,
-              fixture: { ...f.fixture, status: live.status },
-              goals: live.goals || f.goals,
-              score: live.score || f.score,
-            };
+    // For any match whose kickoff has passed and is NOT confirmed finished in Sanity,
+    // fetch real status directly from API-Football — never trust Sanity for in-progress data
+    if (fixtures.length > 0) {
+      const now = Date.now();
+      const needsLiveStatus = fixtures.some(f => {
+        if (FINISHED_STATUSES.includes(f.fixture?.status?.short)) return false;
+        const kickoff = new Date(f.fixture.date).getTime();
+        return now >= kickoff; // kickoff has passed
+      });
+
+      if (needsLiveStatus) {
+        try {
+          const key = process.env.FOOTBALL_API_KEY;
+          if (key) {
+            const res = await fetch(`https://${API_HOST}/fixtures?date=${date}`, {
+              headers: { 'x-apisports-key': key },
+              cache: 'no-store',
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const apiFixtures = data.response || [];
+              // Build lookup of fresh statuses from API-Football
+              const freshMap = {};
+              apiFixtures.forEach(af => { freshMap[af.fixture.id] = af; });
+
+              fixtures = fixtures.map(f => {
+                // Already finished in cache — trust Sanity
+                if (FINISHED_STATUSES.includes(f.fixture?.status?.short)) return f;
+                // Kickoff hasn't passed — keep NS from cache
+                const kickoff = new Date(f.fixture.date).getTime();
+                if (now < kickoff) return f;
+                // Kickoff passed, not finished: use API-Football fresh data
+                const fresh = freshMap[f.fixture.id];
+                if (fresh) {
+                  return {
+                    ...f,
+                    fixture: { ...f.fixture, status: fresh.fixture.status },
+                    goals: fresh.goals || f.goals,
+                    score: fresh.score || f.score,
+                  };
+                }
+                return f;
+              });
+            }
           }
-          return f;
-        });
+        } catch (e) {
+          console.error('[FIXTURES] Live status fetch failed:', e.message);
+          // Continue with cached data — Pusher will update the client
+        }
       }
     }
 

@@ -216,13 +216,13 @@ export async function GET(request) {
     const WINDOW_MS = 45 * 60 * 1000;
     const TOLERANCE_MS = 5 * 60 * 1000;
 
-    const cached = await getFromSanity('matchDay', today);
-    if (!cached?.matches) {
+    const cached = await getFromSanity('footballFixturesCache', today);
+    if (!cached?.fixtures) {
       return Response.json({ success: true, message: 'No fixtures cached', updated: 0 });
     }
 
     // Find matches that are within [kickoff - 50min, kickoff] window
-    const matchesNearKickoff = cached.matches.filter(m => {
+    const matchesNearKickoff = cached.fixtures.filter(m => {
       if (m.fixture.status.short !== 'NS') return false;
       const kickoff = new Date(m.fixture.date).getTime();
       const timeUntil = kickoff - now;
