@@ -417,9 +417,10 @@ export default function AnalisisPage() {
           </Section>
         )}
 
-        {/* ===== SECCIÓN 6B — POR EQUIPO ===== */}
+        {/* ===== SECCIÓN 6B — POR EQUIPO (estadísticas internas) ===== */}
         {p?.perTeam && (
-          <Section title="Predicciones por equipo" icon="&#9878;" sectionKey="perteam" collapsed={collapsed} toggle={toggleSection}>
+          <Section title="Estad铆sticas por equipo" icon="&#9878;" sectionKey="perteam" collapsed={collapsed} toggle={toggleSection}>
+            <div className="perteam-disclaimer-detail">Estad铆sticas internas basadas en los 煤ltimos 5 partidos. No disponibles como mercados en casas de apuestas.</div>
             <PerTeamSection perTeam={p.perTeam} homeTeam={a.homeTeam} awayTeam={a.awayTeam} homeLogo={a.homeLogo} awayLogo={a.awayLogo} />
           </Section>
         )}
@@ -475,46 +476,55 @@ export default function AnalisisPage() {
         )}
 
         {/* ===== SECCIÓN 9 — COMBINADA AUTOMÁTICA ===== */}
-        {c && c.selections.length > 0 && (
-          <Section title="Combinada automática" icon="&#127942;" sectionKey="combinada" collapsed={collapsed} toggle={toggleSection}>
-            <div className="combinada-card">
-              {c.highRisk && (
-                <div className="combinada-warning">
-                  &#9888; Combinada de riesgo alto — probabilidad combinada: {cap(c.combinedProbability)}%
-                </div>
-              )}
-              <div className="combinada-selections">
-                {c.selections.map((sel, i) => {
-                  const isHighProb = sel.probability >= 70 && sel.probability <= 95;
-                  return (
-                    <div key={i} className={`combinada-item ${isHighProb ? 'alta-prob' : ''}`}>
-                      <div className="combinada-item-info">
-                        <span className="combinada-num">#{i + 1}</span>
-                        <span className="combinada-market">{sel.name}</span>
-                        {isHighProb && <span className="alta-prob-badge">Alta prob.</span>}
+        {/* Only show selections with real bookmaker odds (odd > 1). If < 2, hide entire section. */}
+        {(() => {
+          if (!c) return null;
+          const validSels = c.selections.filter(sel => sel.odd && sel.odd > 1);
+          if (validSels.length < 2) return null;
+          const recalcOdd = validSels.reduce((acc, s) => acc * s.odd, 1);
+          const recalcProb = validSels.reduce((acc, s) => acc + s.probability, 0) / validSels.length;
+          const isHighRisk = recalcProb < 60;
+          return (
+            <Section title="Combinada autom谩tica" icon="&#127942;" sectionKey="combinada" collapsed={collapsed} toggle={toggleSection}>
+              <div className="combinada-card">
+                {isHighRisk && (
+                  <div className="combinada-warning">
+                    &#9888; Combinada de riesgo alto — probabilidad combinada: {cap(recalcProb)}%
+                  </div>
+                )}
+                <div className="combinada-selections">
+                  {validSels.map((sel, i) => {
+                    const isHighProb = sel.probability >= 70 && sel.probability <= 95;
+                    return (
+                      <div key={i} className={`combinada-item ${isHighProb ? 'alta-prob' : ''}`}>
+                        <div className="combinada-item-info">
+                          <span className="combinada-num">#{i + 1}</span>
+                          <span className="combinada-market">{sel.name}</span>
+                          {isHighProb && <span className="alta-prob-badge">Alta prob.</span>}
+                        </div>
+                        <div className="combinada-item-data">
+                          <ProbBar label="" value={sel.probability} compact />
+                          <span className="combinada-prob">{cap(sel.probability)}%</span>
+                          <span className="combinada-odd">{sel.odd.toFixed(2)}</span>
+                        </div>
                       </div>
-                      <div className="combinada-item-data">
-                        <ProbBar label="" value={sel.probability} compact />
-                        <span className="combinada-prob">{cap(sel.probability)}%</span>
-                        {sel.odd && <span className="combinada-odd">{sel.odd.toFixed(2)}</span>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="combinada-footer">
-                <div className="combinada-total">
-                  <span>Cuota combinada</span>
-                  <strong>{c.combinedOdd}</strong>
+                    );
+                  })}
                 </div>
-                <div className="combinada-total">
-                  <span>Probabilidad combinada</span>
-                  <strong className={c.highRisk ? 'danger' : 'safe'}>{cap(c.combinedProbability)}%</strong>
+                <div className="combinada-footer">
+                  <div className="combinada-total">
+                    <span>Cuota combinada</span>
+                    <strong>{recalcOdd.toFixed(2)}</strong>
+                  </div>
+                  <div className="combinada-total">
+                    <span>Probabilidad combinada</span>
+                    <strong className={isHighRisk ? 'danger' : 'safe'}>{cap(recalcProb)}%</strong>
+                  </div>
                 </div>
               </div>
-            </div>
-          </Section>
-        )}
+            </Section>
+          );
+        })()}
 
         <div className="analysis-footer">
           {quota && <span>Llamadas usadas hoy: {quota.used}/{quota.limit}</span>}

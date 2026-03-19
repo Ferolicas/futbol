@@ -2564,6 +2564,14 @@ div[data-testid*="development"] { display: none !important; }
   border-radius: var(--rs);
   border: 1px solid var(--brd);
 }
+.perteam-disclaimer, .perteam-disclaimer-detail {
+  display: block;
+  font-size: .65rem;
+  color: var(--txt-3);
+  opacity: .7;
+  margin-bottom: 8px;
+  font-style: italic;
+}
 
 .perteam-group {
   display: flex;

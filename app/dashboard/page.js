@@ -1120,7 +1120,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
             <button className="btn-x acc-rm" onClick={onRemove} title="Eliminar de analizados">&#10005;</button>
           )}
           {selCount > 0 && <span className="acc-sel-count">{selCount} sel.</span>}
-          {data?.combinada && (
+          {data?.combinada && data.combinada.combinedOdd > 1 && (data.combinada.selections || []).some(s => s.odd && s.odd > 1) && (
             <span className="acc-mini">{cap(data.combinada.combinedProbability)}% | {data.combinada.combinedOdd}x</span>
           )}
           <span className={`chev-ico ${isExpanded ? 'up' : ''}`}>&#9662;</span>
@@ -1137,22 +1137,28 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 <LiveMatchDetails stats={liveStats} homeTeam={match.teams.home} awayTeam={match.teams.away} />
               )}
 
-              {/* Auto combinada */}
-              {data.combinada?.selections?.length > 0 && (
-                <div className="auto-comb">
-                  <div className="auto-comb-head">
-                    <span>&#127942; Combinada Auto</span>
-                    <span className={`auto-comb-val ${data.combinada.highRisk ? 'danger' : 'safe'}`}>
-                      {cap(data.combinada.combinedProbability)}% &middot; {data.combinada.combinedOdd}x
-                    </span>
+              {/* Auto combinada — only show selections with real odds */}
+              {(() => {
+                const validSels = (data.combinada?.selections || []).filter(s => s.odd && s.odd > 1);
+                if (validSels.length < 2) return null;
+                const cOdd = validSels.reduce((a, s) => a * s.odd, 1);
+                const cProb = validSels.reduce((a, s) => a + s.probability, 0) / validSels.length;
+                return (
+                  <div className="auto-comb">
+                    <div className="auto-comb-head">
+                      <span>&#127942; Combinada Auto</span>
+                      <span className={`auto-comb-val ${cProb < 60 ? 'danger' : 'safe'}`}>
+                        {cap(cProb)}% &middot; {cOdd.toFixed(2)}x
+                      </span>
+                    </div>
+                    <div className="auto-comb-chips">
+                      {validSels.map((s, i) => (
+                        <span key={i} className="auto-chip">{s.name} <b>{cap(s.probability)}%</b> ({s.odd.toFixed(2)})</span>
+                      ))}
+                    </div>
                   </div>
-                  <div className="auto-comb-chips">
-                    {data.combinada.selections.map((s, i) => (
-                      <span key={i} className="auto-chip">{s.name} <b>{cap(s.probability)}%</b></span>
-                    ))}
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Form summary */}
               {data.calculatedProbabilities?.homeForm && (
@@ -1237,9 +1243,10 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 </div>
               </div>
 
-              {/* Per-team breakdown */}
+              {/* Per-team breakdown — internal stats only, no betting markets */}
               {data.calculatedProbabilities?.perTeam && (
                 <div className="perteam-section">
+                  <span className="perteam-disclaimer">Estad铆sticas internas (no disponibles en casas de apuestas)</span>
                   {[
                     { key: 'home', name: match.teams.home.name, team: data.calculatedProbabilities.perTeam.home },
                     { key: 'away', name: match.teams.away.name, team: data.calculatedProbabilities.perTeam.away },
@@ -1250,7 +1257,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                       Object.entries(team.corners).forEach(([k, v]) => {
                         if (v >= 70) {
                           const threshold = k.replace('over', '').replace('5', '.5');
-                          rows.push({ label: `Corners ${name}: Mas de ${threshold}`, prob: v, cat: 'corners' });
+                          rows.push({ label: `Corners ${name}: +${threshold}`, prob: v });
                         }
                       });
                     }
@@ -1258,7 +1265,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                       Object.entries(team.cards).forEach(([k, v]) => {
                         if (v >= 70) {
                           const threshold = k.replace('over', '').replace('5', '.5');
-                          rows.push({ label: `Tarjetas ${name}: Mas de ${threshold}`, prob: v, cat: 'cards' });
+                          rows.push({ label: `Tarjetas ${name}: +${threshold}`, prob: v });
                         }
                       });
                     }
@@ -1266,7 +1273,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                       Object.entries(team.goals).forEach(([k, v]) => {
                         if (v >= 70) {
                           const threshold = k.replace('over', '').replace('5', '.5');
-                          rows.push({ label: `Goles ${name}: Mas de ${threshold}`, prob: v, cat: 'goals' });
+                          rows.push({ label: `Goles ${name}: +${threshold}`, prob: v });
                         }
                       });
                     }
