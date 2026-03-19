@@ -73,13 +73,13 @@ export default function AnalisisPage() {
 
   useEffect(() => { loadAnalysis(); }, [loadAnalysis]);
 
-  // Poll live stats for this match
+  // Poll live stats for this match — always poll once on mount to catch status changes
+  // (e.g., cached analysis says NS but match is now FT)
   useEffect(() => {
     if (!analysis) return;
     const statusShort = analysis.status?.short || 'NS';
     const isLive = isLiveStatus(statusShort);
     const isFinished = ['FT', 'AET', 'PEN'].includes(statusShort);
-    if (!isLive && !isFinished) return;
 
     const d = new Date();
     const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -103,7 +103,9 @@ export default function AnalisisPage() {
       } catch {}
     };
 
+    // Always poll once on mount to get fresh status
     poll();
+    // Continue polling only if live
     const interval = isLive ? setInterval(poll, 30000) : null;
     return () => { if (interval) clearInterval(interval); };
   }, [analysis?.status?.short, fixtureId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -198,6 +200,44 @@ export default function AnalisisPage() {
                 <span className="header-time">{fmtTime(a.kickoff)}</span>
               )}
               <span className="header-date">{fmtDate(a.kickoff)}</span>
+              {(() => {
+                // Show aggregate score for two-legged ties
+                const round = a.leagueRound || '';
+                const is2ndLeg = /2nd leg/i.test(round);
+                const is1stLeg = /1st leg/i.test(round);
+                if (!is2ndLeg && !is1stLeg) return null;
+                // Find the other leg from H2H (same teams, same season)
+                const otherLeg = (a.h2h || []).find(h => {
+                  const hRound = h.league?.round || '';
+                  if (is2ndLeg) return /1st leg/i.test(hRound);
+                  return /2nd leg/i.test(hRound);
+                });
+                if (!otherLeg) return null;
+                const legGoals = a.goals || {};
+                const otherGoals = otherLeg.goals || {};
+                // Calculate aggregate from perspective of current home team
+                const curHomeIsLeg1Home = is1stLeg;
+                let aggHome, aggAway;
+                if (is2ndLeg) {
+                  // Current match is 2nd leg
+                  // Other leg (1st): check if current home was home or away in 1st leg
+                  const wasHomeIn1st = otherLeg.teams?.home?.id === a.homeId;
+                  aggHome = (legGoals.home ?? 0) + (wasHomeIn1st ? (otherGoals.home ?? 0) : (otherGoals.away ?? 0));
+                  aggAway = (legGoals.away ?? 0) + (wasHomeIn1st ? (otherGoals.away ?? 0) : (otherGoals.home ?? 0));
+                } else {
+                  // Current match is 1st leg
+                  const wasHomeIn2nd = otherLeg.teams?.home?.id === a.homeId;
+                  aggHome = (legGoals.home ?? 0) + (wasHomeIn2nd ? (otherGoals.home ?? 0) : (otherGoals.away ?? 0));
+                  aggAway = (legGoals.away ?? 0) + (wasHomeIn2nd ? (otherGoals.away ?? 0) : (otherGoals.home ?? 0));
+                }
+                return (
+                  <span className="header-aggregate">
+                    Global: {aggHome} - {aggAway}
+                    {is1stLeg && <small> (Ida)</small>}
+                    {is2ndLeg && <small> (Vuelta)</small>}
+                  </span>
+                );
+              })()}
             </div>
             <div className="header-team">
               {a.awayPosition && <span className="pos-badge-lg">{a.awayPosition}°</span>}
@@ -419,8 +459,7 @@ export default function AnalisisPage() {
 
         {/* ===== SECCIÓN 6B — POR EQUIPO (estadísticas internas) ===== */}
         {p?.perTeam && (
-          <Section title="Estad铆sticas por equipo" icon="&#9878;" sectionKey="perteam" collapsed={collapsed} toggle={toggleSection}>
-            <div className="perteam-disclaimer-detail">Estad铆sticas internas basadas en los 煤ltimos 5 partidos. No disponibles como mercados en casas de apuestas.</div>
+          <Section title="Estadísticas por equipo" icon="&#9878;" sectionKey="perteam" collapsed={collapsed} toggle={toggleSection}>
             <PerTeamSection perTeam={p.perTeam} homeTeam={a.homeTeam} awayTeam={a.awayTeam} homeLogo={a.homeLogo} awayLogo={a.awayLogo} />
           </Section>
         )}
@@ -485,7 +524,7 @@ export default function AnalisisPage() {
           const recalcProb = validSels.reduce((acc, s) => acc + s.probability, 0) / validSels.length;
           const isHighRisk = recalcProb < 60;
           return (
-            <Section title="Combinada autom谩tica" icon="&#127942;" sectionKey="combinada" collapsed={collapsed} toggle={toggleSection}>
+            <Section title="Combinada automática" icon="&#127942;" sectionKey="combinada" collapsed={collapsed} toggle={toggleSection}>
               <div className="combinada-card">
                 {isHighRisk && (
                   <div className="combinada-warning">
@@ -736,6 +775,21 @@ function Last5Table({ team, logo, teamId, form, lastFive }) {
                   <img src={e.opponentLogo} alt="" className="last5-opp-logo" />
                 )}
                 <span className="last5-match-opponent">{e.opponentName}</span>
+                {e.corners && (
+                  <span className="last5-stat" title="Corners">
+                    <span className="ls-icon corner-icon">&#9873;</span>{e.corners.total}
+                  </span>
+                )}
+                {e.yellowCards && e.yellowCards.total > 0 && (
+                  <span className="last5-stat" title="Amarillas">
+                    <span className="yellow-card-sm" />{e.yellowCards.total}
+                  </span>
+                )}
+                {e.redCards && e.redCards.total > 0 && (
+                  <span className="last5-stat" title="Rojas">
+                    <span className="red-card-sm" />{e.redCards.total}
+                  </span>
+                )}
               </div>
             );
           })
@@ -779,12 +833,20 @@ function H2HSection({ h2h, homeTeam, awayTeam, homeId, summary }) {
           else if (ag > hg) winnerClass = fHomeId === homeId ? 'away-win' : 'home-win';
           else winnerClass = 'draw-result';
 
+          const stats = f._stats || {};
           return (
             <div key={i} className={`h2h-row ${winnerClass}`}>
               <span className="h2h-date">{date}</span>
               <span className="h2h-home-team">{f.teams?.home?.name}</span>
               <span className="h2h-result">{hg} - {ag}</span>
               <span className="h2h-away-team">{f.teams?.away?.name}</span>
+              {(stats.corners || stats.yellowCards || stats.redCards) && (
+                <span className="h2h-stats-row">
+                  {stats.corners && <span className="h2h-stat-badge" title={`Corners: ${stats.corners.home}-${stats.corners.away}`}>&#9873; {stats.corners.total}</span>}
+                  {stats.yellowCards && stats.yellowCards.total > 0 && <span className="h2h-stat-badge yellow" title={`Amarillas: ${stats.yellowCards.home}-${stats.yellowCards.away}`}><span className="yellow-card-sm"></span> {stats.yellowCards.total}</span>}
+                  {stats.redCards && stats.redCards.total > 0 && <span className="h2h-stat-badge red" title={`Rojas: ${stats.redCards.home}-${stats.redCards.away}`}><span className="red-card-sm"></span> {stats.redCards.total}</span>}
+                </span>
+              )}
             </div>
           );
         })}

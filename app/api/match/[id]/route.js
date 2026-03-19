@@ -1,5 +1,5 @@
 import { getQuota, refreshLineups, refreshInjuries } from '../../../../lib/api-football';
-import { getCachedAnalysis } from '../../../../lib/sanity-cache';
+import { getCachedAnalysis, getCachedFixtures } from '../../../../lib/sanity-cache';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +17,26 @@ export async function GET(request, { params }) {
 
     if (!analysis) {
       return Response.json({ error: 'Match not analyzed yet', notFound: true }, { status: 404 });
+    }
+
+    // Merge latest fixture status/goals from fixtures cache to prevent stale data.
+    // The analysis may have been cached when status was NS, but the match may now be FT.
+    if (clientDate) {
+      try {
+        const fixtures = await getCachedFixtures(clientDate);
+        if (fixtures) {
+          const fresh = fixtures.find(f => f.fixture.id === Number(id));
+          if (fresh) {
+            const freshStatus = fresh.fixture?.status?.short;
+            const cachedStatus = analysis.status?.short;
+            // Update if the fixture has progressed (live/finished vs NS)
+            if (freshStatus && freshStatus !== cachedStatus) {
+              analysis.status = fresh.fixture.status;
+              analysis.goals = fresh.goals || analysis.goals;
+            }
+          }
+        }
+      } catch {}
     }
 
     const quota = await getQuota();

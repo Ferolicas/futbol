@@ -185,20 +185,28 @@ export async function GET(request) {
                 score: fresh.score,
               };
             }
-            // Update liveMatchStats with final status
+            // Update liveMatchStats with final status, preserving existing stats
             const existing = await getFromSanity('liveMatchStats', String(stale.fixture.id));
-            await saveToSanity('liveMatchStats', String(stale.fixture.id), {
+            const updatedStats = {
               ...(existing || { fixtureId: stale.fixture.id, date: today }),
               status: fresh.fixture.status,
               goals: fresh.goals,
               score: fresh.score,
               updatedAt: new Date().toISOString(),
-            });
+            };
+            await saveToSanity('liveMatchStats', String(stale.fixture.id), updatedStats);
+            // Include persisted corners/cards so frontend retains stats after FT
             finishedUpdates.push({
               fixtureId: stale.fixture.id,
               status: fresh.fixture.status,
               goals: fresh.goals,
               score: fresh.score,
+              corners: existing?.corners || null,
+              yellowCards: existing?.yellowCards || null,
+              redCards: existing?.redCards || null,
+              goalScorers: existing?.goalScorers || [],
+              missedPenalties: existing?.missedPenalties || [],
+              cardEvents: existing?.cardEvents || [],
             });
             staleFixedCount++;
           }

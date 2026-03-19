@@ -1179,7 +1179,7 @@ body {
 .h2h-stat.draw { color: var(--yellow); }
 .h2h-stat.away { color: var(--red); }
 .h2h-table { display: flex; flex-direction: column; gap: 4px; }
-.h2h-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-1); border-radius: var(--rx); font-size: .78rem; }
+.h2h-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-1); border-radius: var(--rx); font-size: .78rem; flex-wrap: wrap; }
 .h2h-row.home-win { border-left: 3px solid var(--green); }
 .h2h-row.away-win { border-left: 3px solid var(--red); }
 .h2h-row.draw-result { border-left: 3px solid var(--yellow); }
@@ -1187,6 +1187,10 @@ body {
 .h2h-home-team { flex: 1; text-align: right; font-weight: 500; }
 .h2h-result { font-weight: 700; min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; color: var(--yellow); }
 .h2h-away-team { flex: 1; font-weight: 500; }
+.h2h-stats-row { display: flex; gap: 6px; align-items: center; margin-left: auto; flex-shrink: 0; }
+.h2h-stat-badge { display: inline-flex; align-items: center; gap: 2px; font-size: .68rem; color: var(--t3); background: var(--bg-2); padding: 2px 5px; border-radius: 4px; }
+.h2h-stat-badge.yellow { color: #e6a817; }
+.h2h-stat-badge.red { color: #e04040; }
 
 /* Stats Grid */
 .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

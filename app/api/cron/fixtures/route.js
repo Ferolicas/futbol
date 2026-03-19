@@ -29,7 +29,8 @@ export async function GET(request) {
     const quota = await getQuota();
     let tomorrowCount = 0;
 
-    if (quota.remaining > 100) {
+    // Always fetch tomorrow's fixtures — quota is not a concern
+    {
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       const tomorrowDate = tomorrow.toISOString().split('T')[0];

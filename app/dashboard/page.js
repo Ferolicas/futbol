@@ -148,11 +148,29 @@ export default function Dashboard() {
       // (calls API-Football directly — no Sanity cache)
       const isViewingToday = d === today();
       if (isViewingToday && fx.length > 0) {
+        // Fetch fresh fixture statuses
         fetch(`/api/live?date=${d}`)
           .then(r => r.json())
           .then(liveData => {
             if (!liveData.matches?.length) return;
             setFixtures(prev => applyLiveUpdate(prev, liveData.matches));
+          })
+          .catch(() => {});
+        // Fetch persisted live stats (corners, cards, scorers) — includes finished matches
+        fetch(`/api/live-poll?date=${d}`)
+          .then(r => r.json())
+          .then(pollData => {
+            if (!pollData.liveStats?.length) return;
+            setLiveStats(prev => {
+              const next = { ...prev };
+              pollData.liveStats.forEach(s => {
+                if (s.corners || s.yellowCards || s.redCards || s.goalScorers?.length) {
+                  next[s.fixtureId] = { ...next[s.fixtureId], ...s };
+                }
+              });
+              if (_dashCache) _dashCache.liveStats = next;
+              return next;
+            });
           })
           .catch(() => {});
       }
@@ -752,22 +770,44 @@ export default function Dashboard() {
             )}
             {sorted.length > 0 && (
               <div className="match-list">
-                {sorted.map((m, i) => (
-                  <MatchCard
-                    key={m.fixture.id}
-                    match={m}
-                    isAnalyzed={analyzed.includes(m.fixture.id)}
-                    isSelected={selected.has(m.fixture.id)}
-                    odds={analyzedOdds[m.fixture.id]}
-                    standings={standings}
-                    matchData={analyzedData[m.fixture.id]}
-                    liveStats={liveStats[m.fixture.id]}
-                    onSelect={() => toggleSelect(m.fixture.id)}
-                    onHide={(e) => doHide(e, m.fixture.id)}
-                    onView={() => router.push(`/dashboard/analisis/${m.fixture.id}`)}
-                    idx={i}
-                  />
-                ))}
+                {sorted.map((m, i) => {
+                  const isMatchAnalyzed = analyzed.includes(m.fixture.id);
+                  if (isMatchAnalyzed) {
+                    return (
+                      <AccordionCard
+                        key={m.fixture.id}
+                        match={m}
+                        data={analyzedData[m.fixture.id]}
+                        odds={analyzedOdds[m.fixture.id]}
+                        standings={standings}
+                        liveStats={liveStats[m.fixture.id]}
+                        isExpanded={expandedMatch === m.fixture.id}
+                        onToggle={() => setExpandedMatch(expandedMatch === m.fixture.id ? null : m.fixture.id)}
+                        selMarkets={selectedMarkets[m.fixture.id] || {}}
+                        onToggleMarket={(mkt) => toggleMarket(m.fixture.id, mkt, `${m.teams.home.name} vs ${m.teams.away.name}`)}
+                        onViewFull={() => router.push(`/dashboard/analisis/${m.fixture.id}`)}
+                        onRemove={(e) => dismissMatch(e, m.fixture.id)}
+                        idx={i}
+                      />
+                    );
+                  }
+                  return (
+                    <MatchCard
+                      key={m.fixture.id}
+                      match={m}
+                      isAnalyzed={false}
+                      isSelected={selected.has(m.fixture.id)}
+                      odds={analyzedOdds[m.fixture.id]}
+                      standings={standings}
+                      matchData={analyzedData[m.fixture.id]}
+                      liveStats={liveStats[m.fixture.id]}
+                      onSelect={() => toggleSelect(m.fixture.id)}
+                      onHide={(e) => doHide(e, m.fixture.id)}
+                      onView={() => router.push(`/dashboard/analisis/${m.fixture.id}`)}
+                      idx={i}
+                    />
+                  );
+                })}
               </div>
             )}
           </>
@@ -1208,8 +1248,8 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 </div>
               )}
 
-              {/* Selectable markets */}
-              <div className="markets">
+              {/* Selectable markets — only show if there are markets with real odds */}
+              {markets.length > 0 && <div className="markets">
                 <h4 className="markets-title">Selecciona para tu combinada</h4>
                 <div className="markets-grid">
                   {markets.map(mkt => {
@@ -1241,12 +1281,12 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                     );
                   })}
                 </div>
-              </div>
+              </div>}
 
               {/* Per-team breakdown — internal stats only, no betting markets */}
               {data.calculatedProbabilities?.perTeam && (
                 <div className="perteam-section">
-                  <span className="perteam-disclaimer">Estad铆sticas internas (no disponibles en casas de apuestas)</span>
+                  <span className="perteam-disclaimer">Estadísticas internas</span>
                   {[
                     { key: 'home', name: match.teams.home.name, team: data.calculatedProbabilities.perTeam.home },
                     { key: 'away', name: match.teams.away.name, team: data.calculatedProbabilities.perTeam.away },

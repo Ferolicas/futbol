@@ -3,15 +3,10 @@ import { fetchOddsForFixtures } from '../../../../lib/odds-api';
 import { triggerEvent } from '../../../../lib/pusher';
 
 // Cron: fetches odds from The Odds API
-// IMPORTANT: Free plan limit — max 14 calls per day total.
-// Schedule suggestion: call at 08:00, 10:00, 12:00, 14:00, 15:00, 16:00,
-// 17:00, 18:00, 19:00, 20:00, 21:00, 22:00, 23:00, 00:00 (14 times)
 // cron-job.org: GET /api/cron/odds?secret=CRON_SECRET
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 55;
-
-const MAX_DAILY_CALLS = 14;
 
 function verifyCronAuth(request) {
   const { searchParams } = new URL(request.url);
@@ -32,16 +27,8 @@ export async function GET(request) {
   try {
     const today = new Date().toISOString().split('T')[0];
 
-    // Enforce daily limit: max 14 calls per day
     const quotaDoc = await getFromSanity('appConfig', `oddsQuota-${today}`);
     const callsToday = quotaDoc?.calls || 0;
-    if (callsToday >= MAX_DAILY_CALLS) {
-      return Response.json({
-        success: false,
-        message: `Daily odds limit reached (${callsToday}/${MAX_DAILY_CALLS})`,
-        callsToday,
-      });
-    }
 
     // Get today's fixtures from Sanity cache
     const cached = await getFromSanity('footballFixturesCache', today);
@@ -102,7 +89,6 @@ export async function GET(request) {
       apiCallsUsed,
       remaining,
       callsToday: callsToday + 1,
-      maxDaily: MAX_DAILY_CALLS,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
