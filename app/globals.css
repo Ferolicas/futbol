@@ -1775,7 +1775,7 @@ body {
 
 /* ===== CLERK THEME — colors & typography only, NO layout overrides ===== */
 
-/* Hide Clerk branding and dev badge */
+/* Hide Clerk branding, "Secured by Clerk", and dev badge */
 .cl-footer > div:last-child { display: none !important; }
 .cl-internal-b3fm6y { display: none !important; }
 [data-mode="development"] { display: none !important; }
@@ -1784,6 +1784,9 @@ body {
 a[href*="clerk.com"] { display: none !important; }
 div[data-testid*="development"] { display: none !important; }
 .cl-card::after { display: none !important; }
+/* Catch all "Secured by" / Clerk branding variants */
+[class*="cl-internal"] { display: none !important; }
+.cl-footerPages { display: none !important; }
 /* Apple icon is black - invert it on dark bg */
 .cl-socialButtonsProviderIcon__apple { filter: invert(1) !important; }
 

@@ -4,10 +4,59 @@ import { esES as esESBase } from '@clerk/localizations';
 
 const esES = {
   ...esESBase,
-  formFieldHintText__password: 'Tu contraseña cumple con todos los requisitos.',
+  signIn: {
+    ...esESBase.signIn,
+    start: {
+      ...esESBase.signIn?.start,
+      title: 'Iniciar sesion en CF Analisis',
+      subtitle: 'Bienvenido de vuelta. Inicia sesion para continuar.',
+      actionText: 'No tienes una cuenta?',
+      actionLink: 'Registrate',
+    },
+    password: {
+      ...esESBase.signIn?.password,
+      title: 'Introduce tu contrasena',
+      subtitle: '',
+      actionLink: 'Usar otro metodo',
+    },
+    forgotPasswordAlternativeMethods: {
+      ...esESBase.signIn?.forgotPasswordAlternativeMethods,
+      title: 'Olvidaste tu contrasena?',
+      label__alternativeMethods: 'O inicia sesion con otro metodo',
+      blockButton__resetPassword: 'Restablecer contrasena',
+    },
+  },
+  signUp: {
+    ...esESBase.signUp,
+    start: {
+      ...esESBase.signUp?.start,
+      title: 'Crear cuenta en CF Analisis',
+      subtitle: 'Bienvenido! Completa los datos para registrarte.',
+      actionText: 'Ya tienes una cuenta?',
+      actionLink: 'Inicia sesion',
+    },
+  },
+  formFieldLabel__emailAddress: 'Correo electronico',
+  formFieldLabel__password: 'Contrasena',
+  formFieldLabel__confirmPassword: 'Confirmar contrasena',
+  formFieldLabel__firstName: 'Nombre',
+  formFieldLabel__lastName: 'Apellido',
+  formFieldInputPlaceholder__emailAddress: 'Introduce tu correo electronico',
+  formFieldInputPlaceholder__password: 'Introduce tu contrasena',
+  formFieldInputPlaceholder__confirmPassword: 'Confirma tu contrasena',
+  formFieldInputPlaceholder__firstName: 'Tu nombre',
+  formFieldInputPlaceholder__lastName: 'Tu apellido',
+  formButtonPrimary: 'Continuar',
+  formFieldHintText__password: 'Tu contrasena cumple con todos los requisitos.',
+  formFieldAction__forgotPassword: 'Olvidaste tu contrasena?',
+  footerActionLink__useAnotherMethod: 'Usar otro metodo',
+  dividerText: 'o',
+  socialButtonsBlockButton__signIn: 'Iniciar sesion con {{provider}}',
+  socialButtonsBlockButton__signUp: 'Registrarse con {{provider}}',
+  badge__requiresAction: 'Requiere accion',
   unstable__errors: {
     ...esESBase.unstable__errors,
-    form_password_meets_requirements: 'Tu contraseña cumple con todos los requisitos.',
+    form_password_meets_requirements: 'Tu contrasena cumple con todos los requisitos.',
   },
 };
 
@@ -42,6 +91,10 @@ const clerkAppearance = {
     borderRadius: '12px',
   },
   elements: {
+    logoImage: {
+      width: '200px',
+      height: '200px',
+    },
     card: {
       background: 'linear-gradient(180deg, #06060b 0%, #0c0c14 40%, #0f1018 100%)',
       border: '1px solid rgba(0,230,118,0.12)',
