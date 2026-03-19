@@ -33,6 +33,9 @@ export async function GET(request) {
 
     // For any match whose kickoff has passed and is NOT confirmed finished in Sanity,
     // fetch real status directly from API-Football — never trust Sanity for in-progress data
+    const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
+    let initialLiveStats = {};
+
     if (fixtures.length > 0) {
       const now = Date.now();
       const needsLiveStatus = fixtures.some(f => {
@@ -56,6 +59,9 @@ export async function GET(request) {
               const freshMap = {};
               apiFixtures.forEach(af => { freshMap[af.fixture.id] = af; });
 
+              // Identify which fixtures are currently live (for events/stats fetch)
+              const liveFixtureIds = [];
+
               fixtures = fixtures.map(f => {
                 // Already finished in cache — trust Sanity
                 if (FINISHED_STATUSES.includes(f.fixture?.status?.short)) return f;
@@ -65,6 +71,9 @@ export async function GET(request) {
                 // Kickoff passed, not finished: use API-Football fresh data
                 const fresh = freshMap[f.fixture.id];
                 if (fresh) {
+                  if (LIVE_STATUSES.includes(fresh.fixture.status.short)) {
+                    liveFixtureIds.push(f.fixture.id);
+                  }
                   return {
                     ...f,
                     fixture: { ...f.fixture, status: fresh.fixture.status },
@@ -74,6 +83,92 @@ export async function GET(request) {
                 }
                 return f;
               });
+
+              // Fetch events + statistics for all live matches in parallel
+              if (liveFixtureIds.length > 0) {
+                const headers = { 'x-apisports-key': key };
+                const fetchOpts = { headers, cache: 'no-store' };
+
+                const detailResults = await Promise.allSettled(
+                  liveFixtureIds.map(async (fid) => {
+                    const [evRes, stRes] = await Promise.all([
+                      fetch(`https://${API_HOST}/fixtures/events?fixture=${fid}`, fetchOpts),
+                      fetch(`https://${API_HOST}/fixtures/statistics?fixture=${fid}`, fetchOpts),
+                    ]);
+                    const evData = evRes.ok ? await evRes.json() : null;
+                    const stData = stRes.ok ? await stRes.json() : null;
+                    const events = evData?.response || [];
+                    const stats = stData?.response || [];
+
+                    const fresh = freshMap[fid];
+                    const homeId = fresh?.teams?.home?.id;
+                    const awayId = fresh?.teams?.away?.id;
+
+                    // Extract corners/cards from statistics
+                    const getStatVal = (teamStats, type) => {
+                      const stat = (teamStats?.statistics || []).find(s => s.type === type);
+                      return stat?.value || 0;
+                    };
+                    const homeStats = stats.find(s => s.team?.id === homeId);
+                    const awayStats = stats.find(s => s.team?.id === awayId);
+
+                    const goalScorers = [];
+                    const cardEvents = [];
+                    const missedPenalties = [];
+                    for (const ev of events) {
+                      if (ev.type === 'Goal') {
+                        if (ev.detail === 'Missed Penalty') {
+                          missedPenalties.push({
+                            player: ev.player?.name, teamId: ev.team?.id, teamName: ev.team?.name,
+                            minute: ev.time?.elapsed, extra: ev.time?.extra,
+                          });
+                        } else {
+                          goalScorers.push({
+                            player: ev.player?.name, teamId: ev.team?.id, teamName: ev.team?.name,
+                            minute: ev.time?.elapsed, extra: ev.time?.extra, type: ev.detail,
+                          });
+                        }
+                      }
+                      if (ev.type === 'Card') {
+                        cardEvents.push({
+                          player: ev.player?.name, teamId: ev.team?.id, teamName: ev.team?.name,
+                          minute: ev.time?.elapsed, type: ev.detail,
+                        });
+                      }
+                    }
+
+                    return {
+                      fixtureId: fid,
+                      status: fresh?.fixture?.status,
+                      goals: fresh?.goals,
+                      corners: {
+                        home: getStatVal(homeStats, 'Corner Kicks'),
+                        away: getStatVal(awayStats, 'Corner Kicks'),
+                        total: getStatVal(homeStats, 'Corner Kicks') + getStatVal(awayStats, 'Corner Kicks'),
+                      },
+                      yellowCards: {
+                        home: getStatVal(homeStats, 'Yellow Cards'),
+                        away: getStatVal(awayStats, 'Yellow Cards'),
+                        total: getStatVal(homeStats, 'Yellow Cards') + getStatVal(awayStats, 'Yellow Cards'),
+                      },
+                      redCards: {
+                        home: getStatVal(homeStats, 'Red Cards'),
+                        away: getStatVal(awayStats, 'Red Cards'),
+                        total: getStatVal(homeStats, 'Red Cards') + getStatVal(awayStats, 'Red Cards'),
+                      },
+                      goalScorers,
+                      cardEvents,
+                      missedPenalties,
+                    };
+                  })
+                );
+
+                for (const result of detailResults) {
+                  if (result.status === 'fulfilled' && result.value) {
+                    initialLiveStats[result.value.fixtureId] = result.value;
+                  }
+                }
+              }
             }
           }
         } catch (e) {
@@ -224,6 +319,7 @@ export async function GET(request) {
       analyzedOdds,
       analyzedData,
       standings,
+      initialLiveStats,
       batchStatus: batchFlag ? {
         started: batchFlag.started || false,
         completed: batchFlag.completed || false,

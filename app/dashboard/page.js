@@ -160,16 +160,26 @@ export default function Dashboard() {
         setBatchRunning(false);
       }
 
+      // Populate initial live stats from /api/fixtures response (corners, cards, scorers)
+      // This is available immediately — no need to wait for cron or Pusher
+      if (data.initialLiveStats && Object.keys(data.initialLiveStats).length > 0) {
+        setLiveStats(prev => {
+          const next = { ...prev, ...data.initialLiveStats };
+          if (_dashCache) _dashCache.liveStats = next;
+          return next;
+        });
+      }
+
       // Persist to module cache for instant back-navigation
       _dashCache = {
         fixtures: fx, analyzed: data.analyzed || [], analyzedOdds: data.analyzedOdds || {},
         analyzedData: data.analyzedData || {}, standings: data.standings || {},
         hidden: data.hidden || [], fromCache: data.fromCache || false,
         quota: data.quota || { used: 0, remaining: 100, limit: 100 },
+        liveStats: data.initialLiveStats || {},
       };
 
-      // For today's matches, ALWAYS fetch fresh statuses from /api/live
-      // (calls API-Football directly — no Sanity cache)
+      // For today's matches, fetch fresh statuses from /api/live as backup
       const isViewingToday = d === today();
       if (isViewingToday && fx.length > 0) {
         // Fetch fresh fixture statuses
@@ -178,23 +188,6 @@ export default function Dashboard() {
           .then(liveData => {
             if (!liveData.matches?.length) return;
             setFixtures(prev => applyLiveUpdate(prev, liveData.matches));
-          })
-          .catch(() => {});
-        // Fetch persisted live stats (corners, cards, scorers) — includes finished matches
-        fetch(`/api/live-poll?date=${d}`)
-          .then(r => r.json())
-          .then(pollData => {
-            if (!pollData.liveStats?.length) return;
-            setLiveStats(prev => {
-              const next = { ...prev };
-              pollData.liveStats.forEach(s => {
-                if (s.corners || s.yellowCards || s.redCards || s.goalScorers?.length) {
-                  next[s.fixtureId] = { ...next[s.fixtureId], ...s };
-                }
-              });
-              if (_dashCache) _dashCache.liveStats = next;
-              return next;
-            });
           })
           .catch(() => {});
       }
