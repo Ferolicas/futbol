@@ -664,6 +664,9 @@ export default function Dashboard() {
           </div>
         </motion.header>
 
+        {/* OWNER: API counter */}
+        {isOwner && <ApiCounter quota={quota} />}
+
         {/* CONTROLS: Date + Filters */}
         <div className="controls-row">
           <div className="date-nav">
@@ -1534,4 +1537,63 @@ function getMinOdd(fixture, analyzedOdds) {
   const odds = analyzedOdds?.[fixture.fixture.id];
   if (!odds) return 0;
   return Math.min(odds.home || 99, odds.draw || 99, odds.away || 99);
+}
+
+/* ======================== API COUNTER (OWNER ONLY) ======================== */
+
+function ApiCounter({ quota }) {
+  const [liveQuota, setLiveQuota] = useState(quota);
+  const [countdown, setCountdown] = useState('');
+
+  // Poll quota every 30 seconds
+  useEffect(() => {
+    setLiveQuota(quota);
+  }, [quota]);
+
+  useEffect(() => {
+    const poll = () => {
+      fetch('/api/fixtures?date=' + today())
+        .then(r => r.json())
+        .then(d => { if (d.quota) setLiveQuota(d.quota); })
+        .catch(() => {});
+    };
+    const interval = setInterval(poll, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Countdown to UTC midnight (API-Football daily reset)
+  useEffect(() => {
+    const tick = () => {
+      const now = new Date();
+      const utcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+      const diff = utcMidnight - now;
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      setCountdown(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const pct = liveQuota.limit > 0 ? (liveQuota.used / liveQuota.limit) * 100 : 0;
+  const danger = pct > 85;
+  const warn = pct > 65;
+
+  return (
+    <div className={`api-counter ${danger ? 'danger' : warn ? 'warn' : ''}`}>
+      <div className="api-counter-row">
+        <span className="api-counter-label">API Calls</span>
+        <span className="api-counter-value">{liveQuota.used.toLocaleString()} / {liveQuota.limit.toLocaleString()}</span>
+      </div>
+      <div className="api-counter-bar">
+        <div className="api-counter-fill" style={{ width: `${Math.min(pct, 100)}%` }} />
+      </div>
+      <div className="api-counter-row">
+        <span className="api-counter-remaining">{liveQuota.remaining.toLocaleString()} restantes</span>
+        <span className="api-counter-reset">Reset: {countdown}</span>
+      </div>
+    </div>
+  );
 }

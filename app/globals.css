@@ -1792,6 +1792,38 @@ div[data-testid*="development"] { display: none !important; }
 /* Apple icon is black - invert it on dark bg */
 .cl-socialButtonsProviderIcon__apple { filter: invert(1) !important; }
 
+/* ===================== API COUNTER (OWNER) ===================== */
+.api-counter {
+  background: rgba(0,230,118,0.04);
+  border: 1px solid rgba(0,230,118,0.12);
+  border-radius: 12px;
+  padding: 8px 14px;
+  margin-bottom: 8px;
+  font-size: 0.78rem;
+}
+.api-counter.warn { border-color: rgba(255,180,0,0.3); background: rgba(255,180,0,0.04); }
+.api-counter.danger { border-color: rgba(255,60,60,0.3); background: rgba(255,60,60,0.04); }
+.api-counter-row {
+  display: flex; justify-content: space-between; align-items: center;
+}
+.api-counter-label { color: rgba(255,255,255,0.5); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.api-counter-value { color: #fff; font-weight: 700; font-variant-numeric: tabular-nums; }
+.api-counter-bar {
+  height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px;
+  margin: 5px 0; overflow: hidden;
+}
+.api-counter-fill {
+  height: 100%; border-radius: 2px;
+  background: linear-gradient(90deg, #00e676, #00b0ff);
+  transition: width 0.5s ease;
+}
+.api-counter.warn .api-counter-fill { background: linear-gradient(90deg, #ffb300, #ff9100); }
+.api-counter.danger .api-counter-fill { background: linear-gradient(90deg, #ff5252, #ff1744); }
+.api-counter-remaining { color: rgba(255,255,255,0.4); font-size: 0.7rem; }
+.api-counter-reset { color: rgba(0,230,118,0.7); font-size: 0.7rem; font-variant-numeric: tabular-nums; font-weight: 600; }
+.api-counter.warn .api-counter-reset { color: rgba(255,180,0,0.8); }
+.api-counter.danger .api-counter-reset { color: rgba(255,80,80,0.8); }
+
 /* ===================== REGISTRATION MODAL ===================== */
 .modal-overlay {
   position: fixed; inset: 0; z-index: 9999; background: rgba(6,6,11,0.85);
