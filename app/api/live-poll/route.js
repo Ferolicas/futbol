@@ -19,6 +19,8 @@ export async function GET(request) {
     return Response.json({
       liveStats: liveStats || [],
       timestamp: new Date().toISOString(),
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
     });
   } catch (error) {
     return Response.json({ liveStats: [], error: error.message });

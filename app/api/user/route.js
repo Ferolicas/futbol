@@ -153,10 +153,19 @@ export async function POST(request) {
     if (type === 'save-combinada') {
       const docId = `comb-${userId.replace('cfaUser-', '')}-${Date.now()}`;
 
+      // Normalize selection fields: client sends 'name' but schema expects 'market'
+      const normalizedSelections = (data.selections || []).map(s => ({
+        fixtureId: String(s.fixtureId || ''),
+        matchName: s.matchName || '',
+        market: s.name || s.market || '',
+        odd: s.odd || 0,
+        probability: s.probability || 0,
+      }));
+
       await saveToSanity('cfaCombinada', docId, {
         userId,
         name: data.name || `Combinada ${new Date().toLocaleDateString('es')}`,
-        selections: data.selections,
+        selections: normalizedSelections,
         combinedOdd: data.combinedOdd,
         combinedProbability: data.combinedProbability,
         createdAt: new Date().toISOString(),

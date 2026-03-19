@@ -6,6 +6,7 @@ export default {
     { name: 'userId', title: 'User ID', type: 'string' },
     { name: 'name', title: 'Nombre', type: 'string' },
     { name: 'selections', title: 'Selecciones', type: 'array', of: [{ type: 'object', fields: [
+      { name: 'fixtureId', title: 'Fixture ID', type: 'string' },
       { name: 'matchName', title: 'Partido', type: 'string' },
       { name: 'market', title: 'Mercado', type: 'string' },
       { name: 'odd', title: 'Cuota', type: 'number' },

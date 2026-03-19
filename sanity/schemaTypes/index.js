@@ -6,6 +6,7 @@ import cfaCombinada from './cfaCombinada';
 import footballMatchAnalysis from './footballMatchAnalysis';
 import footballFixturesCache from './footballFixturesCache';
 import appConfig from './appConfig';
+import oddsCache from './oddsCache';
 
 export const schemaTypes = [
   cfaUser,
@@ -16,4 +17,5 @@ export const schemaTypes = [
   footballMatchAnalysis,
   footballFixturesCache,
   appConfig,
+  oddsCache,
 ];

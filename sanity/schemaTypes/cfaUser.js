@@ -12,6 +12,7 @@ export default {
     { name: 'subscriptionStatus', title: 'Estado Suscripcion', type: 'string', options: { list: ['pending', 'active', 'trialing', 'past_due', 'cancelled', 'inactive'] } },
     { name: 'stripeCustomerId', title: 'Stripe Customer ID', type: 'string' },
     { name: 'stripeSessionId', title: 'Stripe Session ID', type: 'string' },
+    { name: 'clerkId', title: 'Clerk ID', type: 'string' },
     { name: 'paidAt', title: 'Fecha de Pago', type: 'datetime' },
     { name: 'createdAt', title: 'Fecha de Registro', type: 'datetime' },
   ],

@@ -1,11 +1,19 @@
 import { createCheckoutSession } from '../../../lib/stripe';
 import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
+import { auth } from '@clerk/nextjs/server';
+import { getSanityUserByClerkId } from '../../../lib/clerk-sync';
 
 export async function POST(request) {
   try {
+    // Validate Clerk session first
+    const { userId: clerkId } = await auth();
+    if (!clerkId) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { plan, userId, email, localCurrency, exchangeRate } = await request.json();
 
-    if (!plan || !userId || !email) {
+    if (!plan || !email) {
       return Response.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
@@ -13,11 +21,17 @@ export async function POST(request) {
       return Response.json({ error: 'Invalid plan' }, { status: 400 });
     }
 
-    // Get user from Sanity
-    const user = await queryFromSanity(
-      `*[_type == "cfaUser" && email == $email][0]{ _id, name, email }`,
-      { email: email.toLowerCase().trim() }
-    );
+    // Validate: email from body must match the authenticated user's email
+    const sanityUser = await getSanityUserByClerkId(clerkId);
+    if (!sanityUser) {
+      return Response.json({ error: 'User not found' }, { status: 404 });
+    }
+    if (sanityUser.email?.toLowerCase() !== email.toLowerCase().trim()) {
+      return Response.json({ error: 'Email mismatch' }, { status: 403 });
+    }
+
+    // Use the validated Sanity user — never trust client-provided userId
+    const user = sanityUser;
 
     if (!user) {
       return Response.json({ error: 'User not found' }, { status: 404 });

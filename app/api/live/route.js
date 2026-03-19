@@ -1,63 +1,62 @@
-import { getFromSanity, saveToSanity } from '../../../lib/sanity';
 import { getQuota } from '../../../lib/api-football';
 
+// Live state: ALWAYS fetches directly from API-Football.
+// NEVER reads from Sanity cache — live state must be real-time.
+// Uses in-memory cache (30s TTL) to prevent burning API quota on concurrent requests.
+
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const API_HOST = 'v3.football.api-sports.io';
-const DAILY_LIMIT = 100;
 
-function getApiKeys() {
-  const keys = [];
-  if (process.env.FOOTBALL_API_KEY) keys.push(process.env.FOOTBALL_API_KEY);
-  if (process.env.FOOTBALL_API_KEY_2) keys.push(process.env.FOOTBALL_API_KEY_2);
-  return keys;
+// In-memory cache: survives across requests in the same serverless instance
+// TTL = 30 seconds — ensures data is max 30s old
+let _liveCache = { data: null, fetchedAt: 0 };
+const CACHE_TTL = 30_000; // 30 seconds
+
+function getApiKey() {
+  return process.env.FOOTBALL_API_KEY;
 }
 
-async function trackKeyCall(keyIndex) {
-  const date = new Date().toISOString().split('T')[0];
-  const docId = `apiQuota-${date}-key${keyIndex + 1}`;
-  const doc = await getFromSanity('appConfig', docId);
-  const used = (doc?.used || 0) + 1;
-  await saveToSanity('appConfig', docId, { date, used, updatedAt: new Date().toISOString() });
-  return used;
-}
+async function fetchLiveFromApi() {
+  const key = getApiKey();
+  if (!key) return null;
 
-// Try API call with key rotation
-async function tryApiCall(endpoint) {
-  const keys = getApiKeys();
-  for (let i = 0; i < keys.length; i++) {
-    try {
-      const res = await fetch(`https://${API_HOST}${endpoint}`, {
-        headers: { 'x-apisports-key': keys[i] },
-        cache: 'no-store',
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
+  const res = await fetch(`https://${API_HOST}/fixtures?live=all`, {
+    headers: { 'x-apisports-key': key },
+    cache: 'no-store',
+  });
 
-      // Detect API errors (rate limit, suspended, etc.)
-      if (data.errors && Object.keys(data.errors).length > 0) {
-        console.error(`Live key${i + 1} error:`, data.errors);
-        // Mark key as exhausted
-        const date = new Date().toISOString().split('T')[0];
-        const docId = `apiQuota-${date}-key${i + 1}`;
-        await saveToSanity('appConfig', docId, { date, used: DAILY_LIMIT, updatedAt: new Date().toISOString() });
-        continue;
-      }
-
-      await trackKeyCall(i);
-      return data.response || [];
-    } catch (e) {
-      console.error(`Live key${i + 1} fetch error:`, e.message);
-      continue;
-    }
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (data.errors && Object.keys(data.errors).length > 0) {
+    console.error('[LIVE] API error:', data.errors);
+    return null;
   }
-  return null; // All keys failed
+  return data.response || [];
+}
+
+async function fetchByDateFromApi(date) {
+  const key = getApiKey();
+  if (!key) return null;
+
+  const res = await fetch(`https://${API_HOST}/fixtures?date=${date}`, {
+    headers: { 'x-apisports-key': key },
+    cache: 'no-store',
+  });
+
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (data.errors && Object.keys(data.errors).length > 0) {
+    console.error('[LIVE] API error:', data.errors);
+    return null;
+  }
+  return data.response || [];
 }
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const date = searchParams.get('date');
-  const idsParam = searchParams.get('ids');
 
   if (!date) {
     return Response.json({ error: 'date parameter required' }, { status: 400 });
@@ -65,75 +64,69 @@ export async function GET(request) {
 
   try {
     const { ALL_LEAGUE_IDS, LEAGUES } = await import('../../../lib/leagues');
+    const now = Date.now();
 
-    const cached = await getFromSanity('matchDay', date);
-    const fixtures = cached?.matches || [];
-    const cacheAge = cached?.fetchedAt ? Date.now() - new Date(cached.fetchedAt).getTime() : Infinity;
-    const quota = await getQuota();
+    // Check in-memory cache (30s TTL)
+    if (_liveCache.data && (now - _liveCache.fetchedAt) < CACHE_TTL) {
+      const filtered = _liveCache.data
+        .filter(m => ALL_LEAGUE_IDS.includes(m.league.id));
 
-    // Dynamic refresh interval
-    const minInterval = quota.remaining > 100 ? 45_000 : quota.remaining > 40 ? 90_000 : 180_000;
-
-    if (cacheAge > minInterval && quota.remaining > 0) {
-      const allFixtures = await tryApiCall(`/fixtures?date=${date}`);
-
-      if (allFixtures && allFixtures.length > 0) {
-        const filtered = allFixtures
-          .filter(m => ALL_LEAGUE_IDS.includes(m.league.id))
-          .map(m => ({
-            ...m,
-            leagueMeta: LEAGUES[m.league.id] || { country: m.league.country, name: m.league.name, division: 0, gender: 'M' },
-          }));
-
-        const now = new Date().toISOString();
-
-        // Only save if we got real data
-        if (filtered.length > 0) {
-          await saveToSanity('matchDay', date, {
-            date,
-            matches: filtered,
-            fetchedAt: now,
-            matchCount: filtered.length,
-          });
-        }
-
-        const trackedIds = idsParam ? new Set(idsParam.split(',').map(Number)) : null;
-        const responseMatches = trackedIds
-          ? filtered.filter(m => trackedIds.has(m.fixture.id))
-          : filtered;
-
-        const updatedQuota = await getQuota();
-
-        return Response.json({
-          matches: responseMatches,
-          allCount: filtered.length,
-          source: 'api-football',
-          updatedAt: now,
-          apiCallUsed: true,
-          refreshInterval: updatedQuota.remaining > 100 ? 45 : updatedQuota.remaining > 40 ? 90 : 180,
-          quota: updatedQuota,
-        });
-      }
-      // API failed - fall through to cache
+      return Response.json({
+        matches: filtered,
+        allCount: filtered.length,
+        source: 'api-football-memory-cache',
+        cacheAgeSec: Math.round((now - _liveCache.fetchedAt) / 1000),
+        updatedAt: new Date(_liveCache.fetchedAt).toISOString(),
+      }, {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+        },
+      });
     }
 
-    // Return cached data
-    const trackedIds = idsParam ? new Set(idsParam.split(',').map(Number)) : null;
-    const responseMatches = trackedIds
-      ? fixtures.filter(m => trackedIds.has(m.fixture.id))
-      : fixtures;
+    // Call API-Football directly — no Sanity, no cache
+    const allFixtures = await fetchByDateFromApi(date);
 
+    if (allFixtures && allFixtures.length > 0) {
+      // Update in-memory cache
+      _liveCache = { data: allFixtures, fetchedAt: now };
+
+      const filtered = allFixtures
+        .filter(m => ALL_LEAGUE_IDS.includes(m.league.id))
+        .map(m => ({
+          ...m,
+          leagueMeta: LEAGUES[m.league.id] || { country: m.league.country, name: m.league.name, division: 0, gender: 'M' },
+        }));
+
+      return Response.json({
+        matches: filtered,
+        allCount: filtered.length,
+        source: 'api-football',
+        updatedAt: new Date().toISOString(),
+      }, {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+        },
+      });
+    }
+
+    // API call failed — return empty, never stale data
     return Response.json({
-      matches: responseMatches,
-      allCount: fixtures.length,
-      source: 'cache',
-      updatedAt: cached?.fetchedAt || null,
-      cacheAgeSec: Math.round(cacheAge / 1000),
-      refreshInterval: quota.remaining > 100 ? 45 : quota.remaining > 40 ? 90 : 180,
-      quota,
+      matches: [],
+      allCount: 0,
+      source: 'api-failed',
+      error: 'Could not fetch live data from API',
+    }, {
+      headers: {
+        'Cache-Control': 'no-store',
+      },
     });
   } catch (error) {
-    console.error('Live scores error:', error);
+    console.error('[LIVE] Error:', error);
     return Response.json({ error: error.message }, { status: 500 });
   }
 }

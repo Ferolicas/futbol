@@ -110,6 +110,65 @@ export async function GET(request) {
       ? await getAnalyzedMatchesFull(globallyAnalyzed)
       : { analyzedOdds: {}, analyzedData: {} };
 
+    // Merge The Odds API cached odds into analyzed data
+    // This ensures real bookmaker odds appear even if API-Football odds were empty
+    if (fixtureIds.length > 0) {
+      try {
+        const oddsDocs = await queryFromSanity(
+          `*[_type == "oddsCache" && date == $date]{ fixtureId, odds }`,
+          { date }
+        );
+        if (oddsDocs?.length > 0) {
+          for (const doc of oddsDocs) {
+            const fid = doc.fixtureId;
+            if (!fid || !doc.odds) continue;
+
+            // Merge into analyzedOdds (matchWinner for card display)
+            if (doc.odds.matchWinner) {
+              if (!analyzedOdds[fid]) {
+                analyzedOdds[fid] = doc.odds.matchWinner;
+              }
+            }
+
+            // Merge into analyzedData odds (for accordion markets)
+            if (analyzedData[fid]) {
+              const existing = analyzedData[fid].odds;
+              if (!existing || !existing.matchWinner) {
+                // No API-Football odds — use The Odds API entirely
+                analyzedData[fid].odds = {
+                  ...(existing || {}),
+                  ...doc.odds,
+                };
+              } else {
+                // Merge: fill missing markets from The Odds API
+                if (!existing.matchWinner && doc.odds.matchWinner) {
+                  existing.matchWinner = doc.odds.matchWinner;
+                }
+                if (!existing.overUnder && doc.odds.overUnder) {
+                  existing.overUnder = doc.odds.overUnder;
+                }
+                // Add The Odds API bookmakers to allBookmakerOdds
+                if (doc.odds.allBookmakerOdds?.length) {
+                  const names = new Set(
+                    (existing.allBookmakerOdds || []).map(b => b.name?.toLowerCase())
+                  );
+                  for (const bk of doc.odds.allBookmakerOdds) {
+                    if (!names.has(bk.name?.toLowerCase())) {
+                      if (!existing.allBookmakerOdds) existing.allBookmakerOdds = [];
+                      existing.allBookmakerOdds.push(bk);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // Non-critical: odds enrichment failed, continue without
+        console.error('[FIXTURES] Odds merge error:', e.message);
+      }
+    }
+
     const quota = await getQuota();
 
     // Get cached standings positions
@@ -140,6 +199,8 @@ export async function GET(request) {
         startedAt: batchFlag.startedAt || null,
       } : null,
       ...(error ? { error } : {}),
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
     });
   } catch (e) {
     const quota = await getQuota().catch(() => ({ used: 0, remaining: 100, limit: 100 }));

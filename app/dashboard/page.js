@@ -71,6 +71,40 @@ export default function Dashboard() {
   const [savingComb, setSavingComb] = useState(false);
   // Live match stats (corners, cards, scorers)
   const [liveStats, setLiveStats] = useState(_dashCache?.liveStats || {});
+  // Track when Pusher last delivered live data — polling defers to Pusher when recent
+  const pusherLastUpdate = useRef(0);
+
+  // Apply live data to fixtures — NEVER accepts a lower elapsed minute (prevents backwards jumps)
+  const applyLiveUpdate = useCallback((prev, freshMatches) => {
+    const updated = prev.map(f => {
+      const fresh = freshMatches.find(m =>
+        (m.fixtureId || m.fixture?.id) === f.fixture.id
+      );
+      if (!fresh) return f;
+
+      const freshStatus = fresh.status || fresh.fixture?.status;
+      const freshElapsed = freshStatus?.elapsed ?? fresh.elapsed;
+      const currentElapsed = f.fixture.status.elapsed;
+
+      // Never go backwards: if current elapsed is higher, keep it
+      // (protects against stale data from any source)
+      if (currentElapsed && freshElapsed && freshElapsed < currentElapsed) {
+        return f;
+      }
+
+      return {
+        ...f,
+        fixture: {
+          ...f.fixture,
+          status: freshStatus || f.fixture.status,
+        },
+        goals: fresh.goals || f.goals,
+        score: fresh.score || f.score,
+      };
+    });
+    if (_dashCache) _dashCache.fixtures = updated;
+    return updated;
+  }, []);
 
   const loadFixtures = useCallback(async (d, { silent } = {}) => {
     if (!silent) setLoading(true);
@@ -110,29 +144,15 @@ export default function Dashboard() {
         quota: data.quota || { used: 0, remaining: 100, limit: 100 },
       };
 
-      // Immediately fetch truly fresh statuses from /api/live
-      // (calls API-Football directly if matchDay is stale)
-      if (fx.length > 0) {
+      // For today's matches, ALWAYS fetch fresh statuses from /api/live
+      // (calls API-Football directly — no Sanity cache)
+      const isViewingToday = d === today();
+      if (isViewingToday && fx.length > 0) {
         fetch(`/api/live?date=${d}`)
           .then(r => r.json())
           .then(liveData => {
             if (!liveData.matches?.length) return;
-            setFixtures(prev => {
-              const updated = prev.map(f => {
-                const fresh = liveData.matches.find(m => m.fixture.id === f.fixture.id);
-                if (fresh) {
-                  return {
-                    ...f,
-                    fixture: { ...f.fixture, status: fresh.fixture.status },
-                    goals: fresh.goals || f.goals,
-                    score: fresh.score || f.score,
-                  };
-                }
-                return f;
-              });
-              if (_dashCache) _dashCache.fixtures = updated;
-              return updated;
-            });
+            setFixtures(prev => applyLiveUpdate(prev, liveData.matches));
           })
           .catch(() => {});
       }
@@ -181,22 +201,15 @@ export default function Dashboard() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // === PUSHER REAL-TIME EVENTS ===
+  // Only subscribe to Pusher for today's date — past dates are historical/fixed
+  const isViewingToday = date === today();
 
-  // Live scores: update fixtures and live stats in real-time
-  usePusherEvent('live-scores', 'update', useCallback((data) => {
+  // Live scores: update fixtures and live stats in real-time (Pusher = sole source of truth)
+  usePusherEvent(isViewingToday ? 'live-scores' : null, 'update', useCallback((data) => {
     if (!data?.matches) return;
-    setFixtures(prev => prev.map(f => {
-      const liveMatch = data.matches.find(m => m.fixtureId === f.fixture.id);
-      if (liveMatch) {
-        return {
-          ...f,
-          fixture: { ...f.fixture, status: liveMatch.status },
-          goals: liveMatch.goals,
-          score: liveMatch.score,
-        };
-      }
-      return f;
-    }));
+    pusherLastUpdate.current = Date.now();
+    // Update fixtures with anti-backwards protection
+    setFixtures(prev => applyLiveUpdate(prev, data.matches));
     // Update live stats from Pusher data
     setLiveStats(prev => {
       const next = { ...prev };
@@ -219,17 +232,37 @@ export default function Dashboard() {
       if (_dashCache) _dashCache.liveStats = next;
       return next;
     });
-  }, []));
+  }, [applyLiveUpdate]));
 
-  // Lineups: notify that lineups are available
-  usePusherEvent('match-updates', 'lineups-ready', useCallback((data) => {
+  // Lineups: notify that lineups are available (only for today)
+  usePusherEvent(isViewingToday ? 'match-updates' : null, 'lineups-ready', useCallback((data) => {
     if (!data?.fixtureIds) return;
     // Reload fixtures to get updated analysis with lineups
     loadFixtures(date);
   }, [date, loadFixtures]));
 
-  // Analysis batch: reload when complete (via Pusher)
-  usePusherEvent('analysis', 'batch-complete', useCallback((data) => {
+  // Odds update from The Odds API cron
+  usePusherEvent(isViewingToday ? 'live-scores' : null, 'odds-update', useCallback((data) => {
+    if (!data?.odds) return;
+    // Merge fresh odds into analyzed data
+    setAnalyzedOdds(prev => {
+      const next = { ...prev };
+      for (const [fid, odds] of Object.entries(data.odds)) {
+        if (odds.matchWinner) {
+          next[fid] = {
+            ...(next[fid] || {}),
+            home: odds.matchWinner.home,
+            draw: odds.matchWinner.draw,
+            away: odds.matchWinner.away,
+          };
+        }
+      }
+      return next;
+    });
+  }, []));
+
+  // Analysis batch: reload when complete (via Pusher, only for today)
+  usePusherEvent(isViewingToday ? 'analysis' : null, 'batch-complete', useCallback((data) => {
     if (data?.date === date) {
       setBatchRunning(false);
       loadFixtures(date);
@@ -245,48 +278,41 @@ export default function Dashboard() {
     return () => clearInterval(pollBatch);
   }, [batchRunning, date, loadFixtures]);
 
-  // Polling fallback for live stats (works when Pusher is unavailable)
+  // Polling: fetches DIRECTLY from API-Football via /api/live (no Sanity cache).
+  // Only for today. Defers to Pusher when active.
   useEffect(() => {
+    // Never poll for past/future dates — their state is fixed
+    if (date !== today()) return;
+
     const hasLive = fixtures.some(f => isLive(f.fixture.status.short));
-    const hasFinishedToday = fixtures.some(f => isFinished(f.fixture.status.short));
-    // Also check if any match has kicked off based on time (cache may still show NS)
+    // Also check if any match should have kicked off (cache may still show NS)
     const now = Date.now();
     const hasKickedOff = fixtures.some(f => {
       const kickoff = new Date(f.fixture.date).getTime();
       return kickoff < now && !isFinished(f.fixture.status.short) && !isPostponed(f.fixture.status.short);
     });
-    if (!hasLive && !hasFinishedToday && !hasKickedOff) return;
+    if (!hasLive && !hasKickedOff) return;
 
     const poll = async () => {
+      // Skip if Pusher delivered data in the last 90 seconds
+      if (Date.now() - pusherLastUpdate.current < 90000) return;
+
       try {
-        const res = await fetch(`/api/live-poll?date=${date}`);
+        // Calls API-Football directly (30s in-memory cache on server)
+        const res = await fetch(`/api/live?date=${date}`);
         const data = await res.json();
-        if (data.liveStats?.length > 0) {
-          const statsMap = {};
-          data.liveStats.forEach(s => { statsMap[s.fixtureId] = s; });
-          setLiveStats(statsMap);
-          if (_dashCache) _dashCache.liveStats = statsMap;
-          // Also update fixture scores/status from live stats
-          setFixtures(prev => prev.map(f => {
-            const ls = statsMap[f.fixture.id];
-            if (ls?.status) {
-              return {
-                ...f,
-                fixture: { ...f.fixture, status: ls.status },
-                goals: ls.goals || f.goals,
-                score: ls.score || f.score,
-              };
-            }
-            return f;
-          }));
+        if (data.matches?.length > 0) {
+          // Apply with anti-backwards protection
+          setFixtures(prev => applyLiveUpdate(prev, data.matches));
         }
       } catch {}
     };
 
-    poll(); // Initial fetch
-    const interval = setInterval(poll, 15000); // Every 15 seconds
+    poll();
+    // Poll every 35 seconds (server has 30s in-memory cache, so we always get fresh data)
+    const interval = setInterval(poll, 35000);
     return () => clearInterval(interval);
-  }, [date, fixtures.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [date, fixtures.length, applyLiveUpdate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const changeDate = (offset) => {
     const d = new Date(date);
@@ -296,6 +322,9 @@ export default function Dashboard() {
     setSelected(new Set());
     setSelectedMarkets({});
     setExpandedMatch(null);
+    // Clear live stats when switching dates to prevent stale data from previous view
+    setLiveStats({});
+    pusherLastUpdate.current = 0;
     loadFixtures(nd);
   };
 
@@ -466,7 +495,8 @@ export default function Dashboard() {
       const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
       data.combinada.selections.forEach(sel => {
-        if (sel.probability >= 65) {
+        // Requisito #9: only include bets with real odds
+        if (sel.probability >= 65 && sel.odd && sel.odd > 1) {
           allBets.push({ ...sel, fixtureId: fid, matchName: mn, priority, matchTime, homeTeam, awayTeam });
         }
       });
@@ -668,7 +698,7 @@ export default function Dashboard() {
                     </span>
                     <span className="apuesta-mkt">{sel.name}</span>
                     <span className="apuesta-prob">{cap(sel.probability)}%</span>
-                    <span className="apuesta-odd">{sel.odd ? sel.odd.toFixed(2) : '—'}</span>
+                    <span className="apuesta-odd">{sel.odd.toFixed(2)}</span>
                   </div>
                 ))}
                 {apuestaDelDia.combinedOdd > 1 && (
@@ -795,7 +825,7 @@ export default function Dashboard() {
                       <div className="comb-item-row">
                         <span className="comb-item-name">{sel.name}</span>
                         <span className={`comb-item-prob ${sel.probability >= 75 ? 'high' : sel.probability >= 50 ? 'mid' : 'low'}`}>{cap(sel.probability)}%</span>
-                        <span className="comb-item-odd">{sel.odd ? sel.odd.toFixed(2) : '—'}</span>
+                        <span className="comb-item-odd">{sel.odd ? sel.odd.toFixed(2) : ''}</span>
                         <button className="comb-item-rm" onClick={() => toggleMarket(sel.fixtureId, sel, sel.matchName)}>&#10005;</button>
                       </div>
                     </div>
@@ -842,7 +872,7 @@ export default function Dashboard() {
                         </div>
                         <div className="saved-comb-sels">
                           {comb.selections.map((s, i) => (
-                            <span key={i} className="saved-sel-chip">{s.name} {s.odd ? `(${s.odd.toFixed(2)})` : ''}</span>
+                            <span key={i} className="saved-sel-chip">{s.name || s.market} {s.odd ? `(${s.odd.toFixed(2)})` : ''}</span>
                           ))}
                         </div>
                       </div>
@@ -1040,8 +1070,9 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
       m.push({ id: 'k25', name: 'Más de 2.5 tarjetas', probability: p.cards.over25, odd: null, cat: 'Tarjetas' });
       m.push({ id: 'k35', name: 'Más de 3.5 tarjetas', probability: p.cards.over35, odd: null, cat: 'Tarjetas' });
     }
+    // Requisito #9: only show markets that have real odds (no odds = no display)
     return m
-      .filter(x => x.probability >= 70 && x.probability <= 95)
+      .filter(x => x.probability >= 70 && x.probability <= 95 && x.odd && x.odd > 1)
       .sort((a, b) => b.probability - a.probability);
   }, [data, match]);
 
@@ -1193,7 +1224,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                         <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${cap(mkt.probability)}%` }} /></div>
                         <div className="mkt-nums">
                           <span className="mkt-pct">{cap(mkt.probability)}%</span>
-                          <span className="mkt-odd">{mkt.odd ? mkt.odd.toFixed(2) : '—'}</span>
+                          <span className="mkt-odd">{mkt.odd.toFixed(2)}</span>
                           {bkInfo && (() => {
                             const logo = BOOKMAKER_LOGOS[bkInfo.bookmaker?.toLowerCase()] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => bkInfo.bookmaker?.toLowerCase()?.includes(k))?.[1];
                             return logo ? <span className="mkt-bk"><img src={logo} alt="" className="bk-logo-lg" /></span> : null;

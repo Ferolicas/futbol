@@ -17,6 +17,8 @@ export async function GET(request) {
       matches: result.fixtures || [],
       fromCache: result.fromCache || false,
       quota,
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
     });
   } catch (error) {
     console.error('Matches error:', error);
