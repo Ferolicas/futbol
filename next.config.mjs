@@ -4,8 +4,8 @@ const nextConfig = {
     unoptimized: true,
   },
   env: {
-    NEXT_PUBLIC_PUSHER_KEY: process.env.NEXT_PUBLIC_PUSHER_KEY,
-    NEXT_PUBLIC_PUSHER_CLUSTER: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
+    NEXT_PUBLIC_PUSHER_KEY: '4b69ba2ea5a71be0e991',
+    NEXT_PUBLIC_PUSHER_CLUSTER: 'sa1',
   },
 };
 
