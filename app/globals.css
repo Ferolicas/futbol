@@ -1784,9 +1784,11 @@ body {
 a[href*="clerk.com"] { display: none !important; }
 div[data-testid*="development"] { display: none !important; }
 .cl-card::after { display: none !important; }
-/* Catch all "Secured by" / Clerk branding variants */
-[class*="cl-internal"] { display: none !important; }
+/* Hide "Secured by Clerk" branding link in footer */
 .cl-footerPages { display: none !important; }
+.cl-footer a[href*="clerk"] { display: none !important; }
+.cl-footer [class*="secured"] { display: none !important; }
+.cl-poweredBy { display: none !important; }
 /* Apple icon is black - invert it on dark bg */
 .cl-socialButtonsProviderIcon__apple { filter: invert(1) !important; }
 
