@@ -71,6 +71,9 @@ export default function Dashboard() {
   const [savingComb, setSavingComb] = useState(false);
   // Live match stats (corners, cards, scorers)
   const [liveStats, setLiveStats] = useState(_dashCache?.liveStats || {});
+  // Owner re-analyze state
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const [reanalyzeDone, setReanalyzeDone] = useState(false);
   // Track when Pusher last delivered live data — polling defers to Pusher when recent
   const pusherLastUpdate = useRef(0);
 
@@ -105,6 +108,27 @@ export default function Dashboard() {
     if (_dashCache) _dashCache.fixtures = updated;
     return updated;
   }, []);
+
+  const isOwner = user?.emailAddresses?.[0]?.emailAddress?.toLowerCase() === 'ferneyolicas@gmail.com';
+
+  const handleReanalyze = async () => {
+    setReanalyzing(true);
+    setReanalyzeDone(false);
+    try {
+      const res = await fetch('/api/admin/reanalyze', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setReanalyzeDone(true);
+        setTimeout(() => setReanalyzeDone(false), 3000);
+        // Reload fixtures to get fresh data
+        loadFixtures(date);
+      }
+    } catch (e) {
+      console.error('[REANALYZE]', e);
+    } finally {
+      setReanalyzing(false);
+    }
+  };
 
   const loadFixtures = useCallback(async (d, { silent } = {}) => {
     if (!silent) setLoading(true);
@@ -626,6 +650,15 @@ export default function Dashboard() {
         >
           <img src="/vflogo.png" alt="CFanalisis" className="brand-logo" />
           <div className="header-right">
+            {isOwner && (
+              <button
+                className="btn-reanalyze"
+                onClick={handleReanalyze}
+                disabled={reanalyzing}
+              >
+                {reanalyzeDone ? '✓ Listo' : reanalyzing ? '⏳ Re-analizando...' : '🔄 Re-analizar todo'}
+              </button>
+            )}
             {user && (
               <div className="user-badge">
                 <span className="user-name">{user.firstName || user.emailAddresses?.[0]?.emailAddress?.split('@')[0]}</span>
