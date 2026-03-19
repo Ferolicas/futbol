@@ -12,9 +12,13 @@ const esES = {
 };
 
 export const metadata = {
-  title: 'CFanalisis.com - Analisis de Futbol Profesional',
+  title: 'Analisis Deportivos - CF Analisis',
   description: 'Plataforma avanzada de analisis de futbol y apuestas deportivas. Estadisticas, combinadas inteligentes, marcadores en vivo.',
   keywords: 'futbol, apuestas, analisis, estadisticas, combinadas, probabilidades',
+  icons: {
+    icon: '/vflogo.png',
+    apple: '/vflogo.png',
+  },
 };
 
 export const viewport = {
