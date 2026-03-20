@@ -1505,16 +1505,6 @@ function ApiCounter({ quota }) {
     setLiveQuota(quota);
   }, [quota]);
 
-  useEffect(() => {
-    const poll = () => {
-      fetch('/api/quota')
-        .then(r => r.json())
-        .then(d => { if (d.quota) setLiveQuota(d.quota); })
-        .catch(() => {});
-    };
-    const interval = setInterval(poll, 300000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Countdown to UTC midnight (API-Football daily reset)
   useEffect(() => {
