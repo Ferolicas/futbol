@@ -2,7 +2,7 @@ import { getFixtures, getQuota, analyzeMatch } from '../../../../lib/api-footbal
 import { getFromSanity, saveToSanity } from '../../../../lib/sanity';
 import { getCachedFixturesRaw } from '../../../../lib/sanity-cache';
 import { triggerEvent } from '../../../../lib/pusher';
-import { redisSet, KEYS, TTL } from '../../../../lib/redis';
+import { redisSet, redisDel, KEYS, TTL } from '../../../../lib/redis';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -129,6 +129,8 @@ export async function GET(request) {
       gaveUp: false,
     });
 
+    // Bust analysis Redis cache so next loadFixtures reads fresh Sanity data
+    await redisDel(`analysis:${today}`);
     // Notify dashboards that retried analysis is ready
     await triggerEvent('analysis', 'batch-complete', {
       date: today,
@@ -287,6 +289,8 @@ export async function GET(request) {
     const quota = await getQuota();
     console.log(`[DAILY-BATCH] Done: ${totalAnalyzed} analyzed, ${totalCached} cached, ${totalFailed} failed`);
 
+    // Bust analysis Redis cache so next loadFixtures reads fresh Sanity data
+    await redisDel(`analysis:${today}`);
     // Notify open dashboards that analysis is ready
     await triggerEvent('analysis', 'batch-complete', {
       date: today,

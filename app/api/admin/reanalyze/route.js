@@ -1,6 +1,7 @@
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { analyzeMatch } from '../../../../lib/api-football';
 import { getCachedFixturesRaw, getCachedAnalysis } from '../../../../lib/sanity-cache';
+import { redisGet, redisDel, KEYS } from '../../../../lib/redis';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -20,7 +21,15 @@ export async function POST() {
   }
 
   const today = new Date().toISOString().split('T')[0];
-  const fixtures = await getCachedFixturesRaw(today);
+
+  // Try Sanity first, fall back to Redis (page loads use Redis directly, Sanity may be empty)
+  let fixtures = await getCachedFixturesRaw(today);
+  if (!fixtures || fixtures.length === 0) {
+    const redisFixtures = await redisGet(KEYS.fixtures(today));
+    if (Array.isArray(redisFixtures) && redisFixtures.length > 0) {
+      fixtures = redisFixtures;
+    }
+  }
 
   if (!fixtures || fixtures.length === 0) {
     return Response.json({ success: true, analyzed: 0, message: 'No fixtures for today' });
@@ -71,6 +80,9 @@ export async function POST() {
           })
         );
       }
+
+      // Bust analysis Redis cache so next loadFixtures reads fresh data from Sanity
+      await redisDel(`analysis:${today}`);
 
       send({ type: 'done', analyzed, skipped, failed, total });
       controller.close();
