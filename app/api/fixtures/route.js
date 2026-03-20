@@ -4,16 +4,11 @@ import { auth } from '@clerk/nextjs/server';
 import { getSanityUserByClerkId } from '../../../lib/clerk-sync';
 import { queryFromSanity, getFromSanity } from '../../../lib/sanity';
 import { getCachedStandingsPositions } from '../../../lib/api-football';
+import { redisGet, KEYS } from '../../../lib/redis';
 
 export const dynamic = 'force-dynamic';
 
-const API_HOST = 'v3.football.api-sports.io';
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
-
-// In-memory cache for live status + stats (60s TTL)
-// Prevents burning API calls on repeated dashboard visits
-let _liveStatusCache = { data: null, stats: null, date: null, timestamp: 0 };
-const LIVE_CACHE_TTL = 60_000; // 60 seconds
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -25,189 +20,45 @@ export async function GET(request) {
     let stale = false;
     let error = null;
 
-    try {
-      const result = await getFixtures(date);
-      fixtures = result.fixtures || [];
-      fromCache = result.fromCache || false;
-      stale = result.stale || false;
-    } catch (e) {
-      error = e.message === 'RATE_LIMIT'
-        ? 'Limite de llamadas alcanzado. Usando datos en cache.'
-        : e.message;
+    // 1. Try Redis first (instant)
+    const redisFixtures = await redisGet(KEYS.fixtures(date));
+    if (redisFixtures && Array.isArray(redisFixtures) && redisFixtures.length > 0) {
+      fixtures = redisFixtures;
+      fromCache = true;
+    } else {
+      // 2. Fallback to Sanity/API-Football
+      try {
+        const result = await getFixtures(date);
+        fixtures = result.fixtures || [];
+        fromCache = result.fromCache || false;
+        stale = result.stale || false;
+      } catch (e) {
+        error = e.message === 'RATE_LIMIT'
+          ? 'Limite de llamadas alcanzado. Usando datos en cache.'
+          : e.message;
+      }
     }
 
-    // For any match whose kickoff has passed and is NOT confirmed finished in Sanity,
-    // fetch real status directly from API-Football — never trust Sanity for in-progress data
-    const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
+    // Read live stats from Redis (populated by cron/live every minute)
+    // No API-Football calls from this endpoint — all live data comes from Redis/Pusher
     let initialLiveStats = {};
 
     if (fixtures.length > 0) {
-      const now = Date.now();
-      const needsLiveStatus = fixtures.some(f => {
-        if (FINISHED_STATUSES.includes(f.fixture?.status?.short)) return false;
-        const kickoff = new Date(f.fixture.date).getTime();
-        return now >= kickoff; // kickoff has passed
-      });
-
-      if (needsLiveStatus) {
-        // Check in-memory cache first (60s TTL)
-        const cacheValid = _liveStatusCache.date === date
-          && _liveStatusCache.data
-          && (now - _liveStatusCache.timestamp) < LIVE_CACHE_TTL;
-
-        if (cacheValid) {
-          // Use cached live status data
-          const freshMap = {};
-          _liveStatusCache.data.forEach(af => { freshMap[af.fixture.id] = af; });
-          fixtures = fixtures.map(f => {
-            if (FINISHED_STATUSES.includes(f.fixture?.status?.short)) return f;
-            const kickoff = new Date(f.fixture.date).getTime();
-            if (now < kickoff) return f;
-            const fresh = freshMap[f.fixture.id];
-            if (fresh) {
-              return {
-                ...f,
-                fixture: { ...f.fixture, status: fresh.fixture.status },
-                goals: fresh.goals || f.goals,
-                score: fresh.score || f.score,
-              };
-            }
-            return f;
-          });
-          initialLiveStats = _liveStatusCache.stats || {};
-        } else {
-          // Fresh fetch from API-Football
-          try {
-            const key = process.env.FOOTBALL_API_KEY;
-            if (key) {
-              const res = await fetch(`https://${API_HOST}/fixtures?date=${date}`, {
-                headers: { 'x-apisports-key': key },
-                cache: 'no-store',
-              });
-              if (res.ok) {
-                const data = await res.json();
-                const apiFixtures = data.response || [];
-                // Save to cache
-                _liveStatusCache.data = apiFixtures;
-                _liveStatusCache.date = date;
-                _liveStatusCache.timestamp = now;
-
-                const freshMap = {};
-                apiFixtures.forEach(af => { freshMap[af.fixture.id] = af; });
-
-                const liveFixtureIds = [];
-
-                fixtures = fixtures.map(f => {
-                  if (FINISHED_STATUSES.includes(f.fixture?.status?.short)) return f;
-                  const kickoff = new Date(f.fixture.date).getTime();
-                  if (now < kickoff) return f;
-                  const fresh = freshMap[f.fixture.id];
-                  if (fresh) {
-                    if (LIVE_STATUSES.includes(fresh.fixture.status.short)) {
-                      liveFixtureIds.push(f.fixture.id);
-                    }
-                    return {
-                      ...f,
-                      fixture: { ...f.fixture, status: fresh.fixture.status },
-                      goals: fresh.goals || f.goals,
-                      score: fresh.score || f.score,
-                    };
-                  }
-                  return f;
-                });
-
-                // Fetch events + statistics for live matches
-                if (liveFixtureIds.length > 0) {
-                  const headers = { 'x-apisports-key': key };
-                  const fetchOpts = { headers, cache: 'no-store' };
-
-                  const detailResults = await Promise.allSettled(
-                    liveFixtureIds.map(async (fid) => {
-                      const [evRes, stRes] = await Promise.all([
-                        fetch(`https://${API_HOST}/fixtures/events?fixture=${fid}`, fetchOpts),
-                        fetch(`https://${API_HOST}/fixtures/statistics?fixture=${fid}`, fetchOpts),
-                      ]);
-                      const evData = evRes.ok ? await evRes.json() : null;
-                      const stData = stRes.ok ? await stRes.json() : null;
-                      const events = evData?.response || [];
-                      const stats = stData?.response || [];
-
-                      const fresh = freshMap[fid];
-                      const homeId = fresh?.teams?.home?.id;
-                      const awayId = fresh?.teams?.away?.id;
-
-                      const getStatVal = (teamStats, type) => {
-                        const stat = (teamStats?.statistics || []).find(s => s.type === type);
-                        return stat?.value || 0;
-                      };
-                      const homeStats = stats.find(s => s.team?.id === homeId);
-                      const awayStats = stats.find(s => s.team?.id === awayId);
-
-                      const goalScorers = [];
-                      const cardEvents = [];
-                      const missedPenalties = [];
-                      for (const ev of events) {
-                        if (ev.type === 'Goal') {
-                          if (ev.detail === 'Missed Penalty') {
-                            missedPenalties.push({
-                              player: ev.player?.name, teamId: ev.team?.id, teamName: ev.team?.name,
-                              minute: ev.time?.elapsed, extra: ev.time?.extra,
-                            });
-                          } else {
-                            goalScorers.push({
-                              player: ev.player?.name, teamId: ev.team?.id, teamName: ev.team?.name,
-                              minute: ev.time?.elapsed, extra: ev.time?.extra, type: ev.detail,
-                            });
-                          }
-                        }
-                        if (ev.type === 'Card') {
-                          cardEvents.push({
-                            player: ev.player?.name, teamId: ev.team?.id, teamName: ev.team?.name,
-                            minute: ev.time?.elapsed, type: ev.detail,
-                          });
-                        }
-                      }
-
-                      return {
-                        fixtureId: fid,
-                        status: fresh?.fixture?.status,
-                        goals: fresh?.goals,
-                        corners: {
-                          home: getStatVal(homeStats, 'Corner Kicks'),
-                          away: getStatVal(awayStats, 'Corner Kicks'),
-                          total: getStatVal(homeStats, 'Corner Kicks') + getStatVal(awayStats, 'Corner Kicks'),
-                        },
-                        yellowCards: {
-                          home: getStatVal(homeStats, 'Yellow Cards'),
-                          away: getStatVal(awayStats, 'Yellow Cards'),
-                          total: getStatVal(homeStats, 'Yellow Cards') + getStatVal(awayStats, 'Yellow Cards'),
-                        },
-                        redCards: {
-                          home: getStatVal(homeStats, 'Red Cards'),
-                          away: getStatVal(awayStats, 'Red Cards'),
-                          total: getStatVal(homeStats, 'Red Cards') + getStatVal(awayStats, 'Red Cards'),
-                        },
-                        goalScorers,
-                        cardEvents,
-                        missedPenalties,
-                      };
-                    })
-                  );
-
-                  for (const result of detailResults) {
-                    if (result.status === 'fulfilled' && result.value) {
-                      initialLiveStats[result.value.fixtureId] = result.value;
-                    }
-                  }
-                }
-                // Cache the live stats too
-                _liveStatusCache.stats = initialLiveStats;
-              }
-            }
-          } catch (e) {
-            console.error('[FIXTURES] Live status fetch failed:', e.message);
-          }
-        }
+      const liveData = await redisGet(KEYS.liveStats(date));
+      if (liveData && typeof liveData === 'object') {
+        initialLiveStats = liveData;
+        // Apply live status updates to fixtures
+        fixtures = fixtures.map(f => {
+          const live = liveData[f.fixture.id];
+          if (!live) return f;
+          if (FINISHED_STATUSES.includes(f.fixture?.status?.short)) return f;
+          return {
+            ...f,
+            fixture: { ...f.fixture, status: live.status || f.fixture.status },
+            goals: live.goals || f.goals,
+            score: live.score || f.score,
+          };
+        });
       }
     }
 

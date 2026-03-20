@@ -2,6 +2,7 @@ import { getFixtures, getQuota, analyzeMatch } from '../../../../lib/api-footbal
 import { getFromSanity, saveToSanity } from '../../../../lib/sanity';
 import { getCachedFixturesRaw } from '../../../../lib/sanity-cache';
 import { triggerEvent } from '../../../../lib/pusher';
+import { redisSet, KEYS, TTL } from '../../../../lib/redis';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -50,14 +51,17 @@ export async function GET(request) {
 
     if (fixtures.length === 0) {
       // Save empty schedule so live/lineups crons skip the day
-      await saveToSanity('matchSchedule', today, {
+      const emptySchedule = {
         date: today,
         firstKickoff: null,
         lastExpectedEnd: null,
         kickoffTimes: [],
         fixtureCount: 0,
         createdAt: new Date().toISOString(),
-      });
+      };
+      await saveToSanity('matchSchedule', today, emptySchedule);
+      // Also save empty schedule to Redis
+      await redisSet(KEYS.schedule(today), emptySchedule, TTL.schedule);
       await saveToSanity('appConfig', `dailyBatch-${today}`, {
         date: today, started: true, completed: true,
         fixtureCount: 0, completedAt: new Date().toISOString(),
@@ -78,15 +82,28 @@ export async function GET(request) {
     const firstKickoff = kickoffTimes[0].kickoff;
     const lastExpectedEnd = Math.max(...kickoffTimes.map(k => k.expectedEnd));
 
-    await saveToSanity('matchSchedule', today, {
+    const scheduleData = {
       date: today,
       firstKickoff,
       lastExpectedEnd,
       kickoffTimes,
       fixtureCount: fixtures.length,
       createdAt: new Date().toISOString(),
-    });
-    console.log(`[DAILY-BATCH] matchSchedule saved: ${fixtures.length} matches, first=${new Date(firstKickoff).toISOString()}, last end=${new Date(lastExpectedEnd).toISOString()}`);
+    };
+    await saveToSanity('matchSchedule', today, scheduleData);
+
+    // ===== Save to Redis for instant access =====
+    // Schedule
+    await redisSet(KEYS.schedule(today), scheduleData, TTL.schedule);
+    // Fixtures list
+    await redisSet(KEYS.fixtures(today), fixtures, TTL.fixtures);
+    // Also save yesterday's fixtures with longer TTL for day-back navigation
+    const yesterday = new Date(new Date(today).getTime() - 86400000).toISOString().split('T')[0];
+    const yesterdayDoc = await getCachedFixturesRaw(yesterday);
+    if (yesterdayDoc) {
+      await redisSet(KEYS.fixtures(yesterday), yesterdayDoc, TTL.yesterday);
+    }
+    console.log(`[DAILY-BATCH] matchSchedule + Redis saved: ${fixtures.length} matches, first=${new Date(firstKickoff).toISOString()}, last end=${new Date(lastExpectedEnd).toISOString()}`);
 
     // 2. Analyze ALL matches inline in batches of 3
     const batchSize = 3;

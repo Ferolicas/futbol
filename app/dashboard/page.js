@@ -74,7 +74,7 @@ export default function Dashboard() {
   // Owner re-analyze state
   const [reanalyzing, setReanalyzing] = useState(false);
   const [reanalyzeDone, setReanalyzeDone] = useState(false);
-  // Track when Pusher last delivered live data — polling defers to Pusher when recent
+  // Track Pusher activity (for debugging/diagnostics)
   const pusherLastUpdate = useRef(0);
 
   // Apply live data to fixtures — NEVER accepts a lower elapsed minute (prevents backwards jumps)
@@ -178,19 +178,7 @@ export default function Dashboard() {
         quota: data.quota || { used: 0, remaining: 100, limit: 100 },
         liveStats: data.initialLiveStats || {},
       };
-
-      // For today's matches, fetch fresh statuses from /api/live as backup
-      const isViewingToday = d === today();
-      if (isViewingToday && fx.length > 0) {
-        // Fetch fresh fixture statuses
-        fetch(`/api/live?date=${d}`)
-          .then(r => r.json())
-          .then(liveData => {
-            if (!liveData.matches?.length) return;
-            setFixtures(prev => applyLiveUpdate(prev, liveData.matches));
-          })
-          .catch(() => {});
-      }
+      // Live updates come from Pusher — no /api/live polling needed
     } catch (e) {
       setError(e.message || 'Error de conexion');
     } finally {
@@ -313,41 +301,8 @@ export default function Dashboard() {
     return () => clearInterval(pollBatch);
   }, [batchRunning, date, loadFixtures]);
 
-  // Polling: fetches DIRECTLY from API-Football via /api/live (no Sanity cache).
-  // Only for today. Defers to Pusher when active.
-  useEffect(() => {
-    // Never poll for past/future dates — their state is fixed
-    if (date !== today()) return;
-
-    const hasLive = fixtures.some(f => isLive(f.fixture.status.short));
-    // Also check if any match should have kicked off (cache may still show NS)
-    const now = Date.now();
-    const hasKickedOff = fixtures.some(f => {
-      const kickoff = new Date(f.fixture.date).getTime();
-      return kickoff < now && !isFinished(f.fixture.status.short) && !isPostponed(f.fixture.status.short);
-    });
-    if (!hasLive && !hasKickedOff) return;
-
-    const poll = async () => {
-      // Skip if Pusher delivered data in the last 90 seconds
-      if (Date.now() - pusherLastUpdate.current < 90000) return;
-
-      try {
-        // Calls API-Football directly (30s in-memory cache on server)
-        const res = await fetch(`/api/live?date=${date}`);
-        const data = await res.json();
-        if (data.matches?.length > 0) {
-          // Apply with anti-backwards protection
-          setFixtures(prev => applyLiveUpdate(prev, data.matches));
-        }
-      } catch {}
-    };
-
-    poll();
-    // Poll every 35 seconds (server has 30s in-memory cache, so we always get fresh data)
-    const interval = setInterval(poll, 35000);
-    return () => clearInterval(interval);
-  }, [date, fixtures.length, applyLiveUpdate]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Live updates come exclusively from Pusher (cron/live pushes every minute).
+  // No more client-side polling — saves API quota and reduces latency.
 
   const changeDate = (offset) => {
     const d = new Date(date);

@@ -1,6 +1,7 @@
 import { getFromSanity, saveToSanity } from '../../../../lib/sanity';
 import { ALL_LEAGUE_IDS } from '../../../../lib/leagues';
 import { triggerEvent } from '../../../../lib/pusher';
+import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
 
 // Cron: runs every 1 minute during active hours
 // cron-job.org: GET /api/cron/live?secret=CRON_SECRET
@@ -121,7 +122,11 @@ export async function GET(request) {
     const now = Date.now();
 
     // ===== Smart schedule check — skip if no matches active =====
-    let schedule = await getFromSanity('matchSchedule', today);
+    // Try Redis first (faster), then Sanity as fallback
+    let schedule = await redisGet(KEYS.schedule(today));
+    if (!schedule) {
+      schedule = await getFromSanity('matchSchedule', today);
+    }
 
     // If no formal schedule exists, derive from footballFixturesCache
     if (!schedule) {
@@ -150,7 +155,7 @@ export async function GET(request) {
           createdAt: new Date().toISOString(),
           derivedFrom: 'fixturesCache',
         });
-        console.log(`[LIVE] Derived matchSchedule from fixturesCache: ${fixturesDoc.fixtures.length} matches`);
+        console.log(`[LIVE-CRON] Derived matchSchedule from fixturesCache: ${fixturesDoc.fixtures.length} matches`);
       } else if (fixturesDoc && (!fixturesDoc.fixtures || fixturesDoc.fixtures.length === 0)) {
         // Cache exists but empty — no fixtures today
         schedule = { kickoffTimes: [], firstKickoff: null, lastExpectedEnd: null };
@@ -159,8 +164,13 @@ export async function GET(request) {
     }
 
     if (schedule) {
+      // CRITICAL: Convert all timestamps with Number() — Sanity may deserialize as strings
+      const firstKickoff = schedule.firstKickoff ? Number(schedule.firstKickoff) : null;
+      const lastExpectedEnd = schedule.lastExpectedEnd ? Number(schedule.lastExpectedEnd) : null;
+
       // No fixtures today
       if (!schedule.kickoffTimes || schedule.kickoffTimes.length === 0) {
+        console.log('[LIVE-CRON]', { now, firstKickoff, lastExpectedEnd, skipped: true, reason: 'No fixtures scheduled today' });
         return Response.json({
           success: true,
           skipped: true,
@@ -170,45 +180,56 @@ export async function GET(request) {
         });
       }
 
-      // Before first kickoff
-      if (schedule.firstKickoff && now < schedule.firstKickoff - 5 * 60 * 1000) {
+      // Before first kickoff (5 min margin)
+      if (firstKickoff && now < firstKickoff - 5 * 60 * 1000) {
+        const reason = `Before first kickoff (${new Date(firstKickoff).toISOString()})`;
+        console.log('[LIVE-CRON]', { now, firstKickoff, lastExpectedEnd, skipped: true, reason });
         return Response.json({
           success: true,
           skipped: true,
-          reason: `Before first kickoff (${new Date(schedule.firstKickoff).toISOString()})`,
+          reason,
+          nextCheck: new Date(firstKickoff - 5 * 60 * 1000).toISOString(),
           apiCalls: 0,
           timestamp: new Date().toISOString(),
         });
       }
 
-      // After last expected end
-      if (schedule.lastExpectedEnd && now > schedule.lastExpectedEnd) {
+      // After last expected end (30 min tolerance for extra time / delays)
+      if (lastExpectedEnd && now > lastExpectedEnd + 30 * 60 * 1000) {
+        const reason = `After last expected end + 30min (${new Date(lastExpectedEnd).toISOString()})`;
+        console.log('[LIVE-CRON]', { now, firstKickoff, lastExpectedEnd, skipped: true, reason });
         return Response.json({
           success: true,
           skipped: true,
-          reason: `After last expected end (${new Date(schedule.lastExpectedEnd).toISOString()})`,
+          reason,
           apiCalls: 0,
           timestamp: new Date().toISOString(),
         });
       }
 
       // Within the day's window — check if any specific match is active or near
-      const hasActiveOrNearMatch = schedule.kickoffTimes.some(m => {
-        const fiveMinutesBefore = m.kickoff - 5 * 60 * 1000;
-        return now >= fiveMinutesBefore && now <= m.expectedEnd;
+      const hasActiveMatch = schedule.kickoffTimes.some(m => {
+        const kickoff = Number(m.kickoff);
+        const expectedEnd = Number(m.expectedEnd);
+        return now >= kickoff - 5 * 60 * 1000 && now <= expectedEnd;
       });
 
-      if (!hasActiveOrNearMatch) {
+      if (!hasActiveMatch) {
+        const reason = 'No active matches in window';
+        console.log('[LIVE-CRON]', { now, firstKickoff, lastExpectedEnd, skipped: true, reason, matchCount: schedule.kickoffTimes.length });
         return Response.json({
           success: true,
           skipped: true,
-          reason: 'No matches active or near kickoff in current window',
+          reason,
           apiCalls: 0,
           timestamp: new Date().toISOString(),
         });
       }
+
+      console.log('[LIVE-CRON]', { now, firstKickoff, lastExpectedEnd, skipped: false, reason: 'Active matches found' });
+    } else {
+      console.log('[LIVE-CRON]', { now, skipped: false, reason: 'No schedule found — proceeding as fallback' });
     }
-    // If schedule is still null (no fixturesCache either), proceed normally as fallback
 
     const allLive = await apiFetch('/fixtures?live=all');
     let apiCalls = 1;
@@ -239,6 +260,18 @@ export async function GET(request) {
           await saveToSanity('liveMatchStats', String(fid), liveData);
         }
       }));
+    }
+
+    // ── 1b. Save live data to Redis for instant dashboard access ──
+    if (Object.keys(liveDetailsMap).length > 0) {
+      // Save aggregated live stats for today
+      await redisSet(KEYS.liveStats(today), liveDetailsMap, TTL.liveStats);
+      // Save individual fixture stats
+      await Promise.all(
+        Object.entries(liveDetailsMap).map(([fid, data]) =>
+          redisSet(KEYS.fixtureStats(fid), data, TTL.fixtureStats)
+        )
+      );
     }
 
     // ── 2. Detect recently-finished matches (were live in cache, now dropped from live feed) ──

@@ -175,9 +175,17 @@ export async function POST(request) {
     }
 
     if (type === 'delete-combinada') {
-      const { deleteFromSanity } = await import('../../../lib/sanity');
+      const { deleteFromSanity, queryFromSanity: qSanity } = await import('../../../lib/sanity');
       const docId = data.combinadaId?.replace('cfaCombinada-', '');
-      if (docId) await deleteFromSanity('cfaCombinada', docId);
+      if (docId) {
+        // Verify ownership before deleting
+        const owned = await qSanity(
+          `*[_type == "cfaCombinada" && _id == $id && userId == $userId][0]{ _id }`,
+          { id: `cfaCombinada-${docId}`, userId }
+        );
+        if (!owned) return Response.json({ error: 'Not found' }, { status: 404 });
+        await deleteFromSanity('cfaCombinada', docId);
+      }
       return Response.json({ success: true });
     }
 
