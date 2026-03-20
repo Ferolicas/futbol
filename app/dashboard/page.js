@@ -307,6 +307,21 @@ export default function Dashboard() {
     });
   }, []));
 
+  // Corners update (every 45 min cron)
+  usePusherEvent(isViewingToday ? 'live-scores' : null, 'corners-update', useCallback((data) => {
+    if (!data?.matches) return;
+    setLiveStats(prev => {
+      const next = { ...prev };
+      data.matches.forEach(m => {
+        if (m.corners && next[m.fixtureId]) {
+          next[m.fixtureId] = { ...next[m.fixtureId], corners: m.corners };
+        }
+      });
+      if (_dashCache) _dashCache.liveStats = next;
+      return next;
+    });
+  }, []));
+
   // Analysis batch: reload when complete (via Pusher, only for today)
   usePusherEvent(isViewingToday ? 'analysis' : null, 'batch-complete', useCallback((data) => {
     if (data?.date === date) {
