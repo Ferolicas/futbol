@@ -49,12 +49,44 @@ export async function GET(request) {
     console.log(`[DAILY-BATCH] ${fixtures.length} fixtures loaded`);
 
     if (fixtures.length === 0) {
+      // Save empty schedule so live/lineups crons skip the day
+      await saveToSanity('matchSchedule', today, {
+        date: today,
+        firstKickoff: null,
+        lastExpectedEnd: null,
+        kickoffTimes: [],
+        fixtureCount: 0,
+        createdAt: new Date().toISOString(),
+      });
       await saveToSanity('appConfig', `dailyBatch-${today}`, {
         date: today, started: true, completed: true,
         fixtureCount: 0, completedAt: new Date().toISOString(),
       });
       return Response.json({ success: true, date: today, fixtureCount: 0, message: 'No fixtures today' });
     }
+
+    // ===== PASO 5: Build and save matchSchedule =====
+    const kickoffTimes = fixtures.map(f => {
+      const kickoff = new Date(f.fixture.date).getTime();
+      return {
+        fixtureId: f.fixture.id,
+        kickoff,
+        expectedEnd: kickoff + 120 * 60 * 1000, // kickoff + 120 minutes
+      };
+    }).sort((a, b) => a.kickoff - b.kickoff);
+
+    const firstKickoff = kickoffTimes[0].kickoff;
+    const lastExpectedEnd = Math.max(...kickoffTimes.map(k => k.expectedEnd));
+
+    await saveToSanity('matchSchedule', today, {
+      date: today,
+      firstKickoff,
+      lastExpectedEnd,
+      kickoffTimes,
+      fixtureCount: fixtures.length,
+      createdAt: new Date().toISOString(),
+    });
+    console.log(`[DAILY-BATCH] matchSchedule saved: ${fixtures.length} matches, first=${new Date(firstKickoff).toISOString()}, last end=${new Date(lastExpectedEnd).toISOString()}`);
 
     // 2. Analyze ALL matches inline in batches of 3
     const batchSize = 3;
@@ -107,6 +139,7 @@ export async function GET(request) {
       cached: totalCached,
       failed: totalFailed,
       message: `Completed: ${totalAnalyzed} analyzed, ${totalCached} cached, ${totalFailed} failed`,
+      schedule: { firstKickoff: new Date(firstKickoff).toISOString(), lastExpectedEnd: new Date(lastExpectedEnd).toISOString() },
       quota,
     });
   } catch (error) {

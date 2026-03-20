@@ -118,6 +118,62 @@ export async function GET(request) {
 
   try {
     const today = new Date().toISOString().split('T')[0];
+    const now = Date.now();
+
+    // ===== PASO 6: Smart schedule check — skip if no matches active =====
+    const schedule = await getFromSanity('matchSchedule', today);
+    if (schedule) {
+      // No fixtures today
+      if (!schedule.kickoffTimes || schedule.kickoffTimes.length === 0) {
+        return Response.json({
+          success: true,
+          skipped: true,
+          reason: 'No fixtures scheduled today',
+          apiCalls: 0,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // Before first kickoff
+      if (schedule.firstKickoff && now < schedule.firstKickoff - 5 * 60 * 1000) {
+        return Response.json({
+          success: true,
+          skipped: true,
+          reason: `Before first kickoff (${new Date(schedule.firstKickoff).toISOString()})`,
+          apiCalls: 0,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // After last expected end
+      if (schedule.lastExpectedEnd && now > schedule.lastExpectedEnd) {
+        return Response.json({
+          success: true,
+          skipped: true,
+          reason: `After last expected end (${new Date(schedule.lastExpectedEnd).toISOString()})`,
+          apiCalls: 0,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // Within the day's window — check if any specific match is active or near
+      const hasActiveOrNearMatch = schedule.kickoffTimes.some(m => {
+        const fiveMinutesBefore = m.kickoff - 5 * 60 * 1000;
+        return now >= fiveMinutesBefore && now <= m.expectedEnd;
+      });
+
+      if (!hasActiveOrNearMatch) {
+        return Response.json({
+          success: true,
+          skipped: true,
+          reason: 'No matches active or near kickoff in current window',
+          apiCalls: 0,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+    // If no schedule exists (e.g., daily cron hasn't run yet), proceed normally
+
     const allLive = await apiFetch('/fixtures?live=all');
     let apiCalls = 1;
 

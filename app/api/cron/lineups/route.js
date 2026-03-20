@@ -216,6 +216,31 @@ export async function GET(request) {
     const WINDOW_MS = 45 * 60 * 1000;
     const TOLERANCE_MS = 5 * 60 * 1000;
 
+    // ===== PASO 7: Smart schedule check — skip if no matches in lineup window =====
+    const schedule = await getFromSanity('matchSchedule', today);
+    if (schedule) {
+      if (!schedule.kickoffTimes || schedule.kickoffTimes.length === 0) {
+        return Response.json({ success: true, skipped: true, reason: 'No fixtures today', updated: 0, apiCalls: 0 });
+      }
+
+      // Check if any match is between 50 minutes before kickoff and the kickoff itself
+      const hasMatchInWindow = schedule.kickoffTimes.some(m => {
+        const timeUntilKickoff = m.kickoff - now;
+        return timeUntilKickoff > 0 && timeUntilKickoff <= WINDOW_MS + TOLERANCE_MS;
+      });
+
+      if (!hasMatchInWindow) {
+        return Response.json({
+          success: true,
+          skipped: true,
+          reason: 'No matches within 50min of kickoff',
+          updated: 0,
+          apiCalls: 0,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
     const cached = await getFromSanity('footballFixturesCache', today);
     if (!cached?.fixtures) {
       return Response.json({ success: true, message: 'No fixtures cached', updated: 0 });

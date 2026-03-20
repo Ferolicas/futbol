@@ -1552,12 +1552,12 @@ function ApiCounter({ quota }) {
 
   useEffect(() => {
     const poll = () => {
-      fetch('/api/fixtures?date=' + today())
+      fetch('/api/quota')
         .then(r => r.json())
         .then(d => { if (d.quota) setLiveQuota(d.quota); })
         .catch(() => {});
     };
-    const interval = setInterval(poll, 30000);
+    const interval = setInterval(poll, 60000);
     return () => clearInterval(interval);
   }, []);
 
