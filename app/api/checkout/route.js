@@ -40,6 +40,9 @@ export async function POST(request) {
     await saveToSanity('cfaUser', docId, {
       name: sanityUser.name,
       email: sanityUser.email,
+      password: sanityUser.password,
+      clerkId: sanityUser.clerkId,
+      role: sanityUser.role,
       plan,
       subscriptionStatus: 'pending',
       stripeCustomerId: result.customerId,
