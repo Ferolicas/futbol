@@ -242,7 +242,7 @@ export async function GET(request) {
     console.log(`[DAILY-BATCH] matchSchedule + Redis saved: ${fixtures.length} matches, first=${new Date(firstKickoff).toISOString()}, last end=${new Date(lastExpectedEnd).toISOString()}`);
 
     // 2. Analyze ALL matches inline in batches of 3
-    const allFixtures = await getCachedFixturesRaw(today) || fixtures;
+    const allFixtures = fixtures;
 
     const { analyzed: totalAnalyzed, cached: totalCached, failedIds } = await analyzeFixturesBatch(allFixtures, today, force);
     const totalFailed = failedIds.length;

@@ -1512,7 +1512,7 @@ function ApiCounter({ quota }) {
         .then(d => { if (d.quota) setLiveQuota(d.quota); })
         .catch(() => {});
     };
-    const interval = setInterval(poll, 60000);
+    const interval = setInterval(poll, 300000);
     return () => clearInterval(interval);
   }, []);
 

@@ -1,9 +1,10 @@
 import { getFromSanity, saveToSanity } from '../../../../lib/sanity';
-import { getCachedAnalysis, cacheAnalysis } from '../../../../lib/sanity-cache';
+import { getCachedAnalysis, cacheAnalysis, incrementApiCallCount } from '../../../../lib/sanity-cache';
 import { ALL_LEAGUE_IDS } from '../../../../lib/leagues';
 import { computeAllProbabilities } from '../../../../lib/calculations';
 import { buildCombinada } from '../../../../lib/combinada';
 import { triggerEvent } from '../../../../lib/pusher';
+import { redisGet, redisSet } from '../../../../lib/redis';
 
 // Smart Lineup Fetch: runs every 5 minutes
 // 1. Finds matches ~45 min from kickoff
@@ -59,6 +60,13 @@ async function fetchInjuries(fixtureId) {
  * Returns { usualXI: Array, apiCalls: number }
  */
 async function deriveUsualXIOnTheFly(teamId) {
+  // Check Redis cache first — avoid recalculating every invocation
+  const cacheKey = `usualxi:${teamId}`;
+  const cachedXI = await redisGet(cacheKey);
+  if (cachedXI && Array.isArray(cachedXI) && cachedXI.length > 0) {
+    return { usualXI: cachedXI, apiCalls: 0 };
+  }
+
   const season = new Date().getMonth() >= 6
     ? new Date().getFullYear()
     : new Date().getFullYear() - 1;
@@ -130,6 +138,11 @@ async function deriveUsualXIOnTheFly(teamId) {
   const usualXI = Object.values(playerAppearances)
     .sort((a, b) => b.appearances - a.appearances || b.totalMinutes - a.totalMinutes)
     .slice(0, 11);
+
+  // Cache in Redis for 24h — avoid recalculating on next invocation
+  if (usualXI.length > 0) {
+    await redisSet(cacheKey, usualXI, 86400);
+  }
 
   return { usualXI, apiCalls: calls };
 }
@@ -216,14 +229,14 @@ export async function GET(request) {
     const WINDOW_MS = 45 * 60 * 1000;
     const TOLERANCE_MS = 5 * 60 * 1000;
 
-    // ===== Smart schedule check — skip if no matches in lineup window =====
+    // ===== Load fixtures once — reuse for schedule check AND match filtering =====
     let schedule = await getFromSanity('matchSchedule', today);
+    const cached = await getFromSanity('footballFixturesCache', today);
 
-    // Derive from fixturesCache if no formal schedule exists
+    // Derive schedule from fixturesCache if no formal schedule exists
     if (!schedule) {
-      const fixturesDoc = await getFromSanity('footballFixturesCache', today);
-      if (fixturesDoc?.fixtures && fixturesDoc.fixtures.length > 0) {
-        const kickoffTimes = fixturesDoc.fixtures.map(f => {
+      if (cached?.fixtures && cached.fixtures.length > 0) {
+        const kickoffTimes = cached.fixtures.map(f => {
           const kickoff = new Date(f.fixture.date).getTime();
           return { fixtureId: f.fixture.id, kickoff, expectedEnd: kickoff + 120 * 60 * 1000 };
         }).sort((a, b) => a.kickoff - b.kickoff);
@@ -232,7 +245,7 @@ export async function GET(request) {
           firstKickoff: kickoffTimes[0].kickoff,
           lastExpectedEnd: Math.max(...kickoffTimes.map(k => k.expectedEnd)),
         };
-      } else if (fixturesDoc && (!fixturesDoc.fixtures || fixturesDoc.fixtures.length === 0)) {
+      } else if (cached && (!cached.fixtures || cached.fixtures.length === 0)) {
         schedule = { kickoffTimes: [], firstKickoff: null, lastExpectedEnd: null };
       }
     }
@@ -242,7 +255,6 @@ export async function GET(request) {
         return Response.json({ success: true, skipped: true, reason: 'No fixtures today', updated: 0, apiCalls: 0 });
       }
 
-      // Check if any match is between 50 minutes before kickoff and the kickoff itself
       const hasMatchInWindow = schedule.kickoffTimes.some(m => {
         const timeUntilKickoff = m.kickoff - now;
         return timeUntilKickoff > 0 && timeUntilKickoff <= WINDOW_MS + TOLERANCE_MS;
@@ -260,7 +272,6 @@ export async function GET(request) {
       }
     }
 
-    const cached = await getFromSanity('footballFixturesCache', today);
     if (!cached?.fixtures) {
       return Response.json({ success: true, message: 'No fixtures cached', updated: 0 });
     }
@@ -393,11 +404,10 @@ export async function GET(request) {
       }));
     }
 
-    // Track API calls
-    const callDocId = `apiCalls-${today}`;
-    const callDoc = await getFromSanity('appConfig', callDocId);
-    const count = (callDoc?.count || 0) + apiCalls;
-    await saveToSanity('appConfig', callDocId, { date: today, count });
+    // Track API calls (atomic Redis INCR)
+    for (let i = 0; i < apiCalls; i++) {
+      await incrementApiCallCount();
+    }
 
     // Emit Pusher events
     if (updatedFixtureIds.length > 0) {

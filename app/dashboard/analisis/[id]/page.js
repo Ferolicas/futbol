@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { computeAllProbabilities } from '../../../../lib/calculations';
 import { buildCombinada } from '../../../../lib/combinada';
 import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY, COUNTRY_BOOKMAKERS } from '../../../../lib/bookmakers';
+import { usePusherEvent } from '../../../../lib/use-pusher';
 
 function detectCountry() {
   try {
@@ -73,24 +74,17 @@ export default function AnalisisPage() {
 
   useEffect(() => { loadAnalysis(); }, [loadAnalysis]);
 
-  // Poll live stats for this match — always poll once on mount to catch status changes
-  // (e.g., cached analysis says NS but match is now FT)
+  // Load live stats once on mount (catch status changes like NS→FT)
   useEffect(() => {
     if (!analysis) return;
     const statusShort = analysis.status?.short || 'NS';
     const isLive = isLiveStatus(statusShort);
     const isFinished = ['FT', 'AET', 'PEN'].includes(statusShort);
-
-    const d = new Date();
-    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (!isLive && !isFinished) return;
 
     const loadStats = async () => {
       try {
-        // For finished/live matches, use fixtureId-specific query (loads from Redis stats:{fid} or Sanity)
-        const url = (isLive || isFinished)
-          ? `/api/live-poll?fixtureId=${fixtureId}`
-          : `/api/live-poll?date=${dateStr}`;
-        const res = await fetch(url);
+        const res = await fetch(`/api/live-poll?fixtureId=${fixtureId}`);
         const data = await res.json();
         const matchStats = data.liveStats?.find(s =>
           Number(s.fixtureId) === Number(fixtureId)
@@ -108,12 +102,27 @@ export default function AnalisisPage() {
       } catch {}
     };
 
-    // Always load once on mount (works for live, FT, and any status with stats)
     loadStats();
-    // Continue polling only if live
-    const interval = isLive ? setInterval(loadStats, 30000) : null;
-    return () => { if (interval) clearInterval(interval); };
   }, [analysis?.status?.short, fixtureId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Real-time updates via Pusher (replaces 30s polling)
+  usePusherEvent('live-scores', 'update', useCallback((data) => {
+    if (!data?.matches) return;
+    const matchUpdate = data.matches.find(m => Number(m.fixtureId) === Number(fixtureId));
+    if (!matchUpdate) return;
+
+    setLiveStats(prev => ({
+      ...prev,
+      ...matchUpdate,
+    }));
+    if (matchUpdate.status) {
+      setAnalysis(prev => prev ? ({
+        ...prev,
+        status: matchUpdate.status,
+        goals: matchUpdate.goals || prev.goals,
+      }) : prev);
+    }
+  }, [fixtureId]));
 
   const doRefreshLineups = async () => {
     setRefreshingLineups(true);
