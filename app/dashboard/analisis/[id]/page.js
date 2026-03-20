@@ -84,14 +84,19 @@ export default function AnalisisPage() {
     const d = new Date();
     const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-    const poll = async () => {
+    const loadStats = async () => {
       try {
-        const res = await fetch(`/api/live-poll?date=${dateStr}`);
+        // For finished/live matches, use fixtureId-specific query (loads from Redis stats:{fid} or Sanity)
+        const url = (isLive || isFinished)
+          ? `/api/live-poll?fixtureId=${fixtureId}`
+          : `/api/live-poll?date=${dateStr}`;
+        const res = await fetch(url);
         const data = await res.json();
-        const matchStats = data.liveStats?.find(s => s.fixtureId === Number(fixtureId));
+        const matchStats = data.liveStats?.find(s =>
+          Number(s.fixtureId) === Number(fixtureId)
+        );
         if (matchStats) {
           setLiveStats(matchStats);
-          // Update score and status
           if (matchStats.status) {
             setAnalysis(prev => prev ? ({
               ...prev,
@@ -103,10 +108,10 @@ export default function AnalisisPage() {
       } catch {}
     };
 
-    // Always poll once on mount to get fresh status
-    poll();
+    // Always load once on mount (works for live, FT, and any status with stats)
+    loadStats();
     // Continue polling only if live
-    const interval = isLive ? setInterval(poll, 30000) : null;
+    const interval = isLive ? setInterval(loadStats, 30000) : null;
     return () => { if (interval) clearInterval(interval); };
   }, [analysis?.status?.short, fixtureId]); // eslint-disable-line react-hooks/exhaustive-deps
 

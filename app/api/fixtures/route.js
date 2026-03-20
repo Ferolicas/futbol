@@ -6,6 +6,8 @@ import { queryFromSanity, getFromSanity } from '../../../lib/sanity';
 import { getCachedStandingsPositions } from '../../../lib/api-football';
 import { redisGet, KEYS } from '../../../lib/redis';
 
+const FT_STATS_FIELDS = ['corners', 'yellowCards', 'redCards', 'goalScorers', 'cardEvents', 'missedPenalties'];
+
 export const dynamic = 'force-dynamic';
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
@@ -44,6 +46,7 @@ export async function GET(request) {
     let initialLiveStats = {};
 
     if (fixtures.length > 0) {
+      // 1. Get aggregated live data (includes both live + recently-finished matches)
       const liveData = await redisGet(KEYS.liveStats(date));
       if (liveData && typeof liveData === 'object') {
         initialLiveStats = liveData;
@@ -59,6 +62,26 @@ export async function GET(request) {
             score: live.score || f.score,
           };
         });
+      }
+
+      // 2. For finished matches without stats in live:{date}, load from Redis stats:{fid} or Sanity
+      const ftWithoutStats = fixtures.filter(f =>
+        FINISHED_STATUSES.includes(f.fixture?.status?.short) && !initialLiveStats[f.fixture.id]
+      );
+
+      if (ftWithoutStats.length > 0) {
+        await Promise.all(ftWithoutStats.map(async (f) => {
+          const fid = f.fixture.id;
+          // Try Redis first (stats:{fid} has 48h TTL)
+          let stats = await redisGet(KEYS.fixtureStats(fid));
+          // Fallback to Sanity (permanent storage)
+          if (!stats) {
+            stats = await getFromSanity('liveMatchStats', String(fid));
+          }
+          if (stats && FT_STATS_FIELDS.some(k => stats[k])) {
+            initialLiveStats[fid] = stats;
+          }
+        }));
       }
     }
 

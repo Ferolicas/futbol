@@ -257,16 +257,23 @@ export async function GET(request) {
 
         // RULE: Only persist to Sanity if match is FINISHED
         if (FINISHED_STATUSES.includes(match.fixture.status.short)) {
+          liveData.savedAt = new Date().toISOString();
           await saveToSanity('liveMatchStats', String(fid), liveData);
+          // Also save to Redis with 48h TTL for fast retrieval
+          await redisSet(KEYS.fixtureStats(fid), liveData, TTL.yesterday);
         }
       }));
     }
 
     // ── 1b. Save live data to Redis for instant dashboard access ──
+    // Merge with existing live:{date} so FT matches aren't lost when they drop from the live feed
+    const existingLive = await redisGet(KEYS.liveStats(today)) || {};
+    const mergedLive = { ...existingLive, ...liveDetailsMap };
+    if (Object.keys(mergedLive).length > 0) {
+      await redisSet(KEYS.liveStats(today), mergedLive, TTL.liveStats);
+    }
+    // Save individual fixture stats
     if (Object.keys(liveDetailsMap).length > 0) {
-      // Save aggregated live stats for today
-      await redisSet(KEYS.liveStats(today), liveDetailsMap, TTL.liveStats);
-      // Save individual fixture stats
       await Promise.all(
         Object.entries(liveDetailsMap).map(([fid, data]) =>
           redisSet(KEYS.fixtureStats(fid), data, TTL.fixtureStats)
@@ -290,33 +297,52 @@ export async function GET(request) {
 
       if (staleMatches.length > 0) {
         await Promise.all(staleMatches.map(async (stale) => {
-          const data = await apiFetch(`/fixtures?id=${stale.fixture.id}`);
+          const fid = stale.fixture.id;
+          const data = await apiFetch(`/fixtures?id=${fid}`);
           apiCalls++;
           if (data?.[0]) {
             const fresh = data[0];
             const freshStatus = fresh.fixture.status.short;
 
-            // Only persist if the match is now truly finished
             if (FINISHED_STATUSES.includes(freshStatus)) {
-              const finalStats = {
-                fixtureId: stale.fixture.id,
-                date: today,
+              // Fetch FULL stats (events + statistics) for the finished match
+              const [eventsData, statsData] = await Promise.all([
+                apiFetch(`/fixtures/events?fixture=${fid}`),
+                apiFetch(`/fixtures/statistics?fixture=${fid}`),
+              ]);
+              apiCalls += 2;
+
+              const fullStats = extractLiveStats(fresh, eventsData, statsData);
+              fullStats.date = today;
+              fullStats.savedAt = new Date().toISOString();
+
+              // Save PERMANENTLY to Sanity (historical record)
+              await saveToSanity('liveMatchStats', String(fid), fullStats);
+              // Save to Redis with 48h TTL for fast access
+              await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
+              staleFixedCount++;
+
+              // Include full stats in Pusher update
+              finishedUpdates.push({
+                fixtureId: fid,
                 status: fresh.fixture.status,
                 goals: fresh.goals,
                 score: fresh.score,
-                updatedAt: new Date().toISOString(),
-              };
-              await saveToSanity('liveMatchStats', String(stale.fixture.id), finalStats);
-              staleFixedCount++;
+                corners: fullStats.corners,
+                yellowCards: fullStats.yellowCards,
+                redCards: fullStats.redCards,
+                goalScorers: fullStats.goalScorers || [],
+                missedPenalties: fullStats.missedPenalties || [],
+              });
+            } else {
+              // Not finished yet — push basic update
+              finishedUpdates.push({
+                fixtureId: fid,
+                status: fresh.fixture.status,
+                goals: fresh.goals,
+                score: fresh.score,
+              });
             }
-
-            // Push update via Pusher regardless (client needs to know)
-            finishedUpdates.push({
-              fixtureId: stale.fixture.id,
-              status: fresh.fixture.status,
-              goals: fresh.goals,
-              score: fresh.score,
-            });
           }
         }));
       }
