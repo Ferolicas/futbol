@@ -170,14 +170,33 @@ export async function GET(request) {
     }
 
     // ===== PHASE 4: Auto-trigger daily batch (uses batchFlag already loaded) =====
-    if (fixtures.length > 0 && !batchFlag?.started) {
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : 'http://localhost:3000');
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : 'http://localhost:3000');
 
+    if (fixtures.length > 0 && !batchFlag?.started) {
       fetch(`${baseUrl}/api/cron/daily?date=${date}`, {
         headers: { 'x-internal-trigger': 'true' },
       }).catch(() => {}); // Fire and forget
+    }
+
+    // Auto-trigger live cron on page load — rate-limited to once every 45s via Redis lock.
+    // Ensures stale matches (stuck at 90:xx) resolve within seconds of a user entering the platform,
+    // instead of waiting up to 1 minute for the scheduled cron.
+    if (date === todayStr) {
+      const hasLiveMatches = Object.values(liveData || {}).some(m =>
+        ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(m.status?.short)
+      );
+      if (hasLiveMatches) {
+        const lock = await redisGet(KEYS.liveCronLock);
+        if (!lock) {
+          // Set lock for 45s before firing so concurrent requests don't all trigger
+          await redisSet(KEYS.liveCronLock, '1', 45);
+          fetch(`${baseUrl}/api/cron/live?secret=${process.env.CRON_SECRET}`, {
+            headers: { 'x-internal-trigger': 'true' },
+          }).catch(() => {}); // Fire and forget
+        }
+      }
     }
 
     // ===== PHASE 5: User data (auth resolved above) =====

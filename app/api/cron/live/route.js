@@ -23,7 +23,8 @@ function verifyCronAuth(request) {
   const { searchParams } = new URL(request.url);
   const secret = searchParams.get('secret')
     || request.headers.get('authorization')?.replace('Bearer ', '');
-  return secret === process.env.CRON_SECRET || process.env.NODE_ENV !== 'production';
+  const internalTrigger = request.headers.get('x-internal-trigger') === 'true';
+  return secret === process.env.CRON_SECRET || internalTrigger || process.env.NODE_ENV !== 'production';
 }
 
 async function apiFetch(endpoint) {
