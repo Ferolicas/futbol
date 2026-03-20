@@ -19,50 +19,69 @@ export async function POST() {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    const fixtures = await getCachedFixturesRaw(today);
+  const today = new Date().toISOString().split('T')[0];
+  const fixtures = await getCachedFixturesRaw(today);
 
-    if (!fixtures || fixtures.length === 0) {
-      return Response.json({ success: true, analyzed: 0, message: 'No fixtures for today' });
-    }
-
-    let analyzed = 0;
-    let skipped = 0;
-    let failed = 0;
-
-    // Process in batches of 5 to avoid overwhelming the API
-    for (let i = 0; i < fixtures.length; i += 5) {
-      const batch = fixtures.slice(i, i + 5);
-      await Promise.all(
-        batch.map(async (fixture) => {
-          try {
-            const fid = fixture.fixture?.id;
-            const existing = await getCachedAnalysis(fid, today);
-            if (existing) {
-              skipped++;
-              return;
-            }
-            await analyzeMatch(fixture, { date: today });
-            analyzed++;
-          } catch (e) {
-            failed++;
-            console.error(`[REANALYZE] Failed ${fixture.fixture?.id}:`, e.message);
-          }
-        })
-      );
-    }
-
-    return Response.json({
-      success: true,
-      analyzed,
-      skipped,
-      failed,
-      total: fixtures.length,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('[REANALYZE] Error:', error);
-    return Response.json({ error: error.message }, { status: 500 });
+  if (!fixtures || fixtures.length === 0) {
+    return Response.json({ success: true, analyzed: 0, message: 'No fixtures for today' });
   }
+
+  // Stream progress via SSE
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (data) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      };
+
+      let analyzed = 0;
+      let skipped = 0;
+      let failed = 0;
+      const total = fixtures.length;
+
+      send({ type: 'start', total });
+
+      for (let i = 0; i < fixtures.length; i += 5) {
+        const batch = fixtures.slice(i, i + 5);
+        await Promise.all(
+          batch.map(async (fixture) => {
+            const fid = fixture.fixture?.id;
+            const name = `${fixture.teams?.home?.name || '?'} vs ${fixture.teams?.away?.name || '?'}`;
+            try {
+              const existing = await getCachedAnalysis(fid, today);
+              if (existing) {
+                skipped++;
+              } else {
+                await analyzeMatch(fixture, { date: today });
+                analyzed++;
+              }
+            } catch (e) {
+              failed++;
+              console.error(`[REANALYZE] Failed ${fid}:`, e.message);
+            }
+            send({
+              type: 'progress',
+              current: analyzed + skipped + failed,
+              total,
+              analyzed,
+              skipped,
+              failed,
+              match: name,
+            });
+          })
+        );
+      }
+
+      send({ type: 'done', analyzed, skipped, failed, total });
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  });
 }

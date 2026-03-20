@@ -74,6 +74,7 @@ export default function Dashboard() {
   // Owner re-analyze state
   const [reanalyzing, setReanalyzing] = useState(false);
   const [reanalyzeDone, setReanalyzeDone] = useState(false);
+  const [reanalyzeProgress, setReanalyzeProgress] = useState(null);
   // Track Pusher activity (for debugging/diagnostics)
   const pusherLastUpdate = useRef(0);
 
@@ -114,14 +115,34 @@ export default function Dashboard() {
   const handleReanalyze = async () => {
     setReanalyzing(true);
     setReanalyzeDone(false);
+    setReanalyzeProgress(null);
     try {
       const res = await fetch('/api/admin/reanalyze', { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        setReanalyzeDone(true);
-        setTimeout(() => setReanalyzeDone(false), 3000);
-        // Reload fixtures to get fresh data
-        loadFixtures(date);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === 'progress' || data.type === 'start') {
+              setReanalyzeProgress(data);
+            }
+            if (data.type === 'done') {
+              setReanalyzeProgress(data);
+              setReanalyzeDone(true);
+              setTimeout(() => { setReanalyzeDone(false); setReanalyzeProgress(null); }, 4000);
+              loadFixtures(date);
+            }
+          } catch {}
+        }
       }
     } catch (e) {
       console.error('[REANALYZE]', e);
@@ -599,13 +620,27 @@ export default function Dashboard() {
           <img src="/vflogo.png" alt="CFanalisis" className="brand-logo" />
           <div className="header-right">
             {isOwner && (
-              <button
-                className="btn-reanalyze"
-                onClick={handleReanalyze}
-                disabled={reanalyzing}
-              >
-                {reanalyzeDone ? '✓ Listo' : reanalyzing ? '⏳ Re-analizando...' : '🔄 Re-analizar todo'}
-              </button>
+              <div className="reanalyze-wrapper">
+                <button
+                  className="btn-reanalyze"
+                  onClick={handleReanalyze}
+                  disabled={reanalyzing}
+                >
+                  {reanalyzeDone
+                    ? `Done: ${reanalyzeProgress?.analyzed || 0} nuevos, ${reanalyzeProgress?.skipped || 0} ya listos`
+                    : reanalyzing
+                      ? `${reanalyzeProgress ? Math.round((reanalyzeProgress.current / reanalyzeProgress.total) * 100) : 0}% — ${reanalyzeProgress?.match || 'Iniciando...'}`
+                      : 'Re-analizar todo'}
+                </button>
+                {reanalyzing && reanalyzeProgress && (
+                  <div className="reanalyze-bar">
+                    <div
+                      className="reanalyze-bar-fill"
+                      style={{ width: `${Math.round((reanalyzeProgress.current / reanalyzeProgress.total) * 100)}%` }}
+                    />
+                  </div>
+                )}
+              </div>
             )}
             {user && (
               <div className="user-badge">
