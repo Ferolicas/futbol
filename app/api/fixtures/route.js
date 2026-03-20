@@ -118,10 +118,21 @@ export async function GET(request) {
         });
       }
 
-      // For finished matches without stats in live:{date}, load from Redis stats:{fid} or Sanity
-      const ftWithoutStats = fixtures.filter(f =>
-        FINISHED_STATUSES.includes(f.fixture?.status?.short) && !initialLiveStats[f.fixture.id]
-      );
+      // For finished matches without stats (or with all-zero stats) in live:{date},
+      // load from Redis stats:{fid} (written by stale-detection with real /fixtures?id={fid} data)
+      const ftWithoutStats = fixtures.filter(f => {
+        if (!FINISHED_STATUSES.includes(f.fixture?.status?.short)) return false;
+        const s = initialLiveStats[f.fixture.id];
+        if (!s) return true;
+        // Also reload if stats are all zeros — live=all doesn't include statistics,
+        // but stale-detection saves real stats to stats:{fid} after the match ends
+        const hasRealStats =
+          (s.corners?.total > 0) ||
+          (s.yellowCards?.total > 0) ||
+          (s.redCards?.home > 0 || s.redCards?.away > 0) ||
+          (s.cardEvents?.length > 0);
+        return !hasRealStats;
+      });
 
       if (ftWithoutStats.length > 0) {
         await Promise.all(ftWithoutStats.map(async (f) => {

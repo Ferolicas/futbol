@@ -91,10 +91,22 @@ function extractLiveStats(match, events, stats) {
 
   const hCorners = getVal(homeStats, 'Corner Kicks');
   const aCorners = getVal(awayStats, 'Corner Kicks');
-  const hYellow = getVal(homeStats, 'Yellow Cards');
-  const aYellow = getVal(awayStats, 'Yellow Cards');
-  const hRed = getVal(homeStats, 'Red Cards');
-  const aRed = getVal(awayStats, 'Red Cards');
+
+  // Prefer statistics; fall back to counting from events (many leagues don't include stats in live=all)
+  const hYellowStat = getVal(homeStats, 'Yellow Cards');
+  const aYellowStat = getVal(awayStats, 'Yellow Cards');
+  const hRedStat = getVal(homeStats, 'Red Cards');
+  const aRedStat = getVal(awayStats, 'Red Cards');
+
+  const hYellowEv = cardEvents.filter(e => e.teamId === homeId && e.type === 'Yellow Card').length;
+  const aYellowEv = cardEvents.filter(e => e.teamId === awayId && e.type === 'Yellow Card').length;
+  const hRedEv = cardEvents.filter(e => e.teamId === homeId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
+  const aRedEv = cardEvents.filter(e => e.teamId === awayId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
+
+  const hYellow = hYellowStat || hYellowEv;
+  const aYellow = aYellowStat || aYellowEv;
+  const hRed = hRedStat || hRedEv;
+  const aRed = aRedStat || aRedEv;
 
   return {
     fixtureId: match.fixture.id,
