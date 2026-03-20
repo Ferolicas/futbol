@@ -287,9 +287,6 @@ export async function GET(request) {
         missedPenalties: data.missedPenalties?.length > 0 ? data.missedPenalties : (existing?.missedPenalties || []),
       };
     }
-    if (Object.keys(mergedLive).length > 0) {
-      await redisSet(KEYS.liveStats(today), mergedLive, TTL.liveStats);
-    }
     // Save individual fixture stats to Redis
     if (Object.keys(liveDetailsMap).length > 0) {
       await Promise.all(
@@ -298,6 +295,8 @@ export async function GET(request) {
         )
       );
     }
+    // NOTE: mergedLive is saved AFTER stale detection so FT status + full stats
+    // from finished matches are included in a single write to live:{date}
 
     // ── 2. Detect recently-finished matches (were live in cache, now dropped from live feed) ──
     const finishedUpdates = [];
@@ -333,6 +332,8 @@ export async function GET(request) {
               await saveToSanity('liveMatchStats', String(fid), fullStats);
               // Save to Redis with 48h TTL for fast access
               await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
+              // Also update live:{date} so page reloads show FT status + real stats
+              mergedLive[fid] = { ...fullStats, status: fresh.fixture.status };
               staleFixedCount++;
 
               // Include full stats in Pusher update
@@ -403,6 +404,11 @@ export async function GET(request) {
           fixtures: updatedFixtures,
         });
       }
+    }
+
+    // ── 3b. Save mergedLive to Redis — done here so FT status from stale detection is included ──
+    if (Object.keys(mergedLive).length > 0) {
+      await redisSet(KEYS.liveStats(today), mergedLive, TTL.liveStats);
     }
 
     // ── 4. Push real-time update via Pusher (ALL live data, never filtered) ──
