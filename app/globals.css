@@ -2295,6 +2295,41 @@ div[data-testid*="development"] { display: none !important; }
   box-shadow: 0 0 20px rgba(0,230,118,0.2);
 }
 
+/* ===================== PAYMENT MODAL ===================== */
+.payment-modal-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.7); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px; animation: fadeIn .2s;
+}
+.payment-modal-content {
+  background: var(--bg-1, #0d0d14); border: 1px solid var(--brd, #1e1e2e);
+  border-radius: 20px; padding: 32px 28px; width: 100%; max-width: 440px;
+  max-height: 90vh; overflow-y: auto; position: relative;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.payment-modal-header {
+  text-align: center; margin-bottom: 24px; position: relative;
+}
+.payment-modal-logo {
+  width: 48px; height: 48px; margin: 0 auto 12px; display: block;
+}
+.payment-modal-header h2 {
+  font-size: 1.3rem; font-weight: 800; color: var(--t1, #e8e8ef); margin-bottom: 4px;
+}
+.payment-modal-amount {
+  font-size: 1.6rem; font-weight: 800; color: var(--green, #00e676);
+}
+.payment-modal-close {
+  position: absolute; top: -8px; right: -8px; background: none; border: none;
+  color: var(--t3, #5c5c72); font-size: 1.8rem; cursor: pointer;
+  width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; transition: all .2s;
+}
+.payment-modal-close:hover { color: var(--t1, #e8e8ef); background: rgba(255,255,255,0.05); }
+.payment-modal-element { margin-bottom: 20px; }
+.payment-modal-form .modal-btn { margin-top: 4px; }
+
 /* ===================== MOBILE LANDING ===================== */
 @media (max-width: 640px) {
   .hero-title { font-size: 2rem; }

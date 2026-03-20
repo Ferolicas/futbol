@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useClerk } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
+import PaymentModal from './PaymentModal';
 
 export default function PlanesClient({ userId, email }) {
   const { signOut } = useClerk();
@@ -10,6 +11,7 @@ export default function PlanesClient({ userId, email }) {
   const [prices, setPrices] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [paymentData, setPaymentData] = useState(null);
 
   // Detect country and get prices
   useEffect(() => {
@@ -35,18 +37,16 @@ export default function PlanesClient({ userId, email }) {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          plan,
-          userId,
-          email,
-          localCurrency: prices?.currency || 'USD',
-          exchangeRate: prices?.rate || 1,
-        }),
+        body: JSON.stringify({ plan, email }),
       });
       const data = await res.json();
 
-      if (data.url) {
-        window.location.href = data.url;
+      if (data.clientSecret) {
+        setPaymentData({
+          clientSecret: data.clientSecret,
+          plan: data.plan,
+          amount: data.amount,
+        });
       } else {
         setError(data.error || 'Error al procesar pago');
       }
@@ -55,6 +55,11 @@ export default function PlanesClient({ userId, email }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleClosePayment = () => {
+    setPaymentData(null);
+    setSelectedPlan(null);
   };
 
   const fmtPrice = (usd, local, currency) => {
@@ -116,7 +121,7 @@ export default function PlanesClient({ userId, email }) {
               <li>Corners, tarjetas, BTTS</li>
             </ul>
             {loading && selectedPlan === 'plataforma' && (
-              <div className="modal-loading">Redirigiendo a pago...</div>
+              <div className="modal-loading">Preparando pago...</div>
             )}
           </motion.div>
 
@@ -152,7 +157,7 @@ export default function PlanesClient({ userId, email }) {
               <li>Acceso a comunidad VIP</li>
             </ul>
             {loading && selectedPlan === 'asesoria' && (
-              <div className="modal-loading">Redirigiendo a pago...</div>
+              <div className="modal-loading">Preparando pago...</div>
             )}
           </motion.div>
         </div>
@@ -166,6 +171,15 @@ export default function PlanesClient({ userId, email }) {
           </button>
         </div>
       </motion.div>
+
+      {paymentData && (
+        <PaymentModal
+          clientSecret={paymentData.clientSecret}
+          plan={paymentData.plan}
+          amount={paymentData.amount}
+          onClose={handleClosePayment}
+        />
+      )}
     </div>
   );
 }
