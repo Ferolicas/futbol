@@ -216,8 +216,27 @@ export async function GET(request) {
     const WINDOW_MS = 45 * 60 * 1000;
     const TOLERANCE_MS = 5 * 60 * 1000;
 
-    // ===== PASO 7: Smart schedule check — skip if no matches in lineup window =====
-    const schedule = await getFromSanity('matchSchedule', today);
+    // ===== Smart schedule check — skip if no matches in lineup window =====
+    let schedule = await getFromSanity('matchSchedule', today);
+
+    // Derive from fixturesCache if no formal schedule exists
+    if (!schedule) {
+      const fixturesDoc = await getFromSanity('footballFixturesCache', today);
+      if (fixturesDoc?.fixtures && fixturesDoc.fixtures.length > 0) {
+        const kickoffTimes = fixturesDoc.fixtures.map(f => {
+          const kickoff = new Date(f.fixture.date).getTime();
+          return { fixtureId: f.fixture.id, kickoff, expectedEnd: kickoff + 120 * 60 * 1000 };
+        }).sort((a, b) => a.kickoff - b.kickoff);
+        schedule = {
+          kickoffTimes,
+          firstKickoff: kickoffTimes[0].kickoff,
+          lastExpectedEnd: Math.max(...kickoffTimes.map(k => k.expectedEnd)),
+        };
+      } else if (fixturesDoc && (!fixturesDoc.fixtures || fixturesDoc.fixtures.length === 0)) {
+        schedule = { kickoffTimes: [], firstKickoff: null, lastExpectedEnd: null };
+      }
+    }
+
     if (schedule) {
       if (!schedule.kickoffTimes || schedule.kickoffTimes.length === 0) {
         return Response.json({ success: true, skipped: true, reason: 'No fixtures today', updated: 0, apiCalls: 0 });

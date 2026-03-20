@@ -120,8 +120,44 @@ export async function GET(request) {
     const today = new Date().toISOString().split('T')[0];
     const now = Date.now();
 
-    // ===== PASO 6: Smart schedule check — skip if no matches active =====
-    const schedule = await getFromSanity('matchSchedule', today);
+    // ===== Smart schedule check — skip if no matches active =====
+    let schedule = await getFromSanity('matchSchedule', today);
+
+    // If no formal schedule exists, derive from footballFixturesCache
+    if (!schedule) {
+      const fixturesDoc = await getFromSanity('footballFixturesCache', today);
+      if (fixturesDoc?.fixtures && fixturesDoc.fixtures.length > 0) {
+        const kickoffTimes = fixturesDoc.fixtures.map(f => {
+          const kickoff = new Date(f.fixture.date).getTime();
+          return {
+            fixtureId: f.fixture.id,
+            kickoff,
+            expectedEnd: kickoff + 120 * 60 * 1000,
+          };
+        }).sort((a, b) => a.kickoff - b.kickoff);
+
+        schedule = {
+          kickoffTimes,
+          firstKickoff: kickoffTimes[0].kickoff,
+          lastExpectedEnd: Math.max(...kickoffTimes.map(k => k.expectedEnd)),
+        };
+
+        // Persist so future invocations don't re-derive
+        await saveToSanity('matchSchedule', today, {
+          date: today,
+          ...schedule,
+          fixtureCount: fixturesDoc.fixtures.length,
+          createdAt: new Date().toISOString(),
+          derivedFrom: 'fixturesCache',
+        });
+        console.log(`[LIVE] Derived matchSchedule from fixturesCache: ${fixturesDoc.fixtures.length} matches`);
+      } else if (fixturesDoc && (!fixturesDoc.fixtures || fixturesDoc.fixtures.length === 0)) {
+        // Cache exists but empty — no fixtures today
+        schedule = { kickoffTimes: [], firstKickoff: null, lastExpectedEnd: null };
+      }
+      // If fixturesDoc is null (nothing cached yet), schedule stays null → proceed normally
+    }
+
     if (schedule) {
       // No fixtures today
       if (!schedule.kickoffTimes || schedule.kickoffTimes.length === 0) {
@@ -172,7 +208,7 @@ export async function GET(request) {
         });
       }
     }
-    // If no schedule exists (e.g., daily cron hasn't run yet), proceed normally
+    // If schedule is still null (no fixturesCache either), proceed normally as fallback
 
     const allLive = await apiFetch('/fixtures?live=all');
     let apiCalls = 1;

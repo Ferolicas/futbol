@@ -26,6 +26,41 @@ export async function GET(request) {
     const result = await getFixtures(today);
     const fixtures = result.fixtures || [];
 
+    // Generate matchSchedule so live/lineups crons can skip intelligently
+    if (fixtures.length > 0) {
+      const kickoffTimes = fixtures.map(f => {
+        const kickoff = new Date(f.fixture.date).getTime();
+        return {
+          fixtureId: f.fixture.id,
+          kickoff,
+          expectedEnd: kickoff + 120 * 60 * 1000,
+        };
+      }).sort((a, b) => a.kickoff - b.kickoff);
+
+      const firstKickoff = kickoffTimes[0].kickoff;
+      const lastExpectedEnd = Math.max(...kickoffTimes.map(k => k.expectedEnd));
+
+      await saveToSanity('matchSchedule', today, {
+        date: today,
+        firstKickoff,
+        lastExpectedEnd,
+        kickoffTimes,
+        fixtureCount: fixtures.length,
+        createdAt: new Date().toISOString(),
+      });
+      console.log(`[CRON] matchSchedule saved: ${fixtures.length} matches`);
+    } else {
+      await saveToSanity('matchSchedule', today, {
+        date: today,
+        firstKickoff: null,
+        lastExpectedEnd: null,
+        kickoffTimes: [],
+        fixtureCount: 0,
+        createdAt: new Date().toISOString(),
+      });
+      console.log('[CRON] matchSchedule saved: 0 matches');
+    }
+
     const quota = await getQuota();
     let tomorrowCount = 0;
 
