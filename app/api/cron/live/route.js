@@ -308,10 +308,16 @@ export async function GET(request) {
       const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
       const currentLiveIds = new Set(tracked.map(m => m.fixture.id));
 
-      // Matches that show live status in cache but are no longer in the live feed
-      const staleMatches = fixturesDoc.fixtures.filter(f =>
-        LIVE_STATUSES.includes(f.fixture?.status?.short) && !currentLiveIds.has(f.fixture.id)
-      );
+      // Use live:{date} Redis (existingLive) as source of truth for which matches were live —
+      // footballFixturesCache stays at NS status from the daily cron and never reflects live state,
+      // so stale detection based on it never fires. Redis is updated every minute by this cron.
+      const staleIds = Object.entries(existingLive)
+        .filter(([fid, m]) => LIVE_STATUSES.includes(m.status?.short) && !currentLiveIds.has(Number(fid)))
+        .map(([fid]) => Number(fid));
+
+      const staleMatches = staleIds
+        .map(fid => fixturesDoc.fixtures.find(f => f.fixture.id === fid))
+        .filter(Boolean);
 
       if (staleMatches.length > 0) {
         await Promise.all(staleMatches.map(async (stale) => {
