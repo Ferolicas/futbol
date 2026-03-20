@@ -1,10 +1,9 @@
-import { getFixtures, getQuota } from '../../../lib/api-football';
-import { getAnalyzedMatchesFull } from '../../../lib/sanity-cache';
+import { getFixtures, getQuota, getCachedStandingsPositions } from '../../../lib/api-football';
+import { getAnalyzedMatchesFull, getCachedFixturesRaw } from '../../../lib/sanity-cache';
 import { auth } from '@clerk/nextjs/server';
 import { getSanityUserByClerkId } from '../../../lib/clerk-sync';
 import { queryFromSanity, getFromSanity } from '../../../lib/sanity';
-import { getCachedStandingsPositions } from '../../../lib/api-football';
-import { redisGet, KEYS } from '../../../lib/redis';
+import { redisGet, redisSet, KEYS } from '../../../lib/redis';
 
 const FT_STATS_FIELDS = ['corners', 'yellowCards', 'redCards', 'goalScorers', 'cardEvents', 'missedPenalties'];
 
@@ -12,11 +11,23 @@ export const dynamic = 'force-dynamic';
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 
+// Redis TTLs for new cache layers (seconds)
+const ANALYSIS_CACHE_TTL = 4 * 3600;   // 4 hours
+const ODDS_CACHE_TTL = 4 * 3600;       // 4 hours
+const STANDINGS_CACHE_TTL = 12 * 3600;  // 12 hours
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
 
   try {
+    // ===== PHASE 1: Load fixtures (Redis -> Sanity/API) + start auth in parallel =====
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isPastDate = date < todayStr;
+
+    // Start auth early -- it runs in parallel with fixture loading
+    const authPromise = auth();
+
     let fixtures = [];
     let fromCache = false;
     let stale = false;
@@ -27,8 +38,15 @@ export async function GET(request) {
     if (redisFixtures && Array.isArray(redisFixtures) && redisFixtures.length > 0) {
       fixtures = redisFixtures;
       fromCache = true;
+    } else if (isPastDate) {
+      // 2. Past dates: use getCachedFixturesRaw (Sanity only, no API call -- past matches never change)
+      const rawFixtures = await getCachedFixturesRaw(date);
+      if (rawFixtures && rawFixtures.length > 0) {
+        fixtures = rawFixtures;
+        fromCache = true;
+      }
     } else {
-      // 2. Fallback to Sanity/API-Football
+      // 3. Current/future dates: fallback to Sanity/API-Football
       try {
         const result = await getFixtures(date);
         fixtures = result.fixtures || [];
@@ -41,13 +59,49 @@ export async function GET(request) {
       }
     }
 
-    // Read live stats from Redis (populated by cron/live every minute)
-    // No API-Football calls from this endpoint — all live data comes from Redis/Pusher
+    // ===== PHASE 2: Parallel middle section =====
+    // Now that we have fixtures, run ALL dependent lookups in parallel
+
+    const fixtureIds = fixtures.map(f => f.fixture.id);
+    const leagueIds = fixtures.length > 0
+      ? [...new Set(fixtures.map(f => f.league?.id).filter(Boolean))]
+      : [];
+
+    // Build Redis keys for new cache layers
+    const analysisRedisKey = `analysis:${date}`;
+    const oddsRedisKey = `odds:${date}`;
+    const standingsRedisKey = `standings:positions`;
+
+    // Launch all parallel lookups at once
+    const [
+      liveData,
+      batchFlag,
+      { userId: clerkId },
+      cachedAnalysisData,
+      cachedOddsData,
+      cachedStandings,
+      quota,
+    ] = await Promise.all([
+      // 1. Live stats from Redis
+      fixtures.length > 0 ? redisGet(KEYS.liveStats(date)) : null,
+      // 2. Batch flag from Sanity (read ONCE, reused below)
+      fixtures.length > 0 ? getFromSanity('appConfig', `dailyBatch-${date}`) : null,
+      // 3. Auth (already started, just await)
+      authPromise,
+      // 4. Analysis data: Redis first, then null (Sanity loaded below if needed)
+      fixtureIds.length > 0 ? redisGet(analysisRedisKey) : null,
+      // 5. Odds data: Redis first
+      fixtureIds.length > 0 ? redisGet(oddsRedisKey) : null,
+      // 6. Standings: Redis first
+      fixtures.length > 0 ? redisGet(standingsRedisKey) : null,
+      // 7. Quota
+      getQuota(),
+    ]);
+
+    // ===== PHASE 3: Process live stats =====
     let initialLiveStats = {};
 
     if (fixtures.length > 0) {
-      // 1. Get aggregated live data (includes both live + recently-finished matches)
-      const liveData = await redisGet(KEYS.liveStats(date));
       if (liveData && typeof liveData === 'object') {
         initialLiveStats = liveData;
         // Apply live status updates to fixtures
@@ -64,7 +118,7 @@ export async function GET(request) {
         });
       }
 
-      // 2. For finished matches without stats in live:{date}, load from Redis stats:{fid} or Sanity
+      // For finished matches without stats in live:{date}, load from Redis stats:{fid} or Sanity
       const ftWithoutStats = fixtures.filter(f =>
         FINISHED_STATUSES.includes(f.fixture?.status?.short) && !initialLiveStats[f.fixture.id]
       );
@@ -85,28 +139,85 @@ export async function GET(request) {
       }
     }
 
-    // Auto-trigger daily batch if first visit of the day (using client's date)
-    if (fixtures.length > 0) {
-      const batchFlag = await getFromSanity('appConfig', `dailyBatch-${date}`);
-      if (!batchFlag?.started) {
-        // First visit of the day — trigger full analysis batch in background
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
-          ? `https://${process.env.VERCEL_URL}`
-          : 'http://localhost:3000');
+    // ===== PHASE 4: Auto-trigger daily batch (uses batchFlag already loaded) =====
+    if (fixtures.length > 0 && !batchFlag?.started) {
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : 'http://localhost:3000');
 
-        fetch(`${baseUrl}/api/cron/daily?date=${date}`, {
-          headers: { 'x-internal-trigger': 'true' },
-        }).catch(() => {}); // Fire and forget
-      }
+      fetch(`${baseUrl}/api/cron/daily?date=${date}`, {
+        headers: { 'x-internal-trigger': 'true' },
+      }).catch(() => {}); // Fire and forget
     }
 
-    // Get user-specific data
-    let hidden = [];
-    let analyzed = [];
-    const { userId: clerkId } = await auth();
-    const sanityUser = clerkId ? await getSanityUserByClerkId(clerkId) : null;
+    // ===== PHASE 5: User data (auth resolved above) =====
+    const sanityUserPromise = clerkId ? getSanityUserByClerkId(clerkId) : Promise.resolve(null);
+
+    // While user lookup runs, resolve analysis + odds + standings from cache or Sanity in parallel
+    const [sanityUser, analysisResult, oddsResult, standingsResult] = await Promise.all([
+      sanityUserPromise,
+
+      // Analysis: use Redis cache or fall back to Sanity
+      (async () => {
+        if (cachedAnalysisData) return cachedAnalysisData;
+        if (fixtureIds.length === 0) return { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
+
+        const analyzedDocs = await queryFromSanity(
+          `*[_type == "footballMatchAnalysis" && fixtureId in $ids]{ fixtureId }`,
+          { ids: fixtureIds }
+        );
+        const globallyAnalyzed = (analyzedDocs || []).map(d => d.fixtureId);
+
+        const { analyzedOdds, analyzedData } = globallyAnalyzed.length > 0
+          ? await getAnalyzedMatchesFull(globallyAnalyzed)
+          : { analyzedOdds: {}, analyzedData: {} };
+
+        const result = { globallyAnalyzed, analyzedOdds, analyzedData };
+        // Cache in Redis for next request
+        redisSet(analysisRedisKey, result, ANALYSIS_CACHE_TTL).catch(() => {});
+        return result;
+      })(),
+
+      // Odds: use Redis cache or fall back to Sanity
+      (async () => {
+        if (cachedOddsData) return cachedOddsData;
+        if (fixtureIds.length === 0) return [];
+
+        const oddsDocs = await queryFromSanity(
+          `*[_type == "oddsCache" && date == $date]{ fixtureId, odds }`,
+          { date }
+        );
+        const result = oddsDocs || [];
+        // Cache in Redis for next request
+        if (result.length > 0) {
+          redisSet(oddsRedisKey, result, ODDS_CACHE_TTL).catch(() => {});
+        }
+        return result;
+      })(),
+
+      // Standings: use Redis cache or fall back to Sanity
+      (async () => {
+        if (cachedStandings && typeof cachedStandings === 'object' && Object.keys(cachedStandings).length > 0) {
+          return cachedStandings;
+        }
+        if (leagueIds.length === 0) return {};
+
+        try {
+          const positions = await getCachedStandingsPositions(leagueIds);
+          if (Object.keys(positions).length > 0) {
+            redisSet(standingsRedisKey, positions, STANDINGS_CACHE_TTL).catch(() => {});
+          }
+          return positions;
+        } catch {
+          return {};
+        }
+      })(),
+    ]);
+
     const userId = sanityUser?._id;
 
+    // ===== PHASE 6: User-specific data =====
+    let hidden = [];
     let userRemovedAnalyzed = [];
     if (userId) {
       const [hiddenDoc, removedDoc] = await Promise.all([
@@ -123,73 +234,50 @@ export async function GET(request) {
       userRemovedAnalyzed = removedDoc?.fixtureIds || [];
     }
 
-    // Get globally analyzed matches (from daily batch)
-    const fixtureIds = fixtures.map(f => f.fixture.id);
-    let globallyAnalyzed = [];
-
-    if (fixtureIds.length > 0) {
-      const analyzedDocs = await queryFromSanity(
-        `*[_type == "footballMatchAnalysis" && fixtureId in $ids]{ fixtureId }`,
-        { ids: fixtureIds }
-      );
-      globallyAnalyzed = (analyzedDocs || []).map(d => d.fixtureId);
-    }
-
-    // Filter out matches the user has personally removed from their analyzed tab
-    const userAnalyzed = globallyAnalyzed.filter(id => !userRemovedAnalyzed.includes(id));
-
-    // Only fetch full data for analyzed matches
-    const { analyzedOdds, analyzedData } = globallyAnalyzed.length > 0
-      ? await getAnalyzedMatchesFull(globallyAnalyzed)
-      : { analyzedOdds: {}, analyzedData: {} };
+    // ===== PHASE 7: Merge analysis + odds =====
+    const { globallyAnalyzed, analyzedOdds, analyzedData } = analysisResult;
+    const userAnalyzed = (globallyAnalyzed || []).filter(id => !userRemovedAnalyzed.includes(id));
 
     // Merge The Odds API cached odds into analyzed data
-    // This ensures real bookmaker odds appear even if API-Football odds were empty
-    if (fixtureIds.length > 0) {
+    if (oddsResult && oddsResult.length > 0) {
       try {
-        const oddsDocs = await queryFromSanity(
-          `*[_type == "oddsCache" && date == $date]{ fixtureId, odds }`,
-          { date }
-        );
-        if (oddsDocs?.length > 0) {
-          for (const doc of oddsDocs) {
-            const fid = doc.fixtureId;
-            if (!fid || !doc.odds) continue;
+        for (const doc of oddsResult) {
+          const fid = doc.fixtureId;
+          if (!fid || !doc.odds) continue;
 
-            // Merge into analyzedOdds (matchWinner for card display)
-            if (doc.odds.matchWinner) {
-              if (!analyzedOdds[fid]) {
-                analyzedOdds[fid] = doc.odds.matchWinner;
-              }
+          // Merge into analyzedOdds (matchWinner for card display)
+          if (doc.odds.matchWinner) {
+            if (!analyzedOdds[fid]) {
+              analyzedOdds[fid] = doc.odds.matchWinner;
             }
+          }
 
-            // Merge into analyzedData odds (for accordion markets)
-            if (analyzedData[fid]) {
-              const existing = analyzedData[fid].odds;
-              if (!existing || !existing.matchWinner) {
-                // No API-Football odds — use The Odds API entirely
-                analyzedData[fid].odds = {
-                  ...(existing || {}),
-                  ...doc.odds,
-                };
-              } else {
-                // Merge: fill missing markets from The Odds API
-                if (!existing.matchWinner && doc.odds.matchWinner) {
-                  existing.matchWinner = doc.odds.matchWinner;
-                }
-                if (!existing.overUnder && doc.odds.overUnder) {
-                  existing.overUnder = doc.odds.overUnder;
-                }
-                // Add The Odds API bookmakers to allBookmakerOdds
-                if (doc.odds.allBookmakerOdds?.length) {
-                  const names = new Set(
-                    (existing.allBookmakerOdds || []).map(b => b.name?.toLowerCase())
-                  );
-                  for (const bk of doc.odds.allBookmakerOdds) {
-                    if (!names.has(bk.name?.toLowerCase())) {
-                      if (!existing.allBookmakerOdds) existing.allBookmakerOdds = [];
-                      existing.allBookmakerOdds.push(bk);
-                    }
+          // Merge into analyzedData odds (for accordion markets)
+          if (analyzedData[fid]) {
+            const existing = analyzedData[fid].odds;
+            if (!existing || !existing.matchWinner) {
+              // No API-Football odds -- use The Odds API entirely
+              analyzedData[fid].odds = {
+                ...(existing || {}),
+                ...doc.odds,
+              };
+            } else {
+              // Merge: fill missing markets from The Odds API
+              if (!existing.matchWinner && doc.odds.matchWinner) {
+                existing.matchWinner = doc.odds.matchWinner;
+              }
+              if (!existing.overUnder && doc.odds.overUnder) {
+                existing.overUnder = doc.odds.overUnder;
+              }
+              // Add The Odds API bookmakers to allBookmakerOdds
+              if (doc.odds.allBookmakerOdds?.length) {
+                const names = new Set(
+                  (existing.allBookmakerOdds || []).map(b => b.name?.toLowerCase())
+                );
+                for (const bk of doc.odds.allBookmakerOdds) {
+                  if (!names.has(bk.name?.toLowerCase())) {
+                    if (!existing.allBookmakerOdds) existing.allBookmakerOdds = [];
+                    existing.allBookmakerOdds.push(bk);
                   }
                 }
               }
@@ -202,20 +290,6 @@ export async function GET(request) {
       }
     }
 
-    const quota = await getQuota();
-
-    // Get cached standings positions
-    let standings = {};
-    if (fixtures.length > 0) {
-      const leagueIds = [...new Set(fixtures.map(f => f.league?.id).filter(Boolean))];
-      try {
-        standings = await getCachedStandingsPositions(leagueIds);
-      } catch {}
-    }
-
-    // Batch status
-    const batchFlag = await getFromSanity('appConfig', `dailyBatch-${date}`);
-
     return Response.json({
       fixtures,
       fromCache,
@@ -225,7 +299,7 @@ export async function GET(request) {
       analyzed: userAnalyzed,
       analyzedOdds,
       analyzedData,
-      standings,
+      standings: standingsResult,
       initialLiveStats,
       batchStatus: batchFlag ? {
         started: batchFlag.started || false,

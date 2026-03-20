@@ -208,18 +208,18 @@ export default function Dashboard() {
   const loadingRef = useRef(loading);
   useEffect(() => { loadingRef.current = loading; }, [loading]);
 
-  // Splash screen: show for minimum 2.5s on FIRST visit only, then fade out when data loaded
+  // Splash screen: show briefly on FIRST visit only, fade out as soon as data loads
   useEffect(() => {
     if (_splashDone) { setSplash(false); return; }
-    const minTime = new Promise(r => setTimeout(r, 2500));
+    const minTime = new Promise(r => setTimeout(r, 800));
     const dataReady = new Promise(r => {
-      const check = () => !loadingRef.current ? r() : setTimeout(check, 100);
+      const check = () => !loadingRef.current ? r() : setTimeout(check, 50);
       check();
     });
     Promise.all([minTime, dataReady]).then(() => {
       _splashDone = true;
       setSplashFade(true);
-      setTimeout(() => setSplash(false), 600);
+      setTimeout(() => setSplash(false), 400);
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
