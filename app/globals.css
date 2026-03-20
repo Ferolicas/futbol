@@ -2312,7 +2312,7 @@ div[data-testid*="development"] { display: none !important; }
   text-align: center; margin-bottom: 24px; position: relative;
 }
 .payment-modal-logo {
-  width: 72px; height: 72px; margin: 0 auto 12px; display: block;
+  width: 170px; height: 100px; margin: 0 auto 12px; display: block; object-fit: contain;
 }
 .payment-modal-header h2 {
   font-size: 1.3rem; font-weight: 800; color: var(--t1, #e8e8ef); margin-bottom: 4px;

@@ -1,21 +1,30 @@
-import { stripe, createAsesoriaSubscription } from '../../../lib/stripe';
+import { stripe, createPostPaymentSubscription } from '../../../lib/stripe';
 import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
 import { sendWelcomeEmail } from '../../../lib/resend-email';
 
-async function findUserByCustomerId(customerId) {
-  // Try by stripeCustomerId first
-  const user = await queryFromSanity(
-    `*[_type == "cfaUser" && stripeCustomerId == $customerId][0]{ _id, name, email, password, plan }`,
+async function findUser(customerId, userId) {
+  // 1. By stripeCustomerId
+  let user = await queryFromSanity(
+    `*[_type == "cfaUser" && stripeCustomerId == $customerId][0]{ _id, name, email, password, plan, clerkId, role }`,
     { customerId }
   );
   if (user) return user;
 
-  // Fallback: get email from Stripe customer, find by email
+  // 2. By userId from metadata
+  if (userId) {
+    user = await queryFromSanity(
+      `*[_type == "cfaUser" && _id == $userId][0]{ _id, name, email, password, plan, clerkId, role }`,
+      { userId }
+    );
+    if (user) return user;
+  }
+
+  // 3. Fallback: email from Stripe customer
   try {
     const customer = await stripe.customers.retrieve(customerId);
     if (customer?.email) {
       return queryFromSanity(
-        `*[_type == "cfaUser" && email == $email][0]{ _id, name, email, password, plan }`,
+        `*[_type == "cfaUser" && email == $email][0]{ _id, name, email, password, plan, clerkId, role }`,
         { email: customer.email }
       );
     }
@@ -31,6 +40,8 @@ async function activateUser(user, plan, customerId) {
     name: user.name,
     email: user.email,
     password: user.password,
+    clerkId: user.clerkId,
+    role: user.role,
     plan: plan || 'plataforma',
     subscriptionStatus: 'active',
     stripeCustomerId: customerId,
@@ -73,57 +84,28 @@ export async function POST(request) {
 
   try {
     switch (event.type) {
-      // Embedded payment: subscription first invoice paid
-      case 'invoice.payment_succeeded': {
-        const invoice = event.data.object;
-        const customerId = invoice.customer;
-        const subscriptionId = invoice.subscription;
-
-        // Only handle subscription invoices (not one-time)
-        if (!subscriptionId) break;
-
-        // Only handle the first invoice (activation)
-        if (invoice.billing_reason !== 'subscription_create') break;
-
-        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-        const plan = subscription.metadata?.plan;
-
-        const user = await findUserByCustomerId(customerId);
-        if (user) {
-          await activateUser(user, plan, customerId);
-        }
-        break;
-      }
-
-      // Embedded payment: one-time payment succeeded (asesoria $100)
+      // Both plans: PaymentIntent succeeded → activate user + create subscription
       case 'payment_intent.succeeded': {
-        const paymentIntent = event.data.object;
-        const { userId, plan } = paymentIntent.metadata || {};
-        const customerId = paymentIntent.customer;
+        const pi = event.data.object;
+        const { userId, plan } = pi.metadata || {};
+        const customerId = pi.customer;
 
-        // Only handle asesoria one-time payments
-        if (plan !== 'asesoria' || !customerId) break;
+        if (!plan || !customerId) break;
 
-        const user = await findUserByCustomerId(customerId);
+        const user = await findUser(customerId, userId);
         if (!user) {
-          // Fallback: find by userId from metadata
-          const userById = await queryFromSanity(
-            `*[_type == "cfaUser" && _id == $userId][0]{ _id, name, email, password, plan }`,
-            { userId }
-          );
-          if (userById) {
-            await activateUser(userById, 'asesoria', customerId);
-          }
-        } else {
-          await activateUser(user, 'asesoria', customerId);
+          console.error(`Webhook: user not found for customer ${customerId}, userId ${userId}`);
+          break;
         }
 
-        // Create the recurring subscription after $100 payment
+        await activateUser(user, plan, customerId);
+
+        // Create recurring subscription (starts after 30-day trial)
         try {
-          await createAsesoriaSubscription(customerId);
-          console.log(`Asesoria subscription created for customer ${customerId}`);
+          const sub = await createPostPaymentSubscription(customerId, plan);
+          console.log(`Subscription created for ${plan}: ${sub.id}`);
         } catch (subErr) {
-          console.error('Failed to create asesoria subscription:', subErr);
+          console.error('Failed to create subscription:', subErr);
         }
         break;
       }
@@ -132,11 +114,11 @@ export async function POST(request) {
         const subscription = event.data.object;
         const customerId = subscription.customer;
 
-        const user = await findUserByCustomerId(customerId);
+        const user = await findUser(customerId);
         if (user) {
           const docId = user._id.replace('cfaUser-', '');
           const status = subscription.status === 'active' ? 'active'
-            : subscription.status === 'trialing' ? 'trialing'
+            : subscription.status === 'trialing' ? 'active'
             : subscription.status === 'past_due' ? 'past_due'
             : 'inactive';
 
@@ -144,6 +126,8 @@ export async function POST(request) {
             name: user.name,
             email: user.email,
             password: user.password,
+            clerkId: user.clerkId,
+            role: user.role,
             plan: user.plan,
             subscriptionStatus: status,
             updatedAt: new Date().toISOString(),
@@ -156,13 +140,15 @@ export async function POST(request) {
         const subscription = event.data.object;
         const customerId = subscription.customer;
 
-        const user = await findUserByCustomerId(customerId);
+        const user = await findUser(customerId);
         if (user) {
           const docId = user._id.replace('cfaUser-', '');
           await saveToSanity('cfaUser', docId, {
             name: user.name,
             email: user.email,
             password: user.password,
+            clerkId: user.clerkId,
+            role: user.role,
             plan: user.plan,
             subscriptionStatus: 'cancelled',
             cancelledAt: new Date().toISOString(),
@@ -175,13 +161,15 @@ export async function POST(request) {
         const invoice = event.data.object;
         const customerId = invoice.customer;
 
-        const user = await findUserByCustomerId(customerId);
+        const user = await findUser(customerId);
         if (user) {
           const docId = user._id.replace('cfaUser-', '');
           await saveToSanity('cfaUser', docId, {
             name: user.name,
             email: user.email,
             password: user.password,
+            clerkId: user.clerkId,
+            role: user.role,
             plan: user.plan,
             subscriptionStatus: 'past_due',
             updatedAt: new Date().toISOString(),
