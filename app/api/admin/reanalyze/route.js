@@ -8,7 +8,7 @@ export const maxDuration = 300;
 
 const OWNER_EMAIL = 'ferneyolicas@gmail.com';
 
-export async function POST() {
+export async function POST(request) {
   const { userId } = await auth();
   if (!userId) {
     return Response.json({ error: 'Not authenticated' }, { status: 401 });
@@ -20,7 +20,8 @@ export async function POST() {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const today = new Date().toISOString().split('T')[0];
+  const { searchParams } = new URL(request.url);
+  const today = searchParams.get('date') || new Date().toISOString().split('T')[0];
 
   // Try Sanity first, fall back to Redis (page loads use Redis directly, Sanity may be empty)
   let fixtures = await getCachedFixturesRaw(today);

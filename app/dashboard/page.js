@@ -117,7 +117,7 @@ export default function Dashboard() {
     setReanalyzeDone(false);
     setReanalyzeProgress(null);
     try {
-      const res = await fetch('/api/admin/reanalyze', { method: 'POST' });
+      const res = await fetch(`/api/admin/reanalyze?date=${date}`, { method: 'POST' });
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
