@@ -1791,6 +1791,9 @@ div[data-testid*="development"] { display: none !important; }
 .cl-poweredBy { display: none !important; }
 /* Apple icon is black - invert it on dark bg */
 .cl-socialButtonsProviderIcon__apple { filter: invert(1) !important; }
+/* Force white text on social/Google buttons in dark theme */
+.cl-socialButtonsBlockButton { color: #ffffff !important; }
+.cl-socialButtonsBlockButtonText { color: #ffffff !important; }
 
 /* ===================== API COUNTER (OWNER) ===================== */
 .api-counter {

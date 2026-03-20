@@ -17,3 +17,5 @@ tmp_fixture.json
 
 # clerk configuration (can include secrets)
 /.clerk/
+
+.vercel

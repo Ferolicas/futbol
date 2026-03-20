@@ -135,6 +135,16 @@ const clerkAppearance = {
       border: '1px solid rgba(0,230,118,0.25)',
       borderRadius: '10px',
     },
+    socialButtonsBlockButton: {
+      background: 'rgba(0,230,118,0.06)',
+      border: '1px solid rgba(0,230,118,0.25)',
+      borderRadius: '10px',
+      color: '#ffffff',
+    },
+    socialButtonsBlockButtonText: {
+      color: '#ffffff',
+      fontWeight: 500,
+    },
     dividerLine: { background: 'rgba(0,230,118,0.1)' },
     dividerText: { color: 'rgba(255,255,255,0.3)' },
     footerActionLink: { color: '#00e676' },
