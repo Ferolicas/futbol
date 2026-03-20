@@ -2312,7 +2312,7 @@ div[data-testid*="development"] { display: none !important; }
   text-align: center; margin-bottom: 24px; position: relative;
 }
 .payment-modal-logo {
-  width: 48px; height: 48px; margin: 0 auto 12px; display: block;
+  width: 120px; height: 120px; margin: 0 auto 12px; display: block;
 }
 .payment-modal-header h2 {
   font-size: 1.3rem; font-weight: 800; color: var(--t1, #e8e8ef); margin-bottom: 4px;
@@ -2327,6 +2327,21 @@ div[data-testid*="development"] { display: none !important; }
   border-radius: 50%; transition: all .2s;
 }
 .payment-modal-close:hover { color: var(--t1, #e8e8ef); background: rgba(255,255,255,0.05); }
+.payment-modal-conditions {
+  background: rgba(0,230,118,0.04); border: 1px solid rgba(0,230,118,0.12);
+  border-radius: 12px; padding: 14px 18px; margin-bottom: 20px;
+}
+.payment-modal-conditions ul {
+  list-style: none; margin: 0; padding: 0;
+}
+.payment-modal-conditions li {
+  font-size: .82rem; color: var(--t2, #8888a4); padding: 3px 0 3px 18px;
+  position: relative; line-height: 1.5;
+}
+.payment-modal-conditions li::before {
+  content: '\2713'; position: absolute; left: 0; color: var(--green, #00e676);
+  font-weight: 700; font-size: .78rem;
+}
 .payment-modal-element { margin-bottom: 20px; }
 .payment-modal-form .modal-btn { margin-top: 4px; }
 

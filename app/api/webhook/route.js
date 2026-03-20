@@ -3,10 +3,26 @@ import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
 import { sendWelcomeEmail } from '../../../lib/resend-email';
 
 async function findUserByCustomerId(customerId) {
-  return queryFromSanity(
+  // Try by stripeCustomerId first
+  const user = await queryFromSanity(
     `*[_type == "cfaUser" && stripeCustomerId == $customerId][0]{ _id, name, email, password, plan }`,
     { customerId }
   );
+  if (user) return user;
+
+  // Fallback: get email from Stripe customer, find by email
+  try {
+    const customer = await stripe.customers.retrieve(customerId);
+    if (customer?.email) {
+      return queryFromSanity(
+        `*[_type == "cfaUser" && email == $email][0]{ _id, name, email, password, plan }`,
+        { email: customer.email }
+      );
+    }
+  } catch (e) {
+    console.error('Fallback customer lookup failed:', e.message);
+  }
+  return null;
 }
 
 async function activateUser(user, plan, customerId) {

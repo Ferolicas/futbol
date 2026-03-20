@@ -6,11 +6,36 @@ import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
 
-function PaymentForm({ plan, amount, onSuccess, onClose }) {
+const PLAN_CONDITIONS = {
+  plataforma: {
+    title: 'Plan Plataforma',
+    lines: [
+      'Suscripcion mensual',
+      'Primer mes: $15 USD (50% de descuento)',
+      'A partir del segundo mes: $30 USD/mes',
+      'Acceso total a estadisticas, analisis y herramientas',
+      'Cancela cuando quieras',
+    ],
+  },
+  asesoria: {
+    title: 'Plan Asesoria',
+    lines: [
+      'Pago unico de $100 USD',
+      '1 mes de asesoria personalizada + acceso a plataforma',
+      'Formacion en apuestas, estrategias y bankroll',
+      'Soporte prioritario 1 a 1',
+      'Luego: $15 USD el segundo mes, $30 USD/mes en adelante',
+    ],
+  },
+};
+
+function PaymentForm({ plan, amount, onClose }) {
   const stripe = useStripe();
   const elements = useElements();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const conditions = PLAN_CONDITIONS[plan];
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -21,9 +46,10 @@ function PaymentForm({ plan, amount, onSuccess, onClose }) {
 
     const returnUrl = `${window.location.origin}/dashboard?checkout=success&plan=${plan}`;
 
-    const { error: stripeError } = plan === 'plataforma'
-      ? await stripe.confirmPayment({ elements, confirmParams: { return_url: returnUrl } })
-      : await stripe.confirmPayment({ elements, confirmParams: { return_url: returnUrl } });
+    const { error: stripeError } = await stripe.confirmPayment({
+      elements,
+      confirmParams: { return_url: returnUrl },
+    });
 
     if (stripeError) {
       if (stripeError.type === 'card_error' || stripeError.type === 'validation_error') {
@@ -33,18 +59,25 @@ function PaymentForm({ plan, amount, onSuccess, onClose }) {
       }
       setLoading(false);
     }
-    // If no error, stripe redirects to return_url after successful payment
   };
 
-  const displayAmount = (amount / 100).toFixed(2);
+  const displayAmount = (amount / 100).toFixed(0);
 
   return (
     <form onSubmit={handleSubmit} className="payment-modal-form">
       <div className="payment-modal-header">
-        <img src="/vflogo.png" alt="CFanalisis" className="payment-modal-logo" />
-        <h2>Completar pago</h2>
-        <p className="payment-modal-amount">${displayAmount} USD</p>
         <button type="button" className="payment-modal-close" onClick={onClose}>&times;</button>
+        <img src="/vflogo.png" alt="CFanalisis" className="payment-modal-logo" />
+        <h2>{conditions.title}</h2>
+        <p className="payment-modal-amount">${displayAmount} USD</p>
+      </div>
+
+      <div className="payment-modal-conditions">
+        <ul>
+          {conditions.lines.map((line, i) => (
+            <li key={i}>{line}</li>
+          ))}
+        </ul>
       </div>
 
       {error && <div className="modal-error">{error}</div>}
@@ -96,10 +129,7 @@ export default function PaymentModal({ clientSecret, plan, amount, onClose }) {
       <div className="payment-modal-content" onClick={(e) => e.stopPropagation()}>
         <Elements
           stripe={stripePromise}
-          options={{
-            clientSecret,
-            appearance,
-          }}
+          options={{ clientSecret, appearance }}
         >
           <PaymentForm
             plan={plan}
