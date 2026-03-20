@@ -1,4 +1,4 @@
-import { stripe } from '../../../lib/stripe';
+import { stripe, createAsesoriaSubscription } from '../../../lib/stripe';
 import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
 import { sendWelcomeEmail } from '../../../lib/resend-email';
 
@@ -55,9 +55,18 @@ export async function POST(request) {
             paidAt: new Date().toISOString(),
           });
 
+          // For asesoria: create the recurring subscription after $100 payment
+          if (plan === 'asesoria' && customerId) {
+            try {
+              await createAsesoriaSubscription(customerId);
+              console.log(`Asesoria subscription created for customer ${customerId}`);
+            } catch (subErr) {
+              console.error('Failed to create asesoria subscription:', subErr);
+            }
+          }
+
           // Send welcome email (don't fail if email fails)
           try {
-            // We don't have the raw password, so we tell user to use the one they set
             await sendWelcomeEmail({
               to: user.email,
               name: user.name,
