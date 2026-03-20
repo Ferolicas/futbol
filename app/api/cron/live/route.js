@@ -277,7 +277,16 @@ export async function GET(request) {
     // ── 1b. Save live data to Redis for instant dashboard access ──
     // Merge with existing live:{date} so FT matches aren't lost when they drop from the live feed
     const existingLive = await redisGet(KEYS.liveStats(today)) || {};
-    const mergedLive = { ...existingLive, ...liveDetailsMap };
+    // Preserve goalScorers/missedPenalties from existing if new data has none (API events are inconsistent)
+    const mergedLive = { ...existingLive };
+    for (const [fid, data] of Object.entries(liveDetailsMap)) {
+      const existing = existingLive[fid];
+      mergedLive[fid] = {
+        ...data,
+        goalScorers: data.goalScorers?.length > 0 ? data.goalScorers : (existing?.goalScorers || []),
+        missedPenalties: data.missedPenalties?.length > 0 ? data.missedPenalties : (existing?.missedPenalties || []),
+      };
+    }
     if (Object.keys(mergedLive).length > 0) {
       await redisSet(KEYS.liveStats(today), mergedLive, TTL.liveStats);
     }

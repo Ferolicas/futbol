@@ -259,8 +259,9 @@ export default function Dashboard() {
       const next = { ...prev };
       data.matches.forEach(m => {
         if (m.corners || m.yellowCards || m.redCards || m.goalScorers?.length) {
+          const prev = next[m.fixtureId];
           next[m.fixtureId] = {
-            ...next[m.fixtureId],
+            ...prev,
             fixtureId: m.fixtureId,
             status: m.status,
             goals: m.goals,
@@ -268,8 +269,9 @@ export default function Dashboard() {
             corners: m.corners,
             yellowCards: m.yellowCards,
             redCards: m.redCards,
-            goalScorers: m.goalScorers,
-            missedPenalties: m.missedPenalties,
+            // Never overwrite with empty — API events are inconsistent per cycle
+            goalScorers: m.goalScorers?.length > 0 ? m.goalScorers : (prev?.goalScorers || []),
+            missedPenalties: m.missedPenalties?.length > 0 ? m.missedPenalties : (prev?.missedPenalties || []),
           };
         }
       });
