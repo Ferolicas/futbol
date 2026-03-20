@@ -104,9 +104,28 @@ export async function GET(request) {
     if (fixtures.length > 0) {
       if (liveData && typeof liveData === 'object') {
         initialLiveStats = liveData;
-        // Apply live status updates to fixtures
-        fixtures = fixtures.map(f => {
+
+        // For fixtures with a live status in live:{date}, check stats:{fid} to detect
+        // matches that already finished (stale detection saves FT status there)
+        const liveInCache = fixtures.filter(f => {
           const live = liveData[f.fixture.id];
+          return live && !FINISHED_STATUSES.includes(live.status?.short) &&
+            !FINISHED_STATUSES.includes(f.fixture?.status?.short);
+        });
+        if (liveInCache.length > 0) {
+          await Promise.all(liveInCache.map(async (f) => {
+            const fid = f.fixture.id;
+            const stats = await redisGet(KEYS.fixtureStats(fid));
+            if (stats && FINISHED_STATUSES.includes(stats.status?.short)) {
+              // Match is actually finished — update live:{date} entry so fixture renders as FT
+              initialLiveStats[fid] = stats;
+            }
+          }));
+        }
+
+        // Apply live/FT status updates to fixtures
+        fixtures = fixtures.map(f => {
+          const live = initialLiveStats[f.fixture.id];
           if (!live) return f;
           if (FINISHED_STATUSES.includes(f.fixture?.status?.short)) return f;
           return {
