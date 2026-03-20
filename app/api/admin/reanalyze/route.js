@@ -1,6 +1,6 @@
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { analyzeMatch } from '../../../../lib/api-football';
-import { getCachedFixturesRaw } from '../../../../lib/sanity-cache';
+import { getCachedFixturesRaw, getCachedAnalysis } from '../../../../lib/sanity-cache';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -28,6 +28,7 @@ export async function POST() {
     }
 
     let analyzed = 0;
+    let skipped = 0;
     let failed = 0;
 
     // Process in batches of 5 to avoid overwhelming the API
@@ -36,7 +37,13 @@ export async function POST() {
       await Promise.all(
         batch.map(async (fixture) => {
           try {
-            await analyzeMatch(fixture, { date: today, force: true });
+            const fid = fixture.fixture?.id;
+            const existing = await getCachedAnalysis(fid, today);
+            if (existing) {
+              skipped++;
+              return;
+            }
+            await analyzeMatch(fixture, { date: today });
             analyzed++;
           } catch (e) {
             failed++;
@@ -49,6 +56,7 @@ export async function POST() {
     return Response.json({
       success: true,
       analyzed,
+      skipped,
       failed,
       total: fixtures.length,
       timestamp: new Date().toISOString(),

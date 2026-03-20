@@ -240,10 +240,52 @@ export async function GET(request) {
 
     const tracked = allLive.filter(m => ALL_LEAGUE_IDS.includes(m.league.id));
 
-    // ── 1. Fetch events & stats for currently-live matches ──
+    // ── 1. Build live data — throttle per-match API calls to every 5 minutes ──
+    // Every minute: use /fixtures?live=all data for score/status (already fetched, 0 extra calls)
+    // Every 5 minutes OR on FT: fetch events+stats for corners/cards/scorers
+    const currentMinute = new Date().getMinutes();
+    const isDetailedTick = currentMinute % 5 === 0;
+
     const liveDetailsMap = {};
-    if (tracked.length > 0) {
-      await Promise.all(tracked.map(async (match) => {
+
+    // Split: matches needing fresh events+stats vs those that can use cached data
+    const needDetailedFetch = tracked.filter(m =>
+      FINISHED_STATUSES.includes(m.fixture.status.short) || isDetailedTick
+    );
+    const useCachedMatches = tracked.filter(m =>
+      !FINISHED_STATUSES.includes(m.fixture.status.short) && !isDetailedTick
+    );
+
+    // Build live data from Redis cache for non-detailed-tick matches (0 API calls)
+    if (useCachedMatches.length > 0) {
+      const cachedStats = await Promise.all(
+        useCachedMatches.map(m => redisGet(KEYS.fixtureStats(m.fixture.id)))
+      );
+      useCachedMatches.forEach((match, i) => {
+        const fid = match.fixture.id;
+        const cached = cachedStats[i];
+        liveDetailsMap[fid] = {
+          fixtureId: fid,
+          status: match.fixture.status,
+          goals: match.goals,
+          score: match.score,
+          homeTeam: { id: match.teams.home.id, name: match.teams.home.name },
+          awayTeam: { id: match.teams.away.id, name: match.teams.away.name },
+          corners: cached?.corners || { home: 0, away: 0, total: 0 },
+          yellowCards: cached?.yellowCards || { home: 0, away: 0, total: 0 },
+          redCards: cached?.redCards || { home: 0, away: 0, total: 0 },
+          goalScorers: cached?.goalScorers || [],
+          cardEvents: cached?.cardEvents || [],
+          missedPenalties: cached?.missedPenalties || [],
+          updatedAt: new Date().toISOString(),
+          date: today,
+        };
+      });
+    }
+
+    // Fetch full events+stats only for FT matches and every-5-min detailed ticks
+    if (needDetailedFetch.length > 0) {
+      await Promise.all(needDetailedFetch.map(async (match) => {
         const fid = match.fixture.id;
         const [eventsData, statsData] = await Promise.all([
           apiFetch(`/fixtures/events?fixture=${fid}`),
@@ -272,12 +314,12 @@ export async function GET(request) {
     if (Object.keys(mergedLive).length > 0) {
       await redisSet(KEYS.liveStats(today), mergedLive, TTL.liveStats);
     }
-    // Save individual fixture stats
-    if (Object.keys(liveDetailsMap).length > 0) {
+    // Save individual fixture stats (only for matches with fresh API data)
+    if (needDetailedFetch.length > 0) {
       await Promise.all(
-        Object.entries(liveDetailsMap).map(([fid, data]) =>
-          redisSet(KEYS.fixtureStats(fid), data, TTL.fixtureStats)
-        )
+        needDetailedFetch
+          .filter(m => liveDetailsMap[m.fixture.id])
+          .map(m => redisSet(KEYS.fixtureStats(m.fixture.id), liveDetailsMap[m.fixture.id], TTL.fixtureStats))
       );
     }
 
