@@ -151,10 +151,21 @@ async function sendGoalPushes(liveDetailsMap, existingLive) {
   }
   if (goals.length === 0) return;
 
+  // Load subscriptions with userId so we can check each user's hidden list
   const subs = await queryFromSanity(
-    `*[_type == "cfaUserData" && dataType == "pushSubscription"]{ subscription }`
+    `*[_type == "cfaUserData" && dataType == "pushSubscription"]{ subscription, userId }`
   );
   if (!subs?.length) return;
+
+  // Preload every subscriber's hidden list from Redis in one parallel batch
+  const hiddenByUser = {};
+  await Promise.all(
+    subs.map(async (doc) => {
+      if (!doc.userId || hiddenByUser[doc.userId] !== undefined) return;
+      const cached = await redisGet(KEYS.userHidden(doc.userId));
+      hiddenByUser[doc.userId] = Array.isArray(cached) ? cached : [];
+    })
+  );
 
   for (const goal of goals) {
     const title = `⚽ GOL! ${goal.homeTeam} ${goal.homeScore}-${goal.awayScore} ${goal.awayTeam}`;
@@ -164,6 +175,9 @@ async function sendGoalPushes(liveDetailsMap, existingLive) {
     await Promise.allSettled(
       subs.map(async (doc) => {
         try {
+          // Skip if this user has hidden the match
+          const userHidden = hiddenByUser[doc.userId] || [];
+          if (userHidden.includes(goal.fixtureId)) return;
           const sub = JSON.parse(doc.subscription);
           await sendPushNotification(sub, { title, body, tag: `goal-${goal.fixtureId}` });
         } catch {}
