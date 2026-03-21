@@ -1,4 +1,4 @@
-import { createEmbeddedPayment } from '../../../lib/stripe';
+import { createEmbeddedPayment, createPSEPayment } from '../../../lib/stripe';
 import { saveToSanity } from '../../../lib/sanity';
 import { auth } from '@clerk/nextjs/server';
 import { getSanityUserByClerkId } from '../../../lib/clerk-sync';
@@ -10,7 +10,7 @@ export async function POST(request) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { plan, email } = await request.json();
+    const { plan, email, method } = await request.json();
 
     if (!plan || !email) {
       return Response.json({ error: 'Missing required fields' }, { status: 400 });
@@ -28,7 +28,8 @@ export async function POST(request) {
       return Response.json({ error: 'Email mismatch' }, { status: 403 });
     }
 
-    const result = await createEmbeddedPayment({
+    const createPayment = method === 'pse' ? createPSEPayment : createEmbeddedPayment;
+    const result = await createPayment({
       plan,
       userId: sanityUser._id,
       email: sanityUser.email,
@@ -53,6 +54,7 @@ export async function POST(request) {
       clientSecret: result.clientSecret,
       plan: result.plan,
       amount: result.amount,
+      currency: result.currency || 'usd',
     });
   } catch (error) {
     console.error('Checkout error:', error);

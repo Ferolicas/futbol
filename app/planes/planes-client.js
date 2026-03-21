@@ -28,7 +28,7 @@ export default function PlanesClient({ userId, email }) {
       .catch(() => {});
   }, []);
 
-  const handleSelectPlan = async (plan) => {
+  const handleSelectPlan = async (plan, method = 'card') => {
     setSelectedPlan(plan);
     setLoading(true);
     setError('');
@@ -37,7 +37,7 @@ export default function PlanesClient({ userId, email }) {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan, email }),
+        body: JSON.stringify({ plan, email, method }),
       });
       const data = await res.json();
 
@@ -46,6 +46,7 @@ export default function PlanesClient({ userId, email }) {
           clientSecret: data.clientSecret,
           plan: data.plan,
           amount: data.amount,
+          currency: data.currency || 'usd',
         });
       } else {
         setError(data.error || 'Error al procesar pago');
@@ -97,7 +98,7 @@ export default function PlanesClient({ userId, email }) {
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.3, duration: 0.5 }}
             whileHover={{ scale: 1.02 }}
-            onClick={() => !loading && handleSelectPlan('plataforma')}
+            onClick={() => !loading && handleSelectPlan('plataforma', 'card')}
             style={{ cursor: loading ? 'wait' : 'pointer' }}
           >
             <div className="plan-badge">Popular</div>
@@ -120,6 +121,13 @@ export default function PlanesClient({ userId, email }) {
               <li>15+ ligas internacionales</li>
               <li>Corners, tarjetas, BTTS</li>
             </ul>
+            <button
+              className="btn-pse"
+              disabled={loading}
+              onClick={(e) => { e.stopPropagation(); !loading && handleSelectPlan('plataforma', 'pse'); }}
+            >
+              🏦 Pagar con PSE (Colombia) — $62.000 COP
+            </button>
             {loading && selectedPlan === 'plataforma' && (
               <div className="modal-loading">Preparando pago...</div>
             )}
@@ -156,6 +164,13 @@ export default function PlanesClient({ userId, email }) {
               <li>Sesiones de asesoria mensual</li>
               <li>Acceso a comunidad VIP</li>
             </ul>
+            <button
+              className="btn-pse"
+              disabled={loading}
+              onClick={(e) => { e.stopPropagation(); !loading && handleSelectPlan('asesoria', 'pse'); }}
+            >
+              🏦 Pagar con PSE (Colombia) — $415.000 COP
+            </button>
             {loading && selectedPlan === 'asesoria' && (
               <div className="modal-loading">Preparando pago...</div>
             )}
@@ -177,6 +192,7 @@ export default function PlanesClient({ userId, email }) {
           clientSecret={paymentData.clientSecret}
           plan={paymentData.plan}
           amount={paymentData.amount}
+          currency={paymentData.currency}
           onClose={handleClosePayment}
         />
       )}

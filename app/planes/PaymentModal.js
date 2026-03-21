@@ -61,7 +61,10 @@ function PaymentForm({ plan, amount, onClose }) {
     }
   };
 
-  const displayAmount = (amount / 100).toFixed(0);
+  const isCOP = currency === 'cop';
+  const displayAmount = isCOP
+    ? `$${(amount / 100).toLocaleString('es-CO')} COP`
+    : `$${(amount / 100).toFixed(0)} USD`;
 
   return (
     <form onSubmit={handleSubmit} className="payment-modal-form">
@@ -69,7 +72,7 @@ function PaymentForm({ plan, amount, onClose }) {
         <button type="button" className="payment-modal-close" onClick={onClose}>&times;</button>
         <img src="/vflogo.png" alt="CFanalisis" className="payment-modal-logo" />
         <h2>{conditions.title}</h2>
-        <p className="payment-modal-amount">${displayAmount} USD</p>
+        <p className="payment-modal-amount">{displayAmount}</p>
       </div>
 
       <div className="payment-modal-conditions">
@@ -96,13 +99,13 @@ function PaymentForm({ plan, amount, onClose }) {
         disabled={!stripe || loading}
         className="modal-btn"
       >
-        {loading ? 'Procesando...' : `Pagar $${displayAmount} USD`}
+        {loading ? 'Procesando...' : `Pagar ${displayAmount}`}
       </button>
     </form>
   );
 }
 
-export default function PaymentModal({ clientSecret, plan, amount, onClose }) {
+export default function PaymentModal({ clientSecret, plan, amount, currency, onClose }) {
   if (!clientSecret) return null;
 
   const appearance = {
@@ -134,6 +137,7 @@ export default function PaymentModal({ clientSecret, plan, amount, onClose }) {
           <PaymentForm
             plan={plan}
             amount={amount}
+            currency={currency}
             onClose={onClose}
           />
         </Elements>
