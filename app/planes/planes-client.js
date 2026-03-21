@@ -28,7 +28,7 @@ export default function PlanesClient({ userId, email }) {
       .catch(() => {});
   }, []);
 
-  const handleSelectPlan = async (plan, method = 'card') => {
+  const handleSelectPlan = async (plan) => {
     setSelectedPlan(plan);
     setLoading(true);
     setError('');
@@ -37,7 +37,7 @@ export default function PlanesClient({ userId, email }) {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan, email, method }),
+        body: JSON.stringify({ plan, email }),
       });
       const data = await res.json();
 
@@ -98,7 +98,7 @@ export default function PlanesClient({ userId, email }) {
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.3, duration: 0.5 }}
             whileHover={{ scale: 1.02 }}
-            onClick={() => !loading && handleSelectPlan('plataforma', 'card')}
+            onClick={() => !loading && handleSelectPlan('plataforma')}
             style={{ cursor: loading ? 'wait' : 'pointer' }}
           >
             <div className="plan-badge">Popular</div>
@@ -121,16 +121,6 @@ export default function PlanesClient({ userId, email }) {
               <li>15+ ligas internacionales</li>
               <li>Corners, tarjetas, BTTS</li>
             </ul>
-            <button
-              className="btn-pse"
-              disabled={loading}
-              onClick={(e) => { e.stopPropagation(); !loading && handleSelectPlan('plataforma', 'pse'); }}
-            >
-              🏦 Pagar con PSE (Colombia)
-              {prices?.plans?.plataforma?.firstMonth?.local
-                ? ` — $${Math.round(prices.plans.plataforma.firstMonth.local).toLocaleString('es-CO')} COP`
-                : ''}
-            </button>
             {loading && selectedPlan === 'plataforma' && (
               <div className="modal-loading">Preparando pago...</div>
             )}
@@ -167,16 +157,6 @@ export default function PlanesClient({ userId, email }) {
               <li>Sesiones de asesoria mensual</li>
               <li>Acceso a comunidad VIP</li>
             </ul>
-            <button
-              className="btn-pse"
-              disabled={loading}
-              onClick={(e) => { e.stopPropagation(); !loading && handleSelectPlan('asesoria', 'pse'); }}
-            >
-              🏦 Pagar con PSE (Colombia)
-              {prices?.plans?.asesoria?.initial?.local
-                ? ` — $${Math.round(prices.plans.asesoria.initial.local).toLocaleString('es-CO')} COP`
-                : ''}
-            </button>
             {loading && selectedPlan === 'asesoria' && (
               <div className="modal-loading">Preparando pago...</div>
             )}

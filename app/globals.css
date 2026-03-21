@@ -2303,16 +2303,6 @@ div[data-testid*="development"] { display: none !important; }
   border-color: var(--green, #00e676);
   box-shadow: 0 0 20px rgba(0,230,118,0.2);
 }
-.btn-pse {
-  width: 100%; margin-top: 16px; padding: 11px 16px;
-  background: rgba(255,193,7,0.08); border: 1px solid rgba(255,193,7,0.3);
-  border-radius: 10px; color: #ffc107; font-size: .85rem; font-weight: 600;
-  cursor: pointer; transition: all .2s; text-align: center;
-}
-.btn-pse:hover:not(:disabled) {
-  background: rgba(255,193,7,0.15); border-color: rgba(255,193,7,0.6);
-}
-.btn-pse:disabled { opacity: .5; cursor: not-allowed; }
 
 /* ===================== PAYMENT MODAL ===================== */
 .payment-modal-overlay {
