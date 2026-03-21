@@ -42,11 +42,13 @@ export default function PlanesClient({ userId, email }) {
       const data = await res.json();
 
       if (data.clientSecret) {
+        const localDisplay = plan === 'plataforma'
+          ? fmtPrice(15, prices?.plans?.plataforma?.firstMonth?.local, prices?.currency)
+          : fmtPrice(100, prices?.plans?.asesoria?.initial?.local, prices?.currency);
         setPaymentData({
           clientSecret: data.clientSecret,
           plan: data.plan,
-          amount: data.amount,
-          currency: data.currency || 'usd',
+          displayAmount: localDisplay,
         });
       } else {
         setError(data.error || 'Error al procesar pago');
@@ -177,8 +179,7 @@ export default function PlanesClient({ userId, email }) {
         <PaymentModal
           clientSecret={paymentData.clientSecret}
           plan={paymentData.plan}
-          amount={paymentData.amount}
-          currency={paymentData.currency}
+          displayAmount={paymentData.displayAmount}
           onClose={handleClosePayment}
         />
       )}

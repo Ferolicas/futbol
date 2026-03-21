@@ -29,7 +29,7 @@ const PLAN_CONDITIONS = {
   },
 };
 
-function PaymentForm({ plan, amount, currency, onClose }) {
+function PaymentForm({ plan, displayAmount, onClose }) {
   const stripe = useStripe();
   const elements = useElements();
   const [loading, setLoading] = useState(false);
@@ -60,11 +60,6 @@ function PaymentForm({ plan, amount, currency, onClose }) {
       setLoading(false);
     }
   };
-
-  const isCOP = currency === 'cop';
-  const displayAmount = isCOP
-    ? `$${(amount / 100).toLocaleString('es-CO')} COP`
-    : `$${(amount / 100).toFixed(0)} USD`;
 
   return (
     <form onSubmit={handleSubmit} className="payment-modal-form">
@@ -105,7 +100,7 @@ function PaymentForm({ plan, amount, currency, onClose }) {
   );
 }
 
-export default function PaymentModal({ clientSecret, plan, amount, currency, onClose }) {
+export default function PaymentModal({ clientSecret, plan, displayAmount, onClose }) {
   if (!clientSecret) return null;
 
   const appearance = {
@@ -136,8 +131,7 @@ export default function PaymentModal({ clientSecret, plan, amount, currency, onC
         >
           <PaymentForm
             plan={plan}
-            amount={amount}
-            currency={currency}
+            displayAmount={displayAmount}
             onClose={onClose}
           />
         </Elements>
