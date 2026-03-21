@@ -275,9 +275,42 @@ export async function GET(request) {
       }
     }
 
-    // ── 1b. Save live data to Redis for instant dashboard access ──
-    // Merge with existing live:{date} so FT matches aren't lost when they drop from the live feed
+    // ── 1b. Fetch events for matches with goals but empty events[] (e.g. South American leagues) ──
+    // /fixtures?live=all often returns events:[] for these leagues even when goals have been scored.
+    // We detect these and make one individual call per such match to get the real events.
     const existingLive = await redisGet(KEYS.liveStats(today)) || {};
+
+    const needsEventsFetch = tracked.filter(m => {
+      const fid = m.fixture.id;
+      const totalGoals = (m.goals?.home || 0) + (m.goals?.away || 0);
+      if (totalGoals === 0) return false; // No goals → no events needed
+      if ((m.events || []).length > 0) return false; // Already have events from live=all
+      // Check if we already have correct scorers cached and score hasn't changed
+      const cached = existingLive[fid];
+      if (cached?.goalScorers?.length > 0) {
+        const cachedTotal = (cached.goals?.home || 0) + (cached.goals?.away || 0);
+        if (cachedTotal === totalGoals) return false; // Score unchanged, cached scorers are still valid
+      }
+      return true;
+    });
+
+    if (needsEventsFetch.length > 0) {
+      await Promise.all(needsEventsFetch.map(async (match) => {
+        const fid = match.fixture.id;
+        const data = await apiFetch(`/fixtures?id=${fid}`);
+        apiCalls++;
+        if (data?.[0]) {
+          const full = data[0];
+          // Re-extract stats with the full events from the individual call
+          const fullData = extractLiveStats(full, full.events || [], full.statistics || []);
+          fullData.date = today;
+          liveDetailsMap[fid] = fullData;
+        }
+      }));
+    }
+
+    // ── 1c. Save live data to Redis for instant dashboard access ──
+    // Merge with existing live:{date} so FT matches aren't lost when they drop from the live feed
     // Preserve goalScorers/missedPenalties from existing if new data has none (API events are inconsistent)
     const mergedLive = { ...existingLive };
     for (const [fid, data] of Object.entries(liveDetailsMap)) {
