@@ -61,12 +61,20 @@ const esES = {
 };
 
 export const metadata = {
-  title: 'Analisis Deportivos - CF Analisis',
+  title: 'CF Analisis - Futbol',
   description: 'Plataforma avanzada de analisis de futbol y apuestas deportivas. Estadisticas, combinadas inteligentes, marcadores en vivo.',
   keywords: 'futbol, apuestas, analisis, estadisticas, combinadas, probabilidades',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'CFanalisis',
+  },
   icons: {
     icon: '/vflogo.png',
-    apple: '/vflogo.png',
+    apple: [
+      { url: '/vflogo.png', sizes: '180x180', type: 'image/png' },
+    ],
   },
 };
 
@@ -74,6 +82,7 @@ export const viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
+  themeColor: '#00e676',
 };
 
 const clerkAppearance = {
