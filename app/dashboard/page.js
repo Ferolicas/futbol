@@ -1473,23 +1473,32 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
 /* ======================== LIVE STATS COMPONENTS ======================== */
 
 function MatchTimer({ elapsed, status }) {
+  const [localElapsed, setLocalElapsed] = useState(elapsed || 0);
   const [seconds, setSeconds] = useState(0);
 
   useEffect(() => {
-    if (status === '1H' || status === '2H' || status === 'ET') {
-      setSeconds(0);
-      const interval = setInterval(() => {
-        setSeconds(prev => (prev + 1) % 60);
-      }, 1000);
-      return () => clearInterval(interval);
-    }
+    setLocalElapsed(elapsed || 0);
+    setSeconds(0);
+
+    if (status !== '1H' && status !== '2H' && status !== 'ET') return;
+
+    const interval = setInterval(() => {
+      setSeconds(prev => {
+        if (prev >= 59) {
+          setLocalElapsed(m => m + 1);
+          return 0;
+        }
+        return prev + 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
   }, [status, elapsed]);
 
   if (status === 'HT') return <span>ET</span>;
   if (status === 'BT') return <span>Descanso ET</span>;
   if (status === 'P') return <span>Penales</span>;
 
-  return <span>{elapsed}:{String(seconds).padStart(2, '0')}</span>;
+  return <span>{localElapsed}:{String(seconds).padStart(2, '0')}</span>;
 }
 
 function LiveStatsBar({ stats }) {

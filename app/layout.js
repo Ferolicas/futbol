@@ -71,9 +71,9 @@ export const metadata = {
     title: 'CFanalisis',
   },
   icons: {
-    icon: '/vflogo.png',
+    icon: '/icon-192.png',
     apple: [
-      { url: '/vflogo.png', sizes: '180x180', type: 'image/png' },
+      { url: '/apple-icon.png', sizes: '180x180', type: 'image/png' },
     ],
   },
 };
