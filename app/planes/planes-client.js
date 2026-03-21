@@ -64,8 +64,8 @@ export default function PlanesClient({ userId, email }) {
   };
 
   const fmtPrice = (usd, local, currency) => {
-    if (!local || currency === 'USD') return `$${usd} USD`;
-    return `$${usd} USD (~${currency} ${local.toLocaleString()})`;
+    if (!local || !currency || currency === 'USD') return `$${usd} USD`;
+    return `${Math.round(local).toLocaleString()} ${currency}`;
   };
 
   return (
