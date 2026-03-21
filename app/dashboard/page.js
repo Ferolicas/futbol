@@ -1479,16 +1479,25 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
 function MatchTimer({ elapsed, status }) {
   const [localElapsed, setLocalElapsed] = useState(elapsed || 0);
   const [seconds, setSeconds] = useState(0);
+  // Tracks the highest minute accepted — prevents backwards jumps when API
+  // keeps returning elapsed:90 while the local counter has advanced past it
+  const maxElapsedRef = useRef(elapsed || 0);
 
   useEffect(() => {
-    setLocalElapsed(elapsed || 0);
-    setSeconds(0);
+    const newElapsed = elapsed || 0;
+    // Only advance if the API sends a strictly higher minute
+    if (newElapsed > maxElapsedRef.current) {
+      maxElapsedRef.current = newElapsed;
+      setLocalElapsed(newElapsed);
+      setSeconds(0);
+    }
 
     if (status !== '1H' && status !== '2H' && status !== 'ET') return;
 
     const interval = setInterval(() => {
       setSeconds(prev => {
         if (prev >= 59) {
+          maxElapsedRef.current += 1;
           setLocalElapsed(m => m + 1);
           return 0;
         }
