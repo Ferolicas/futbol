@@ -269,17 +269,28 @@ export async function GET(request) {
     let hidden = [];
     let userRemovedAnalyzed = [];
     if (userId) {
-      const [hiddenDoc, removedDoc] = await Promise.all([
-        queryFromSanity(
-          `*[_type == "cfaUserData" && userId == $userId && dataType == "hidden"][0]`,
-          { userId }
-        ),
+      const [hiddenFromRedis, removedDoc] = await Promise.all([
+        // Read hidden list from Redis first — avoids Sanity CDN staleness after a write
+        redisGet(KEYS.userHidden(userId)),
         queryFromSanity(
           `*[_type == "cfaUserData" && userId == $userId && dataType == "removedAnalyzed" && date == $date][0]`,
           { userId, date }
         ),
       ]);
-      hidden = hiddenDoc?.fixtureIds || [];
+
+      if (Array.isArray(hiddenFromRedis)) {
+        hidden = hiddenFromRedis;
+      } else {
+        // Redis miss — fall back to Sanity and warm the cache
+        const hiddenDoc = await queryFromSanity(
+          `*[_type == "cfaUserData" && userId == $userId && dataType == "hidden"][0]`,
+          { userId }
+        );
+        hidden = hiddenDoc?.fixtureIds || [];
+        if (hidden.length > 0) {
+          redisSet(KEYS.userHidden(userId), hidden, 30 * 24 * 3600).catch(() => {});
+        }
+      }
       userRemovedAnalyzed = removedDoc?.fixtureIds || [];
     }
 

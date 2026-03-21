@@ -202,6 +202,20 @@ body {
   object-fit: contain;
 }
 
+.btn-bell {
+  width: 36px; height: 36px;
+  background: var(--bg-2);
+  border: 1px solid var(--brd);
+  border-radius: var(--rs);
+  color: var(--t2);
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .2s var(--ease);
+}
+.btn-bell:hover { border-color: var(--green); }
+.btn-bell--on { border-color: var(--green); }
+
 .btn-reload {
   width: 36px; height: 36px;
   background: var(--bg-2);

@@ -1,6 +1,9 @@
 import { auth } from '@clerk/nextjs/server';
 import { getSanityUserByClerkId } from '../../../lib/clerk-sync';
 import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
+import { redisGet, redisSet, KEYS } from '../../../lib/redis';
+
+const HIDDEN_TTL = 30 * 24 * 3600; // 30 days
 
 export const dynamic = 'force-dynamic';
 
@@ -13,11 +16,17 @@ export async function GET() {
   if (!userId) return Response.json({ hidden: [] });
 
   try {
+    // Redis first (avoids CDN staleness)
+    const cached = await redisGet(KEYS.userHidden(userId));
+    if (Array.isArray(cached)) return Response.json({ hidden: cached });
+
     const doc = await queryFromSanity(
       `*[_type == "cfaUserData" && userId == $userId && dataType == "hidden"][0]`,
       { userId }
     );
-    return Response.json({ hidden: doc?.fixtureIds || [] });
+    const ids = doc?.fixtureIds || [];
+    redisSet(KEYS.userHidden(userId), ids, HIDDEN_TTL).catch(() => {});
+    return Response.json({ hidden: ids });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }
@@ -54,6 +63,9 @@ export async function POST(request) {
       fixtureIds: ids,
       updatedAt: new Date().toISOString(),
     });
+
+    // Update Redis immediately so next GET bypasses CDN staleness
+    await redisSet(KEYS.userHidden(userId), ids, HIDDEN_TTL);
 
     return Response.json({ hidden: ids });
   } catch (error) {

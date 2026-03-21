@@ -1,8 +1,9 @@
-import { getFromSanity, saveToSanity } from '../../../../lib/sanity';
+import { getFromSanity, saveToSanity, queryFromSanity } from '../../../../lib/sanity';
 import { ALL_LEAGUE_IDS } from '../../../../lib/leagues';
 import { triggerEvent } from '../../../../lib/pusher';
 import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
 import { incrementApiCallCount } from '../../../../lib/sanity-cache';
+import { sendPushNotification } from '../../../../lib/webpush';
 
 // Cron: runs every 1 minute during active hours
 // cron-job.org: GET /api/cron/live?secret=CRON_SECRET
@@ -124,6 +125,51 @@ function extractLiveStats(match, events, stats) {
     missedPenalties,
     updatedAt: new Date().toISOString(),
   };
+}
+
+async function sendGoalPushes(liveDetailsMap, existingLive) {
+  const goals = [];
+  for (const [fid, data] of Object.entries(liveDetailsMap)) {
+    const prev = existingLive[fid];
+    if (!prev?.goals) continue;
+    const prevH = prev.goals.home ?? 0;
+    const prevA = prev.goals.away ?? 0;
+    const newH = data.goals?.home ?? 0;
+    const newA = data.goals?.away ?? 0;
+    if (newH > prevH || newA > prevA) {
+      const lastScorer = data.goalScorers?.slice(-1)[0];
+      goals.push({
+        fixtureId: Number(fid),
+        homeTeam: data.homeTeam?.name || '?',
+        awayTeam: data.awayTeam?.name || '?',
+        homeScore: newH,
+        awayScore: newA,
+        scorer: lastScorer?.player,
+        minute: lastScorer?.minute,
+      });
+    }
+  }
+  if (goals.length === 0) return;
+
+  const subs = await queryFromSanity(
+    `*[_type == "cfaUserData" && dataType == "pushSubscription"]{ subscription }`
+  );
+  if (!subs?.length) return;
+
+  for (const goal of goals) {
+    const title = `⚽ GOL! ${goal.homeTeam} ${goal.homeScore}-${goal.awayScore} ${goal.awayTeam}`;
+    const body = goal.scorer
+      ? `${goal.scorer} · min. ${goal.minute}`
+      : `min. ${goal.minute || '?'}`;
+    await Promise.allSettled(
+      subs.map(async (doc) => {
+        try {
+          const sub = JSON.parse(doc.subscription);
+          await sendPushNotification(sub, { title, body, tag: `goal-${goal.fixtureId}` });
+        } catch {}
+      })
+    );
+  }
 }
 
 export async function GET(request) {
@@ -308,6 +354,9 @@ export async function GET(request) {
         }
       }));
     }
+
+    // ── 1d. Detect goals and send push notifications (fire and forget) ──
+    sendGoalPushes(liveDetailsMap, existingLive).catch(() => {});
 
     // ── 1c. Save live data to Redis for instant dashboard access ──
     // Merge with existing live:{date} so FT matches aren't lost when they drop from the live feed

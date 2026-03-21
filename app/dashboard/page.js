@@ -77,6 +77,9 @@ export default function Dashboard() {
   const [reanalyzeProgress, setReanalyzeProgress] = useState(null);
   // Track Pusher activity (for debugging/diagnostics)
   const pusherLastUpdate = useRef(0);
+  // Web push notifications
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushSupported, setPushSupported] = useState(false);
 
   // Apply live data to fixtures — NEVER accepts a lower elapsed minute (prevents backwards jumps)
   const applyLiveUpdate = useCallback((prev, freshMatches) => {
@@ -243,6 +246,46 @@ export default function Dashboard() {
       setTimeout(() => setSplash(false), 400);
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // === WEB PUSH NOTIFICATIONS ===
+  useEffect(() => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    setPushSupported(true);
+    navigator.serviceWorker.register('/sw.js').then(reg => {
+      reg.pushManager.getSubscription().then(sub => setPushEnabled(!!sub));
+    }).catch(() => {});
+  }, []);
+
+  const handlePushToggle = async () => {
+    if (!pushSupported) return;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) {
+        await existing.unsubscribe();
+        await fetch('/api/push/subscribe', { method: 'DELETE' });
+        setPushEnabled(false);
+      } else {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') return;
+        const vapidKey = process.env.NEXT_PUBLIC_VAPID_KEY;
+        if (!vapidKey) return;
+        const padding = '='.repeat((4 - vapidKey.length % 4) % 4);
+        const base64 = (vapidKey + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const raw = window.atob(base64);
+        const appServerKey = new Uint8Array([...raw].map(c => c.charCodeAt(0)));
+        const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appServerKey });
+        await fetch('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sub),
+        });
+        setPushEnabled(true);
+      }
+    } catch (e) {
+      console.error('[PUSH]', e);
+    }
+  };
 
   // === PUSHER REAL-TIME EVENTS ===
   // Only subscribe to Pusher for today's date — past dates are historical/fixed
@@ -665,6 +708,15 @@ export default function Dashboard() {
                 <span className="user-name">{user.firstName || user.emailAddresses?.[0]?.emailAddress?.split('@')[0]}</span>
                 <button className="btn-signout" onClick={() => signOut({ redirectUrl: '/' })}>Salir</button>
               </div>
+            )}
+            {pushSupported && (
+              <button
+                className={`btn-bell${pushEnabled ? ' btn-bell--on' : ''}`}
+                onClick={handlePushToggle}
+                title={pushEnabled ? 'Desactivar notificaciones de goles' : 'Activar notificaciones de goles'}
+              >
+                {pushEnabled ? '🔔' : '🔕'}
+              </button>
             )}
             <button className="btn-reload" onClick={() => loadFixtures(date)} disabled={loading}>
               <span className={loading ? 'spin' : ''}>&#8635;</span>
