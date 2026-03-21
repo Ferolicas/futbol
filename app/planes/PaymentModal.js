@@ -29,7 +29,7 @@ const PLAN_CONDITIONS = {
   },
 };
 
-function PaymentForm({ plan, amount, onClose }) {
+function PaymentForm({ plan, amount, currency, onClose }) {
   const stripe = useStripe();
   const elements = useElements();
   const [loading, setLoading] = useState(false);
