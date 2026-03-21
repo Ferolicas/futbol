@@ -266,7 +266,8 @@ export default function Dashboard() {
             status: m.status,
             goals: m.goals,
             score: m.score,
-            corners: m.corners,
+            // Preserve corners from corners-cron if new value is 0 (live=all has no statistics)
+            corners: m.corners?.total > 0 ? m.corners : (prev?.corners || m.corners),
             yellowCards: m.yellowCards,
             redCards: m.redCards,
             // Never overwrite with empty — API events are inconsistent per cycle
@@ -1184,6 +1185,22 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
         </div>
         {/* Live stats bar in accordion header */}
         {(live || finished) && liveStats && <LiveStatsBar stats={liveStats} />}
+        {/* Goal scorers compact — visible in header without opening accordion */}
+        {(live || finished) && liveStats?.goalScorers?.length > 0 && (
+          <div className="mcard-scorers">
+            {liveStats.goalScorers.map((g, i) => (
+              <span key={i} className={`scorer-chip ${g.type === 'Own Goal' ? 'og' : ''}`}>
+                {g.minute}{g.extra ? `+${g.extra}` : ''}&apos; {g.player?.split(' ').pop()}
+                {g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
+              </span>
+            ))}
+            {liveStats.missedPenalties?.map((p, i) => (
+              <span key={`mp-${i}`} className="scorer-chip missed">
+                {p.minute}&apos; {p.player?.split(' ').pop()} (Penal fallado)
+              </span>
+            ))}
+          </div>
+        )}
         {odds && (
           <div className="mcard-odds">
             <span className="odd-chip">{odds.home?.toFixed(2)}</span>

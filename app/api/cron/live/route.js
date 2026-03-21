@@ -454,13 +454,17 @@ export async function GET(request) {
     // ── 4. Push real-time update via Pusher (ALL live data, never filtered) ──
     const allPusherUpdates = [];
     tracked.forEach(m => {
-      const details = liveDetailsMap[m.fixture.id];
+      const fid = m.fixture.id;
+      const details = liveDetailsMap[fid];
+      const merged = mergedLive[fid]; // has real corners from corners-cron via Redis
       allPusherUpdates.push({
-        fixtureId: m.fixture.id,
+        fixtureId: fid,
         status: m.fixture.status,
         goals: m.goals,
         score: m.score,
-        corners: details?.corners || null,
+        // Use mergedLive corners (preserved from corners cron) — liveDetailsMap always has 0
+        // because /fixtures?live=all never includes statistics
+        corners: merged?.corners?.total > 0 ? merged.corners : (details?.corners || null),
         yellowCards: details?.yellowCards || null,
         redCards: details?.redCards || null,
         goalScorers: details?.goalScorers || [],
