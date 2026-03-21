@@ -126,7 +126,10 @@ export default function PlanesClient({ userId, email }) {
               disabled={loading}
               onClick={(e) => { e.stopPropagation(); !loading && handleSelectPlan('plataforma', 'pse'); }}
             >
-              🏦 Pagar con PSE (Colombia) — $62.000 COP
+              🏦 Pagar con PSE (Colombia)
+              {prices?.plans?.plataforma?.firstMonth?.local
+                ? ` — $${Math.round(prices.plans.plataforma.firstMonth.local).toLocaleString('es-CO')} COP`
+                : ''}
             </button>
             {loading && selectedPlan === 'plataforma' && (
               <div className="modal-loading">Preparando pago...</div>
@@ -169,7 +172,10 @@ export default function PlanesClient({ userId, email }) {
               disabled={loading}
               onClick={(e) => { e.stopPropagation(); !loading && handleSelectPlan('asesoria', 'pse'); }}
             >
-              🏦 Pagar con PSE (Colombia) — $415.000 COP
+              🏦 Pagar con PSE (Colombia)
+              {prices?.plans?.asesoria?.initial?.local
+                ? ` — $${Math.round(prices.plans.asesoria.initial.local).toLocaleString('es-CO')} COP`
+                : ''}
             </button>
             {loading && selectedPlan === 'asesoria' && (
               <div className="modal-loading">Preparando pago...</div>
