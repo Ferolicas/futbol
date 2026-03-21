@@ -1,6 +1,7 @@
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { analyzeMatch } from '../../../../lib/api-football';
-import { getCachedFixturesRaw, getCachedAnalysis } from '../../../../lib/sanity-cache';
+import { getCachedFixturesRaw, getCachedAnalysis, getAnalyzedFixtureIds } from '../../../../lib/sanity-cache';
+import { deleteFromSanity } from '../../../../lib/sanity';
 import { redisGet, redisDel, KEYS } from '../../../../lib/redis';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +23,17 @@ export async function POST(request) {
 
   const { searchParams } = new URL(request.url);
   const today = searchParams.get('date') || new Date().toISOString().split('T')[0];
+  const force = searchParams.get('force') === 'true';
+
+  // force=true: delete all existing analysis for the date before re-running
+  if (force) {
+    const existingIds = await getAnalyzedFixtureIds(today);
+    await Promise.all([
+      ...existingIds.map(id => deleteFromSanity('footballMatchAnalysis', String(id))),
+      deleteFromSanity('appConfig', `analyzed-${today}`),
+      redisDel(`analysis:${today}`),
+    ]);
+  }
 
   // Try Sanity first, fall back to Redis (page loads use Redis directly, Sanity may be empty)
   let fixtures = await getCachedFixturesRaw(today);
