@@ -37,7 +37,7 @@ export default function PlanesClient({ userId, email }) {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan, email }),
+        body: JSON.stringify({ plan, email, currency: prices?.currency || 'USD' }),
       });
       const data = await res.json();
 

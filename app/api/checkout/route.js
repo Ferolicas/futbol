@@ -10,7 +10,7 @@ export async function POST(request) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { plan, email } = await request.json();
+    const { plan, email, currency } = await request.json();
 
     if (!plan || !email) {
       return Response.json({ error: 'Missing required fields' }, { status: 400 });
@@ -33,6 +33,7 @@ export async function POST(request) {
       userId: sanityUser._id,
       email: sanityUser.email,
       name: sanityUser.name,
+      currency: currency || 'USD',
     });
 
     // Update user with pending plan
