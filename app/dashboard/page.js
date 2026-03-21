@@ -482,7 +482,11 @@ export default function Dashboard() {
   // Unified dismiss: removes from both Partidos AND Analizados tabs
   const dismissMatch = async (e, fixtureId) => {
     e.stopPropagation();
-    setHidden(prev => prev.includes(fixtureId) ? prev : [...prev, fixtureId]);
+    setHidden(prev => {
+      const next = prev.includes(fixtureId) ? prev : [...prev, fixtureId];
+      if (_dashCache) _dashCache.hidden = next; // keep SPA back-navigation in sync
+      return next;
+    });
     setAnalyzed(prev => prev.filter(id => id !== fixtureId));
     setSelectedMarkets(prev => {
       const n = { ...prev };

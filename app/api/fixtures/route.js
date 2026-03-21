@@ -2,7 +2,7 @@ import { getFixtures, getQuota, getCachedStandingsPositions } from '../../../lib
 import { getAnalyzedMatchesFull, getCachedFixturesRaw } from '../../../lib/sanity-cache';
 import { auth } from '@clerk/nextjs/server';
 import { getSanityUserByClerkId } from '../../../lib/clerk-sync';
-import { queryFromSanity, getFromSanity } from '../../../lib/sanity';
+import { queryFromSanity, queryFromSanityFresh, getFromSanity } from '../../../lib/sanity';
 import { redisGet, redisSet, KEYS } from '../../../lib/redis';
 
 const FT_STATS_FIELDS = ['corners', 'yellowCards', 'redCards', 'goalScorers', 'cardEvents', 'missedPenalties'];
@@ -281,8 +281,8 @@ export async function GET(request) {
       if (Array.isArray(hiddenFromRedis)) {
         hidden = hiddenFromRedis;
       } else {
-        // Redis miss — fall back to Sanity and warm the cache
-        const hiddenDoc = await queryFromSanity(
+        // Redis miss — use origin client (no CDN) to guarantee fresh data
+        const hiddenDoc = await queryFromSanityFresh(
           `*[_type == "cfaUserData" && userId == $userId && dataType == "hidden"][0]`,
           { userId }
         );
