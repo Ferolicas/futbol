@@ -314,7 +314,8 @@ export async function GET(request) {
       return Response.json({ success: false, error: 'API fetch failed', timestamp: new Date().toISOString() });
     }
 
-    const tracked = allLive.filter(m => ALL_LEAGUE_IDS.includes(m.league.id));
+    const YOUTH_RE = /\bU-?1[2-9]\b|\bU-?2[0-3]\b|\bunder[ -]?(1[2-9]|2[0-3])\b|\byouth\b|\bjunior\b|\bsub-?(1[2-9]|2[0-3])\b/i;
+    const tracked = allLive.filter(m => ALL_LEAGUE_IDS.includes(m.league.id) && !YOUTH_RE.test(m.league.name || ''));
 
     // ── 1. Extract ALL live data from /fixtures?live=all response (0 extra API calls) ──
     // The live=all response already includes match.events[] and match.statistics[]

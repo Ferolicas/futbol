@@ -387,8 +387,11 @@ export default function Dashboard() {
   // No more client-side polling — saves API quota and reduces latency.
 
   const changeDate = (offset) => {
-    const d = new Date(date);
-    d.setDate(d.getDate() + offset);
+    // Parse components directly to avoid UTC-vs-local timezone shift:
+    // new Date("2025-03-25") parses as UTC midnight, so getDate() returns the
+    // LOCAL day which is 1 behind in UTC+X and causes the stuck/double-jump bug.
+    const [y, m, day] = date.split('-').map(Number);
+    const d = new Date(y, m - 1, day + offset); // local constructor, no UTC offset
     const nd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     setDate(nd);
     setSelected(new Set());
