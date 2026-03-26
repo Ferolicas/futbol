@@ -48,9 +48,13 @@ export async function GET(request) {
         if (hasStale) {
           // Some matches still show live/NS — refresh from API to get final scores
           try {
-            const result = await getFixtures(date);
+            const result = await getFixtures(date, { forceApi: true });
             fixtures = result.fixtures || rawFixtures;
-            fromCache = result.fromCache || false;
+            fromCache = false;
+            // Save fresh fixtures to Redis so next request is instant
+            if (fixtures !== rawFixtures) {
+              redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(() => {});
+            }
           } catch {
             fixtures = rawFixtures; // API failed — use cache as-is
             fromCache = true;
