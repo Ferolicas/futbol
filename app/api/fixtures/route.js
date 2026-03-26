@@ -36,8 +36,25 @@ export async function GET(request) {
     // 1. Try Redis first (instant)
     const redisFixtures = await redisGet(KEYS.fixtures(date));
     if (redisFixtures && Array.isArray(redisFixtures) && redisFixtures.length > 0) {
-      fixtures = redisFixtures;
-      fromCache = true;
+      // For past dates, check if Redis has stale live/NS statuses that need refreshing
+      const STALE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE', 'NS'];
+      const redisHasStale = isPastDate && redisFixtures.some(f => STALE_STATUSES.includes(f.fixture?.status?.short));
+      if (redisHasStale) {
+        // Redis has stale data for a past date — force refresh from API
+        try {
+          const result = await getFixtures(date, { forceApi: true });
+          fixtures = result.fixtures || redisFixtures;
+          fromCache = false;
+          // Overwrite Redis with fresh data
+          redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(() => {});
+        } catch {
+          fixtures = redisFixtures;
+          fromCache = true;
+        }
+      } else {
+        fixtures = redisFixtures;
+        fromCache = true;
+      }
     } else if (isPastDate) {
       // 2. Past dates: load from Sanity cache first
       const rawFixtures = await getCachedFixturesRaw(date);
