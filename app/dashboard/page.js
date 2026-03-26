@@ -49,7 +49,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(!_dashCache);
   const [error, setError] = useState('');
   const [fromCache, setFromCache] = useState(_dashCache?.fromCache || false);
-  const [quota, setQuota] = useState(_dashCache?.quota || { used: 0, remaining: 100, limit: 100 });
+  const [quota, setQuota] = useState(_dashCache?.quota || { used: 0 });
   const [hidden, setHidden] = useState(_dashCache?.hidden || []);
   const [analyzed, setAnalyzed] = useState(_dashCache?.analyzed || []);
   const [analyzedOdds, setAnalyzedOdds] = useState(_dashCache?.analyzedOdds || {});
@@ -199,7 +199,7 @@ export default function Dashboard() {
         fixtures: fx, analyzed: data.analyzed || [], analyzedOdds: data.analyzedOdds || {},
         analyzedData: data.analyzedData || {}, standings: data.standings || {},
         hidden: data.hidden || [], fromCache: data.fromCache || false,
-        quota: data.quota || { used: 0, remaining: 100, limit: 100 },
+        quota: data.quota || { used: 0 },
         liveStats: data.initialLiveStats || {},
       };
       // Live updates come from Pusher — no /api/live polling needed
@@ -1079,7 +1079,7 @@ export default function Dashboard() {
 
         {/* FOOTER */}
         <div className="footer">
-          <span>{quota.used}/{quota.limit} API</span>
+          <span>{quota.used} API calls</span>
           <span>{fromCache ? 'Cache' : 'API'}</span>
           <span>{visible.length} partidos</span>
         </div>
@@ -1694,21 +1694,13 @@ function ApiCounter({ quota }) {
     return () => clearInterval(interval);
   }, []);
 
-  const pct = liveQuota.limit > 0 ? (liveQuota.used / liveQuota.limit) * 100 : 0;
-  const danger = pct > 85;
-  const warn = pct > 65;
-
   return (
-    <div className={`api-counter ${danger ? 'danger' : warn ? 'warn' : ''}`}>
+    <div className="api-counter">
       <div className="api-counter-row">
         <span className="api-counter-label">API Calls</span>
-        <span className="api-counter-value">{liveQuota.used.toLocaleString()} / {liveQuota.limit.toLocaleString()}</span>
-      </div>
-      <div className="api-counter-bar">
-        <div className="api-counter-fill" style={{ width: `${Math.min(pct, 100)}%` }} />
+        <span className="api-counter-value">{liveQuota.used.toLocaleString()} hoy</span>
       </div>
       <div className="api-counter-row">
-        <span className="api-counter-remaining">{liveQuota.remaining.toLocaleString()} restantes</span>
         <span className="api-counter-reset">Reset: {countdown}</span>
       </div>
     </div>

@@ -10,6 +10,6 @@ export async function GET() {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
     });
   } catch (e) {
-    return Response.json({ quota: { used: 0, remaining: 7500, limit: 7500 } });
+    return Response.json({ quota: { used: 0 } });
   }
 }

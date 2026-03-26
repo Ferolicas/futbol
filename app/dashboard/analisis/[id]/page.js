@@ -224,7 +224,7 @@ export default function AnalisisPage() {
         {/* TOP BAR */}
         <div className="analysis-top-bar">
           <button className="back-btn" onClick={() => router.push('/dashboard')}>&#9664; Volver</button>
-          {quota && <span className="quota-badge">Llamadas usadas hoy: {quota.used}/{quota.limit}</span>}
+          {quota && <span className="quota-badge">Llamadas usadas hoy: {quota.used}</span>}
         </div>
 
         {/* ===== SECCIÓN 1 — CABECERA ===== */}
@@ -619,7 +619,7 @@ export default function AnalisisPage() {
         })()}
 
         <div className="analysis-footer">
-          {quota && <span>Llamadas usadas hoy: {quota.used}/{quota.limit}</span>}
+          {quota && <span>Llamadas usadas hoy: {quota.used}</span>}
         </div>
       </div>
     </div>
