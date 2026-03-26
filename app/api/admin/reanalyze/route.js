@@ -45,16 +45,17 @@ export async function POST(request) {
       deleteFromSanity('appConfig', `analyzed-${today}`),
       deleteFromSanity('appConfig', `dailyBatch-${today}`),
       deleteFromSanity('appConfig', `dailyReport-${today}`),
+      deleteFromSanity('footballFixturesCache', today),  // Delete stale fixtures cache too
       redisDel(`analysis:${today}`),
       redisDel(KEYS.fixtures(today)),
     ]);
   }
 
-  // STEP 1: Fetch FRESH fixtures from API-Football (not cache).
+  // STEP 1: Fetch FRESH fixtures from API-Football (bypass ALL caches).
   // This gets real final scores, correct statuses (FT, AET, PEN).
   let fixtures = null;
   try {
-    const result = await getFixtures(today);
+    const result = await getFixtures(today, { forceApi: true });
     fixtures = result.fixtures || [];
   } catch {}
 
