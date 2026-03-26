@@ -2,11 +2,11 @@ import { triggerEvent } from '../../../../lib/pusher';
 import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
 import { incrementApiCallCount } from '../../../../lib/sanity-cache';
 
-// Cron: runs every 45 minutes
+// Cron: runs every 30 minutes
 // Fetches statistics (corners) for all currently-live matches
-// ~2 calls per match over its 90-min duration → 180 calls for 90 matches/day
+// ~3 calls per match over its 90-min duration → 270 calls for 90 matches/day
 //
-// cron-job.org: GET /api/cron/live-corners?secret=CRON_SECRET
+// cron-job.org: GET /api/cron/live-corners?secret=CRON_SECRET  (every 30 min)
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 55;
@@ -83,8 +83,8 @@ export async function GET(request) {
     const aCorners = getVal(awayStats, 'Corner Kicks');
     const corners = { home: hCorners, away: aCorners, total: hCorners + aCorners };
 
-    // Only update if we actually got corner data
-    if (hCorners === 0 && aCorners === 0) return;
+    // Always update corner data — even 0-0 is valid information.
+    // Previously skipped 0-0 which left corners undefined/stale for early-match periods.
 
     // Update live:{date} in place
     liveData[fid] = { ...existing, corners };

@@ -1,7 +1,7 @@
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { analyzeMatch } from '../../../../lib/api-football';
 import { getCachedFixturesRaw, getCachedAnalysis, getAnalyzedFixtureIds } from '../../../../lib/sanity-cache';
-import { deleteFromSanity } from '../../../../lib/sanity';
+import { deleteFromSanity, queryFromSanity } from '../../../../lib/sanity';
 import { redisGet, redisDel, KEYS } from '../../../../lib/redis';
 
 export const dynamic = 'force-dynamic';
@@ -25,12 +25,33 @@ export async function POST(request) {
   const today = searchParams.get('date') || new Date().toISOString().split('T')[0];
   const force = searchParams.get('force') === 'true';
 
-  // force=true: delete all existing analysis for the date before re-running
+  // force=true: delete ALL existing analysis + batch state for the date before re-running
   if (force) {
-    const existingIds = await getAnalyzedFixtureIds(today);
+    // Get ALL analysis docs for this date from Sanity directly (not just the tracked list)
+    const [existingIds, allAnalysisDocs] = await Promise.all([
+      getAnalyzedFixtureIds(today),
+      queryFromSanity(
+        `*[_type == "footballMatchAnalysis" && date == $date]{ fixtureId }`,
+        { date: today }
+      ),
+    ]);
+
+    // Merge both sources to catch orphaned analyses
+    const allIds = [...new Set([
+      ...existingIds,
+      ...(allAnalysisDocs || []).map(d => d.fixtureId).filter(Boolean),
+    ])];
+
     await Promise.all([
-      ...existingIds.map(id => deleteFromSanity('footballMatchAnalysis', String(id))),
+      // Delete all analysis documents
+      ...allIds.map(id => deleteFromSanity('footballMatchAnalysis', String(id))),
+      // Delete tracking documents
       deleteFromSanity('appConfig', `analyzed-${today}`),
+      // Delete batch state — clears permanentlyFailedIds, gaveUp, retryCount
+      deleteFromSanity('appConfig', `dailyBatch-${today}`),
+      // Delete daily report so it gets regenerated
+      deleteFromSanity('appConfig', `dailyReport-${today}`),
+      // Bust all Redis caches for this date
       redisDel(`analysis:${today}`),
     ]);
   }
@@ -70,13 +91,18 @@ export async function POST(request) {
             const fid = fixture.fixture?.id;
             const name = `${fixture.teams?.home?.name || '?'} vs ${fixture.teams?.away?.name || '?'}`;
             try {
-              const existing = await getCachedAnalysis(fid, today);
-              if (existing) {
-                skipped++;
-              } else {
-                await analyzeMatch(fixture, { date: today });
-                analyzed++;
+              if (!force) {
+                // Only skip if NOT force mode — check if analysis already exists
+                const existing = await getCachedAnalysis(fid, today);
+                if (existing) {
+                  skipped++;
+                  send({ type: 'progress', current: analyzed + skipped + failed, total, analyzed, skipped, failed, match: name });
+                  return;
+                }
               }
+              // force=true: always re-analyze, no skip check
+              await analyzeMatch(fixture, { date: today, force });
+              analyzed++;
             } catch (e) {
               failed++;
               console.error(`[REANALYZE] Failed ${fid}:`, e.message);

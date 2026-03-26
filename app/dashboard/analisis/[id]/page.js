@@ -74,13 +74,11 @@ export default function AnalisisPage() {
 
   useEffect(() => { loadAnalysis(); }, [loadAnalysis]);
 
-  // Load live stats once on mount (catch status changes like NS→FT)
+  // Always load live stats on mount — the API already returns correct status from Redis,
+  // but we also check live-poll to catch any transitions (NS→1H, 1H→FT, etc.)
+  // that happened after the analysis was loaded.
   useEffect(() => {
     if (!analysis) return;
-    const statusShort = analysis.status?.short || 'NS';
-    const isLive = isLiveStatus(statusShort);
-    const isFinished = ['FT', 'AET', 'PEN'].includes(statusShort);
-    if (!isLive && !isFinished) return;
 
     const loadStats = async () => {
       try {
@@ -103,7 +101,7 @@ export default function AnalisisPage() {
     };
 
     loadStats();
-  }, [analysis?.status?.short, fixtureId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fixtureId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Real-time updates via Pusher (replaces 30s polling)
   usePusherEvent('live-scores', 'update', useCallback((data) => {
@@ -124,17 +122,41 @@ export default function AnalisisPage() {
     }
   }, [fixtureId]));
 
+  // Real-time corners updates (every 30 min from live-corners cron)
+  usePusherEvent('live-scores', 'corners-update', useCallback((data) => {
+    if (!data?.matches) return;
+    const cornerUpdate = data.matches.find(m => Number(m.fixtureId) === Number(fixtureId));
+    if (!cornerUpdate) return;
+
+    setLiveStats(prev => ({
+      ...prev,
+      corners: cornerUpdate.corners,
+    }));
+  }, [fixtureId]));
+
+  const [lineupsError, setLineupsError] = useState('');
+
   const doRefreshLineups = async () => {
     setRefreshingLineups(true);
+    setLineupsError('');
     try {
       const res = await fetch(`/api/match/${fixtureId}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'refresh-lineups' }),
       });
       const data = await res.json();
-      if (data.lineups) setAnalysis(prev => ({ ...prev, lineups: data.lineups }));
+      if (data.error) {
+        setLineupsError(data.error);
+      } else if (data.lineups) {
+        setAnalysis(prev => ({ ...prev, lineups: data.lineups }));
+        if (!data.lineups.available) {
+          setLineupsError('Alineaciones aún no disponibles en la API');
+        }
+      }
       if (data.quota) setQuota(data.quota);
-    } catch {} finally { setRefreshingLineups(false); }
+    } catch (e) {
+      setLineupsError('Error de conexión al actualizar alineaciones');
+    } finally { setRefreshingLineups(false); }
   };
 
   const doRefreshInjuries = async () => {
@@ -404,6 +426,7 @@ export default function AnalisisPage() {
               <button className="btn-secondary" onClick={doRefreshLineups} disabled={refreshingLineups}>
                 {refreshingLineups ? 'Actualizando...' : 'Actualizar alineaciones'}
               </button>
+              {lineupsError && <p style={{ color: '#ef4444', fontSize: '0.85rem', marginTop: '0.5rem' }}>{lineupsError}</p>}
             </div>
           )}
         </Section>
