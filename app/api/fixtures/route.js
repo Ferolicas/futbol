@@ -39,11 +39,26 @@ export async function GET(request) {
       fixtures = redisFixtures;
       fromCache = true;
     } else if (isPastDate) {
-      // 2. Past dates: use getCachedFixturesRaw (Sanity only, no API call -- past matches never change)
+      // 2. Past dates: load from Sanity cache first
       const rawFixtures = await getCachedFixturesRaw(date);
       if (rawFixtures && rawFixtures.length > 0) {
-        fixtures = rawFixtures;
-        fromCache = true;
+        // Check if any matches have stale live statuses (should be finished by now)
+        const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE', 'NS'];
+        const hasStale = rawFixtures.some(f => LIVE_STATUSES.includes(f.fixture?.status?.short));
+        if (hasStale) {
+          // Some matches still show live/NS — refresh from API to get final scores
+          try {
+            const result = await getFixtures(date);
+            fixtures = result.fixtures || rawFixtures;
+            fromCache = result.fromCache || false;
+          } catch {
+            fixtures = rawFixtures; // API failed — use cache as-is
+            fromCache = true;
+          }
+        } else {
+          fixtures = rawFixtures;
+          fromCache = true;
+        }
       }
     } else {
       // 3. Current/future dates: fallback to Sanity/API-Football

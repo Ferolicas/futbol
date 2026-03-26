@@ -1,8 +1,8 @@
 import { auth, currentUser } from '@clerk/nextjs/server';
-import { analyzeMatch } from '../../../../lib/api-football';
+import { analyzeMatch, getFixtures } from '../../../../lib/api-football';
 import { getCachedFixturesRaw, getCachedAnalysis, getAnalyzedFixtureIds } from '../../../../lib/sanity-cache';
 import { deleteFromSanity, queryFromSanity } from '../../../../lib/sanity';
-import { redisGet, redisDel, KEYS } from '../../../../lib/redis';
+import { redisGet, redisDel, redisSet, KEYS } from '../../../../lib/redis';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -53,11 +53,25 @@ export async function POST(request) {
       deleteFromSanity('appConfig', `dailyReport-${today}`),
       // Bust all Redis caches for this date
       redisDel(`analysis:${today}`),
+      redisDel(KEYS.fixtures(today)),
     ]);
   }
 
-  // Try Sanity first, fall back to Redis (page loads use Redis directly, Sanity may be empty)
-  let fixtures = await getCachedFixturesRaw(today);
+  // ALWAYS fetch fresh fixtures from API-Football first.
+  // The cached fixtures may have stale statuses (NS, ET, 1H) for matches that already finished.
+  // This ensures re-analysis uses correct final scores and statuses (FT, AET, PEN).
+  let fixtures = null;
+  try {
+    const result = await getFixtures(today);
+    fixtures = result.fixtures || [];
+  } catch {
+    // API unavailable — fall back to cache
+  }
+
+  // Fallback: Sanity cache, then Redis
+  if (!fixtures || fixtures.length === 0) {
+    fixtures = await getCachedFixturesRaw(today);
+  }
   if (!fixtures || fixtures.length === 0) {
     const redisFixtures = await redisGet(KEYS.fixtures(today));
     if (Array.isArray(redisFixtures) && redisFixtures.length > 0) {
@@ -66,7 +80,7 @@ export async function POST(request) {
   }
 
   if (!fixtures || fixtures.length === 0) {
-    return Response.json({ success: true, analyzed: 0, message: 'No fixtures for today' });
+    return Response.json({ success: true, analyzed: 0, message: 'No fixtures for this date' });
   }
 
   // Stream progress via SSE
