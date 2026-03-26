@@ -74,14 +74,30 @@ export default function AnalisisPage() {
 
   useEffect(() => { loadAnalysis(); }, [loadAnalysis]);
 
-  // Always load live stats on mount — the API already returns correct status from Redis,
-  // but we also check live-poll to catch any transitions (NS→1H, 1H→FT, etc.)
-  // that happened after the analysis was loaded.
+  // On mount: trigger forced live refresh (runs live + corners crons on server),
+  // then apply fresh data. This ensures the match detail always shows real-time status.
   useEffect(() => {
     if (!analysis) return;
 
     const loadStats = async () => {
       try {
+        // Force-refresh: triggers crons on the server, returns all live data
+        const refreshRes = await fetch('/api/refresh-live', { method: 'POST' });
+        const refreshData = await refreshRes.json();
+        if (refreshData.liveStats && refreshData.liveStats[fixtureId]) {
+          const matchStats = refreshData.liveStats[fixtureId];
+          setLiveStats(matchStats);
+          if (matchStats.status) {
+            setAnalysis(prev => prev ? ({
+              ...prev,
+              status: matchStats.status,
+              goals: matchStats.goals || prev.goals,
+            }) : prev);
+          }
+          return; // Got data from forced refresh
+        }
+
+        // Fallback: read from live-poll (in case refresh-live was rate-limited)
         const res = await fetch(`/api/live-poll?fixtureId=${fixtureId}`);
         const data = await res.json();
         const matchStats = data.liveStats?.find(s =>

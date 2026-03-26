@@ -210,8 +210,34 @@ export default function Dashboard() {
     }
   }, []);
 
-  // On mount: if we have cached data (back-navigation), refresh silently in background
-  useEffect(() => { loadFixtures(today(), { silent: !!_dashCache }); }, [loadFixtures]);
+  // Force-refresh live data: triggers live + corners crons on the server,
+  // then updates all live stats (scores, corners, cards, goal scorers, minutes).
+  const [refreshingLive, setRefreshingLive] = useState(false);
+
+  const refreshLiveData = useCallback(async () => {
+    setRefreshingLive(true);
+    try {
+      const res = await fetch('/api/refresh-live', { method: 'POST' });
+      const data = await res.json();
+      if (data.liveStats && typeof data.liveStats === 'object') {
+        setLiveStats(prev => {
+          const next = { ...prev, ...data.liveStats };
+          if (_dashCache) _dashCache.liveStats = next;
+          return next;
+        });
+        // Also update fixture statuses from fresh live data
+        setFixtures(prev => applyLiveUpdate(prev, Object.values(data.liveStats)));
+      }
+    } catch {} finally {
+      setRefreshingLive(false);
+    }
+  }, [applyLiveUpdate]);
+
+  // On mount: load fixtures + force-refresh live data (triggers crons)
+  useEffect(() => {
+    loadFixtures(today(), { silent: !!_dashCache });
+    refreshLiveData();
+  }, [loadFixtures, refreshLiveData]);
 
   // Load saved combinadas per-user on mount
   useEffect(() => {
@@ -725,8 +751,8 @@ export default function Dashboard() {
                 {pushEnabled ? '🔔' : '🔕'}
               </button>
             )}
-            <button className="btn-reload" onClick={() => loadFixtures(date)} disabled={loading}>
-              <span className={loading ? 'spin' : ''}>&#8635;</span>
+            <button className="btn-reload" onClick={() => { loadFixtures(date); refreshLiveData(); }} disabled={loading || refreshingLive}>
+              <span className={loading || refreshingLive ? 'spin' : ''}>&#8635;</span>
             </button>
           </div>
         </motion.header>
