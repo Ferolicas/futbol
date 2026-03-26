@@ -207,9 +207,8 @@ export async function GET(request) {
 
       // Analysis: use Redis cache or fall back to Sanity
       (async () => {
-        // For past dates: skip Redis cache and query Sanity origin directly
-        // This prevents stale partial lists from hiding analyzed matches
-        if (!isPastDate && cachedAnalysisData) return cachedAnalysisData;
+        // Redis cache exists — use it (reanalyze saves directly to Redis, bypassing CDN)
+        if (cachedAnalysisData) return cachedAnalysisData;
         if (fixtureIds.length === 0) return { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
 
         // Use origin client (not CDN) to guarantee fresh results
@@ -219,15 +218,14 @@ export async function GET(request) {
         );
         const globallyAnalyzed = (analyzedDocs || []).map(d => d.fixtureId);
 
+        // For past dates, read from Sanity origin (CDN may be stale after re-analyze)
         const { analyzedOdds, analyzedData } = globallyAnalyzed.length > 0
-          ? await getAnalyzedMatchesFull(globallyAnalyzed)
+          ? await getAnalyzedMatchesFull(globallyAnalyzed, { fresh: isPastDate })
           : { analyzedOdds: {}, analyzedData: {} };
 
         const result = { globallyAnalyzed, analyzedOdds, analyzedData };
-        // Cache in Redis for next request (only for today — past dates always query fresh)
-        if (!isPastDate) {
-          redisSet(analysisRedisKey, result, ANALYSIS_CACHE_TTL).catch(() => {});
-        }
+        // Cache in Redis for next request
+        redisSet(analysisRedisKey, result, ANALYSIS_CACHE_TTL).catch(() => {});
         return result;
       })(),
 

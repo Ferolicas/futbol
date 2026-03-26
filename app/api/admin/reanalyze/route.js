@@ -1,6 +1,6 @@
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { analyzeMatch, getFixtures } from '../../../../lib/api-football';
-import { getCachedFixturesRaw, getCachedAnalysis, getAnalyzedFixtureIds } from '../../../../lib/sanity-cache';
+import { getCachedFixturesRaw, getCachedAnalysis, getAnalyzedFixtureIds, cacheFixtures } from '../../../../lib/sanity-cache';
 import { deleteFromSanity, queryFromSanity } from '../../../../lib/sanity';
 import { redisGet, redisDel, redisSet, KEYS } from '../../../../lib/redis';
 
@@ -27,7 +27,6 @@ export async function POST(request) {
 
   // force=true: delete ALL existing analysis + batch state for the date before re-running
   if (force) {
-    // Get ALL analysis docs for this date from Sanity directly (not just the tracked list)
     const [existingIds, allAnalysisDocs] = await Promise.all([
       getAnalyzedFixtureIds(today),
       queryFromSanity(
@@ -36,37 +35,28 @@ export async function POST(request) {
       ),
     ]);
 
-    // Merge both sources to catch orphaned analyses
     const allIds = [...new Set([
       ...existingIds,
       ...(allAnalysisDocs || []).map(d => d.fixtureId).filter(Boolean),
     ])];
 
     await Promise.all([
-      // Delete all analysis documents
       ...allIds.map(id => deleteFromSanity('footballMatchAnalysis', String(id))),
-      // Delete tracking documents
       deleteFromSanity('appConfig', `analyzed-${today}`),
-      // Delete batch state — clears permanentlyFailedIds, gaveUp, retryCount
       deleteFromSanity('appConfig', `dailyBatch-${today}`),
-      // Delete daily report so it gets regenerated
       deleteFromSanity('appConfig', `dailyReport-${today}`),
-      // Bust all Redis caches for this date
       redisDel(`analysis:${today}`),
       redisDel(KEYS.fixtures(today)),
     ]);
   }
 
-  // ALWAYS fetch fresh fixtures from API-Football first.
-  // The cached fixtures may have stale statuses (NS, ET, 1H) for matches that already finished.
-  // This ensures re-analysis uses correct final scores and statuses (FT, AET, PEN).
+  // STEP 1: Fetch FRESH fixtures from API-Football (not cache).
+  // This gets real final scores, correct statuses (FT, AET, PEN).
   let fixtures = null;
   try {
     const result = await getFixtures(today);
     fixtures = result.fixtures || [];
-  } catch {
-    // API unavailable — fall back to cache
-  }
+  } catch {}
 
   // Fallback: Sanity cache, then Redis
   if (!fixtures || fixtures.length === 0) {
@@ -83,6 +73,9 @@ export async function POST(request) {
     return Response.json({ success: true, analyzed: 0, message: 'No fixtures for this date' });
   }
 
+  // Save fresh fixtures to Redis immediately so dashboard picks them up
+  await redisSet(KEYS.fixtures(today), fixtures, 48 * 3600).catch(() => {});
+
   // Stream progress via SSE
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -96,6 +89,11 @@ export async function POST(request) {
       let failed = 0;
       const total = fixtures.length;
 
+      // Collect results to build Redis cache at the end (bypasses Sanity CDN)
+      const analyzedIds = [];
+      const analyzedOdds = {};
+      const analyzedData = {};
+
       send({ type: 'start', total });
 
       for (let i = 0; i < fixtures.length; i += 5) {
@@ -106,17 +104,26 @@ export async function POST(request) {
             const name = `${fixture.teams?.home?.name || '?'} vs ${fixture.teams?.away?.name || '?'}`;
             try {
               if (!force) {
-                // Only skip if NOT force mode — check if analysis already exists
                 const existing = await getCachedAnalysis(fid, today);
                 if (existing) {
                   skipped++;
+                  // Still collect for Redis cache
+                  analyzedIds.push(fid);
+                  if (existing.odds?.matchWinner) analyzedOdds[fid] = existing.odds.matchWinner;
+                  analyzedData[fid] = buildSummary(existing);
                   send({ type: 'progress', current: analyzed + skipped + failed, total, analyzed, skipped, failed, match: name });
                   return;
                 }
               }
-              // force=true: always re-analyze, no skip check
-              await analyzeMatch(fixture, { date: today, force });
+              const result = await analyzeMatch(fixture, { date: today, force });
               analyzed++;
+              // Collect fresh analysis for Redis cache
+              if (result.analysis) {
+                const a = result.analysis;
+                analyzedIds.push(fid);
+                if (a.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
+                analyzedData[fid] = buildSummary(a);
+              }
             } catch (e) {
               failed++;
               console.error(`[REANALYZE] Failed ${fid}:`, e.message);
@@ -134,8 +141,14 @@ export async function POST(request) {
         );
       }
 
-      // Bust analysis Redis cache so next loadFixtures reads fresh data from Sanity
-      await redisDel(`analysis:${today}`);
+      // Save analysis results DIRECTLY to Redis — bypasses Sanity CDN completely.
+      // The dashboard reads from this cache first, so it gets fresh data immediately.
+      const analysisCache = {
+        globallyAnalyzed: analyzedIds,
+        analyzedOdds,
+        analyzedData,
+      };
+      await redisSet(`analysis:${today}`, analysisCache, 12 * 3600).catch(() => {});
 
       send({ type: 'done', analyzed, skipped, failed, total });
       controller.close();
@@ -149,4 +162,16 @@ export async function POST(request) {
       Connection: 'keep-alive',
     },
   });
+}
+
+// Build the summary object that getAnalyzedMatchesFull returns for each match
+function buildSummary(a) {
+  return {
+    fixtureId: a.fixtureId, homeTeam: a.homeTeam, awayTeam: a.awayTeam,
+    homeLogo: a.homeLogo, awayLogo: a.awayLogo, homeId: a.homeId, awayId: a.awayId,
+    league: a.league, leagueId: a.leagueId, leagueLogo: a.leagueLogo,
+    kickoff: a.kickoff, status: a.status, goals: a.goals, odds: a.odds,
+    combinada: a.combinada, calculatedProbabilities: a.calculatedProbabilities,
+    homePosition: a.homePosition, awayPosition: a.awayPosition,
+  };
 }
