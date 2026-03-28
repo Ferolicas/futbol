@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
 import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
+import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/timezone';
 
 function detectCountry() {
   try {
@@ -15,11 +16,9 @@ function detectCountry() {
   } catch { return 'default'; }
 }
 
-const today = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
-const fmtTime = (d) => new Date(d).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+// Uses the user's local timezone — never UTC (fixes LATAM "shows next day" bug)
+const today = (tz) => todayInTz(tz || getUserTz());
+const fmtTime = (d, tz) => fmtTimeInTz(d, tz || getUserTz());
 const isLive = (s) => ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(s);
 const isFinished = (s) => ['FT', 'AET', 'PEN', 'AWD', 'WO'].includes(s);
 const isPostponed = (s) => ['PST', 'CANC', 'SUSP', 'ABD'].includes(s);
@@ -43,6 +42,7 @@ export default function Dashboard() {
   const user = session?.user;
   const [splash, setSplash] = useState(!_splashDone);
   const [splashFade, setSplashFade] = useState(false);
+  const [userTz, setUserTz] = useState('UTC'); // corrected on mount to user's real timezone
   const [tab, setTab] = useState('partidos');
   const [date, setDate] = useState(today());
   const [fixtures, setFixtures] = useState(_dashCache?.fixtures || []);
@@ -233,9 +233,13 @@ export default function Dashboard() {
     }
   }, [applyLiveUpdate]);
 
-  // On mount: load fixtures + force-refresh live data (triggers crons)
+  // On mount: detect user timezone, correct date to local, then load fixtures
   useEffect(() => {
-    loadFixtures(today(), { silent: !!_dashCache });
+    const tz = getUserTz();
+    setUserTz(tz);
+    const localDate = todayInTz(tz);
+    setDate(localDate);
+    loadFixtures(localDate, { silent: !!_dashCache });
     refreshLiveData();
   }, [loadFixtures, refreshLiveData]);
 
@@ -315,7 +319,7 @@ export default function Dashboard() {
 
   // === PUSHER REAL-TIME EVENTS ===
   // Only subscribe to Pusher for today's date — past dates are historical/fixed
-  const isViewingToday = date === today();
+  const isViewingToday = date === todayInTz(userTz);
 
   // Live scores: update fixtures and live stats in real-time (Pusher = sole source of truth)
   usePusherEvent(isViewingToday ? 'live-scores' : null, 'update', useCallback((data) => {
@@ -765,7 +769,7 @@ export default function Dashboard() {
           <div className="date-nav">
             <button onClick={() => changeDate(-1)}>&#9664;</button>
             <span className="date-display">
-              {new Date(date + 'T12:00:00').toLocaleDateString('es', { weekday: 'short', day: 'numeric', month: 'short' })}
+              {fmtDateDisplay(date, userTz)}
             </span>
             <button onClick={() => changeDate(1)}>&#9654;</button>
           </div>
@@ -1125,7 +1129,7 @@ function MatchCard({ match, isAnalyzed, isSelected, odds, standings, matchData, 
           ) : finished ? (
             <span className="badge-ft">{statusText(match.fixture.status.short)}</span>
           ) : (
-            <span className="badge-ns">{fmtTime(match.fixture.date)}</span>
+            <span className="badge-ns">{fmtTime(match.fixture.date, userTz)}</span>
           )}
         </div>
       </div>
@@ -1250,7 +1254,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
           <div className="mcard-time">
             {live ? <span className="badge-live"><span className="dot-live" /><MatchTimer elapsed={match.fixture.status.elapsed} status={match.fixture.status.short} /></span>
               : finished ? <span className="badge-ft">{statusText(match.fixture.status.short)}</span>
-              : <span className="badge-ns">{fmtTime(match.fixture.date)}</span>}
+              : <span className="badge-ns">{fmtTime(match.fixture.date, userTz)}</span>}
           </div>
         </div>
         <div className="mcard-body">

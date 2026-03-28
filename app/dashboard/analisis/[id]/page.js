@@ -6,6 +6,7 @@ import { computeAllProbabilities } from '../../../../lib/calculations';
 import { buildCombinada } from '../../../../lib/combinada';
 import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY, COUNTRY_BOOKMAKERS } from '../../../../lib/bookmakers';
 import { usePusherEvent } from '../../../../lib/use-pusher';
+import { getUserTz, fmtTimeInTz, todayInTz } from '../../../../lib/timezone';
 
 function detectCountry() {
   try {
@@ -15,9 +16,9 @@ function detectCountry() {
 }
 
 const cap = (v) => Math.min(95, v);
-const fmtTime = (d) => new Date(d).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
-const fmtDate = (d) => new Date(d).toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' });
-const fmtShortDate = (d) => new Date(d).toLocaleDateString('es', { day: '2-digit', month: 'short' });
+const fmtTime = (d, tz) => fmtTimeInTz(d, tz || getUserTz());
+const fmtDate = (d, tz) => new Date(d).toLocaleDateString('es', { timeZone: tz || getUserTz(), weekday: 'long', day: 'numeric', month: 'long' });
+const fmtShortDate = (d, tz) => new Date(d).toLocaleDateString('es', { timeZone: tz || getUserTz(), day: '2-digit', month: 'short' });
 const statusLabel = (s) => ({
   NS: 'PRÓXIMO', '1H': 'EN VIVO — 1T', '2H': 'EN VIVO — 2T', HT: 'EN VIVO — Entretiempo',
   FT: 'FINALIZADO', ET: 'EN VIVO — Extra', P: 'EN VIVO — Penales',
@@ -50,8 +51,7 @@ export default function AnalisisPage() {
     setLoading(true);
     setError('');
     try {
-      const d = new Date();
-      const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const localDate = todayInTz(getUserTz());
       const res = await fetch(`/api/match/${fixtureId}?date=${localDate}`);
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
