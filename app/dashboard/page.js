@@ -914,6 +914,7 @@ export default function Dashboard() {
                         onViewFull={() => router.push(`/dashboard/analisis/${m.fixture.id}`)}
                         onRemove={(e) => dismissMatch(e, m.fixture.id)}
                         idx={i}
+                        userTz={userTz}
                       />
                     );
                   }
@@ -931,6 +932,7 @@ export default function Dashboard() {
                       onHide={(e) => doHide(e, m.fixture.id)}
                       onView={() => router.push(`/dashboard/analisis/${m.fixture.id}`)}
                       idx={i}
+                      userTz={userTz}
                     />
                   );
                 })}
@@ -965,6 +967,7 @@ export default function Dashboard() {
                     onViewFull={() => router.push(`/dashboard/analisis/${m.fixture.id}`)}
                     onRemove={(e) => removeFromAnalyzed(e, m.fixture.id)}
                     idx={i}
+                    userTz={userTz}
                   />
                 ))}
               </div>
@@ -1094,7 +1097,7 @@ export default function Dashboard() {
 
 /* ======================== MATCH CARD ======================== */
 
-function MatchCard({ match, isAnalyzed, isSelected, odds, standings, matchData, liveStats, onSelect, onHide, onView, idx }) {
+function MatchCard({ match, isAnalyzed, isSelected, odds, standings, matchData, liveStats, onSelect, onHide, onView, idx, userTz }) {
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
@@ -1204,7 +1207,7 @@ function MatchCard({ match, isAnalyzed, isSelected, odds, standings, matchData, 
 
 /* ======================== ACCORDION CARD ======================== */
 
-function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, onRemove, idx }) {
+function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, onRemove, idx, userTz }) {
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
