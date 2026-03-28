@@ -1,7 +1,7 @@
 import { getFixtures, getQuota, getCachedStandingsPositions } from '../../../lib/api-football';
 import { getAnalyzedMatchesFull, getCachedFixturesRaw } from '../../../lib/sanity-cache';
-import { auth } from '@clerk/nextjs/server';
-import { getSanityUserByClerkId } from '../../../lib/clerk-sync';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../lib/auth';
 import { queryFromSanity, queryFromSanityFresh, getFromSanity } from '../../../lib/sanity';
 import { redisGet, redisSet, redisDel, KEYS } from '../../../lib/redis';
 
@@ -26,7 +26,7 @@ export async function GET(request) {
     const isPastDate = date < todayStr;
 
     // Start auth early -- it runs in parallel with fixture loading
-    const authPromise = auth();
+    const sessionPromise = getServerSession(authOptions);
 
     let fixtures = [];
     let fromCache = false;
@@ -112,7 +112,7 @@ export async function GET(request) {
     const [
       liveData,
       batchFlag,
-      { userId: clerkId },
+      session,
       cachedAnalysisData,
       cachedOddsData,
       cachedStandings,
@@ -123,7 +123,7 @@ export async function GET(request) {
       // 2. Batch flag from Sanity (read ONCE, reused below)
       fixtures.length > 0 ? getFromSanity('appConfig', `dailyBatch-${date}`) : null,
       // 3. Auth (already started, just await)
-      authPromise,
+      sessionPromise,
       // 4. Analysis data: Redis first, then null (Sanity loaded below if needed)
       fixtureIds.length > 0 ? redisGet(analysisRedisKey) : null,
       // 5. Odds data: Redis first
@@ -220,11 +220,8 @@ export async function GET(request) {
     // That endpoint triggers BOTH live + corners crons with its own 15s rate limit.
 
     // ===== PHASE 5: User data (auth resolved above) =====
-    const sanityUserPromise = clerkId ? getSanityUserByClerkId(clerkId) : Promise.resolve(null);
-
-    // While user lookup runs, resolve analysis + odds + standings from cache or Sanity in parallel
-    const [sanityUser, analysisResult, oddsResult, standingsResult] = await Promise.all([
-      sanityUserPromise,
+    // While resolving analysis + odds + standings from cache or Sanity in parallel
+    const [analysisResult, oddsResult, standingsResult] = await Promise.all([
 
       // Analysis: use Redis cache or fall back to Sanity
       (async () => {
@@ -286,7 +283,7 @@ export async function GET(request) {
       })(),
     ]);
 
-    const userId = sanityUser?._id;
+    const userId = session?.user?.id || null;
 
     // ===== PHASE 6: User-specific data =====
     let hidden = [];

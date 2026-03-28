@@ -2,16 +2,16 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useUser, SignUpButton, SignInButton } from '@clerk/nextjs';
+import { useSession } from 'next-auth/react';
 
 export default function LandingPage() {
   const router = useRouter();
-  const { isSignedIn, isLoaded } = useUser();
+  const { data: session, status } = useSession();
 
   // If already logged in, redirect to dashboard
   useEffect(() => {
-    if (isLoaded && isSignedIn) router.push('/dashboard');
-  }, [isSignedIn, isLoaded, router]);
+    if (status === 'authenticated') router.push('/dashboard');
+  }, [status, router]);
 
   // Scroll-driven animations with IntersectionObserver
   useEffect(() => {
@@ -81,9 +81,7 @@ export default function LandingPage() {
             y probabilidades calculadas con datos de mas de 15 ligas internacionales.
           </p>
           <div className="hero-btns">
-            <SignUpButton mode="modal" forceRedirectUrl="/planes">
-              <button className="btn-hero">Empezar Ahora</button>
-            </SignUpButton>
+            <button className="btn-hero" onClick={() => router.push('/sign-up')}>Empezar Ahora</button>
             <a href="#features" className="btn-hero-sec">Ver funciones</a>
           </div>
           <div className="hero-stats">
@@ -116,7 +114,7 @@ export default function LandingPage() {
           <div className="step">
             <div className="step-n">1</div>
             <h3>Registrate</h3>
-            <p>Crea tu cuenta en 30 segundos con tu email o Google</p>
+            <p>Crea tu cuenta en 30 segundos con tu email</p>
           </div>
           <div className="step-arrow">&#8594;</div>
           <div className="step">
@@ -156,9 +154,7 @@ export default function LandingPage() {
               <li>15+ ligas internacionales</li>
               <li>Corners, tarjetas, BTTS</li>
             </ul>
-            <SignUpButton mode="modal" forceRedirectUrl="/planes">
-              <button className="btn-plan">Empezar Ahora</button>
-            </SignUpButton>
+            <button className="btn-plan" onClick={() => router.push('/sign-up')}>Empezar Ahora</button>
           </div>
 
           {/* Plan 2: Asesoria */}
@@ -182,9 +178,7 @@ export default function LandingPage() {
               <li>Sesiones de asesoria mensual</li>
               <li>Acceso a comunidad VIP</li>
             </ul>
-            <SignUpButton mode="modal" forceRedirectUrl="/planes">
-              <button className="btn-plan premium">Quiero Asesoria VIP</button>
-            </SignUpButton>
+            <button className="btn-plan premium" onClick={() => router.push('/sign-up')}>Quiero Asesoria VIP</button>
           </div>
         </div>
       </section>
@@ -194,9 +188,7 @@ export default function LandingPage() {
         <img src="/vflogo.png" alt="CFanalisis" className="footer-logo" />
         <p>CFanalisis.com &mdash; Tu ventaja en cada apuesta</p>
         <div className="footer-links">
-          <SignInButton mode="modal" forceRedirectUrl="/dashboard">
-            <button className="footer-link-btn">Iniciar sesion</button>
-          </SignInButton>
+          <button className="footer-link-btn" onClick={() => router.push('/sign-in')}>Iniciar sesion</button>
           <a href="#features">Funciones</a>
           <a href="#pricing">Precios</a>
         </div>

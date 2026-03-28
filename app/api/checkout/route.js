@@ -1,12 +1,12 @@
 import { createEmbeddedPayment } from '../../../lib/stripe';
-import { saveToSanity } from '../../../lib/sanity';
-import { auth } from '@clerk/nextjs/server';
-import { getSanityUserByClerkId } from '../../../lib/clerk-sync';
+import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../lib/auth';
 
 export async function POST(request) {
   try {
-    const { userId: clerkId } = await auth();
-    if (!clerkId) {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -20,7 +20,10 @@ export async function POST(request) {
       return Response.json({ error: 'Invalid plan' }, { status: 400 });
     }
 
-    const sanityUser = await getSanityUserByClerkId(clerkId);
+    const sanityUser = await queryFromSanity(
+      `*[_type == "cfaUser" && _id == $id][0]{ _id, name, email, password, role, stripeCustomerId }`,
+      { id: session.user.id }
+    );
     if (!sanityUser) {
       return Response.json({ error: 'User not found' }, { status: 404 });
     }
@@ -36,13 +39,11 @@ export async function POST(request) {
       currency: currency || 'USD',
     });
 
-    // Update user with pending plan
     const docId = sanityUser._id.replace('cfaUser-', '');
     await saveToSanity('cfaUser', docId, {
       name: sanityUser.name,
       email: sanityUser.email,
       password: sanityUser.password,
-      clerkId: sanityUser.clerkId,
       role: sanityUser.role,
       plan,
       subscriptionStatus: 'pending',

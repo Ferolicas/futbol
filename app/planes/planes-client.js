@@ -1,12 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useClerk } from '@clerk/nextjs';
+import { signOut } from 'next-auth/react';
 import { motion } from 'framer-motion';
 import PaymentModal from './PaymentModal';
 
 export default function PlanesClient({ userId, email }) {
-  const { signOut } = useClerk();
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [prices, setPrices] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -168,7 +167,7 @@ export default function PlanesClient({ userId, email }) {
         <div className="planes-footer">
           <button
             className="planes-signout"
-            onClick={() => signOut({ redirectUrl: '/' })}
+            onClick={() => signOut({ callbackUrl: '/' })}
           >
             Cerrar sesion
           </button>

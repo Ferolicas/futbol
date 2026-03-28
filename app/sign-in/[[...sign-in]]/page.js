@@ -1,25 +1,80 @@
 'use client';
-import { SignIn, useAuth } from '@clerk/nextjs';
+
+import { useState } from 'react';
+import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import Link from 'next/link';
 
 export default function SignInPage() {
-  const { isSignedIn, isLoaded } = useAuth();
   const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (isLoaded && isSignedIn) router.replace('/dashboard');
-  }, [isLoaded, isSignedIn, router]);
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
 
-  // While processing OAuth callback or already signed in, render nothing
-  if (!isLoaded || isSignedIn) return null;
+    const res = await signIn('credentials', {
+      email,
+      password,
+      redirect: false,
+    });
 
-  // Only show the sign-in form if the user navigated here directly (not signed in)
+    setLoading(false);
+
+    if (res?.error) {
+      setError('Email o contraseña incorrectos');
+    } else {
+      router.replace('/dashboard');
+    }
+  };
+
   return (
     <div className="login-page">
       <div className="login-bg" />
       <div className="login-container" style={{ maxWidth: '420px' }}>
-        <SignIn forceRedirectUrl="/dashboard" signUpUrl="/sign-up" />
+        <div className="auth-card">
+          <img src="/vflogo.png" alt="CFanalisis" className="auth-logo" />
+          <h1 className="auth-title">Iniciar sesion en CF Analisis</h1>
+          <p className="auth-subtitle">Bienvenido de vuelta. Inicia sesion para continuar.</p>
+
+          <form onSubmit={handleSubmit} className="auth-form">
+            <div className="auth-field">
+              <label>Correo electronico</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Introduce tu correo electronico"
+                required
+                autoComplete="email"
+              />
+            </div>
+            <div className="auth-field">
+              <label>Contrasena</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Introduce tu contrasena"
+                required
+                autoComplete="current-password"
+              />
+            </div>
+            {error && <p className="auth-error">{error}</p>}
+            <button type="submit" className="auth-btn" disabled={loading}>
+              {loading ? 'Iniciando sesion...' : 'Continuar'}
+            </button>
+          </form>
+
+          <p className="auth-footer-text">
+            No tienes una cuenta?{' '}
+            <Link href="/sign-up" className="auth-link">Registrate</Link>
+          </p>
+        </div>
       </div>
     </div>
   );

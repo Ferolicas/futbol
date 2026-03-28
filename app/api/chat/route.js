@@ -1,5 +1,5 @@
-import { auth } from '@clerk/nextjs/server';
-import { getSanityUserByClerkId } from '../../../lib/clerk-sync';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../lib/auth';
 import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
 import { sendChatNotification } from '../../../lib/resend-email';
 import { triggerEvent } from '../../../lib/pusher';
@@ -8,19 +8,15 @@ export const dynamic = 'force-dynamic';
 
 // GET: Fetch chat messages for current user (or all for admin)
 export async function GET(request) {
-  const { userId: clerkId } = await auth();
-  if (!clerkId) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const sanityUser = await getSanityUserByClerkId(clerkId);
-  if (!sanityUser?._id) {
-    return Response.json({ error: 'User not found' }, { status: 404 });
-  }
-
+  const userId = session.user.id;
+  const isAdmin = session.user.role === 'admin';
   const { searchParams } = new URL(request.url);
   const targetUserId = searchParams.get('userId');
-  const isAdmin = sanityUser.role === 'admin';
 
   try {
     if (isAdmin && !targetUserId) {
@@ -50,12 +46,12 @@ export async function GET(request) {
       return Response.json({ conversations: Object.values(conversations) });
     }
 
-    const userId = isAdmin && targetUserId ? targetUserId : sanityUser._id;
+    const queryUserId = isAdmin && targetUserId ? targetUserId : userId;
     const messages = await queryFromSanity(
       `*[_type == "cfaChat" && userId == $userId] | order(createdAt asc) {
         _id, message, sender, read, createdAt
       }`,
-      { userId }
+      { userId: queryUserId }
     );
 
     return Response.json({ messages: messages || [] });
@@ -67,14 +63,9 @@ export async function GET(request) {
 
 // POST: Send a chat message
 export async function POST(request) {
-  const { userId: clerkId } = await auth();
-  if (!clerkId) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const sanityUser = await getSanityUserByClerkId(clerkId);
-  if (!sanityUser?._id) {
-    return Response.json({ error: 'User not found' }, { status: 404 });
   }
 
   const { message, targetUserId } = await request.json();
@@ -82,24 +73,23 @@ export async function POST(request) {
     return Response.json({ error: 'Message required' }, { status: 400 });
   }
 
-  const isAdmin = sanityUser.role === 'admin';
+  const isAdmin = session.user.role === 'admin';
   const sender = isAdmin ? 'agent' : 'user';
-  const userId = isAdmin && targetUserId ? targetUserId : sanityUser._id;
+  const userId = isAdmin && targetUserId ? targetUserId : session.user.id;
 
   const msgId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
   try {
     await saveToSanity('cfaChat', msgId, {
       userId,
-      userName: sanityUser.name,
-      userEmail: sanityUser.email,
+      userName: session.user.name,
+      userEmail: session.user.email,
       message: message.trim(),
       sender,
       read: false,
       createdAt: new Date().toISOString(),
     });
 
-    // Push real-time via Pusher
     await triggerEvent(`chat-${userId}`, 'new-message', {
       _id: `cfaChat-${msgId}`,
       message: message.trim(),
@@ -107,18 +97,17 @@ export async function POST(request) {
       createdAt: new Date().toISOString(),
     });
 
-    // Also notify admin channel
     if (sender === 'user') {
       await triggerEvent('chat-admin', 'new-message', {
         userId,
-        userName: sanityUser.name,
+        userName: session.user.name,
         message: message.trim(),
         createdAt: new Date().toISOString(),
       });
 
       sendChatNotification({
-        userName: sanityUser.name,
-        userEmail: sanityUser.email,
+        userName: session.user.name,
+        userEmail: session.user.email,
         message: message.trim(),
       }).catch(() => {});
     }
@@ -132,8 +121,8 @@ export async function POST(request) {
 
 // PATCH: Mark messages as read
 export async function PATCH(request) {
-  const { userId: clerkId } = await auth();
-  if (!clerkId) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

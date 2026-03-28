@@ -1,15 +1,14 @@
 import { analyzeMatch, getQuota } from '../../../lib/api-football';
-import { auth } from '@clerk/nextjs/server';
-import { getSanityUserByClerkId } from '../../../lib/clerk-sync';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../lib/auth';
 import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
   try {
-    const { userId: clerkId } = await auth();
-    const sanityUser = clerkId ? await getSanityUserByClerkId(clerkId) : null;
-    const userId = sanityUser?._id;
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id || null;
 
     const { fixtures, date: clientDate } = await request.json();
 

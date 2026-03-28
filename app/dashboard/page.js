@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useUser, useClerk } from '@clerk/nextjs';
+import { useSession, signOut } from 'next-auth/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
@@ -39,8 +39,8 @@ let _splashDone = false;
 
 export default function Dashboard() {
   const router = useRouter();
-  const { user } = useUser();
-  const { signOut } = useClerk();
+  const { data: session } = useSession();
+  const user = session?.user;
   const [splash, setSplash] = useState(!_splashDone);
   const [splashFade, setSplashFade] = useState(false);
   const [tab, setTab] = useState('partidos');
@@ -113,7 +113,7 @@ export default function Dashboard() {
     return updated;
   }, []);
 
-  const isOwner = user?.emailAddresses?.[0]?.emailAddress?.toLowerCase() === 'ferneyolicas@gmail.com';
+  const isOwner = user?.email?.toLowerCase() === 'ferneyolicas@gmail.com';
 
   const handleReanalyze = async () => {
     setReanalyzing(true);
@@ -738,8 +738,8 @@ export default function Dashboard() {
             )}
             {user && (
               <div className="user-badge">
-                <span className="user-name">{user.firstName || user.emailAddresses?.[0]?.emailAddress?.split('@')[0]}</span>
-                <button className="btn-signout" onClick={() => signOut({ redirectUrl: '/' })}>Salir</button>
+                <span className="user-name">{user?.name?.split(' ')[0] || user?.email?.split('@')[0]}</span>
+                <button className="btn-signout" onClick={() => signOut({ callbackUrl: '/' })}>Salir</button>
               </div>
             )}
             {pushSupported && (

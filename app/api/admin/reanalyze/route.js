@@ -1,4 +1,5 @@
-import { auth, currentUser } from '@clerk/nextjs/server';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../../lib/auth';
 import { analyzeMatch, getFixtures } from '../../../../lib/api-football';
 import { getCachedFixturesRaw, getCachedAnalysis, getAnalyzedFixtureIds, cacheFixtures } from '../../../../lib/sanity-cache';
 import { deleteFromSanity, queryFromSanity } from '../../../../lib/sanity';
@@ -10,14 +11,12 @@ export const maxDuration = 300;
 const OWNER_EMAIL = 'ferneyolicas@gmail.com';
 
 export async function POST(request) {
-  const { userId } = await auth();
-  if (!userId) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
     return Response.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
-  const user = await currentUser();
-  const email = user?.emailAddresses?.[0]?.emailAddress?.toLowerCase();
-  if (email !== OWNER_EMAIL) {
+  if (session.user.email?.toLowerCase() !== OWNER_EMAIL) {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
 

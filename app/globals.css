@@ -1975,6 +1975,37 @@ div[data-testid*="development"] { display: none !important; }
 .login-link { color: var(--t3); font-size: .85rem; text-decoration: none; }
 .login-link:hover { color: var(--green); }
 
+/* ===================== AUTH FORMS ===================== */
+.auth-card {
+  background: var(--bg-1); border: 1px solid var(--brd); border-radius: 24px;
+  padding: 40px 28px; animation: modalIn .5s var(--bounce) both;
+}
+.auth-logo { width: 80px; display: block; margin: 0 auto 20px; }
+.auth-title { font-size: 1.3rem; font-weight: 800; text-align: center; margin-bottom: 6px; }
+.auth-subtitle { color: var(--t2); font-size: .88rem; text-align: center; margin-bottom: 28px; }
+.auth-form { display: flex; flex-direction: column; gap: 16px; }
+.auth-field label { display: block; font-size: .82rem; font-weight: 600; color: var(--t2); margin-bottom: 6px; }
+.auth-field input {
+  width: 100%; padding: 12px 14px; background: var(--bg-2); border: 1px solid var(--brd);
+  border-radius: 10px; color: var(--t1); font-size: .95rem; outline: none; transition: border-color .2s; box-sizing: border-box;
+}
+.auth-field input:focus { border-color: var(--green); }
+.auth-field input::placeholder { color: var(--t3); }
+.auth-btn {
+  width: 100%; padding: 14px; background: linear-gradient(135deg, #00e676, #00c853);
+  color: #06060b; font-weight: 700; font-size: 1rem; border: none; border-radius: 12px;
+  cursor: pointer; transition: all .3s; margin-top: 8px;
+}
+.auth-btn:hover { box-shadow: 0 4px 20px rgba(0,230,118,0.3); }
+.auth-btn:disabled { opacity: .6; cursor: not-allowed; }
+.auth-error {
+  background: rgba(255,61,87,0.1); border: 1px solid rgba(255,61,87,0.2);
+  color: var(--red); padding: 10px 14px; border-radius: 10px; font-size: .85rem; text-align: center;
+}
+.auth-footer-text { text-align: center; margin-top: 20px; color: var(--t3); font-size: .85rem; }
+.auth-link { color: var(--green); text-decoration: none; font-weight: 600; }
+.auth-link:hover { text-decoration: underline; }
+
 /* ===================== CHAT WIDGET ===================== */
 .chat-widget {
   position: fixed; bottom: 20px; right: 20px; z-index: 8000;

@@ -1,19 +1,18 @@
 'use client';
 
-import { useUser, useClerk } from '@clerk/nextjs';
+import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 export default function AdminLayout({ children }) {
-  const { user, isLoaded } = useUser();
-  const { signOut } = useClerk();
+  const { data: session, status } = useSession();
   const router = useRouter();
   const [isAdmin, setIsAdmin] = useState(false);
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    if (!isLoaded) return;
-    if (!user) {
+    if (status === 'loading') return;
+    if (!session?.user) {
       router.push('/sign-in');
       return;
     }
@@ -30,9 +29,9 @@ export default function AdminLayout({ children }) {
       })
       .catch(() => router.push('/dashboard'))
       .finally(() => setChecking(false));
-  }, [user, isLoaded, router]);
+  }, [session, status, router]);
 
-  if (!isLoaded || checking) return <div className="admin-layout"><p>Cargando...</p></div>;
+  if (status === 'loading' || checking) return <div className="admin-layout"><p>Cargando...</p></div>;
   if (!isAdmin) return null;
 
   return (
@@ -44,7 +43,7 @@ export default function AdminLayout({ children }) {
         </div>
         <div className="admin-header-right">
           <a href="/dashboard" className="admin-link">Dashboard</a>
-          <button className="admin-signout" onClick={() => signOut({ redirectUrl: '/' })}>Salir</button>
+          <button className="admin-signout" onClick={() => signOut({ callbackUrl: '/' })}>Salir</button>
         </div>
       </header>
       {children}

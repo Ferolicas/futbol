@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useUser } from '@clerk/nextjs';
+import { useSession } from 'next-auth/react';
 import { usePusherEvent } from '../../lib/use-pusher';
 
 export default function ChatWidget() {
-  const { user } = useUser();
+  const { data: session } = useSession();
+  const user = session?.user;
   const [isOpen, setIsOpen] = useState(false);
   const [view, setView] = useState('menu'); // 'menu', 'ticket', 'chat', 'ticket-sent'
   const [messages, setMessages] = useState([]);
@@ -14,28 +15,15 @@ export default function ChatWidget() {
   const [ticketId, setTicketId] = useState('');
   const [sending, setSending] = useState(false);
   const [unread, setUnread] = useState(0);
-  const [sanityUserId, setSanityUserId] = useState(null);
   const messagesEndRef = useRef(null);
   const pollRef = useRef(null);
 
-  // Get Sanity user ID for Pusher channel
-  useEffect(() => {
-    if (user) {
-      fetch('/api/user/role')
-        .then(r => r.json())
-        .catch(() => null);
-      // We use the Clerk userId as channel identifier
-      setSanityUserId(user.id);
-    }
-  }, [user]);
-
-  // Real-time chat messages via Pusher
+  // Real-time chat messages via Pusher (use Sanity _id as channel identifier)
   usePusherEvent(
-    sanityUserId ? `chat-${sanityUserId}` : null,
+    user?.id ? `chat-${user.id}` : null,
     'new-message',
     useCallback((msg) => {
       setMessages(prev => {
-        // Avoid duplicates
         if (prev.some(m => m._id === msg._id)) return prev;
         return [...prev, msg];
       });
@@ -47,7 +35,6 @@ export default function ChatWidget() {
   useEffect(() => {
     if (isOpen && view === 'chat' && user) {
       loadMessages();
-      // Reduced polling as Pusher handles real-time (fallback every 30s)
       pollRef.current = setInterval(loadMessages, 30000);
       return () => clearInterval(pollRef.current);
     }
@@ -77,7 +64,6 @@ export default function ChatWidget() {
     const text = input;
     setInput('');
 
-    // Optimistic update
     setMessages(prev => [...prev, {
       _id: 'temp-' + Date.now(),
       message: text,
@@ -135,7 +121,7 @@ export default function ChatWidget() {
           {view === 'menu' && (
             <div className="chat-menu">
               <p style={{ color: 'var(--t2)', fontSize: '.85rem', marginBottom: '8px' }}>
-                Hola {user?.firstName || 'Usuario'}! Como podemos ayudarte?
+                Hola {user?.name?.split(' ')[0] || 'Usuario'}! Como podemos ayudarte?
               </p>
               <button className="chat-menu-btn" onClick={() => setView('ticket')}>
                 <span className="chat-menu-icon">&#127758;</span>

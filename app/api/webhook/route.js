@@ -40,7 +40,6 @@ async function activateUser(user, plan, customerId) {
     name: user.name,
     email: user.email,
     password: user.password,
-    clerkId: user.clerkId,
     role: user.role,
     plan: plan || 'plataforma',
     subscriptionStatus: 'active',

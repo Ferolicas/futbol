@@ -1,14 +1,13 @@
-import { auth } from '@clerk/nextjs/server';
-import { getSanityUserByClerkId } from '../../../../lib/clerk-sync';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../../lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const { userId: clerkId } = await auth();
-  if (!clerkId) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const sanityUser = await getSanityUserByClerkId(clerkId);
-  return Response.json({ role: sanityUser?.role || 'user' });
+  return Response.json({ role: session.user.role || 'user' });
 }
