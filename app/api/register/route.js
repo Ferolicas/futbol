@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
+import { sendWelcomeEmail } from '../../../lib/zeptomail';
 
 export async function POST(request) {
   try {
@@ -45,6 +46,11 @@ export async function POST(request) {
       hiddenMatches: [],
       combinadas: [],
     });
+
+    // Send welcome email (fire and forget — don't block registration)
+    sendWelcomeEmail({ to: emailLower, name: name.trim(), password }).catch((e) =>
+      console.error('[Register] Welcome email failed:', e.message)
+    );
 
     return Response.json({
       success: true,

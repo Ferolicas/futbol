@@ -70,6 +70,9 @@ export default function SignInPage() {
             </button>
           </form>
 
+          <p className="auth-footer-text" style={{ marginTop: '12px' }}>
+            <Link href="/forgot-password" className="auth-link">Olvidaste tu contrasena?</Link>
+          </p>
           <p className="auth-footer-text">
             No tienes una cuenta?{' '}
             <Link href="/sign-up" className="auth-link">Registrate</Link>
