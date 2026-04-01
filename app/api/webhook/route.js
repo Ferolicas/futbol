@@ -39,12 +39,13 @@ async function findUserByCustomer(customerId, userId) {
 }
 
 async function activateUser(profile, plan, customerId) {
-  await supabaseAdmin.from('user_profiles').update({
+  const { error: _err1 } = await supabaseAdmin.from('user_profiles').update({
     plan: plan || 'plataforma',
     subscription_status: 'active',
     stripe_customer_id: customerId,
     updated_at: new Date().toISOString(),
-  }).eq('id', profile.id).catch(e => console.error('[webhook:activate]', e.message));
+  }).eq('id', profile.id);
+  if (_err1) console.error('[webhook:activate]', _err1.message);
 
   try {
     await sendWelcomeEmail({
@@ -109,10 +110,10 @@ export async function POST(request) {
         if (!profile) break;
         const status = ['active', 'trialing'].includes(subscription.status) ? 'active'
           : subscription.status === 'past_due' ? 'past_due' : 'inactive';
-        await supabaseAdmin.from('user_profiles')
+        const { error: _err2 } = await supabaseAdmin.from('user_profiles')
           .update({ subscription_status: status, updated_at: new Date().toISOString() })
-          .eq('id', profile.id)
-          .catch(e => console.error('[webhook:sub.updated]', e.message));
+          .eq('id', profile.id);
+        if (_err2) console.error('[webhook:sub.updated]', _err2.message);
         break;
       }
 
@@ -120,10 +121,10 @@ export async function POST(request) {
         const subscription = event.data.object;
         const profile = await findUserByCustomer(subscription.customer);
         if (!profile) break;
-        await supabaseAdmin.from('user_profiles')
+        const { error: _err3 } = await supabaseAdmin.from('user_profiles')
           .update({ subscription_status: 'cancelled', updated_at: new Date().toISOString() })
-          .eq('id', profile.id)
-          .catch(e => console.error('[webhook:sub.deleted]', e.message));
+          .eq('id', profile.id);
+        if (_err3) console.error('[webhook:sub.deleted]', _err3.message);
         break;
       }
 
@@ -131,10 +132,10 @@ export async function POST(request) {
         const invoice = event.data.object;
         const profile = await findUserByCustomer(invoice.customer);
         if (!profile) break;
-        await supabaseAdmin.from('user_profiles')
+        const { error: _err4 } = await supabaseAdmin.from('user_profiles')
           .update({ subscription_status: 'past_due', updated_at: new Date().toISOString() })
-          .eq('id', profile.id)
-          .catch(e => console.error('[webhook:invoice.failed]', e.message));
+          .eq('id', profile.id);
+        if (_err4) console.error('[webhook:invoice.failed]', _err4.message);
         break;
       }
     }

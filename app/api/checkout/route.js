@@ -36,12 +36,13 @@ export async function POST(request) {
     });
 
     // Save stripe customer ID
-    await supabaseAdmin.from('user_profiles').update({
+    const { error: _err1 } = await supabaseAdmin.from('user_profiles').update({
       plan,
       subscription_status: 'pending',
       stripe_customer_id: result.customerId,
       updated_at: new Date().toISOString(),
-    }).eq('id', profile.id).catch(e => console.error('[checkout:update]', e.message));
+    }).eq('id', profile.id);
+    if (_err1) console.error('[checkout:update]', _err1.message);
 
     return Response.json({
       clientSecret: result.clientSecret,

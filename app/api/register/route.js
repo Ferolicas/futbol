@@ -33,7 +33,7 @@ export async function POST(request) {
     const userId = data.user.id;
 
     // Create user profile
-    await supabaseAdmin.from('user_profiles').upsert({
+    const { error: profileErr } = await supabaseAdmin.from('user_profiles').upsert({
       id: userId,
       email: emailLower,
       name: name.trim(),
@@ -42,7 +42,8 @@ export async function POST(request) {
       plan: plan || null,
       subscription_status: 'pending',
       created_at: new Date().toISOString(),
-    }, { onConflict: 'id' }).catch(e => console.error('[Register] profile:', e.message));
+    }, { onConflict: 'id' });
+    if (profileErr) console.error('[Register] profile:', profileErr.message);
 
     // Send welcome email (fire and forget)
     sendWelcomeEmail({ to: emailLower, name: name.trim(), password }).catch((e) =>
@@ -52,6 +53,6 @@ export async function POST(request) {
     return Response.json({ success: true, userId, message: 'Usuario registrado exitosamente' });
   } catch (error) {
     console.error('[Register] Error:', error.message, error.stack?.split('\n')[1]);
-    return Response.json({ error: 'Error al registrar usuario', debug: error.message }, { status: 500 });
+    return Response.json({ error: 'Error al registrar usuario' }, { status: 500 });
   }
 }

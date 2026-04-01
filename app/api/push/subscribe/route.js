@@ -15,11 +15,12 @@ export async function POST(request) {
 
   const subscription = await request.json();
 
-  await supabaseAdmin.from('push_subscriptions').upsert({
+  const { error: _err1 } = await supabaseAdmin.from('push_subscriptions').upsert({
     user_id: user.id,
     subscription,
     updated_at: new Date().toISOString(),
-  }, { onConflict: 'user_id' }).catch(e => console.error('[push:subscribe]', e.message));
+  }, { onConflict: 'user_id' });
+  if (_err1) console.error('[push:subscribe]', _err1.message);
 
   return Response.json({ success: true });
 }
@@ -29,11 +30,11 @@ export async function DELETE() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  await supabaseAdmin
+  const { error: _err2 } = await supabaseAdmin
     .from('push_subscriptions')
     .delete()
-    .eq('user_id', user.id)
-    .catch(e => console.error('[push:unsubscribe]', e.message));
+    .eq('user_id', user.id);
+  if (_err2) console.error('[push:unsubscribe]', _err2.message);
 
   return Response.json({ success: true });
 }

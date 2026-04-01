@@ -38,17 +38,17 @@ export async function POST(request) {
   const today = date || new Date().toISOString().split('T')[0];
 
   if (action === 'unhide') {
-    await supabaseAdmin
+    const { error: _err1 } = await supabaseAdmin
       .from('user_hidden')
       .delete()
       .eq('user_id', user.id)
-      .eq('fixture_id', Number(fixtureId))
-      .catch(e => console.error('[hide:unhide]', e.message));
+      .eq('fixture_id', Number(fixtureId));
+    if (_err1) console.error('[hide:unhide]', _err1.message);
   } else {
-    await supabaseAdmin
+    const { error: _err2 } = await supabaseAdmin
       .from('user_hidden')
-      .upsert({ user_id: user.id, fixture_id: Number(fixtureId), date: today }, { onConflict: 'user_id,fixture_id' })
-      .catch(e => console.error('[hide:hide]', e.message));
+      .upsert({ user_id: user.id, fixture_id: Number(fixtureId), date: today }, { onConflict: 'user_id,fixture_id' });
+    if (_err2) console.error('[hide:hide]', _err2.message);
   }
 
   // Invalidate Redis cache

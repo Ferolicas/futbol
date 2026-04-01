@@ -107,6 +107,7 @@ export async function PATCH(request) {
   const { messageIds } = await request.json();
   if (!messageIds?.length) return Response.json({ success: true });
 
-  await supabaseAdmin.from('chat_messages').update({ read: true }).in('id', messageIds).catch(e => console.error('[chat:PATCH]', e.message));
+  const { error: readErr } = await supabaseAdmin.from('chat_messages').update({ read: true }).in('id', messageIds);
+  if (readErr) console.error('[chat:PATCH]', readErr.message);
   return Response.json({ success: true });
 }

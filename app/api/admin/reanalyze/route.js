@@ -23,11 +23,12 @@ export async function POST(request) {
 
   // force=true: clear all existing analysis for the date before re-running
   if (force) {
+    const { error: _errClear } = await supabaseAdmin.from('match_analysis').delete().eq('date', today);
+    if (_errClear) console.error('[reanalyze:force-clear]', _errClear.message);
     await Promise.all([
-      supabaseAdmin.from('match_analysis').delete().eq('date', today),
       redisDel(`analysis:${today}`),
       redisDel(KEYS.fixtures(today)),
-    ]).catch(e => console.error('[reanalyze:force-clear]', e.message));
+    ]);
   }
 
   // Fetch FRESH fixtures from API-Football

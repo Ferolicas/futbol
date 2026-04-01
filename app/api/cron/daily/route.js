@@ -64,13 +64,14 @@ export async function GET(request) {
     await redisSet(KEYS.schedule(today), scheduleData, TTL.schedule || 86400);
 
     // Also save to Supabase match_schedule
-    supabaseAdmin.from('match_schedule').upsert({
+    const { error: _err1 } = await supabaseAdmin.from('match_schedule').upsert({
       date: today,
       kickoff_times: kickoffTimes,
       first_kickoff: scheduleData.firstKickoff,
       last_expected_end: scheduleData.lastExpectedEnd,
       fixture_count: fixtures.length,
-    }, { onConflict: 'date' }).catch(e => console.error('[daily:schedule]', e.message));
+    }, { onConflict: 'date' });
+    if (_err1) console.error('[daily:schedule]', _err1.message);
 
     // 4. Analyze all fixtures in batches of 3
     let analyzed = 0, failed = 0, skipped = 0;
