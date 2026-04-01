@@ -26,7 +26,7 @@ export async function POST(request) {
 
   try {
     // 1. Fetch fresh fixtures from API-Football
-    const { fixtures, fromCache } = await getFixtures(date, { forceApi: !fromCache });
+    const { fixtures } = await getFixtures(date, { forceApi: forceAll });
     const allFixtures = fixtures || [];
 
     if (allFixtures.length === 0) {
