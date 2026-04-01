@@ -51,7 +51,7 @@ export async function POST(request) {
 
     return Response.json({ success: true, userId, message: 'Usuario registrado exitosamente' });
   } catch (error) {
-    console.error('[Register] Error:', error.message);
-    return Response.json({ error: 'Error al registrar usuario' }, { status: 500 });
+    console.error('[Register] Error:', error.message, error.stack?.split('\n')[1]);
+    return Response.json({ error: 'Error al registrar usuario', debug: error.message }, { status: 500 });
   }
 }
