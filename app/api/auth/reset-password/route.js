@@ -1,5 +1,5 @@
-import bcrypt from 'bcryptjs';
-import { queryFromSanityFresh, patchSanity } from '../../../../lib/sanity';
+import { supabaseAdmin } from '../../../../lib/supabase';
+import { redisGet, redisDel } from '../../../../lib/redis';
 
 export async function POST(request) {
   try {
@@ -12,30 +12,21 @@ export async function POST(request) {
       return Response.json({ error: 'La contrasena debe tener al menos 6 caracteres' }, { status: 400 });
     }
 
-    // Find user by reset token
-    const user = await queryFromSanityFresh(
-      `*[_type == "cfaUser" && resetToken == $token][0]{ _id, name, email, resetTokenExpiry }`,
-      { token }
-    );
-
-    if (!user?._id) {
+    // Look up token in Redis
+    const tokenData = await redisGet(`pwd-reset:${token}`);
+    if (!tokenData) {
       return Response.json({ error: 'Enlace invalido o expirado' }, { status: 400 });
     }
 
-    // Check expiry
-    if (!user.resetTokenExpiry || new Date(user.resetTokenExpiry) < new Date()) {
-      return Response.json({ error: 'El enlace ha expirado. Solicita uno nuevo.' }, { status: 400 });
+    // Update password via Supabase Auth (Supabase handles hashing)
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(tokenData.userId, { password });
+    if (error) {
+      console.error('[ResetPassword] updateUser:', error.message);
+      return Response.json({ error: 'Error al actualizar la contrasena' }, { status: 500 });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 12);
-    const docId = user._id.replace('cfaUser-', '');
-
-    // Set new password and clear the reset token
-    await patchSanity('cfaUser', docId, {
-      password: hashedPassword,
-      resetToken: null,
-      resetTokenExpiry: null,
-    });
+    // Delete used token
+    await redisDel(`pwd-reset:${token}`);
 
     return Response.json({ success: true });
   } catch (error) {

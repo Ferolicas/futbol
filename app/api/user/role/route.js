@@ -1,13 +1,24 @@
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '../../../../lib/auth';
+import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
+import { supabaseAdmin } from '../../../../lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  try {
+    const supabase = createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
 
-  return Response.json({ role: session.user.role || 'user' });
+    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const { data: profile } = await supabaseAdmin
+      .from('user_profiles')
+      .select('role, plan')
+      .eq('id', user.id)
+      .single();
+
+    return Response.json({ role: profile?.role || 'user', plan: profile?.plan || 'free' });
+  } catch (err) {
+    console.error('[user/role:GET]', err.message);
+    return Response.json({ error: err.message }, { status: 500 });
+  }
 }

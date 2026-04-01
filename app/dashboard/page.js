@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useSession, signOut } from 'next-auth/react';
+import { useAuth } from '../../components/providers';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
@@ -38,8 +38,7 @@ let _splashDone = false;
 
 export default function Dashboard() {
   const router = useRouter();
-  const { data: session } = useSession();
-  const user = session?.user;
+  const { user, supabase } = useAuth();
   const [splash, setSplash] = useState(!_splashDone);
   const [splashFade, setSplashFade] = useState(false);
   const [userTz, setUserTz] = useState('UTC'); // corrected on mount to user's real timezone
@@ -51,6 +50,7 @@ export default function Dashboard() {
   const [fromCache, setFromCache] = useState(_dashCache?.fromCache || false);
   const [quota, setQuota] = useState(_dashCache?.quota || { used: 0 });
   const [hidden, setHidden] = useState(_dashCache?.hidden || []);
+  const [favorites, setFavorites] = useState(_dashCache?.favorites || []);
   const [analyzed, setAnalyzed] = useState(_dashCache?.analyzed || []);
   const [analyzedOdds, setAnalyzedOdds] = useState(_dashCache?.analyzedOdds || {});
   const [analyzedData, setAnalyzedData] = useState(_dashCache?.analyzedData || {});
@@ -154,11 +154,12 @@ export default function Dashboard() {
     }
   };
 
-  const loadFixtures = useCallback(async (d, { silent } = {}) => {
+  const loadFixtures = useCallback(async (d, { silent, tz } = {}) => {
     if (!silent) setLoading(true);
     setError('');
     try {
-      const res = await fetch(`/api/fixtures?date=${d}`);
+      const tzParam = tz || getUserTz();
+      const res = await fetch(`/api/fixtures?date=${d}&tz=${encodeURIComponent(tzParam)}`);
       const data = await res.json();
       if (data.error && !data.fixtures?.length) {
         setError(data.error);
@@ -169,6 +170,7 @@ export default function Dashboard() {
       setFixtures(fx);
       setFromCache(data.fromCache || false);
       setHidden(data.hidden || []);
+      setFavorites(data.favorites || []);
       setAnalyzed(data.analyzed || []);
       setAnalyzedOdds(data.analyzedOdds || {});
       setAnalyzedData(data.analyzedData || {});
@@ -198,7 +200,8 @@ export default function Dashboard() {
       _dashCache = {
         fixtures: fx, analyzed: data.analyzed || [], analyzedOdds: data.analyzedOdds || {},
         analyzedData: data.analyzedData || {}, standings: data.standings || {},
-        hidden: data.hidden || [], fromCache: data.fromCache || false,
+        hidden: data.hidden || [], favorites: data.favorites || [],
+        fromCache: data.fromCache || false,
         quota: data.quota || { used: 0 },
         liveStats: data.initialLiveStats || {},
       };
@@ -239,9 +242,17 @@ export default function Dashboard() {
     setUserTz(tz);
     const localDate = todayInTz(tz);
     setDate(localDate);
-    loadFixtures(localDate, { silent: !!_dashCache });
+    loadFixtures(localDate, { silent: !!_dashCache, tz });
     refreshLiveData();
   }, [loadFixtures, refreshLiveData]);
+
+  // Live polling fallback (30s) when there are live matches — supplements Pusher
+  useEffect(() => {
+    const hasLive = fixtures.some(f => isLive(f.fixture.status.short));
+    if (!hasLive) return;
+    const poll = setInterval(refreshLiveData, 30000);
+    return () => clearInterval(poll);
+  }, [fixtures, refreshLiveData]);
 
   // Load saved combinadas per-user on mount
   useEffect(() => {
@@ -430,7 +441,7 @@ export default function Dashboard() {
     // Clear live stats when switching dates to prevent stale data from previous view
     setLiveStats({});
     pusherLastUpdate.current = 0;
-    loadFixtures(nd);
+    loadFixtures(nd, { tz: userTz });
   };
 
   const visible = fixtures.filter(f => {
@@ -526,21 +537,35 @@ export default function Dashboard() {
       delete n[fixtureId];
       return n;
     });
-    // Persist both: hide from Partidos + remove from Analizados
+    // Persist: hide from Partidos + remove from Analizados
     try {
-      await Promise.all([
-        fetch('/api/hide', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fixtureId }),
-        }),
-        fetch('/api/user', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'remove-analyzed', data: { fixtureId } }),
-        }),
-      ]);
-    } catch {}
+      await fetch('/api/hidden', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fixtureId, date }),
+      });
+    } catch (e) {
+      console.error('[dismissMatch]', e.message);
+    }
+  };
+
+  // Toggle favorite — optimistic update + Supabase persist
+  const toggleFavorite = async (e, fixtureId) => {
+    e.stopPropagation();
+    const isFav = favorites.includes(fixtureId);
+    setFavorites(prev => isFav ? prev.filter(id => id !== fixtureId) : [...prev, fixtureId]);
+    if (_dashCache) _dashCache.favorites = isFav
+      ? (_dashCache.favorites || []).filter(id => id !== fixtureId)
+      : [...(_dashCache.favorites || []), fixtureId];
+    try {
+      await fetch('/api/favorites', {
+        method: isFav ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fixtureId }),
+      });
+    } catch (e) {
+      console.error('[toggleFavorite]', e.message);
+    }
   };
 
   // Keep backward-compatible aliases
@@ -579,6 +604,7 @@ export default function Dashboard() {
 
   const liveCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && isLive(f.fixture.status.short)).length;
   const upcomingCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && f.fixture.status.short === 'NS').length;
+  const favoriteCount = favorites.length;
 
   const leagues = {};
   fixtures.filter(f => !hidden.includes(f.fixture.id)).forEach(f => {
@@ -743,7 +769,7 @@ export default function Dashboard() {
             {user && (
               <div className="user-badge">
                 <span className="user-name">{user?.name?.split(' ')[0] || user?.email?.split('@')[0]}</span>
-                <button className="btn-signout" onClick={() => signOut({ callbackUrl: '/' })}>Salir</button>
+                <button className="btn-signout" onClick={async () => { await supabase?.auth.signOut(); window.location.href = '/'; }}>Salir</button>
               </div>
             )}
             {pushSupported && (
@@ -913,6 +939,8 @@ export default function Dashboard() {
                         onToggleMarket={(mkt) => toggleMarket(m.fixture.id, mkt, `${m.teams.home.name} vs ${m.teams.away.name}`)}
                         onViewFull={() => router.push(`/dashboard/analisis/${m.fixture.id}`)}
                         onRemove={(e) => dismissMatch(e, m.fixture.id)}
+                        isFavorite={favorites.includes(m.fixture.id)}
+                        onFavorite={(e) => toggleFavorite(e, m.fixture.id)}
                         idx={i}
                         userTz={userTz}
                       />
@@ -924,12 +952,14 @@ export default function Dashboard() {
                       match={m}
                       isAnalyzed={false}
                       isSelected={selected.has(m.fixture.id)}
+                      isFavorite={favorites.includes(m.fixture.id)}
                       odds={analyzedOdds[m.fixture.id]}
                       standings={standings}
                       matchData={analyzedData[m.fixture.id]}
                       liveStats={liveStats[m.fixture.id]}
                       onSelect={() => toggleSelect(m.fixture.id)}
                       onHide={(e) => doHide(e, m.fixture.id)}
+                      onFavorite={(e) => toggleFavorite(e, m.fixture.id)}
                       onView={() => router.push(`/dashboard/analisis/${m.fixture.id}`)}
                       idx={i}
                       userTz={userTz}
@@ -966,6 +996,8 @@ export default function Dashboard() {
                     onToggleMarket={(mkt) => toggleMarket(m.fixture.id, mkt, `${m.teams.home.name} vs ${m.teams.away.name}`)}
                     onViewFull={() => router.push(`/dashboard/analisis/${m.fixture.id}`)}
                     onRemove={(e) => removeFromAnalyzed(e, m.fixture.id)}
+                    isFavorite={favorites.includes(m.fixture.id)}
+                    onFavorite={(e) => toggleFavorite(e, m.fixture.id)}
                     idx={i}
                     userTz={userTz}
                   />
@@ -1097,7 +1129,7 @@ export default function Dashboard() {
 
 /* ======================== MATCH CARD ======================== */
 
-function MatchCard({ match, isAnalyzed, isSelected, odds, standings, matchData, liveStats, onSelect, onHide, onView, idx, userTz }) {
+function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings, matchData, liveStats, onSelect, onHide, onFavorite, onView, idx, userTz }) {
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
@@ -1199,6 +1231,13 @@ function MatchCard({ match, isAnalyzed, isSelected, odds, standings, matchData, 
             <span className="cb-mark" />
           </label>
         )}
+        {onFavorite && (
+          <button
+            className={`btn-fav${isFavorite ? ' active' : ''}`}
+            onClick={onFavorite}
+            title={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+          >&#9733;</button>
+        )}
         <button className="btn-x" onClick={(e) => { e.stopPropagation(); onHide(e); }}>&#10005;</button>
       </div>
     </motion.div>
@@ -1207,7 +1246,7 @@ function MatchCard({ match, isAnalyzed, isSelected, odds, standings, matchData, 
 
 /* ======================== ACCORDION CARD ======================== */
 
-function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, onRemove, idx, userTz }) {
+function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, onRemove, isFavorite, onFavorite, idx, userTz }) {
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
@@ -1303,6 +1342,13 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
         <div className="acc-indicator">
           {onRemove && (
             <button className="btn-x acc-rm" onClick={onRemove} title="Eliminar de analizados">&#10005;</button>
+          )}
+          {onFavorite && (
+            <button
+              className={`btn-fav${isFavorite ? ' active' : ''}`}
+              onClick={onFavorite}
+              title={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+            >&#9733;</button>
           )}
           {selCount > 0 && <span className="acc-sel-count">{selCount} sel.</span>}
           {data?.combinada && data.combinada.combinedOdd > 1 && (data.combinada.selections || []).some(s => s.odd && s.odd > 1) && (

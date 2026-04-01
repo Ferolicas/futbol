@@ -1,0 +1,463 @@
+[
+  {
+    "fields": [
+      {
+        "name": "name",
+        "type": "string",
+        "title": "Nombre"
+      },
+      {
+        "name": "email",
+        "type": "string"
+      },
+      {
+        "hidden": true,
+        "name": "password",
+        "type": "string",
+        "title": "Password (hash)"
+      },
+      {
+        "name": "country",
+        "type": "string",
+        "title": "Pais"
+      },
+      {
+        "options": {
+          "list": [
+            "user",
+            "admin"
+          ]
+        },
+        "name": "role",
+        "type": "string",
+        "title": "Rol"
+      },
+      {
+        "options": {
+          "list": [
+            "plataforma",
+            "asesoria"
+          ]
+        },
+        "name": "plan",
+        "type": "string"
+      },
+      {
+        "options": {
+          "list": [
+            "pending",
+            "active",
+            "trialing",
+            "past_due",
+            "cancelled",
+            "inactive"
+          ]
+        },
+        "name": "subscriptionStatus",
+        "type": "string",
+        "title": "Estado Suscripcion"
+      },
+      {
+        "name": "stripeCustomerId",
+        "type": "string",
+        "title": "Stripe Customer ID"
+      },
+      {
+        "name": "stripeSessionId",
+        "type": "string",
+        "title": "Stripe Session ID"
+      },
+      {
+        "name": "clerkId",
+        "type": "string",
+        "title": "Clerk ID"
+      },
+      {
+        "name": "paidAt",
+        "type": "datetime",
+        "title": "Fecha de Pago"
+      },
+      {
+        "name": "createdAt",
+        "type": "datetime",
+        "title": "Fecha de Registro"
+      }
+    ],
+    "name": "cfaUser",
+    "type": "document",
+    "title": "Usuarios"
+  },
+  {
+    "fields": [
+      {
+        "name": "userId",
+        "type": "string",
+        "title": "User ID"
+      },
+      {
+        "options": {
+          "list": [
+            "hidden",
+            "analyzed",
+            "removedAnalyzed"
+          ]
+        },
+        "name": "dataType",
+        "type": "string",
+        "title": "Tipo"
+      },
+      {
+        "name": "date",
+        "type": "string",
+        "title": "Fecha"
+      },
+      {
+        "of": [
+          {
+            "type": "number"
+          }
+        ],
+        "name": "fixtureIds",
+        "type": "array",
+        "title": "Fixture IDs"
+      },
+      {
+        "name": "updatedAt",
+        "type": "datetime",
+        "title": "Actualizado"
+      }
+    ],
+    "name": "cfaUserData",
+    "type": "document",
+    "title": "Datos de Usuario"
+  },
+  {
+    "fields": [
+      {
+        "name": "userId",
+        "type": "string",
+        "title": "User ID"
+      },
+      {
+        "name": "userName",
+        "type": "string",
+        "title": "Nombre Usuario"
+      },
+      {
+        "name": "userEmail",
+        "type": "string",
+        "title": "Email Usuario"
+      },
+      {
+        "name": "message",
+        "type": "text",
+        "title": "Mensaje"
+      },
+      {
+        "options": {
+          "list": [
+            "user",
+            "agent"
+          ]
+        },
+        "name": "sender",
+        "type": "string",
+        "title": "Remitente"
+      },
+      {
+        "name": "read",
+        "type": "boolean",
+        "title": "Leido"
+      },
+      {
+        "name": "createdAt",
+        "type": "datetime",
+        "title": "Fecha"
+      }
+    ],
+    "name": "cfaChat",
+    "type": "document",
+    "title": "Chat Mensajes"
+  },
+  {
+    "fields": [
+      {
+        "name": "ticketId",
+        "type": "string",
+        "title": "Ticket ID"
+      },
+      {
+        "name": "userId",
+        "type": "string",
+        "title": "User ID"
+      },
+      {
+        "name": "userName",
+        "type": "string",
+        "title": "Nombre"
+      },
+      {
+        "name": "userEmail",
+        "type": "string",
+        "title": "Email"
+      },
+      {
+        "name": "message",
+        "type": "text",
+        "title": "Mensaje"
+      },
+      {
+        "options": {
+          "list": [
+            "open",
+            "replied",
+            "closed"
+          ]
+        },
+        "name": "status",
+        "type": "string",
+        "title": "Estado"
+      },
+      {
+        "name": "reply",
+        "type": "text",
+        "title": "Respuesta"
+      },
+      {
+        "name": "repliedAt",
+        "type": "datetime",
+        "title": "Fecha Respuesta"
+      },
+      {
+        "name": "createdAt",
+        "type": "datetime",
+        "title": "Fecha"
+      }
+    ],
+    "name": "cfaTicket",
+    "type": "document",
+    "title": "Tickets"
+  },
+  {
+    "fields": [
+      {
+        "name": "userId",
+        "type": "string",
+        "title": "User ID"
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "title": "Nombre"
+      },
+      {
+        "of": [
+          {
+            "fields": [
+              {
+                "name": "fixtureId",
+                "type": "string",
+                "title": "Fixture ID"
+              },
+              {
+                "name": "matchName",
+                "type": "string",
+                "title": "Partido"
+              },
+              {
+                "name": "market",
+                "type": "string",
+                "title": "Mercado"
+              },
+              {
+                "name": "odd",
+                "type": "number",
+                "title": "Cuota"
+              },
+              {
+                "name": "probability",
+                "type": "number",
+                "title": "Probabilidad"
+              }
+            ],
+            "type": "object"
+          }
+        ],
+        "name": "selections",
+        "type": "array",
+        "title": "Selecciones"
+      },
+      {
+        "name": "combinedOdd",
+        "type": "number",
+        "title": "Cuota Combinada"
+      },
+      {
+        "name": "combinedProbability",
+        "type": "number",
+        "title": "Probabilidad Combinada"
+      },
+      {
+        "name": "createdAt",
+        "type": "datetime",
+        "title": "Fecha"
+      }
+    ],
+    "name": "cfaCombinada",
+    "type": "document",
+    "title": "Combinadas"
+  },
+  {
+    "fields": [
+      {
+        "name": "fixtureId",
+        "type": "number",
+        "title": "Fixture ID"
+      },
+      {
+        "name": "homeTeam",
+        "type": "string",
+        "title": "Local"
+      },
+      {
+        "name": "awayTeam",
+        "type": "string",
+        "title": "Visitante"
+      },
+      {
+        "name": "league",
+        "type": "string",
+        "title": "Liga"
+      },
+      {
+        "name": "leagueId",
+        "type": "number",
+        "title": "Liga ID"
+      },
+      {
+        "name": "kickoff",
+        "type": "string",
+        "title": "Hora"
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "title": "Estado"
+      },
+      {
+        "name": "fetchedAt",
+        "type": "datetime",
+        "title": "Fecha Carga"
+      }
+    ],
+    "name": "footballMatchAnalysis",
+    "type": "document",
+    "title": "Analisis de Partidos"
+  },
+  {
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "title": "Fecha"
+      },
+      {
+        "name": "fetchedAt",
+        "type": "datetime",
+        "title": "Cargado"
+      },
+      {
+        "name": "fixtureCount",
+        "type": "number",
+        "title": "Cantidad"
+      }
+    ],
+    "name": "footballFixturesCache",
+    "type": "document",
+    "title": "Cache de Partidos"
+  },
+  {
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "title": "Fecha"
+      },
+      {
+        "name": "started",
+        "type": "boolean",
+        "title": "Iniciado"
+      },
+      {
+        "name": "completed",
+        "type": "boolean",
+        "title": "Completado"
+      },
+      {
+        "name": "fixtureCount",
+        "type": "number",
+        "title": "Partidos"
+      },
+      {
+        "name": "count",
+        "type": "number",
+        "title": "Contador"
+      },
+      {
+        "name": "startedAt",
+        "type": "datetime",
+        "title": "Inicio"
+      },
+      {
+        "name": "completedAt",
+        "type": "datetime",
+        "title": "Fin"
+      }
+    ],
+    "name": "appConfig",
+    "type": "document",
+    "title": "Configuracion App"
+  },
+  {
+    "fields": [
+      {
+        "name": "fixtureId",
+        "type": "number",
+        "title": "Fixture ID"
+      },
+      {
+        "name": "date",
+        "type": "string"
+      },
+      {
+        "fields": [
+          {
+            "name": "home",
+            "type": "number"
+          },
+          {
+            "name": "draw",
+            "type": "number"
+          },
+          {
+            "name": "away",
+            "type": "number"
+          }
+        ],
+        "name": "odds",
+        "type": "object",
+        "title": "Odds Data"
+      },
+      {
+        "name": "source",
+        "type": "string"
+      },
+      {
+        "name": "fetchedAt",
+        "type": "datetime"
+      }
+    ],
+    "name": "oddsCache",
+    "type": "document"
+  }
+]

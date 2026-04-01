@@ -1,5 +1,5 @@
 import { getQuota, refreshLineups, refreshInjuries } from '../../../../lib/api-football';
-import { getCachedAnalysis, getCachedFixtures } from '../../../../lib/sanity-cache';
+import { getCachedAnalysis, cacheAnalysis, getCachedFixtures } from '../../../../lib/sanity-cache';
 import { redisGet, KEYS } from '../../../../lib/redis';
 
 export const dynamic = 'force-dynamic';
@@ -15,20 +15,17 @@ export async function GET(request, { params }) {
 
   try {
     const analysis = await getCachedAnalysis(id, clientDate);
-
     if (!analysis) {
       return Response.json({ error: 'Match not analyzed yet', notFound: true }, { status: 404 });
     }
 
-    // Merge latest live status from Redis (real-time, updated every minute by live cron).
-    // The analysis was cached when status was NS, but the match may now be live or finished.
+    // Merge latest live status from Redis
     const today = clientDate || new Date().toISOString().split('T')[0];
     let statusUpdated = false;
 
-    // 1. Try Redis live:{date} first (most up-to-date, written every minute)
     try {
       const liveData = await redisGet(KEYS.liveStats(today));
-      if (liveData && liveData[id]) {
+      if (liveData?.[id]) {
         const live = liveData[id];
         if (live.status?.short && live.status.short !== analysis.status?.short) {
           analysis.status = live.status;
@@ -38,7 +35,6 @@ export async function GET(request, { params }) {
       }
     } catch {}
 
-    // 2. Try Redis stats:{fid} (persists 48h, catches finished matches after live:{date} expires)
     if (!statusUpdated) {
       try {
         const stats = await redisGet(KEYS.fixtureStats(id));
@@ -50,18 +46,14 @@ export async function GET(request, { params }) {
       } catch {}
     }
 
-    // 3. Fallback to fixtures cache in Sanity (least fresh but covers edge cases)
     if (!statusUpdated && clientDate) {
       try {
         const fixtures = await getCachedFixtures(clientDate);
         if (fixtures) {
           const fresh = fixtures.find(f => f.fixture.id === Number(id));
-          if (fresh) {
-            const freshStatus = fresh.fixture?.status?.short;
-            if (freshStatus && freshStatus !== analysis.status?.short) {
-              analysis.status = fresh.fixture.status;
-              analysis.goals = fresh.goals || analysis.goals;
-            }
+          if (fresh?.fixture?.status?.short && fresh.fixture.status.short !== analysis.status?.short) {
+            analysis.status = fresh.fixture.status;
+            analysis.goals = fresh.goals || analysis.goals;
           }
         }
       } catch {}
@@ -70,30 +62,26 @@ export async function GET(request, { params }) {
     const quota = await getQuota();
     return Response.json({ analysis, quota });
   } catch (error) {
-    console.error('Match fetch error:', error);
+    console.error('[match:GET]', error.message);
     return Response.json({ error: error.message }, { status: 500 });
   }
 }
 
-// POST to refresh lineups or injuries
+// POST: refresh lineups or injuries
 export async function POST(request, { params }) {
   const { id } = params;
-  const { action } = await request.json();
+  const { action, date } = await request.json();
 
   try {
     if (action === 'refresh-lineups') {
       const lineups = await refreshLineups(id);
       const quota = await getQuota();
 
-      // Persist lineups into the analysis document so they show next time without refresh
+      // Persist lineups into the cached analysis
       if (lineups.available) {
-        const { saveToSanity, getFromSanity } = await import('../../../../lib/sanity');
-        const existing = await getFromSanity('footballMatchAnalysis', String(id));
+        const existing = await getCachedAnalysis(id, date);
         if (existing) {
-          await saveToSanity('footballMatchAnalysis', String(id), {
-            ...existing,
-            lineups,
-          });
+          await cacheAnalysis(id, { ...existing, lineups });
         }
       }
 
@@ -108,7 +96,7 @@ export async function POST(request, { params }) {
 
     return Response.json({ error: 'Invalid action' }, { status: 400 });
   } catch (error) {
-    console.error('Match action error:', error);
+    console.error('[match:POST]', error.message);
     return Response.json({ error: error.message }, { status: 500 });
   }
 }

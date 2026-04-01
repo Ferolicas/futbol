@@ -1,135 +1,75 @@
 'use client';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { getSupabaseBrowserClient } from '../../lib/supabase-client';
 
-import { useState, useEffect, Suspense } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
-
-function ResetPasswordForm() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const token = searchParams.get('token');
-
+export default function ResetPasswordPage() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [done, setDone] = useState(false);
+  const [ready, setReady] = useState(false);
+  const router = useRouter();
+  const supabase = getSupabaseBrowserClient();
 
   useEffect(() => {
-    if (!token) setError('Enlace invalido. Solicita uno nuevo.');
-  }, [token]);
+    // Supabase redirects here with recovery token in URL hash
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') setReady(true);
+    });
+    // Also check current session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) setReady(true);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
-  const handleSubmit = async (e) => {
+  async function handleSubmit(e) {
     e.preventDefault();
     setError('');
-
-    if (password.length < 6) {
-      setError('La contrasena debe tener al menos 6 caracteres');
-      return;
-    }
-    if (password !== confirm) {
-      setError('Las contrasenas no coinciden');
-      return;
-    }
+    if (password !== confirm) { setError('Las contraseñas no coinciden'); return; }
+    if (password.length < 8) { setError('Mínimo 8 caracteres'); return; }
 
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, password }),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || 'Error al restablecer la contrasena');
-      } else {
-        setDone(true);
-        setTimeout(() => router.push('/sign-in'), 3000);
-      }
-    } catch {
-      setError('Error de conexion. Intenta de nuevo.');
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      setSuccess(true);
+      setTimeout(() => router.push('/dashboard'), 2000);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
+  }
+
+  const inputStyle = {
+    width: '100%', padding: '0.75rem 1rem', background: '#1a2332',
+    border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px',
+    color: '#f1f5f9', fontSize: '1rem', outline: 'none', boxSizing: 'border-box',
   };
 
   return (
-    <div className="login-page">
-      <div className="login-bg" />
-      <div className="login-container" style={{ maxWidth: '420px' }}>
-        <div className="auth-card">
-          <img src="/vflogo.png" alt="CFanalisis" className="auth-logo" />
+    <div style={{ minHeight: '100vh', background: '#0a0e17', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ background: 'rgba(17,24,39,0.8)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '2rem', width: '100%', maxWidth: '400px' }}>
+        <h1 style={{ color: '#22d3ee', fontSize: '1.5rem', fontWeight: 700, marginTop: 0 }}>Nueva contraseña</h1>
 
-          {done ? (
-            <>
-              <div style={{ textAlign: 'center', marginBottom: '8px', fontSize: '2.5rem' }}>&#9989;</div>
-              <h1 className="auth-title">Contrasena actualizada</h1>
-              <p className="auth-subtitle">
-                Tu contrasena ha sido restablecida exitosamente. Redirigiendo al inicio de sesion...
-              </p>
-            </>
-          ) : (
-            <>
-              <h1 className="auth-title">Nueva contrasena</h1>
-              <p className="auth-subtitle">Elige una contrasena segura para tu cuenta.</p>
-
-              <form onSubmit={handleSubmit} className="auth-form">
-                <div className="auth-field">
-                  <label>Nueva contrasena</label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Minimo 6 caracteres"
-                    required
-                    minLength={6}
-                    autoComplete="new-password"
-                    disabled={!token}
-                  />
-                </div>
-                <div className="auth-field">
-                  <label>Confirmar contrasena</label>
-                  <input
-                    type="password"
-                    value={confirm}
-                    onChange={(e) => setConfirm(e.target.value)}
-                    placeholder="Repite tu contrasena"
-                    required
-                    autoComplete="new-password"
-                    disabled={!token}
-                  />
-                </div>
-                {error && <p className="auth-error">{error}</p>}
-                <button type="submit" className="auth-btn" disabled={loading || !token}>
-                  {loading ? 'Guardando...' : 'Guardar nueva contrasena'}
-                </button>
-              </form>
-
-              <p className="auth-footer-text">
-                <Link href="/forgot-password" className="auth-link">Solicitar un nuevo enlace</Link>
-              </p>
-            </>
-          )}
-        </div>
+        {success ? (
+          <p style={{ color: '#10b981' }}>✓ Contraseña actualizada. Redirigiendo...</p>
+        ) : !ready ? (
+          <p style={{ color: '#64748b' }}>Verificando enlace de recuperación...</p>
+        ) : (
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="Nueva contraseña (mín. 8 chars)" style={inputStyle} />
+            <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required placeholder="Confirmar contraseña" style={inputStyle} />
+            {error && <p style={{ color: '#ef4444', margin: 0, fontSize: '0.85rem' }}>{error}</p>}
+            <button type="submit" disabled={loading} style={{ padding: '0.875rem', background: '#22d3ee', color: '#0a0e17', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>
+              {loading ? 'Guardando...' : 'Guardar contraseña'}
+            </button>
+          </form>
+        )}
       </div>
     </div>
-  );
-}
-
-export default function ResetPasswordPage() {
-  return (
-    <Suspense fallback={
-      <div className="login-page">
-        <div className="login-bg" />
-        <div className="login-container" style={{ maxWidth: '420px' }}>
-          <div className="auth-card" style={{ textAlign: 'center' }}>
-            <p style={{ color: 'var(--t2)' }}>Cargando...</p>
-          </div>
-        </div>
-      </div>
-    }>
-      <ResetPasswordForm />
-    </Suspense>
   );
 }

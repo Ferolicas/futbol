@@ -1,9 +1,7 @@
 import { redisGet, KEYS } from '../../../lib/redis';
-import { getFromSanity } from '../../../lib/sanity';
 
 // Live poll: reads from Redis (populated by cron/live every minute).
-// Also supports loading stats for specific finished matches from Redis/Sanity.
-// NO direct API-Football calls.
+// NO direct API-Football calls. NO Sanity.
 
 export const dynamic = 'force-dynamic';
 
@@ -13,24 +11,18 @@ export async function GET(request) {
     const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
     const fixtureId = searchParams.get('fixtureId');
 
-    // If a specific fixture is requested, try to get its stats directly
     if (fixtureId) {
-      let stats = await redisGet(KEYS.fixtureStats(fixtureId));
-      if (!stats) {
-        stats = await getFromSanity('liveMatchStats', fixtureId);
-      }
+      const stats = await redisGet(KEYS.fixtureStats(fixtureId));
       return Response.json({
         liveStats: stats ? [stats] : [],
         timestamp: stats?.updatedAt || new Date().toISOString(),
-        source: stats ? 'redis-or-sanity' : 'empty',
+        source: stats ? 'redis' : 'empty',
       }, {
         headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
       });
     }
 
-    // Read aggregated live stats from Redis (includes live + recently-finished)
     const liveData = await redisGet(KEYS.liveStats(date));
-
     if (liveData && typeof liveData === 'object') {
       const liveStats = Object.values(liveData);
       return Response.json({
@@ -42,11 +34,7 @@ export async function GET(request) {
       });
     }
 
-    return Response.json({
-      liveStats: [],
-      timestamp: new Date().toISOString(),
-      source: 'redis-empty',
-    }, {
+    return Response.json({ liveStats: [], timestamp: new Date().toISOString(), source: 'redis-empty' }, {
       headers: { 'Cache-Control': 'no-store' },
     });
   } catch (error) {

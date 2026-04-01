@@ -1,55 +1,47 @@
 import { createEmbeddedPayment } from '../../../lib/stripe';
-import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '../../../lib/auth';
+import { createSupabaseServerClient } from '../../../lib/supabase-auth';
+import { supabaseAdmin } from '../../../lib/supabase';
 
 export async function POST(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const supabase = createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { plan, email, currency } = await request.json();
-
     if (!plan || !email) {
       return Response.json({ error: 'Missing required fields' }, { status: 400 });
     }
-
     if (!['plataforma', 'asesoria'].includes(plan)) {
       return Response.json({ error: 'Invalid plan' }, { status: 400 });
     }
 
-    const sanityUser = await queryFromSanity(
-      `*[_type == "cfaUser" && _id == $id][0]{ _id, name, email, password, role, stripeCustomerId }`,
-      { id: session.user.id }
-    );
-    if (!sanityUser) {
-      return Response.json({ error: 'User not found' }, { status: 404 });
-    }
-    if (sanityUser.email?.toLowerCase() !== email.toLowerCase().trim()) {
+    const { data: profile } = await supabaseAdmin
+      .from('user_profiles')
+      .select('id, name, email, role, stripe_customer_id')
+      .eq('id', user.id)
+      .single();
+
+    if (!profile) return Response.json({ error: 'User not found' }, { status: 404 });
+    if (profile.email?.toLowerCase() !== email.toLowerCase().trim()) {
       return Response.json({ error: 'Email mismatch' }, { status: 403 });
     }
 
     const result = await createEmbeddedPayment({
       plan,
-      userId: sanityUser._id,
-      email: sanityUser.email,
-      name: sanityUser.name,
+      userId: profile.id,
+      email: profile.email,
+      name: profile.name,
       currency: currency || 'USD',
     });
 
-    const docId = sanityUser._id.replace('cfaUser-', '');
-    await saveToSanity('cfaUser', docId, {
-      name: sanityUser.name,
-      email: sanityUser.email,
-      password: sanityUser.password,
-      role: sanityUser.role,
+    // Save stripe customer ID
+    await supabaseAdmin.from('user_profiles').update({
       plan,
-      subscriptionStatus: 'pending',
-      stripeCustomerId: result.customerId,
-      updatedAt: new Date().toISOString(),
-    });
+      subscription_status: 'pending',
+      stripe_customer_id: result.customerId,
+      updated_at: new Date().toISOString(),
+    }).eq('id', profile.id).catch(e => console.error('[checkout:update]', e.message));
 
     return Response.json({
       clientSecret: result.clientSecret,
@@ -58,7 +50,7 @@ export async function POST(request) {
       currency: result.currency || 'usd',
     });
   } catch (error) {
-    console.error('Checkout error:', error);
+    console.error('[checkout]', error.message);
     return Response.json({ error: error.message || 'Checkout failed' }, { status: 500 });
   }
 }

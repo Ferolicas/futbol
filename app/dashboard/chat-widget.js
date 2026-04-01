@@ -1,12 +1,11 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useSession } from 'next-auth/react';
+import { useAuth } from '../../components/providers';
 import { usePusherEvent } from '../../lib/use-pusher';
 
 export default function ChatWidget() {
-  const { data: session } = useSession();
-  const user = session?.user;
+  const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [view, setView] = useState('menu'); // 'menu', 'ticket', 'chat', 'ticket-sent'
   const [messages, setMessages] = useState([]);

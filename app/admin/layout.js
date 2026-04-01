@@ -1,27 +1,26 @@
 'use client';
 
-import { useSession, signOut } from 'next-auth/react';
+import { useAuth } from '../../components/providers';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 export default function AdminLayout({ children }) {
-  const { data: session, status } = useSession();
+  const { user, loading: authLoading, supabase } = useAuth();
   const router = useRouter();
   const [isAdmin, setIsAdmin] = useState(false);
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    if (status === 'loading') return;
-    if (!session?.user) {
-      router.push('/sign-in');
+    if (authLoading) return;
+    if (!user) {
+      router.push('/login');
       return;
     }
 
-    // Check admin role from Sanity
     fetch('/api/user/role')
       .then(r => r.json())
       .then(data => {
-        if (data.role === 'admin') {
+        if (data.role === 'admin' || data.role === 'owner') {
           setIsAdmin(true);
         } else {
           router.push('/dashboard');
@@ -29,9 +28,9 @@ export default function AdminLayout({ children }) {
       })
       .catch(() => router.push('/dashboard'))
       .finally(() => setChecking(false));
-  }, [session, status, router]);
+  }, [user, authLoading, router]);
 
-  if (status === 'loading' || checking) return <div className="admin-layout"><p>Cargando...</p></div>;
+  if (authLoading || checking) return <div className="admin-layout"><p>Cargando...</p></div>;
   if (!isAdmin) return null;
 
   return (
@@ -43,7 +42,7 @@ export default function AdminLayout({ children }) {
         </div>
         <div className="admin-header-right">
           <a href="/dashboard" className="admin-link">Dashboard</a>
-          <button className="admin-signout" onClick={() => signOut({ callbackUrl: '/' })}>Salir</button>
+          <button className="admin-signout" onClick={async () => { await supabase?.auth.signOut(); window.location.href = '/'; }}>Salir</button>
         </div>
       </header>
       {children}

@@ -1,42 +1,17 @@
-import { createClient } from '@sanity/client';
+/**
+ * GET /api/cron/cleanup
+ * Daily cleanup: remove old data from Supabase (match_analysis, fixtures_cache older than N days).
+ * Redis keys expire automatically via TTL — no manual cleanup needed there.
+ */
+import { supabaseAdmin } from '../../../../lib/supabase';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
-
-function getClient() {
-  return createClient({
-    projectId: process.env.NEXT_PUBLIC_SANITY_PROJECT_ID,
-    dataset: process.env.SANITY_DATASET || 'production',
-    apiVersion: '2024-07-11',
-    token: process.env.SANITY_API_TOKEN,
-    useCdn: false,
-  });
-}
+export const maxDuration = 120;
 
 function cutoffDateStr(days) {
   const d = new Date();
   d.setDate(d.getDate() - days);
-  return d.toISOString().split('T')[0]; // "YYYY-MM-DD"
-}
-
-function cutoffDatetimeStr(days) {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString();
-}
-
-async function deleteInBatches(client, ids) {
-  if (!ids.length) return 0;
-  const BATCH = 200;
-  let deleted = 0;
-  for (let i = 0; i < ids.length; i += BATCH) {
-    const slice = ids.slice(i, i + BATCH);
-    const tx = client.transaction();
-    slice.forEach(id => tx.delete(id));
-    await tx.commit({ visibility: 'async' });
-    deleted += slice.length;
-  }
-  return deleted;
+  return d.toISOString().split('T')[0];
 }
 
 export async function GET(request) {
@@ -48,107 +23,60 @@ export async function GET(request) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // purge=true → one-time initial purge keeping only last 3 days
-  // default     → routine cleanup keeping last 7 days
   const isPurge = searchParams.get('purge') === 'true';
   const retentionDays = isPurge ? 3 : 7;
-
-  const client = getClient();
   const cutoffDate = cutoffDateStr(retentionDays);
-  const cutoffDt   = cutoffDatetimeStr(retentionDays);
 
   console.log(`[CLEANUP] Starting ${isPurge ? 'PURGE' : 'routine'} cleanup — cutoff: ${cutoffDate}`);
 
   const results = {};
 
-  // ── 1. apiCache (injuries, lineups, matchstats, matchplayers, matchevents, standings, h2h…)
-  {
-    const ids = await client.fetch(
-      `*[_type == "apiCache" && fetchedAt < $cutoff]._id`,
-      { cutoff: cutoffDt }
-    );
-    results.apiCache = await deleteInBatches(client, ids);
-    console.log(`[CLEANUP] apiCache: ${results.apiCache} deleted`);
-  }
+  // 1. match_analysis
+  const { error: e1, count: c1 } = await supabaseAdmin
+    .from('match_analysis')
+    .delete()
+    .lt('date', cutoffDate)
+    .select('*', { count: 'exact', head: true });
+  results.match_analysis = c1 || 0;
+  if (e1) console.error('[CLEANUP] match_analysis:', e1.message);
+  console.log(`[CLEANUP] match_analysis: ${results.match_analysis} deleted`);
 
-  // ── 2. footballMatchAnalysis
-  {
-    const ids = await client.fetch(
-      `*[_type == "footballMatchAnalysis" && (
-        (defined(fetchedAt) && fetchedAt < $cutoffDt)
-        || (defined(date) && date < $cutoffDate && !defined(fetchedAt))
-      )]._id`,
-      { cutoffDt: cutoffDt, cutoffDate }
-    );
-    results.footballMatchAnalysis = await deleteInBatches(client, ids);
-    console.log(`[CLEANUP] footballMatchAnalysis: ${results.footballMatchAnalysis} deleted`);
-  }
+  // 2. fixtures_cache
+  const { error: e2, count: c2 } = await supabaseAdmin
+    .from('fixtures_cache')
+    .delete()
+    .lt('date', cutoffDate)
+    .select('*', { count: 'exact', head: true });
+  results.fixtures_cache = c2 || 0;
+  if (e2) console.error('[CLEANUP] fixtures_cache:', e2.message);
+  console.log(`[CLEANUP] fixtures_cache: ${results.fixtures_cache} deleted`);
 
-  // ── 3. liveMatchStats
-  {
-    const ids = await client.fetch(
-      `*[_type == "liveMatchStats" && defined(date) && date < $cutoffDate]._id`,
-      { cutoffDate }
-    );
-    results.liveMatchStats = await deleteInBatches(client, ids);
-    console.log(`[CLEANUP] liveMatchStats: ${results.liveMatchStats} deleted`);
-  }
+  // 3. match_schedule
+  const { error: e3, count: c3 } = await supabaseAdmin
+    .from('match_schedule')
+    .delete()
+    .lt('date', cutoffDate)
+    .select('*', { count: 'exact', head: true });
+  results.match_schedule = c3 || 0;
+  if (e3) console.error('[CLEANUP] match_schedule:', e3.message);
+  console.log(`[CLEANUP] match_schedule: ${results.match_schedule} deleted`);
 
-  // ── 4. footballFixturesCache
-  {
-    const ids = await client.fetch(
-      `*[_type == "footballFixturesCache" && defined(date) && date < $cutoffDate]._id`,
-      { cutoffDate }
-    );
-    results.footballFixturesCache = await deleteInBatches(client, ids);
-    console.log(`[CLEANUP] footballFixturesCache: ${results.footballFixturesCache} deleted`);
-  }
+  // 4. app_config (dated entries like dailyBatch-YYYY-MM-DD)
+  const { error: e4, count: c4 } = await supabaseAdmin
+    .from('app_config')
+    .delete()
+    .lt('key', `dailyBatch-${cutoffDate}`)
+    .like('key', 'dailyBatch-%')
+    .select('*', { count: 'exact', head: true });
+  results.app_config = c4 || 0;
+  if (e4) console.error('[CLEANUP] app_config:', e4.message);
+  console.log(`[CLEANUP] app_config: ${results.app_config} deleted`);
 
-  // ── 5. matchSchedule (unregistered type, saved by saveToSanity)
-  {
-    const ids = await client.fetch(
-      `*[_type == "matchSchedule" && defined(date) && date < $cutoffDate]._id`,
-      { cutoffDate }
-    );
-    results.matchSchedule = await deleteInBatches(client, ids);
-    console.log(`[CLEANUP] matchSchedule: ${results.matchSchedule} deleted`);
-  }
-
-  // ── 6. appConfig dated docs (dailyBatch-*, analyzed-*, apiCalls-*)
-  //    Permanent docs like "hiddenMatches" have no `date` field — safe to filter by defined(date)
-  {
-    const ids = await client.fetch(
-      `*[_type == "appConfig" && defined(date) && date < $cutoffDate]._id`,
-      { cutoffDate }
-    );
-    results.appConfig = await deleteInBatches(client, ids);
-    console.log(`[CLEANUP] appConfig: ${results.appConfig} deleted`);
-  }
-
-  // ── 7. cfaUserData — only dated types (analyzed, removedAnalyzed)
-  //    "hidden" and "pushSubscription" are permanent — excluded by dataType filter
-  {
-    const ids = await client.fetch(
-      `*[_type == "cfaUserData" && dataType in ["analyzed", "removedAnalyzed"] && defined(date) && date < $cutoffDate]._id`,
-      { cutoffDate }
-    );
-    results.cfaUserData = await deleteInBatches(client, ids);
-    console.log(`[CLEANUP] cfaUserData: ${results.cfaUserData} deleted`);
-  }
-
-  // ── 8. oddsCache — by fetchedAt
-  {
-    const ids = await client.fetch(
-      `*[_type == "oddsCache" && defined(fetchedAt) && fetchedAt < $cutoff]._id`,
-      { cutoff: cutoffDt }
-    );
-    results.oddsCache = await deleteInBatches(client, ids);
-    console.log(`[CLEANUP] oddsCache: ${results.oddsCache} deleted`);
-  }
+  // 5. user_hidden (entries older than 60 days — safety cleanup)
+  // Only clear if table has a date column for pruning
 
   const total = Object.values(results).reduce((a, b) => a + b, 0);
-
-  console.log(`[CLEANUP] Done — ${total} documents deleted total`);
+  console.log(`[CLEANUP] Done — ${total} rows deleted total`);
 
   return Response.json({
     success: true,
