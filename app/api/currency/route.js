@@ -24,12 +24,12 @@ export async function GET(request) {
       plans: {
         plataforma: {
           firstMonth: { usd: 15, local: plat1.amount, currency: targetCurrency },
-          regular: { usd: 30, local: plat2.amount, currency: targetCurrency },
+          regular: { usd: 15, local: plat2.amount, currency: targetCurrency },
         },
         asesoria: {
-          initial: { usd: 100, local: ases1.amount, currency: targetCurrency },
+          initial: { usd: 50, local: ases1.amount, currency: targetCurrency },
           secondMonth: { usd: 15, local: ases2.amount, currency: targetCurrency },
-          regular: { usd: 30, local: ases3.amount, currency: targetCurrency },
+          regular: { usd: 15, local: ases3.amount, currency: targetCurrency },
         },
       },
       supportedCurrencies: SUPPORTED_CURRENCIES,

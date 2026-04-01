@@ -44,7 +44,7 @@ export default function PlanesClient({ userId, email }) {
       if (data.clientSecret) {
         const localDisplay = plan === 'plataforma'
           ? fmtPrice(15, prices?.plans?.plataforma?.firstMonth?.local, prices?.currency)
-          : fmtPrice(100, prices?.plans?.asesoria?.initial?.local, prices?.currency);
+          : fmtPrice(50, prices?.plans?.asesoria?.initial?.local, prices?.currency);
         setPaymentData({
           clientSecret: data.clientSecret,
           plan: data.plan,
@@ -110,10 +110,7 @@ export default function PlanesClient({ userId, email }) {
               <span className="plan-amount">
                 {fmtPrice(15, prices?.plans?.plataforma?.firstMonth?.local, prices?.currency)}
               </span>
-              <span className="plan-period">primer mes (50% dto.)</span>
-            </div>
-            <div className="plan-after">
-              Luego {fmtPrice(30, prices?.plans?.plataforma?.regular?.local, prices?.currency)}/mes
+              <span className="plan-period">/ mes</span>
             </div>
             <ul className="plan-features">
               <li>Analisis estadistico completo</li>
@@ -143,13 +140,12 @@ export default function PlanesClient({ userId, email }) {
             <p className="plan-desc">Formacion en apuestas, estrategias, bankroll + acceso total a plataforma</p>
             <div className="plan-price">
               <span className="plan-amount">
-                {fmtPrice(100, prices?.plans?.asesoria?.initial?.local, prices?.currency)}
+                {fmtPrice(50, prices?.plans?.asesoria?.initial?.local, prices?.currency)}
               </span>
-              <span className="plan-period">pago inicial (1 mes asesoria + plataforma)</span>
+              <span className="plan-period">pago unico inicial</span>
             </div>
             <div className="plan-after">
-              Mes 2: {fmtPrice(15, prices?.plans?.asesoria?.secondMonth?.local, prices?.currency)} (50% dto.) &bull;
-              Mes 3+: {fmtPrice(30, prices?.plans?.asesoria?.regular?.local, prices?.currency)}/mes
+              Luego {fmtPrice(15, prices?.plans?.asesoria?.regular?.local, prices?.currency)}/mes
             </div>
             <ul className="plan-features">
               <li>Todo lo del Plan Plataforma</li>

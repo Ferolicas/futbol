@@ -143,9 +143,8 @@ export default function LandingPage() {
             <p className="plan-desc">Acceso total a estadisticas, analisis y herramientas de apuesta</p>
             <div className="plan-price">
               <span className="plan-amount">{fmtPrice(15, prices?.plans?.plataforma?.firstMonth?.local, prices?.currency)}</span>
-              <span className="plan-period">primer mes (50% dto.)</span>
+              <span className="plan-period">/ mes</span>
             </div>
-            <div className="plan-after">Luego {fmtPrice(30, prices?.plans?.plataforma?.regular?.local, prices?.currency)}/mes</div>
             <ul className="plan-features">
               <li>Analisis estadistico completo</li>
               <li>Apuesta del Dia inteligente</li>
@@ -163,12 +162,11 @@ export default function LandingPage() {
             <h3 className="plan-name">Plan Asesoria</h3>
             <p className="plan-desc">Formacion en apuestas, estrategias, bankroll + acceso total a plataforma</p>
             <div className="plan-price">
-              <span className="plan-amount">{fmtPrice(100, prices?.plans?.asesoria?.initial?.local, prices?.currency)}</span>
-              <span className="plan-period">pago inicial (1 mes asesoria + plataforma)</span>
+              <span className="plan-amount">{fmtPrice(50, prices?.plans?.asesoria?.initial?.local, prices?.currency)}</span>
+              <span className="plan-period">pago unico inicial</span>
             </div>
             <div className="plan-after">
-              Mes 2: {fmtPrice(15, prices?.plans?.asesoria?.secondMonth?.local, prices?.currency)} (50% dto.) &bull;
-              Mes 3+: {fmtPrice(30, prices?.plans?.asesoria?.regular?.local, prices?.currency)}/mes
+              Luego {fmtPrice(15, prices?.plans?.asesoria?.regular?.local, prices?.currency)}/mes
             </div>
             <ul className="plan-features">
               <li>Todo lo del Plan Plataforma</li>
