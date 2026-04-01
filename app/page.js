@@ -2,16 +2,16 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useSession } from 'next-auth/react';
+import { useAuth } from '../components/providers';
 
 export default function LandingPage() {
   const router = useRouter();
-  const { data: session, status } = useSession();
+  const { user, loading: authLoading } = useAuth();
 
   // If already logged in, redirect to dashboard
   useEffect(() => {
-    if (status === 'authenticated') router.push('/dashboard');
-  }, [status, router]);
+    if (!authLoading && user) router.push('/dashboard');
+  }, [user, authLoading, router]);
 
   // Scroll-driven animations with IntersectionObserver
   useEffect(() => {

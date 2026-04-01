@@ -1,4 +1,5 @@
 import { getFromSanity, saveToSanity, queryFromSanity } from '../../../../lib/sanity';
+import { getMatchSchedule, saveMatchSchedule } from '../../../../lib/supabase-cache';
 import { ALL_LEAGUE_IDS } from '../../../../lib/leagues';
 import { triggerEvent } from '../../../../lib/pusher';
 import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
@@ -196,10 +197,13 @@ export async function GET(request) {
     const now = Date.now();
 
     // ===== Smart schedule check — skip if no matches active =====
-    // Try Redis first (faster), then Sanity as fallback
+    // Try Redis → Supabase → Sanity (in order of speed)
     let schedule = await redisGet(KEYS.schedule(today));
     if (!schedule) {
-      schedule = await getFromSanity('matchSchedule', today);
+      schedule = await getMatchSchedule(today).catch(() => null);
+    }
+    if (!schedule) {
+      schedule = await getFromSanity('matchSchedule', today).catch(() => null);
     }
 
     // If no formal schedule exists, derive from footballFixturesCache
@@ -291,21 +295,30 @@ export async function GET(request) {
       });
 
       if (!hasActiveMatch) {
-        const reason = 'No active matches in window';
-        console.log('[LIVE-CRON]', { now, firstKickoff, lastExpectedEnd, skipped: true, reason, matchCount: schedule.kickoffTimes.length });
-        return Response.json({
-          success: true,
-          skipped: true,
-          reason,
-          apiCalls: 0,
-          timestamp: new Date().toISOString(),
-        });
+        // Safety net: if within day window but no active match per schedule,
+        // still run if we haven't run in >10 minutes (schedule may be stale)
+        const lastRun = await redisGet('live-cron:last-run');
+        const tenMinutesAgo = now - 10 * 60 * 1000;
+        if (!lastRun || Number(lastRun) < tenMinutesAgo) {
+          console.log('[LIVE-CRON] Safety net: running despite no active match — schedule may be stale');
+          // Fall through to execute
+        } else {
+          const reason = 'No active matches in window';
+          console.log('[LIVE-CRON]', { now, firstKickoff, lastExpectedEnd, skipped: true, reason, matchCount: schedule.kickoffTimes.length });
+          return Response.json({
+            success: true, skipped: true, reason, apiCalls: 0,
+            timestamp: new Date().toISOString(),
+          });
+        }
       }
 
       console.log('[LIVE-CRON]', { now, firstKickoff, lastExpectedEnd, skipped: false, reason: 'Active matches found' });
     } else {
       console.log('[LIVE-CRON]', { now, skipped: false, reason: 'No schedule found — proceeding as fallback' });
     }
+
+    // Track last run time for safety net
+    await redisSet('live-cron:last-run', String(now), 600);
 
     const allLive = await apiFetch('/fixtures?live=all');
     let apiCalls = 1;
@@ -371,7 +384,7 @@ export async function GET(request) {
     }
 
     // ── 1d. Detect goals and send push notifications (fire and forget) ──
-    sendGoalPushes(liveDetailsMap, existingLive).catch(() => {});
+    sendGoalPushes(liveDetailsMap, existingLive).catch(err => console.error('[LIVE-CRON:sendGoalPushes]', err.message));
 
     // ── 1c. Save live data to Redis for instant dashboard access ──
     // Merge with existing live:{date} so FT matches aren't lost when they drop from the live feed
@@ -432,8 +445,8 @@ export async function GET(request) {
               fullStats.date = today;
               fullStats.savedAt = new Date().toISOString();
 
-              // Save PERMANENTLY to Sanity (historical record)
-              await saveToSanity('liveMatchStats', String(fid), fullStats);
+              // Save to Sanity (legacy — will be phased out)
+              await saveToSanity('liveMatchStats', String(fid), fullStats).catch(err => console.error('[LIVE-CRON:saveToSanity]', err.message));
               // Save to Redis with 48h TTL for fast access
               await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
               // Also update live:{date} so page reloads show FT status + real stats

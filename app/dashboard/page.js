@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useSession, signOut } from 'next-auth/react';
+import { useAuth } from '../../components/providers';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
@@ -38,8 +38,7 @@ let _splashDone = false;
 
 export default function Dashboard() {
   const router = useRouter();
-  const { data: session } = useSession();
-  const user = session?.user;
+  const { user, supabase } = useAuth();
   const [splash, setSplash] = useState(!_splashDone);
   const [splashFade, setSplashFade] = useState(false);
   const [userTz, setUserTz] = useState('UTC'); // corrected on mount to user's real timezone
@@ -743,7 +742,7 @@ export default function Dashboard() {
             {user && (
               <div className="user-badge">
                 <span className="user-name">{user?.name?.split(' ')[0] || user?.email?.split('@')[0]}</span>
-                <button className="btn-signout" onClick={() => signOut({ callbackUrl: '/' })}>Salir</button>
+                <button className="btn-signout" onClick={async () => { await supabase?.auth.signOut(); window.location.href = '/'; }}>Salir</button>
               </div>
             )}
             {pushSupported && (

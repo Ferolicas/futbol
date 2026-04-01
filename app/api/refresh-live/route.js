@@ -1,22 +1,71 @@
-import { redisGet, redisSet, KEYS } from '../../../lib/redis';
+import { redisGet, redisSet, KEYS, TTL } from '../../../lib/redis';
+import { ALL_LEAGUE_IDS } from '../../../lib/leagues';
 
-// Force-refresh live data: triggers live + corners crons, then returns fresh data.
-// Rate-limited to once every 15s via Redis lock to prevent abuse.
-// Called by: dashboard reload button, page load, session start.
+// Force-refresh live data — direct API call, no cron chaining.
+// Rate-limited to once every 15s via Redis lock.
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 const LOCK_KEY = 'refresh-live:lock';
-const LOCK_TTL = 15; // seconds
+const LOCK_TTL = 15;
+const API_HOST = 'v3.football.api-sports.io';
+
+const YOUTH_RE = /\bU-?1[2-9]\b|\bU-?2[0-3]\b|\bunder[ -]?(1[2-9]|2[0-3])\b|\byouth\b|\bjunior\b|\bsub-?(1[2-9]|2[0-3])\b/i;
+
+function extractStats(match) {
+  const homeId = match.teams.home.id;
+  const awayId = match.teams.away.id;
+  const homeStats = (match.statistics || []).find(s => s.team?.id === homeId);
+  const awayStats = (match.statistics || []).find(s => s.team?.id === awayId);
+
+  const getStat = (statsObj, name) => {
+    if (!statsObj?.statistics) return null;
+    const s = statsObj.statistics.find(x => x.type === name);
+    return s?.value ?? null;
+  };
+
+  return {
+    fixtureId: match.fixture.id,
+    status: match.fixture.status,
+    goals: match.goals,
+    score: match.score,
+    elapsed: match.fixture.status.elapsed,
+    teams: {
+      home: { id: match.teams.home.id, name: match.teams.home.name, logo: match.teams.home.logo, winner: match.teams.home.winner },
+      away: { id: match.teams.away.id, name: match.teams.away.name, logo: match.teams.away.logo, winner: match.teams.away.winner },
+    },
+    league: { id: match.league.id, name: match.league.name },
+    events: (match.events || []).filter(e => ['Goal', 'Card', 'subst'].includes(e.type)),
+    stats: {
+      home: {
+        corners: getStat(homeStats, 'Corner Kicks'),
+        yellowCards: getStat(homeStats, 'Yellow Cards'),
+        redCards: getStat(homeStats, 'Red Cards'),
+        shots: getStat(homeStats, 'Total Shots'),
+        shotsOnTarget: getStat(homeStats, 'Shots on Goal'),
+        possession: getStat(homeStats, 'Ball Possession'),
+      },
+      away: {
+        corners: getStat(awayStats, 'Corner Kicks'),
+        yellowCards: getStat(awayStats, 'Yellow Cards'),
+        redCards: getStat(awayStats, 'Red Cards'),
+        shots: getStat(awayStats, 'Total Shots'),
+        shotsOnTarget: getStat(awayStats, 'Shots on Goal'),
+        possession: getStat(awayStats, 'Ball Possession'),
+      },
+    },
+    updatedAt: new Date().toISOString(),
+  };
+}
 
 export async function POST(request) {
   try {
     const today = new Date().toISOString().split('T')[0];
 
-    // Rate limit: 1 forced refresh every 15 seconds across all users
+    // Rate limit — return cached data immediately if locked
     const lock = await redisGet(LOCK_KEY);
     if (lock) {
-      // Already refreshing or just refreshed — return current Redis data immediately
       const liveData = await redisGet(KEYS.liveStats(today));
       return Response.json({
         success: true,
@@ -24,45 +73,64 @@ export async function POST(request) {
         reason: 'Rate limited — returning cached data',
         liveStats: liveData && typeof liveData === 'object' ? liveData : {},
         timestamp: new Date().toISOString(),
-      }, {
-        headers: { 'Cache-Control': 'no-store' },
+      }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    await redisSet(LOCK_KEY, '1', LOCK_TTL);
+
+    const apiKey = process.env.FOOTBALL_API_KEY;
+    if (!apiKey) {
+      console.error('[REFRESH-LIVE] FOOTBALL_API_KEY is not set');
+      return Response.json({ success: false, error: 'No API key configured' }, { status: 500 });
+    }
+
+    // Single direct call — no cron chaining, no internal fetch
+    const res = await fetch(`https://${API_HOST}/fixtures?live=all`, {
+      headers: { 'x-apisports-key': apiKey },
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      console.error('[REFRESH-LIVE] API error:', res.status);
+      const cached = await redisGet(KEYS.liveStats(today));
+      return Response.json({
+        success: false,
+        error: `API returned ${res.status}`,
+        liveStats: cached && typeof cached === 'object' ? cached : {},
+        timestamp: new Date().toISOString(),
       });
     }
 
-    // Set lock before triggering crons
-    await redisSet(LOCK_KEY, '1', LOCK_TTL);
+    const json = await res.json();
+    if (json.errors && Object.keys(json.errors).length > 0) {
+      console.error('[REFRESH-LIVE] API errors:', json.errors);
+    }
 
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : 'http://localhost:3000');
+    const tracked = (json.response || []).filter(m =>
+      ALL_LEAGUE_IDS.includes(m.league.id) && !YOUTH_RE.test(m.league.name || '')
+    );
 
-    const secret = process.env.CRON_SECRET;
+    const liveStats = {};
+    for (const match of tracked) {
+      const fid = match.fixture.id;
+      const stats = extractStats(match);
+      stats.date = today;
+      liveStats[fid] = stats;
+      await redisSet(KEYS.fixtureStats(fid), stats, TTL.live);
+    }
 
-    // Trigger BOTH crons in parallel — live (scores/goals/cards) + corners (statistics)
-    const [liveRes, cornersRes] = await Promise.all([
-      fetch(`${baseUrl}/api/cron/live?secret=${secret}`, {
-        headers: { 'x-internal-trigger': 'true' },
-      }).then(r => r.json()).catch(e => ({ error: e.message })),
-
-      fetch(`${baseUrl}/api/cron/live-corners?secret=${secret}`, {
-        headers: { 'x-internal-trigger': 'true' },
-      }).then(r => r.json()).catch(e => ({ error: e.message })),
-    ]);
-
-    // Read fresh data from Redis (both crons just wrote to it)
-    const liveData = await redisGet(KEYS.liveStats(today));
+    await redisSet(KEYS.liveStats(today), liveStats, TTL.live);
 
     return Response.json({
       success: true,
-      liveStats: liveData && typeof liveData === 'object' ? liveData : {},
-      liveCron: { success: liveRes?.success, liveCount: liveRes?.liveCount, apiCalls: liveRes?.apiCalls },
-      cornersCron: { success: cornersRes?.success, updatedMatches: cornersRes?.updatedMatches, apiCalls: cornersRes?.apiCalls },
+      liveCount: tracked.length,
+      liveStats,
+      apiCalls: 1,
       timestamp: new Date().toISOString(),
-    }, {
-      headers: { 'Cache-Control': 'no-store' },
-    });
+    }, { headers: { 'Cache-Control': 'no-store' } });
+
   } catch (error) {
-    console.error('[REFRESH-LIVE] Error:', error);
+    console.error('[REFRESH-LIVE] Error:', error.message);
     return Response.json({ error: error.message }, { status: 500 });
   }
 }

@@ -1,9 +1,10 @@
 import { getFixtures, getQuota, getCachedStandingsPositions } from '../../../lib/api-football';
 import { getAnalyzedMatchesFull, getCachedFixturesRaw } from '../../../lib/sanity-cache';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '../../../lib/auth';
-import { queryFromSanity, queryFromSanityFresh, getFromSanity } from '../../../lib/sanity';
+import { queryFromSanity, getFromSanity } from '../../../lib/sanity';
 import { redisGet, redisSet, redisDel, KEYS } from '../../../lib/redis';
+import { createSupabaseServerClient } from '../../../lib/supabase-auth';
+import { supabaseAdmin } from '../../../lib/supabase';
+import { filterFixturesByLocalDate, getLocalDateForFixture } from '../../../lib/timezone';
 
 const FT_STATS_FIELDS = ['corners', 'yellowCards', 'redCards', 'goalScorers', 'cardEvents', 'missedPenalties'];
 
@@ -18,15 +19,19 @@ const STANDINGS_CACHE_TTL = 12 * 3600;  // 12 hours
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
+  // userTimezone: IANA timezone sent by client (e.g. 'America/Bogota')
+  // date: the local date in the USER'S timezone (YYYY-MM-DD)
+  const userTimezone = searchParams.get('tz') || 'UTC';
+  const todayStr = new Date().toISOString().split('T')[0];
+  const date = searchParams.get('date') || todayStr;
 
   try {
     // ===== PHASE 1: Load fixtures (Redis -> Sanity/API) + start auth in parallel =====
-    const todayStr = new Date().toISOString().split('T')[0];
     const isPastDate = date < todayStr;
 
-    // Start auth early -- it runs in parallel with fixture loading
-    const sessionPromise = getServerSession(authOptions);
+    // Start Supabase auth early — runs in parallel with fixture loading
+    const supabase = createSupabaseServerClient();
+    const sessionPromise = supabase.auth.getUser();
 
     let fixtures = [];
     let fromCache = false;
@@ -46,8 +51,9 @@ export async function GET(request) {
           fixtures = result.fixtures || redisFixtures;
           fromCache = false;
           // Overwrite Redis with fresh data
-          redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(() => {});
-        } catch {
+          redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(err => console.error('[fixtures:today] redis set failed:', err.message));
+        } catch (err) {
+          console.error('[fixtures:today] API fetch failed:', err.message);
           fixtures = redisFixtures;
           fromCache = true;
         }
@@ -70,9 +76,10 @@ export async function GET(request) {
             fromCache = false;
             // Save fresh fixtures to Redis so next request is instant
             if (fixtures !== rawFixtures) {
-              redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(() => {});
+              redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(err => console.error('[fixtures:past] redis set failed:', err.message));
             }
-          } catch {
+          } catch (err) {
+            console.error('[fixtures:past] API fetch failed:', err.message);
             fixtures = rawFixtures; // API failed — use cache as-is
             fromCache = true;
           }
@@ -122,8 +129,8 @@ export async function GET(request) {
       fixtures.length > 0 ? redisGet(KEYS.liveStats(date)) : null,
       // 2. Batch flag from Sanity (read ONCE, reused below)
       fixtures.length > 0 ? getFromSanity('appConfig', `dailyBatch-${date}`) : null,
-      // 3. Auth (already started, just await)
-      sessionPromise,
+      // 3. Auth (already started, just await) — Supabase
+      sessionPromise.then(r => r.data?.user || null).catch(() => null),
       // 4. Analysis data: Redis first, then null (Sanity loaded below if needed)
       fixtureIds.length > 0 ? redisGet(analysisRedisKey) : null,
       // 5. Odds data: Redis first
@@ -277,46 +284,31 @@ export async function GET(request) {
             redisSet(standingsRedisKey, positions, STANDINGS_CACHE_TTL).catch(() => {});
           }
           return positions;
-        } catch {
+        } catch (err) {
+          console.error('[fixtures:standings] fetch failed:', err.message);
           return {};
         }
       })(),
     ]);
 
-    const userId = session?.user?.id || null;
+    // session is the Supabase user object (or null)
+    const userId = session?.id || null;
 
-    // ===== PHASE 6: User-specific data =====
+    // ===== PHASE 6: User-specific data (from Supabase — per-user, persists across reloads) =====
     let hidden = [];
-    let userRemovedAnalyzed = [];
+    let favorites = [];
     if (userId) {
-      const [hiddenFromRedis, removedDoc] = await Promise.all([
-        // Read hidden list from Redis first — avoids Sanity CDN staleness after a write
-        redisGet(KEYS.userHidden(userId)),
-        queryFromSanity(
-          `*[_type == "cfaUserData" && userId == $userId && dataType == "removedAnalyzed" && date == $date][0]`,
-          { userId, date }
-        ),
+      const [hiddenRes, favRes] = await Promise.all([
+        supabaseAdmin.from('user_hidden').select('fixture_id').eq('user_id', userId).eq('date', date),
+        supabaseAdmin.from('user_favorites').select('fixture_id').eq('user_id', userId),
       ]);
-
-      if (Array.isArray(hiddenFromRedis)) {
-        hidden = hiddenFromRedis;
-      } else {
-        // Redis miss — use origin client (no CDN) to guarantee fresh data
-        const hiddenDoc = await queryFromSanityFresh(
-          `*[_type == "cfaUserData" && userId == $userId && dataType == "hidden"][0]`,
-          { userId }
-        );
-        hidden = hiddenDoc?.fixtureIds || [];
-        if (hidden.length > 0) {
-          redisSet(KEYS.userHidden(userId), hidden, 30 * 24 * 3600).catch(() => {});
-        }
-      }
-      userRemovedAnalyzed = removedDoc?.fixtureIds || [];
+      hidden = (hiddenRes.data || []).map(r => r.fixture_id);
+      favorites = (favRes.data || []).map(r => r.fixture_id);
     }
 
     // ===== PHASE 7: Merge analysis + odds =====
     const { globallyAnalyzed, analyzedOdds, analyzedData } = analysisResult;
-    const userAnalyzed = (globallyAnalyzed || []).filter(id => !userRemovedAnalyzed.includes(id));
+    const userAnalyzed = (globallyAnalyzed || []);
 
     // Merge The Odds API cached odds into analyzed data
     if (oddsResult && oddsResult.length > 0) {
@@ -376,6 +368,8 @@ export async function GET(request) {
       stale,
       quota,
       hidden,
+      favorites,
+      userTimezone,
       analyzed: userAnalyzed,
       analyzedOdds,
       analyzedData,

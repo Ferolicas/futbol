@@ -1,8 +1,8 @@
 import { getFixtures, getQuota, analyzeMatch } from '../../../../lib/api-football';
 import { getFromSanity, saveToSanity } from '../../../../lib/sanity';
 import { getCachedFixturesRaw } from '../../../../lib/sanity-cache';
-import { triggerEvent } from '../../../../lib/pusher';
 import { redisSet, redisDel, KEYS, TTL } from '../../../../lib/redis';
+import { getAppConfig, setAppConfig, saveAnalysisCached, saveFixturesCached } from '../../../../lib/supabase-cache';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -23,8 +23,15 @@ export async function GET(request) {
   const today = searchParams.get('date') || new Date().toISOString().split('T')[0];
   const force = searchParams.get('force') === 'true';
 
-  // ===== CHECK BATCH STATE =====
-  const batchFlag = !force ? await getFromSanity('appConfig', `dailyBatch-${today}`) : null;
+  // ===== CHECK BATCH STATE (Supabase, with Sanity fallback) =====
+  let batchFlag = null;
+  if (!force) {
+    batchFlag = await getAppConfig(`dailyBatch-${today}`);
+    // Fallback to Sanity if not in Supabase yet (during migration period)
+    if (!batchFlag) {
+      batchFlag = await getFromSanity('appConfig', `dailyBatch-${today}`).catch(() => null);
+    }
+  }
 
   // --- RETRY PATH: batch ran before but has failed IDs pending ---
   if (!force && batchFlag && batchFlag.failedIds?.length > 0 && !batchFlag.completed) {
@@ -162,15 +169,15 @@ export async function GET(request) {
 
   // ===== FRESH BATCH PATH =====
 
-  // Mark batch as started
-  await saveToSanity('appConfig', `dailyBatch-${today}`, {
-    date: today,
-    started: true,
-    completed: false,
-    failedIds: [],
-    retryCount: 0,
-    startedAt: new Date().toISOString(),
-  });
+  // Mark batch as started — write to both Sanity (legacy) and Supabase (new)
+  const batchStartData = {
+    date: today, started: true, completed: false,
+    failedIds: [], retryCount: 0, startedAt: new Date().toISOString(),
+  };
+  await Promise.all([
+    saveToSanity('appConfig', `dailyBatch-${today}`, batchStartData).catch(err => console.error('[daily:save-sanity]', err.message)),
+    setAppConfig(`dailyBatch-${today}`, batchStartData).catch(err => console.error('[daily:save-supabase]', err.message)),
+  ]);
 
   try {
     console.log(`[DAILY-BATCH] Starting for ${today}...`);
