@@ -41,6 +41,7 @@ async function findUserByCustomer(customerId, userId) {
 async function activateUser(profile, plan, customerId) {
   await supabaseAdmin.from('user_profiles').update({
     plan: plan || 'plataforma',
+    subscription_status: 'active',
     stripe_customer_id: customerId,
     updated_at: new Date().toISOString(),
   }).eq('id', profile.id).catch(e => console.error('[webhook:activate]', e.message));
@@ -109,7 +110,7 @@ export async function POST(request) {
         const status = ['active', 'trialing'].includes(subscription.status) ? 'active'
           : subscription.status === 'past_due' ? 'past_due' : 'inactive';
         await supabaseAdmin.from('user_profiles')
-          .update({ plan: profile.plan, updated_at: new Date().toISOString() })
+          .update({ subscription_status: status, updated_at: new Date().toISOString() })
           .eq('id', profile.id)
           .catch(e => console.error('[webhook:sub.updated]', e.message));
         break;
@@ -120,7 +121,7 @@ export async function POST(request) {
         const profile = await findUserByCustomer(subscription.customer);
         if (!profile) break;
         await supabaseAdmin.from('user_profiles')
-          .update({ plan: null, updated_at: new Date().toISOString() })
+          .update({ subscription_status: 'cancelled', updated_at: new Date().toISOString() })
           .eq('id', profile.id)
           .catch(e => console.error('[webhook:sub.deleted]', e.message));
         break;
@@ -131,7 +132,7 @@ export async function POST(request) {
         const profile = await findUserByCustomer(invoice.customer);
         if (!profile) break;
         await supabaseAdmin.from('user_profiles')
-          .update({ updated_at: new Date().toISOString() })
+          .update({ subscription_status: 'past_due', updated_at: new Date().toISOString() })
           .eq('id', profile.id)
           .catch(e => console.error('[webhook:invoice.failed]', e.message));
         break;
