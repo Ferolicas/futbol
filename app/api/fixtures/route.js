@@ -1,10 +1,9 @@
 import { getFixtures, getQuota, getCachedStandingsPositions } from '../../../lib/api-football';
-import { getAnalyzedMatchesFull, getCachedFixturesRaw } from '../../../lib/sanity-cache';
-import { queryFromSanity, getFromSanity } from '../../../lib/sanity';
-import { redisGet, redisSet, redisDel, KEYS } from '../../../lib/redis';
+import { getAnalyzedMatchesFull, getAnalyzedFixtureIds } from '../../../lib/sanity-cache';
+import { redisGet, redisSet, KEYS } from '../../../lib/redis';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../lib/supabase';
-import { filterFixturesByLocalDate, getLocalDateForFixture } from '../../../lib/timezone';
+import { filterFixturesByLocalDate } from '../../../lib/timezone';
 
 const FT_STATS_FIELDS = ['corners', 'yellowCards', 'redCards', 'goalScorers', 'cardEvents', 'missedPenalties'];
 
@@ -12,21 +11,19 @@ export const dynamic = 'force-dynamic';
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 
-// Redis TTLs for new cache layers (seconds)
+// Redis TTLs for cache layers (seconds)
 const ANALYSIS_CACHE_TTL = 4 * 3600;   // 4 hours
 const ODDS_CACHE_TTL = 4 * 3600;       // 4 hours
-const STANDINGS_CACHE_TTL = 12 * 3600;  // 12 hours
+const STANDINGS_CACHE_TTL = 12 * 3600; // 12 hours
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  // userTimezone: IANA timezone sent by client (e.g. 'America/Bogota')
-  // date: the local date in the USER'S timezone (YYYY-MM-DD)
   const userTimezone = searchParams.get('tz') || 'UTC';
   const todayStr = new Date().toISOString().split('T')[0];
   const date = searchParams.get('date') || todayStr;
 
   try {
-    // ===== PHASE 1: Load fixtures (Redis -> Sanity/API) + start auth in parallel =====
+    // ===== PHASE 1: Load fixtures (Redis -> Supabase/API) + start auth in parallel =====
     const isPastDate = date < todayStr;
 
     // Start Supabase auth early — runs in parallel with fixture loading
@@ -41,19 +38,16 @@ export async function GET(request) {
     // 1. Try Redis first (instant)
     const redisFixtures = await redisGet(KEYS.fixtures(date));
     if (redisFixtures && Array.isArray(redisFixtures) && redisFixtures.length > 0) {
-      // For past dates, check if Redis has stale live/NS statuses that need refreshing
       const STALE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE', 'NS'];
       const redisHasStale = isPastDate && redisFixtures.some(f => STALE_STATUSES.includes(f.fixture?.status?.short));
       if (redisHasStale) {
-        // Redis has stale data for a past date — force refresh from API
         try {
           const result = await getFixtures(date, { forceApi: true });
           fixtures = result.fixtures || redisFixtures;
           fromCache = false;
-          // Overwrite Redis with fresh data
-          redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(err => console.error('[fixtures:today] redis set failed:', err.message));
+          redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(() => {});
         } catch (err) {
-          console.error('[fixtures:today] API fetch failed:', err.message);
+          console.error('[fixtures] API fetch failed for past date:', err.message);
           fixtures = redisFixtures;
           fromCache = true;
         }
@@ -62,25 +56,28 @@ export async function GET(request) {
         fromCache = true;
       }
     } else if (isPastDate) {
-      // 2. Past dates: load from Sanity cache first
-      const rawFixtures = await getCachedFixturesRaw(date);
+      // 2. Past dates: load from Supabase fixtures_cache
+      const { data: cached } = await supabaseAdmin
+        .from('fixtures_cache')
+        .select('fixtures')
+        .eq('date', date)
+        .single()
+        .catch(() => ({ data: null }));
+      const rawFixtures = cached?.fixtures || null;
       if (rawFixtures && rawFixtures.length > 0) {
-        // Check if any matches have stale live statuses (should be finished by now)
         const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE', 'NS'];
         const hasStale = rawFixtures.some(f => LIVE_STATUSES.includes(f.fixture?.status?.short));
         if (hasStale) {
-          // Some matches still show live/NS — refresh from API to get final scores
           try {
             const result = await getFixtures(date, { forceApi: true });
             fixtures = result.fixtures || rawFixtures;
             fromCache = false;
-            // Save fresh fixtures to Redis so next request is instant
             if (fixtures !== rawFixtures) {
-              redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(err => console.error('[fixtures:past] redis set failed:', err.message));
+              redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(() => {});
             }
           } catch (err) {
-            console.error('[fixtures:past] API fetch failed:', err.message);
-            fixtures = rawFixtures; // API failed — use cache as-is
+            console.error('[fixtures] past date API fetch failed:', err.message);
+            fixtures = rawFixtures;
             fromCache = true;
           }
         } else {
@@ -89,7 +86,7 @@ export async function GET(request) {
         }
       }
     } else {
-      // 3. Current/future dates: fallback to Sanity/API-Football
+      // 3. Current/future dates: fetch from API-Football
       try {
         const result = await getFixtures(date);
         fixtures = result.fixtures || [];
@@ -103,19 +100,15 @@ export async function GET(request) {
     }
 
     // ===== PHASE 2: Parallel middle section =====
-    // Now that we have fixtures, run ALL dependent lookups in parallel
-
     const fixtureIds = fixtures.map(f => f.fixture.id);
     const leagueIds = fixtures.length > 0
       ? [...new Set(fixtures.map(f => f.league?.id).filter(Boolean))]
       : [];
 
-    // Build Redis keys for new cache layers
     const analysisRedisKey = `analysis:${date}`;
     const oddsRedisKey = `odds:${date}`;
     const standingsRedisKey = `standings:positions`;
 
-    // Launch all parallel lookups at once
     const [
       liveData,
       batchFlag,
@@ -125,19 +118,12 @@ export async function GET(request) {
       cachedStandings,
       quota,
     ] = await Promise.all([
-      // 1. Live stats from Redis
       fixtures.length > 0 ? redisGet(KEYS.liveStats(date)) : null,
-      // 2. Batch flag from Sanity (read ONCE, reused below)
-      fixtures.length > 0 ? getFromSanity('appConfig', `dailyBatch-${date}`) : null,
-      // 3. Auth (already started, just await) — Supabase
+      fixtures.length > 0 ? redisGet(`dailyBatch:${date}`) : null,
       sessionPromise.then(r => r.data?.user || null).catch(() => null),
-      // 4. Analysis data: Redis first, then null (Sanity loaded below if needed)
       fixtureIds.length > 0 ? redisGet(analysisRedisKey) : null,
-      // 5. Odds data: Redis first
       fixtureIds.length > 0 ? redisGet(oddsRedisKey) : null,
-      // 6. Standings: Redis first
       fixtures.length > 0 ? redisGet(standingsRedisKey) : null,
-      // 7. Quota
       getQuota(),
     ]);
 
@@ -148,8 +134,6 @@ export async function GET(request) {
       if (liveData && typeof liveData === 'object') {
         initialLiveStats = liveData;
 
-        // For fixtures with a live status in live:{date}, check stats:{fid} to detect
-        // matches that already finished (stale detection saves FT status there)
         const liveInCache = fixtures.filter(f => {
           const live = liveData[f.fixture.id];
           return live && !FINISHED_STATUSES.includes(live.status?.short) &&
@@ -160,13 +144,11 @@ export async function GET(request) {
             const fid = f.fixture.id;
             const stats = await redisGet(KEYS.fixtureStats(fid));
             if (stats && FINISHED_STATUSES.includes(stats.status?.short)) {
-              // Match is actually finished — update live:{date} entry so fixture renders as FT
               initialLiveStats[fid] = stats;
             }
           }));
         }
 
-        // Apply live/FT status updates to fixtures
         fixtures = fixtures.map(f => {
           const live = initialLiveStats[f.fixture.id];
           if (!live) return f;
@@ -180,14 +162,11 @@ export async function GET(request) {
         });
       }
 
-      // For finished matches without stats (or with all-zero stats) in live:{date},
-      // load from Redis stats:{fid} (written by stale-detection with real /fixtures?id={fid} data)
+      // For finished matches without stats, check Redis stats:{fid}
       const ftWithoutStats = fixtures.filter(f => {
         if (!FINISHED_STATUSES.includes(f.fixture?.status?.short)) return false;
         const s = initialLiveStats[f.fixture.id];
         if (!s) return true;
-        // Also reload if stats are all zeros — live=all doesn't include statistics,
-        // but stale-detection saves real stats to stats:{fid} after the match ends
         const hasRealStats =
           (s.corners?.total > 0) ||
           (s.yellowCards?.total > 0) ||
@@ -199,12 +178,7 @@ export async function GET(request) {
       if (ftWithoutStats.length > 0) {
         await Promise.all(ftWithoutStats.map(async (f) => {
           const fid = f.fixture.id;
-          // Try Redis first (stats:{fid} has 48h TTL)
-          let stats = await redisGet(KEYS.fixtureStats(fid));
-          // Fallback to Sanity (permanent storage)
-          if (!stats) {
-            stats = await getFromSanity('liveMatchStats', String(fid));
-          }
+          const stats = await redisGet(KEYS.fixtureStats(fid));
           if (stats && FT_STATS_FIELDS.some(k => stats[k])) {
             initialLiveStats[fid] = stats;
           }
@@ -212,7 +186,7 @@ export async function GET(request) {
       }
     }
 
-    // ===== PHASE 4: Auto-trigger daily batch (uses batchFlag already loaded) =====
+    // ===== PHASE 4: Auto-trigger daily batch =====
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
       : 'http://localhost:3000');
@@ -220,64 +194,41 @@ export async function GET(request) {
     if (fixtures.length > 0 && !batchFlag?.started) {
       fetch(`${baseUrl}/api/cron/daily?date=${date}`, {
         headers: { 'x-internal-trigger': 'true' },
-      }).catch(() => {}); // Fire and forget
+      }).catch(() => {});
     }
 
-    // Live cron auto-trigger moved to /api/refresh-live (called by dashboard on mount + reload button).
-    // That endpoint triggers BOTH live + corners crons with its own 15s rate limit.
-
     // ===== PHASE 5: User data (auth resolved above) =====
-    // While resolving analysis + odds + standings from cache or Sanity in parallel
     const [analysisResult, oddsResult, standingsResult] = await Promise.all([
 
-      // Analysis: use Redis cache or fall back to Sanity
+      // Analysis: use Redis cache or fall back to Supabase
       (async () => {
-        // Redis cache exists — use it (reanalyze saves directly to Redis, bypassing CDN)
         if (cachedAnalysisData) return cachedAnalysisData;
         if (fixtureIds.length === 0) return { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
 
-        // Use origin client (not CDN) to guarantee fresh results
-        const analyzedDocs = await queryFromSanityFresh(
-          `*[_type == "footballMatchAnalysis" && fixtureId in $ids]{ fixtureId }`,
-          { ids: fixtureIds }
-        );
-        const globallyAnalyzed = (analyzedDocs || []).map(d => d.fixtureId);
+        // Get analyzed fixture IDs from Supabase
+        const globallyAnalyzed = await getAnalyzedFixtureIds(date);
 
-        // For past dates, read from Sanity origin (CDN may be stale after re-analyze)
         const { analyzedOdds, analyzedData } = globallyAnalyzed.length > 0
-          ? await getAnalyzedMatchesFull(globallyAnalyzed, { fresh: isPastDate })
+          ? await getAnalyzedMatchesFull(globallyAnalyzed)
           : { analyzedOdds: {}, analyzedData: {} };
 
         const result = { globallyAnalyzed, analyzedOdds, analyzedData };
-        // Cache in Redis for next request
         redisSet(analysisRedisKey, result, ANALYSIS_CACHE_TTL).catch(() => {});
         return result;
       })(),
 
-      // Odds: use Redis cache or fall back to Sanity
+      // Odds: use Redis cache (populated by cron/odds)
       (async () => {
         if (cachedOddsData) return cachedOddsData;
-        if (fixtureIds.length === 0) return [];
-
-        const oddsDocs = await queryFromSanity(
-          `*[_type == "oddsCache" && date == $date]{ fixtureId, odds }`,
-          { date }
-        );
-        const result = oddsDocs || [];
-        // Cache in Redis for next request
-        if (result.length > 0) {
-          redisSet(oddsRedisKey, result, ODDS_CACHE_TTL).catch(() => {});
-        }
-        return result;
+        return [];
       })(),
 
-      // Standings: use Redis cache or fall back to Sanity
+      // Standings: use Redis cache or fetch fresh
       (async () => {
         if (cachedStandings && typeof cachedStandings === 'object' && Object.keys(cachedStandings).length > 0) {
           return cachedStandings;
         }
         if (leagueIds.length === 0) return {};
-
         try {
           const positions = await getCachedStandingsPositions(leagueIds);
           if (Object.keys(positions).length > 0) {
@@ -291,10 +242,9 @@ export async function GET(request) {
       })(),
     ]);
 
-    // session is the Supabase user object (or null)
     const userId = session?.id || null;
 
-    // ===== PHASE 6: User-specific data (from Supabase — per-user, persists across reloads) =====
+    // ===== PHASE 6: User-specific data from Supabase =====
     let hidden = [];
     let favorites = [];
     if (userId) {
@@ -310,42 +260,27 @@ export async function GET(request) {
     const { globallyAnalyzed, analyzedOdds, analyzedData } = analysisResult;
     const userAnalyzed = (globallyAnalyzed || []);
 
-    // Merge The Odds API cached odds into analyzed data
     if (oddsResult && oddsResult.length > 0) {
       try {
         for (const doc of oddsResult) {
           const fid = doc.fixtureId;
           if (!fid || !doc.odds) continue;
 
-          // Merge into analyzedOdds (matchWinner for card display)
           if (doc.odds.matchWinner) {
             if (!analyzedOdds[fid]) {
               analyzedOdds[fid] = doc.odds.matchWinner;
             }
           }
 
-          // Merge into analyzedData odds (for accordion markets)
           if (analyzedData[fid]) {
             const existing = analyzedData[fid].odds;
             if (!existing || !existing.matchWinner) {
-              // No API-Football odds -- use The Odds API entirely
-              analyzedData[fid].odds = {
-                ...(existing || {}),
-                ...doc.odds,
-              };
+              analyzedData[fid].odds = { ...(existing || {}), ...doc.odds };
             } else {
-              // Merge: fill missing markets from The Odds API
-              if (!existing.matchWinner && doc.odds.matchWinner) {
-                existing.matchWinner = doc.odds.matchWinner;
-              }
-              if (!existing.overUnder && doc.odds.overUnder) {
-                existing.overUnder = doc.odds.overUnder;
-              }
-              // Add The Odds API bookmakers to allBookmakerOdds
+              if (!existing.matchWinner && doc.odds.matchWinner) existing.matchWinner = doc.odds.matchWinner;
+              if (!existing.overUnder && doc.odds.overUnder) existing.overUnder = doc.odds.overUnder;
               if (doc.odds.allBookmakerOdds?.length) {
-                const names = new Set(
-                  (existing.allBookmakerOdds || []).map(b => b.name?.toLowerCase())
-                );
+                const names = new Set((existing.allBookmakerOdds || []).map(b => b.name?.toLowerCase()));
                 for (const bk of doc.odds.allBookmakerOdds) {
                   if (!names.has(bk.name?.toLowerCase())) {
                     if (!existing.allBookmakerOdds) existing.allBookmakerOdds = [];
@@ -357,8 +292,7 @@ export async function GET(request) {
           }
         }
       } catch (e) {
-        // Non-critical: odds enrichment failed, continue without
-        console.error('[FIXTURES] Odds merge error:', e.message);
+        console.error('[fixtures] Odds merge error:', e.message);
       }
     }
 
