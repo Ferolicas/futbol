@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { signOut } from 'next-auth/react';
+import { createClient } from '@supabase/supabase-js';
+const supabaseBrowser = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 import { motion } from 'framer-motion';
 import PaymentModal from './PaymentModal';
 
@@ -167,7 +168,7 @@ export default function PlanesClient({ userId, email }) {
         <div className="planes-footer">
           <button
             className="planes-signout"
-            onClick={() => signOut({ callbackUrl: '/' })}
+            onClick={() => supabaseBrowser.auth.signOut().then(() => window.location.href = '/')}
           >
             Cerrar sesion
           </button>

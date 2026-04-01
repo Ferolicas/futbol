@@ -1,7 +1,6 @@
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '../../lib/auth';
 import { redirect } from 'next/navigation';
-import { queryFromSanity } from '../../lib/sanity';
+import { createSupabaseServerClient } from '../../lib/supabase-auth';
+import { supabaseAdmin } from '../../lib/supabase';
 import PlanesClient from './planes-client';
 
 export const metadata = {
@@ -9,23 +8,25 @@ export const metadata = {
 };
 
 export default async function PlanesPage() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) redirect('/sign-in');
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect('/login');
 
-  // Fresh Sanity lookup to always get current subscription status
-  const sanityUser = await queryFromSanity(
-    `*[_type == "cfaUser" && _id == $id][0]{ _id, email, subscriptionStatus }`,
-    { id: session.user.id }
-  );
+  const { data: profile } = await supabaseAdmin
+    .from('user_profiles')
+    .select('subscription_status, plan, email, name')
+    .eq('id', user.id)
+    .single();
 
-  if (sanityUser && ['active', 'trialing'].includes(sanityUser.subscriptionStatus)) {
+  const activeStatuses = ['active', 'trialing'];
+  if (profile && activeStatuses.includes(profile.subscription_status)) {
     redirect('/dashboard');
   }
 
   return (
     <PlanesClient
-      userId={sanityUser?._id || session.user.id}
-      email={sanityUser?.email || session.user.email}
+      userId={user.id}
+      email={profile?.email || user.email}
     />
   );
 }

@@ -1,7 +1,6 @@
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '../../lib/auth';
 import { redirect } from 'next/navigation';
-import { queryFromSanity } from '../../lib/sanity';
+import { createSupabaseServerClient } from '../../lib/supabase-auth';
+import { supabaseAdmin } from '../../lib/supabase';
 import ChatWidget from './chat-widget';
 
 export const metadata = {
@@ -9,16 +8,19 @@ export const metadata = {
 };
 
 export default async function DashboardLayout({ children }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) redirect('/sign-in');
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect('/login');
 
-  // Fresh Sanity lookup to always get current subscription status
-  const sanityUser = await queryFromSanity(
-    `*[_type == "cfaUser" && _id == $id][0]{ subscriptionStatus }`,
-    { id: session.user.id }
-  );
+  // Check subscription status from user_profiles
+  const { data: profile } = await supabaseAdmin
+    .from('user_profiles')
+    .select('subscription_status, plan')
+    .eq('id', user.id)
+    .single();
 
-  if (!sanityUser || !['active', 'trialing'].includes(sanityUser.subscriptionStatus)) {
+  const activeStatuses = ['active', 'trialing'];
+  if (!profile || !activeStatuses.includes(profile.subscription_status)) {
     redirect('/planes');
   }
 
