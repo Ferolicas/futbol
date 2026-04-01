@@ -32,15 +32,13 @@ export async function POST(request) {
 
     const userId = data.user.id;
 
-    // Create user profile
+    // Create user profile (subscription_status / country added via migration later)
     await supabaseAdmin.from('user_profiles').upsert({
       id: userId,
       email: emailLower,
       name: name.trim(),
-      country: country || 'unknown',
       role: 'user',
       plan: plan || null,
-      subscription_status: 'pending',
       created_at: new Date().toISOString(),
     }, { onConflict: 'id' }).catch(e => console.error('[Register] profile:', e.message));
 

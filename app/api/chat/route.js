@@ -21,11 +21,12 @@ export async function GET(request) {
 
   try {
     if (isAdmin && !targetUserId) {
-      const { data: messages } = await supabaseAdmin
+      const { data: messages, error: mErr } = await supabaseAdmin
         .from('chat_messages')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(200);
+      if (mErr?.code === '42P01') return Response.json({ conversations: [] });
 
       const conversations = {};
       (messages || []).forEach(m => {
@@ -40,11 +41,12 @@ export async function GET(request) {
     }
 
     const queryUserId = isAdmin && targetUserId ? targetUserId : user.id;
-    const { data: messages } = await supabaseAdmin
+    const { data: messages, error: mErr } = await supabaseAdmin
       .from('chat_messages')
       .select('id, message, sender, read, created_at')
       .eq('user_id', queryUserId)
       .order('created_at', { ascending: true });
+    if (mErr?.code === '42P01') return Response.json({ messages: [] });
 
     return Response.json({ messages: messages || [] });
   } catch (error) {
@@ -77,7 +79,10 @@ export async function POST(request) {
       read: false,
       created_at: new Date().toISOString(),
     }).select('id').single();
-    if (error) throw error;
+    if (error) {
+      if (error.code === '42P01') return Response.json({ error: 'Chat no disponible temporalmente.' }, { status: 503 });
+      throw error;
+    }
 
     await triggerEvent(`chat-${userId}`, 'new-message', { id: row.id, message: message.trim(), sender, created_at: new Date().toISOString() });
 

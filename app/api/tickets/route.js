@@ -21,7 +21,10 @@ export async function GET() {
     if (!isAdmin) query = query.eq('user_id', user.id);
 
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) {
+      if (error.code === '42P01') return Response.json({ tickets: [] }); // table not yet created
+      throw error;
+    }
     return Response.json({ tickets: data || [] });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
@@ -52,7 +55,7 @@ export async function POST(request) {
       return Response.json({ error: 'Message required' }, { status: 400 });
     }
 
-    const { count } = await supabaseAdmin.from('tickets').select('*', { count: 'exact', head: true });
+    const { count } = await supabaseAdmin.from('tickets').select('*', { count: 'exact', head: true }).then(r => r).catch(() => ({ count: 0 }));
     const ticketId = `CFA_${1000 + (count || 0)}`;
 
     const { error } = await supabaseAdmin.from('tickets').insert({
@@ -64,7 +67,10 @@ export async function POST(request) {
       status: 'open',
       created_at: new Date().toISOString(),
     });
-    if (error) throw error;
+    if (error) {
+      if (error.code === '42P01') return Response.json({ error: 'Servicio no disponible. Intenta mas tarde.' }, { status: 503 });
+      throw error;
+    }
 
     sendTicketNotification({
       ticketId,

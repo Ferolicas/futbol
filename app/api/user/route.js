@@ -41,6 +41,7 @@ export async function GET(request) {
         .select('*')
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
+      if (error?.code === '42P01') return Response.json({ combinadas: [] });
       if (error) console.error('[user:combinadas]', error.message);
       return Response.json({ combinadas: data || [] });
     }
@@ -103,6 +104,7 @@ export async function POST(request) {
       }).select('id').single();
 
       if (error) {
+        if (error.code === '42P01') return Response.json({ error: 'Servicio no disponible temporalmente.' }, { status: 503 });
         console.error('[user:save-combinada]', error.message);
         return Response.json({ error: 'Error saving combinada' }, { status: 500 });
       }
