@@ -1,8 +1,8 @@
-import { queryFromSanity } from '../../../lib/sanity';
-import { filterHighProbabilityBets } from '../../../lib/odds-api';
-
-// Returns cached odds from The Odds API (stored by the cron job)
-// No cache — always serves latest from Sanity
+/**
+ * GET /api/odds
+ * Returns odds from Redis cache (stored by cron/odds).
+ */
+import { redisGet } from '../../../lib/redis';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -13,41 +13,17 @@ export async function GET(request) {
   const fixtureId = searchParams.get('fixtureId');
 
   try {
-    let odds;
-
     if (fixtureId) {
-      // Single fixture
-      odds = await queryFromSanity(
-        `*[_type == "oddsCache" && fixtureId == $fid][0]`,
-        { fid: Number(fixtureId) }
-      );
-      if (!odds) {
-        return Response.json({ odds: null, highProbBets: [] });
-      }
-      const highProbBets = filterHighProbabilityBets(odds.odds);
-      return Response.json({ odds: odds.odds, highProbBets, fetchedAt: odds.fetchedAt });
+      const odds = await redisGet(`odds:fixture:${fixtureId}`);
+      if (!odds) return Response.json({ odds: null, highProbBets: [] });
+      return Response.json({ odds, fetchedAt: odds.fetchedAt });
     }
 
-    // All fixtures for a date
-    odds = await queryFromSanity(
-      `*[_type == "oddsCache" && date == $date]{
-        fixtureId, odds, fetchedAt
-      }`,
-      { date }
-    );
-
-    const result = {};
-    for (const o of (odds || [])) {
-      result[o.fixtureId] = {
-        ...o.odds,
-        highProbBets: filterHighProbabilityBets(o.odds),
-        fetchedAt: o.fetchedAt,
-      };
-    }
-
+    // All odds for a date
+    const oddsMap = await redisGet(`odds:date:${date}`);
     return Response.json({
-      odds: result,
-      count: Object.keys(result).length,
+      odds: oddsMap || {},
+      count: Object.keys(oddsMap || {}).length,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

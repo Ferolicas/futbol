@@ -1,5 +1,6 @@
 import crypto from 'crypto';
-import { queryFromSanityFresh, patchSanity } from '../../../../lib/sanity';
+import { supabaseAdmin } from '../../../../lib/supabase';
+import { redisSet } from '../../../../lib/redis';
 import { sendPasswordResetEmail } from '../../../../lib/zeptomail';
 
 export async function POST(request) {
@@ -11,30 +12,25 @@ export async function POST(request) {
 
     const emailLower = email.toLowerCase().trim();
 
-    const user = await queryFromSanityFresh(
-      `*[_type == "cfaUser" && email == $email][0]{ _id, name, email }`,
-      { email: emailLower }
-    );
+    // Look up user in user_profiles
+    const { data: profile } = await supabaseAdmin
+      .from('user_profiles')
+      .select('id, name, email')
+      .eq('email', emailLower)
+      .single();
 
-    // Always return success even if user not found (prevents email enumeration)
-    if (!user?._id) {
+    // Always return success to prevent email enumeration
+    if (!profile) {
       return Response.json({ success: true });
     }
 
-    // Generate secure random token (expires in 1 hour)
+    // Generate secure token — store in Redis with 1-hour TTL
     const token = crypto.randomBytes(32).toString('hex');
-    const expiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-
-    // Patch only the reset token fields — does not overwrite password or other data
-    const docId = user._id.replace('cfaUser-', '');
-    await patchSanity('cfaUser', docId, {
-      resetToken: token,
-      resetTokenExpiry: expiry,
-    });
+    await redisSet(`pwd-reset:${token}`, { userId: profile.id, email: emailLower }, 3600);
 
     await sendPasswordResetEmail({
-      to: user.email,
-      name: user.name,
+      to: emailLower,
+      name: profile.name,
       token,
     });
 

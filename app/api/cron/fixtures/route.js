@@ -1,8 +1,12 @@
+/**
+ * GET /api/cron/fixtures
+ * Runs at 10AM Spain (08:00 UTC): fetch today's fixtures, save to Redis + Supabase.
+ * Also generates matchSchedule for live/lineups crons.
+ */
 import { getFixtures, getQuota } from '../../../../lib/api-football';
-import { saveToSanity } from '../../../../lib/sanity';
-
-// Cron: runs at 10:00 AM Spain time (08:00 UTC)
-// cron-job.org: GET /api/cron/fixtures?secret=CRON_SECRET
+import { saveMatchSchedule } from '../../../../lib/supabase-cache';
+import { cacheFixtures } from '../../../../lib/sanity-cache';
+import { redisSet, KEYS } from '../../../../lib/redis';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -21,75 +25,56 @@ export async function GET(request) {
 
   try {
     const today = new Date().toISOString().split('T')[0];
-    console.log(`[CRON] Loading fixtures for ${today}...`);
+    console.log(`[CRON:fixtures] Loading fixtures for ${today}...`);
 
-    const result = await getFixtures(today);
+    const result = await getFixtures(today, { forceApi: true });
     const fixtures = result.fixtures || [];
 
-    // Generate matchSchedule so live/lineups crons can skip intelligently
+    // Cache fixtures in Redis + Supabase
     if (fixtures.length > 0) {
-      const kickoffTimes = fixtures.map(f => {
-        const kickoff = new Date(f.fixture.date).getTime();
-        return {
-          fixtureId: f.fixture.id,
-          kickoff,
-          expectedEnd: kickoff + 120 * 60 * 1000,
-        };
-      }).sort((a, b) => a.kickoff - b.kickoff);
-
-      const firstKickoff = kickoffTimes[0].kickoff;
-      const lastExpectedEnd = Math.max(...kickoffTimes.map(k => k.expectedEnd));
-
-      await saveToSanity('matchSchedule', today, {
-        date: today,
-        firstKickoff,
-        lastExpectedEnd,
-        kickoffTimes,
-        fixtureCount: fixtures.length,
-        createdAt: new Date().toISOString(),
-      });
-      console.log(`[CRON] matchSchedule saved: ${fixtures.length} matches`);
-    } else {
-      await saveToSanity('matchSchedule', today, {
-        date: today,
-        firstKickoff: null,
-        lastExpectedEnd: null,
-        kickoffTimes: [],
-        fixtureCount: 0,
-        createdAt: new Date().toISOString(),
-      });
-      console.log('[CRON] matchSchedule saved: 0 matches');
+      await cacheFixtures(today, fixtures);
+      await redisSet(KEYS.fixtures(today), fixtures, 7200);
     }
 
-    const quota = await getQuota();
-    let tomorrowCount = 0;
+    // Generate matchSchedule for live/lineups crons
+    const kickoffTimes = fixtures.map(f => {
+      const kickoff = new Date(f.fixture.date).getTime();
+      return { fixtureId: f.fixture.id, kickoff, expectedEnd: kickoff + 120 * 60 * 1000 };
+    }).sort((a, b) => a.kickoff - b.kickoff);
 
-    // Always fetch tomorrow's fixtures — quota is not a concern
-    {
+    const scheduleData = {
+      kickoffTimes,
+      firstKickoff: kickoffTimes[0]?.kickoff || null,
+      lastExpectedEnd: kickoffTimes.length > 0 ? Math.max(...kickoffTimes.map(k => k.expectedEnd)) : null,
+      fixtureCount: fixtures.length,
+    };
+
+    await saveMatchSchedule(today, scheduleData);
+    console.log(`[CRON:fixtures] matchSchedule saved: ${fixtures.length} matches`);
+
+    // Also fetch tomorrow's fixtures (cache warming)
+    let tomorrowCount = 0;
+    try {
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       const tomorrowDate = tomorrow.toISOString().split('T')[0];
-
-      try {
-        const tResult = await getFixtures(tomorrowDate);
-        tomorrowCount = tResult.fixtures?.length || 0;
-      } catch (e) {
-        console.error('[CRON] Tomorrow fetch failed:', e.message);
-      }
+      const tResult = await getFixtures(tomorrowDate);
+      tomorrowCount = tResult.fixtures?.length || 0;
+    } catch (e) {
+      console.error('[CRON:fixtures] Tomorrow fetch failed:', e.message);
     }
 
-    const finalQuota = await getQuota();
-
+    const quota = await getQuota();
     return Response.json({
       success: true,
       date: today,
       fixtureCount: fixtures.length,
       tomorrowCount,
-      quota: finalQuota,
+      quota,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('[CRON] Fixtures error:', error);
+    console.error('[CRON:fixtures] Error:', error.message);
     return Response.json({ error: error.message }, { status: 500 });
   }
 }

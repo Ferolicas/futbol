@@ -1,61 +1,61 @@
 import { stripe, createPostPaymentSubscription } from '../../../lib/stripe';
-import { queryFromSanity, saveToSanity } from '../../../lib/sanity';
+import { supabaseAdmin } from '../../../lib/supabase';
 import { sendWelcomeEmail } from '../../../lib/resend-email';
 
-async function findUser(customerId, userId) {
-  // 1. By stripeCustomerId
-  let user = await queryFromSanity(
-    `*[_type == "cfaUser" && stripeCustomerId == $customerId][0]{ _id, name, email, password, plan, clerkId, role }`,
-    { customerId }
-  );
-  if (user) return user;
+async function findUserByCustomer(customerId, userId) {
+  // 1. By stripe_customer_id in user_profiles
+  let { data: profile } = await supabaseAdmin
+    .from('user_profiles')
+    .select('id, name, email, plan, role')
+    .eq('stripe_customer_id', customerId)
+    .single();
+  if (profile) return profile;
 
-  // 2. By userId from metadata
+  // 2. By userId metadata
   if (userId) {
-    user = await queryFromSanity(
-      `*[_type == "cfaUser" && _id == $userId][0]{ _id, name, email, password, plan, clerkId, role }`,
-      { userId }
-    );
-    if (user) return user;
+    const { data: p2 } = await supabaseAdmin
+      .from('user_profiles')
+      .select('id, name, email, plan, role')
+      .eq('id', userId)
+      .single();
+    if (p2) return p2;
   }
 
   // 3. Fallback: email from Stripe customer
   try {
     const customer = await stripe.customers.retrieve(customerId);
     if (customer?.email) {
-      return queryFromSanity(
-        `*[_type == "cfaUser" && email == $email][0]{ _id, name, email, password, plan, clerkId, role }`,
-        { email: customer.email }
-      );
+      const { data: p3 } = await supabaseAdmin
+        .from('user_profiles')
+        .select('id, name, email, plan, role')
+        .eq('email', customer.email.toLowerCase())
+        .single();
+      return p3 || null;
     }
   } catch (e) {
-    console.error('Fallback customer lookup failed:', e.message);
+    console.error('[webhook] Stripe customer lookup:', e.message);
   }
   return null;
 }
 
-async function activateUser(user, plan, customerId) {
-  const docId = user._id.replace('cfaUser-', '');
-  await saveToSanity('cfaUser', docId, {
-    name: user.name,
-    email: user.email,
-    password: user.password,
-    role: user.role,
+async function activateUser(profile, plan, customerId) {
+  await supabaseAdmin.from('user_profiles').upsert({
+    id: profile.id,
     plan: plan || 'plataforma',
-    subscriptionStatus: 'active',
-    stripeCustomerId: customerId,
-    paidAt: new Date().toISOString(),
-  });
+    subscription_status: 'active',
+    stripe_customer_id: customerId,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'id' }).catch(e => console.error('[webhook:activate]', e.message));
 
   try {
     await sendWelcomeEmail({
-      to: user.email,
-      name: user.name,
+      to: profile.email,
+      name: profile.name,
       plan: plan || 'plataforma',
       password: '(la contrasena que elegiste al registrarte)',
     });
-  } catch (emailErr) {
-    console.error('Welcome email failed:', emailErr);
+  } catch (e) {
+    console.error('[webhook] Welcome email failed:', e.message);
   }
 }
 
@@ -69,7 +69,6 @@ export async function POST(request) {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
   let event;
-
   try {
     if (webhookSecret && sig) {
       event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
@@ -77,108 +76,71 @@ export async function POST(request) {
       event = JSON.parse(body);
     }
   } catch (err) {
-    console.error('Webhook signature verification failed:', err.message);
+    console.error('[webhook] Signature failed:', err.message);
     return Response.json({ error: 'Webhook signature failed' }, { status: 400 });
   }
 
   try {
     switch (event.type) {
-      // Both plans: PaymentIntent succeeded → activate user + create subscription
       case 'payment_intent.succeeded': {
         const pi = event.data.object;
         const { userId, plan } = pi.metadata || {};
         const customerId = pi.customer;
-
         if (!plan || !customerId) break;
 
-        const user = await findUser(customerId, userId);
-        if (!user) {
-          console.error(`Webhook: user not found for customer ${customerId}, userId ${userId}`);
+        const profile = await findUserByCustomer(customerId, userId);
+        if (!profile) {
+          console.error(`[webhook] User not found: customer=${customerId} userId=${userId}`);
           break;
         }
+        await activateUser(profile, plan, customerId);
 
-        await activateUser(user, plan, customerId);
-
-        // Create recurring subscription (starts after 30-day trial)
         try {
           const sub = await createPostPaymentSubscription(customerId, plan);
-          console.log(`Subscription created for ${plan}: ${sub.id}`);
-        } catch (subErr) {
-          console.error('Failed to create subscription:', subErr);
+          console.log(`[webhook] Subscription created for ${plan}: ${sub.id}`);
+        } catch (e) {
+          console.error('[webhook] Failed to create subscription:', e.message);
         }
         break;
       }
 
       case 'customer.subscription.updated': {
         const subscription = event.data.object;
-        const customerId = subscription.customer;
-
-        const user = await findUser(customerId);
-        if (user) {
-          const docId = user._id.replace('cfaUser-', '');
-          const status = subscription.status === 'active' ? 'active'
-            : subscription.status === 'trialing' ? 'active'
-            : subscription.status === 'past_due' ? 'past_due'
-            : 'inactive';
-
-          await saveToSanity('cfaUser', docId, {
-            name: user.name,
-            email: user.email,
-            password: user.password,
-            clerkId: user.clerkId,
-            role: user.role,
-            plan: user.plan,
-            subscriptionStatus: status,
-            updatedAt: new Date().toISOString(),
-          });
-        }
+        const profile = await findUserByCustomer(subscription.customer);
+        if (!profile) break;
+        const status = ['active', 'trialing'].includes(subscription.status) ? 'active'
+          : subscription.status === 'past_due' ? 'past_due' : 'inactive';
+        await supabaseAdmin.from('user_profiles')
+          .update({ subscription_status: status, updated_at: new Date().toISOString() })
+          .eq('id', profile.id)
+          .catch(e => console.error('[webhook:sub.updated]', e.message));
         break;
       }
 
       case 'customer.subscription.deleted': {
         const subscription = event.data.object;
-        const customerId = subscription.customer;
-
-        const user = await findUser(customerId);
-        if (user) {
-          const docId = user._id.replace('cfaUser-', '');
-          await saveToSanity('cfaUser', docId, {
-            name: user.name,
-            email: user.email,
-            password: user.password,
-            clerkId: user.clerkId,
-            role: user.role,
-            plan: user.plan,
-            subscriptionStatus: 'cancelled',
-            cancelledAt: new Date().toISOString(),
-          });
-        }
+        const profile = await findUserByCustomer(subscription.customer);
+        if (!profile) break;
+        await supabaseAdmin.from('user_profiles')
+          .update({ subscription_status: 'cancelled', updated_at: new Date().toISOString() })
+          .eq('id', profile.id)
+          .catch(e => console.error('[webhook:sub.deleted]', e.message));
         break;
       }
 
       case 'invoice.payment_failed': {
         const invoice = event.data.object;
-        const customerId = invoice.customer;
-
-        const user = await findUser(customerId);
-        if (user) {
-          const docId = user._id.replace('cfaUser-', '');
-          await saveToSanity('cfaUser', docId, {
-            name: user.name,
-            email: user.email,
-            password: user.password,
-            clerkId: user.clerkId,
-            role: user.role,
-            plan: user.plan,
-            subscriptionStatus: 'past_due',
-            updatedAt: new Date().toISOString(),
-          });
-        }
+        const profile = await findUserByCustomer(invoice.customer);
+        if (!profile) break;
+        await supabaseAdmin.from('user_profiles')
+          .update({ subscription_status: 'past_due', updated_at: new Date().toISOString() })
+          .eq('id', profile.id)
+          .catch(e => console.error('[webhook:invoice.failed]', e.message));
         break;
       }
     }
   } catch (error) {
-    console.error('Webhook handler error:', error);
+    console.error('[webhook] Handler error:', error.message);
     return Response.json({ error: 'Webhook handler failed' }, { status: 500 });
   }
 

@@ -1,9 +1,10 @@
-import { getFromSanity, saveToSanity } from '../../../../lib/sanity';
+/**
+ * GET /api/cron/odds
+ * Fetches odds from The Odds API and stores them in Redis.
+ */
+import { redisGet, redisSet, KEYS } from '../../../../lib/redis';
 import { fetchOddsForFixtures } from '../../../../lib/odds-api';
 import { triggerEvent } from '../../../../lib/pusher';
-
-// Cron: fetches odds from The Odds API
-// cron-job.org: GET /api/cron/odds?secret=CRON_SECRET
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 55;
@@ -27,58 +28,43 @@ export async function GET(request) {
   try {
     const today = new Date().toISOString().split('T')[0];
 
-    const quotaDoc = await getFromSanity('appConfig', `oddsQuota-${today}`);
-    const callsToday = quotaDoc?.calls || 0;
+    // Track calls today
+    const quotaKey = `odds-quota:${today}`;
+    const callsToday = (await redisGet(quotaKey)) || 0;
 
-    // Get today's fixtures from Sanity cache
-    const cached = await getFromSanity('footballFixturesCache', today);
-    const fixtures = cached?.fixtures || [];
-
-    if (fixtures.length === 0) {
+    // Get today's fixtures from Redis
+    const fixtures = await redisGet(KEYS.fixtures(today));
+    if (!fixtures || fixtures.length === 0) {
       return Response.json({ success: true, message: 'No fixtures for today', odds: 0 });
     }
 
-    // Only fetch odds for matches not yet finished
     const FINISHED = ['FT', 'AET', 'PEN', 'AWD', 'WO'];
-    const activeFixtures = fixtures.filter(f =>
-      !FINISHED.includes(f.fixture?.status?.short)
-    );
+    const activeFixtures = fixtures.filter(f => !FINISHED.includes(f.fixture?.status?.short));
 
     if (activeFixtures.length === 0) {
       return Response.json({ success: true, message: 'All matches finished', odds: 0 });
     }
 
-    // Fetch odds from The Odds API
     const { oddsByFixture, apiCallsUsed, remaining } = await fetchOddsForFixtures(activeFixtures);
-
     const matchedCount = Object.keys(oddsByFixture).length;
 
-    // Save odds to Sanity for each fixture
-    const savePromises = Object.entries(oddsByFixture).map(([fixtureId, odds]) =>
-      saveToSanity('oddsCache', `odds-${fixtureId}`, {
-        fixtureId: Number(fixtureId),
-        date: today,
-        odds,
-        source: 'the-odds-api',
-        fetchedAt: new Date().toISOString(),
-      })
+    // Save each fixture's odds to Redis (24h TTL)
+    await Promise.all(
+      Object.entries(oddsByFixture).map(([fixtureId, odds]) =>
+        redisSet(`odds:fixture:${fixtureId}`, { ...odds, fetchedAt: new Date().toISOString() }, 86400)
+      )
     );
-    await Promise.all(savePromises);
+
+    // Save full date odds map
+    await redisSet(`odds:date:${today}`, oddsByFixture, 86400).catch(() => {});
 
     // Track daily usage
-    await saveToSanity('appConfig', `oddsQuota-${today}`, {
-      date: today,
-      calls: callsToday + 1,
-      lastCallAt: new Date().toISOString(),
-      remaining,
-    });
+    await redisSet(quotaKey, Number(callsToday) + 1, 86400).catch(() => {});
 
-    // Push odds update via Pusher so open dashboards get fresh odds
+    // Push update to open dashboards
     if (matchedCount > 0) {
       await triggerEvent('live-scores', 'odds-update', {
-        date: today,
-        odds: oddsByFixture,
-        timestamp: new Date().toISOString(),
+        date: today, odds: oddsByFixture, timestamp: new Date().toISOString(),
       });
     }
 
@@ -88,11 +74,11 @@ export async function GET(request) {
       totalActive: activeFixtures.length,
       apiCallsUsed,
       remaining,
-      callsToday: callsToday + 1,
+      callsToday: Number(callsToday) + 1,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('[ODDS-CRON] Error:', error);
+    console.error('[ODDS-CRON]', error.message);
     return Response.json({ error: error.message }, { status: 500 });
   }
 }
