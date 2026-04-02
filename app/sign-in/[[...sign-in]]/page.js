@@ -26,17 +26,10 @@ export default function SignInPage() {
       return;
     }
 
-    // Verificar si tiene plan activo
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('subscription_status, role')
-      .eq('id', user.id)
-      .single();
-
+    // Verificar acceso server-side (evita problemas de RLS con anon key)
+    const { redirect } = await fetch('/api/auth/check-access').then(r => r.json());
     setLoading(false);
-
-    const hasActivePlan = profile?.subscription_status === 'active' || profile?.role === 'admin';
-    router.replace(hasActivePlan ? '/dashboard' : '/planes');
+    router.replace(redirect);
   };
 
   return (
