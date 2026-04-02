@@ -352,8 +352,8 @@ export default function Dashboard() {
             score: m.score,
             // Preserve corners from corners-cron if new value is 0 (live=all has no statistics)
             corners: m.corners?.total > 0 ? m.corners : (prev?.corners || m.corners),
-            yellowCards: m.yellowCards,
-            redCards: m.redCards,
+            yellowCards: m.yellowCards?.total > 0 ? m.yellowCards : (prev?.yellowCards || m.yellowCards),
+            redCards: m.redCards?.total > 0 ? m.redCards : (prev?.redCards || m.redCards),
             // Never overwrite with empty — API events are inconsistent per cycle
             goalScorers: m.goalScorers?.length > 0 ? m.goalScorers : (prev?.goalScorers || []),
             missedPenalties: m.missedPenalties?.length > 0 ? m.missedPenalties : (prev?.missedPenalties || []),
@@ -452,6 +452,7 @@ export default function Dashboard() {
     if (statusFilter === 'live' && !isLive(status)) return false;
     if (statusFilter === 'upcoming' && status !== 'NS') return false;
     if (statusFilter === 'finished' && !isFinished(status)) return false;
+    if (statusFilter === 'favoritos' && !favorites.includes(f.fixture.id)) return false;
     if (leagueFilter && String(f.league.id) !== leagueFilter) return false;
     return true;
   });
@@ -836,6 +837,7 @@ export default function Dashboard() {
               { key: 'live', label: 'En Vivo', count: liveCount },
               { key: 'upcoming', label: 'Proximos', count: upcomingCount },
               { key: 'finished', label: 'Finalizados' },
+              { key: 'favoritos', label: '&#9733; Favoritos', count: favoriteCount },
             ].map(c => (
               <button key={c.key} className={`chip ${statusFilter === c.key ? 'active' : ''} ${c.key === 'live' && liveCount > 0 ? 'pulse' : ''}`} onClick={() => setStatusFilter(c.key)}>
                 {c.key === 'live' && liveCount > 0 && <span className="dot-live" />}
@@ -1599,8 +1601,8 @@ function MatchTimer({ elapsed, status }) {
 function LiveStatsBar({ stats }) {
   if (!stats) return null;
   const { corners, yellowCards, redCards } = stats;
-  const hasData = corners || yellowCards || redCards;
-  if (!hasData) return null;
+  // Always render if at least one stat object is present (even 0-0 shows the icon)
+  if (!corners && !yellowCards && !redCards) return null;
 
   return (
     <div className="live-stats-bar">

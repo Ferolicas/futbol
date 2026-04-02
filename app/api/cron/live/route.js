@@ -110,20 +110,15 @@ async function sendGoalPushes(liveDetailsMap, existingLive) {
     .select('user_id, subscription');
   if (!subs?.length) return;
 
-  // Preload hidden lists per user
-  const hiddenByUser = {};
+  // Preload favorites per user — only notify for favorited matches
+  const favoritesByUser = {};
   await Promise.all(subs.map(async (row) => {
-    if (hiddenByUser[row.user_id] !== undefined) return;
-    const cached = await redisGet(KEYS.userHidden(row.user_id));
-    if (Array.isArray(cached)) {
-      hiddenByUser[row.user_id] = cached;
-    } else {
-      const { data: hiddenRows } = await supabaseAdmin
-        .from('user_hidden')
-        .select('fixture_id')
-        .eq('user_id', row.user_id);
-      hiddenByUser[row.user_id] = (hiddenRows || []).map(r => r.fixture_id);
-    }
+    if (favoritesByUser[row.user_id] !== undefined) return;
+    const { data: favRows } = await supabaseAdmin
+      .from('user_favorites')
+      .select('fixture_id')
+      .eq('user_id', row.user_id);
+    favoritesByUser[row.user_id] = (favRows || []).map(r => r.fixture_id);
   }));
 
   for (const goal of goals) {
@@ -131,8 +126,8 @@ async function sendGoalPushes(liveDetailsMap, existingLive) {
     const body = goal.scorer ? `${goal.scorer} · min. ${goal.minute}` : `min. ${goal.minute || '?'}`;
     await Promise.allSettled(subs.map(async (row) => {
       try {
-        const userHidden = hiddenByUser[row.user_id] || [];
-        if (userHidden.includes(goal.fixtureId)) return;
+        const userFavorites = favoritesByUser[row.user_id] || [];
+        if (!userFavorites.includes(goal.fixtureId)) return;
         const sub = typeof row.subscription === 'string' ? JSON.parse(row.subscription) : row.subscription;
         await sendPushNotification(sub, { title, body, tag: `goal-${goal.fixtureId}` });
       } catch {}
