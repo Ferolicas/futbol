@@ -2642,7 +2642,7 @@ input:checked + .cb-mark::after {
   text-align: center; margin-bottom: 2.5rem;
 }
 .planes-logo {
-  width: 200px; height: auto; margin: 0 auto 1rem; display: block;
+  width: 300px; height: auto; margin: 0 auto 1rem; display: block;
   filter: drop-shadow(0 0 20px rgba(0,230,118,0.3));
 }
 .planes-header h1 {
