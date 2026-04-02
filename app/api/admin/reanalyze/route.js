@@ -1,8 +1,8 @@
-import { analyzeMatch, getFixtures } from '../../../../lib/api-football';
+import { analyzeMatch, getFixtures, fetchMatchStats } from '../../../../lib/api-football';
 import { getCachedAnalysis, getAnalyzedFixtureIds, cacheAnalysis } from '../../../../lib/sanity-cache';
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../../lib/supabase';
-import { redisGet, redisDel, redisSet, KEYS } from '../../../../lib/redis';
+import { redisGet, redisDel, redisSet, KEYS, TTL } from '../../../../lib/redis';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -21,13 +21,23 @@ export async function POST(request) {
   const today = searchParams.get('date') || new Date().toISOString().split('T')[0];
   const force = searchParams.get('force') === 'true';
 
-  // force=true: clear all existing analysis for the date before re-running
+  // force=true: clear ALL cached data for the date before re-running
   if (force) {
     const { error: _errClear } = await supabaseAdmin.from('match_analysis').delete().eq('date', today);
     if (_errClear) console.error('[reanalyze:force-clear]', _errClear.message);
+
+    // Clear fixture + analysis + live stats caches
+    const existingFixtures = await redisGet(KEYS.fixtures(today));
+    const fidsToClear = Array.isArray(existingFixtures)
+      ? existingFixtures.map(f => f.fixture?.id).filter(Boolean)
+      : [];
+
     await Promise.all([
       redisDel(`analysis:${today}`),
       redisDel(KEYS.fixtures(today)),
+      redisDel(KEYS.liveStats(today)),
+      ...fidsToClear.map(fid => redisDel(KEYS.fixtureStats(fid))),
+      ...fidsToClear.map(fid => redisDel(`analysis:fixture:${fid}`)),
     ]);
   }
 
@@ -84,11 +94,12 @@ export async function POST(request) {
               }
             }
             const result = await analyzeMatch(fixture, { date: today, force });
-            await cacheAnalysis(fid, { ...result, date: today });
+            // analyzeMatch already saves to cache internally — don't overwrite with wrapper object
+            const a = result.analysis || result;
             analyzed++;
             analyzedIds.push(fid);
-            if (result.odds?.matchWinner) analyzedOdds[fid] = result.odds.matchWinner;
-            analyzedData[fid] = buildSummary(result);
+            if (a.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
+            analyzedData[fid] = buildSummary(a);
           } catch (e) {
             failed++;
             console.error(`[reanalyze] Failed ${fid}:`, e.message);
@@ -99,6 +110,29 @@ export async function POST(request) {
 
       const analysisCache = { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData };
       await redisSet(`analysis:${today}`, analysisCache, 12 * 3600).catch(() => {});
+
+      // Re-fetch live stats (corners, cards, scorers) for finished matches
+      const FINISHED = ['FT', 'AET', 'PEN'];
+      const finishedFixtures = fixtures.filter(f => FINISHED.includes(f.fixture?.status?.short));
+      if (finishedFixtures.length > 0) {
+        send({ type: 'progress', current: total, total, analyzed, skipped, failed, match: 'Cargando estadísticas...' });
+        const liveStatsMap = {};
+        await Promise.all(finishedFixtures.map(async (f) => {
+          const fid = f.fixture.id;
+          try {
+            const stats = await fetchMatchStats(fid);
+            if (stats) {
+              await redisSet(KEYS.fixtureStats(fid), stats, TTL.yesterday);
+              liveStatsMap[fid] = stats;
+            }
+          } catch (e) {
+            console.error(`[reanalyze:stats] ${fid}:`, e.message);
+          }
+        }));
+        if (Object.keys(liveStatsMap).length > 0) {
+          await redisSet(KEYS.liveStats(today), liveStatsMap, TTL.yesterday).catch(() => {});
+        }
+      }
 
       send({ type: 'done', analyzed, skipped, failed, total });
       controller.close();

@@ -8,6 +8,7 @@ import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
 import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
 import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/timezone';
+import { useLiveStats } from './live-stats-context';
 
 function detectCountry() {
   try {
@@ -69,8 +70,8 @@ export default function Dashboard() {
   // Multiple saved combinadas
   const [savedCombinadas, setSavedCombinadas] = useState([]);
   const [savingComb, setSavingComb] = useState(false);
-  // Live match stats (corners, cards, scorers)
-  const [liveStats, setLiveStats] = useState(_dashCache?.liveStats || {});
+  // Live match stats — shared context: dashboard + detail page use the same data
+  const { liveStats, setLiveStats, isPopulated } = useLiveStats();
   // Owner re-analyze state
   const [reanalyzing, setReanalyzing] = useState(false);
   const [reanalyzeDone, setReanalyzeDone] = useState(false);
@@ -80,6 +81,18 @@ export default function Dashboard() {
   // Web push notifications
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushSupported, setPushSupported] = useState(false);
+
+  // Seed context from navigation cache when layout remounts (e.g. user navigated outside /dashboard and back)
+  useEffect(() => {
+    if (!isPopulated && _dashCache?.liveStats && Object.keys(_dashCache.liveStats).length > 0) {
+      setLiveStats(prev => ({ ...prev, ..._dashCache.liveStats }));
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync context back to navigation cache so back-navigation is instant
+  useEffect(() => {
+    if (_dashCache) _dashCache.liveStats = liveStats;
+  }, [liveStats]);
 
   // Apply live data to fixtures — NEVER accepts a lower elapsed minute (prevents backwards jumps)
   const applyLiveUpdate = useCallback((prev, freshMatches) => {
@@ -154,6 +167,38 @@ export default function Dashboard() {
     }
   };
 
+  // Fetch missing stats for finished matches immediately (don't wait for cron).
+  // Called on page load and after reanalyze — uses Redis cache, API only when truly missing.
+  const refreshFinishedStats = useCallback(async (currentFixtures, currentLiveStats) => {
+    const FINISHED = ['FT', 'AET', 'PEN'];
+    const missing = (currentFixtures || []).filter(f => {
+      if (!FINISHED.includes(f.fixture?.status?.short)) return false;
+      const s = currentLiveStats[f.fixture.id];
+      return !s || (!s.corners && !s.yellowCards && !s.goalScorers?.length && !s.cardEvents?.length);
+    });
+    if (missing.length === 0) return;
+
+    const results = await Promise.allSettled(
+      missing.map(f =>
+        fetch(`/api/match/${f.fixture.id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'refresh-stats' }),
+        }).then(r => r.json())
+      )
+    );
+
+    const updates = {};
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled' && r.value?.stats) {
+        updates[missing[i].fixture.id] = r.value.stats;
+      }
+    });
+    if (Object.keys(updates).length > 0) {
+      setLiveStats(prev => ({ ...prev, ...updates }));
+    }
+  }, [setLiveStats]);
+
   const loadFixtures = useCallback(async (d, { silent, tz } = {}) => {
     if (!silent) setLoading(true);
     setError('');
@@ -187,14 +232,12 @@ export default function Dashboard() {
       }
 
       // Populate initial live stats from /api/fixtures response (corners, cards, scorers)
-      // This is available immediately — no need to wait for cron or Pusher
       if (data.initialLiveStats && Object.keys(data.initialLiveStats).length > 0) {
-        setLiveStats(prev => {
-          const next = { ...prev, ...data.initialLiveStats };
-          if (_dashCache) _dashCache.liveStats = next;
-          return next;
-        });
+        setLiveStats(prev => ({ ...prev, ...data.initialLiveStats }));
       }
+
+      // Background: fetch missing stats for finished matches immediately (no wait for cron)
+      refreshFinishedStats(fx, data.initialLiveStats || {});
 
       // Persist to module cache for instant back-navigation
       _dashCache = {
@@ -205,13 +248,12 @@ export default function Dashboard() {
         quota: data.quota || { used: 0 },
         liveStats: data.initialLiveStats || {},
       };
-      // Live updates come from Pusher — no /api/live polling needed
     } catch (e) {
       setError(e.message || 'Error de conexion');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshFinishedStats]);
 
   // Force-refresh live data: triggers live + corners crons on the server,
   // then updates all live stats (scores, corners, cards, goal scorers, minutes).
@@ -223,12 +265,7 @@ export default function Dashboard() {
       const res = await fetch('/api/refresh-live', { method: 'POST' });
       const data = await res.json();
       if (data.liveStats && typeof data.liveStats === 'object') {
-        setLiveStats(prev => {
-          const next = { ...prev, ...data.liveStats };
-          if (_dashCache) _dashCache.liveStats = next;
-          return next;
-        });
-        // Also update fixture statuses from fresh live data
+        setLiveStats(prev => ({ ...prev, ...data.liveStats }));
         setFixtures(prev => applyLiveUpdate(prev, Object.values(data.liveStats)));
       }
     } catch {} finally {
@@ -332,37 +369,11 @@ export default function Dashboard() {
   // Only subscribe to Pusher for today's date — past dates are historical/fixed
   const isViewingToday = date === todayInTz(userTz);
 
-  // Live scores: update fixtures and live stats in real-time (Pusher = sole source of truth)
+  // Live scores: update fixture list in real-time (liveStats handled by LiveStatsProvider)
   usePusherEvent(isViewingToday ? 'live-scores' : null, 'update', useCallback((data) => {
     if (!data?.matches) return;
     pusherLastUpdate.current = Date.now();
-    // Update fixtures with anti-backwards protection
     setFixtures(prev => applyLiveUpdate(prev, data.matches));
-    // Update live stats from Pusher data
-    setLiveStats(prev => {
-      const next = { ...prev };
-      data.matches.forEach(m => {
-        if (m.corners || m.yellowCards || m.redCards || m.goalScorers?.length) {
-          const prev = next[m.fixtureId];
-          next[m.fixtureId] = {
-            ...prev,
-            fixtureId: m.fixtureId,
-            status: m.status,
-            goals: m.goals,
-            score: m.score,
-            // Preserve corners from corners-cron if new value is 0 (live=all has no statistics)
-            corners: m.corners?.total > 0 ? m.corners : (prev?.corners || m.corners),
-            yellowCards: m.yellowCards?.total > 0 ? m.yellowCards : (prev?.yellowCards || m.yellowCards),
-            redCards: m.redCards?.total > 0 ? m.redCards : (prev?.redCards || m.redCards),
-            // Never overwrite with empty — API events are inconsistent per cycle
-            goalScorers: m.goalScorers?.length > 0 ? m.goalScorers : (prev?.goalScorers || []),
-            missedPenalties: m.missedPenalties?.length > 0 ? m.missedPenalties : (prev?.missedPenalties || []),
-          };
-        }
-      });
-      if (_dashCache) _dashCache.liveStats = next;
-      return next;
-    });
   }, [applyLiveUpdate]));
 
   // Lineups: notify that lineups are available (only for today)
@@ -392,20 +403,7 @@ export default function Dashboard() {
     });
   }, []));
 
-  // Corners update (every 45 min cron)
-  usePusherEvent(isViewingToday ? 'live-scores' : null, 'corners-update', useCallback((data) => {
-    if (!data?.matches) return;
-    setLiveStats(prev => {
-      const next = { ...prev };
-      data.matches.forEach(m => {
-        if (m.corners && next[m.fixtureId]) {
-          next[m.fixtureId] = { ...next[m.fixtureId], corners: m.corners };
-        }
-      });
-      if (_dashCache) _dashCache.liveStats = next;
-      return next;
-    });
-  }, []));
+  // corners-update handled by LiveStatsProvider
 
   // Analysis batch: reload when complete (via Pusher, only for today)
   usePusherEvent(isViewingToday ? 'analysis' : null, 'batch-complete', useCallback((data) => {
@@ -1353,8 +1351,11 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
             >&#9733;</button>
           )}
           {selCount > 0 && <span className="acc-sel-count">{selCount} sel.</span>}
-          {data?.combinada && data.combinada.combinedOdd > 1 && (data.combinada.selections || []).some(s => s.odd && s.odd > 1) && (
-            <span className="acc-mini">{cap(data.combinada.combinedProbability)}% | {data.combinada.combinedOdd}x</span>
+          {data?.combinada && (data.combinada.selections || []).length > 0 && (
+            <span className="acc-mini">
+              {cap(data.combinada.combinedProbability)}%
+              {data.combinada.combinedOdd > 1 ? ` | ${data.combinada.combinedOdd}x` : ''}
+            </span>
           )}
           <span className={`chev-ico ${isExpanded ? 'up' : ''}`}>&#9662;</span>
         </div>
@@ -1370,23 +1371,27 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 <LiveMatchDetails stats={liveStats} homeTeam={match.teams.home} awayTeam={match.teams.away} />
               )}
 
-              {/* Auto combinada — only show selections with real odds */}
+              {/* Auto combinada — show all selections ≥70% probability */}
               {(() => {
-                const validSels = (data.combinada?.selections || []).filter(s => s.odd && s.odd > 1);
-                if (validSels.length < 2) return null;
-                const cOdd = validSels.reduce((a, s) => a * s.odd, 1);
-                const cProb = validSels.reduce((a, s) => a + s.probability, 0) / validSels.length;
+                const allSels = data.combinada?.selections || [];
+                if (allSels.length === 0) return null;
+                const withOdds = allSels.filter(s => s.odd && s.odd > 1);
+                const cOdd = withOdds.length >= 2 ? withOdds.reduce((a, s) => a * s.odd, 1) : null;
+                const cProb = allSels.reduce((a, s) => a + s.probability, 0) / allSels.length;
                 return (
                   <div className="auto-comb">
                     <div className="auto-comb-head">
                       <span>&#127942; Combinada Auto</span>
-                      <span className={`auto-comb-val ${cProb < 60 ? 'danger' : 'safe'}`}>
-                        {cap(cProb)}% &middot; {cOdd.toFixed(2)}x
+                      <span className={`auto-comb-val ${cProb < 70 ? 'danger' : 'safe'}`}>
+                        {cap(cProb)}%{cOdd ? ` · ${cOdd.toFixed(2)}x` : ''}
                       </span>
                     </div>
                     <div className="auto-comb-chips">
-                      {validSels.map((s, i) => (
-                        <span key={i} className="auto-chip">{s.name} <b>{cap(s.probability)}%</b> ({s.odd.toFixed(2)})</span>
+                      {allSels.map((s, i) => (
+                        <span key={i} className="auto-chip">
+                          {s.name} <b>{cap(s.probability)}%</b>
+                          {s.odd && s.odd > 1 ? ` (${s.odd.toFixed(2)})` : ''}
+                        </span>
                       ))}
                     </div>
                   </div>

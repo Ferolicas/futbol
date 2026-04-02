@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { computeAllProbabilities } from '../../../../lib/calculations';
 import { buildCombinada } from '../../../../lib/combinada';
 import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY, COUNTRY_BOOKMAKERS } from '../../../../lib/bookmakers';
-import { usePusherEvent } from '../../../../lib/use-pusher';
+import { useLiveStats } from '../../live-stats-context';
 import { getUserTz, fmtTimeInTz, todayInTz } from '../../../../lib/timezone';
 
 function detectCountry() {
@@ -41,7 +41,8 @@ export default function AnalisisPage() {
   const [refreshingLineups, setRefreshingLineups] = useState(false);
   const [refreshingInjuries, setRefreshingInjuries] = useState(false);
   const [userCountry, setUserCountry] = useState('default');
-  const [liveStats, setLiveStats] = useState(null);
+  const { liveStats: allLiveStats, setLiveStats, isPopulated } = useLiveStats();
+  const liveStats = allLiveStats[fixtureId];
 
   useEffect(() => { setUserCountry(detectCountry()); }, []);
 
@@ -74,81 +75,62 @@ export default function AnalisisPage() {
 
   useEffect(() => { loadAnalysis(); }, [loadAnalysis]);
 
-  // On mount: trigger forced live refresh (runs live + corners crons on server),
-  // then apply fresh data. This ensures the match detail always shows real-time status.
+  // Load stats when analysis is ready and this match doesn't have stats yet in context
   useEffect(() => {
     if (!analysis) return;
+    // Skip if this specific match already has stats (corners or cards or scorers)
+    const existing = allLiveStats[fixtureId];
+    if (existing && (existing.corners || existing.yellowCards || existing.goalScorers?.length || existing.cardEvents?.length)) return;
 
     const loadStats = async () => {
       try {
-        // Force-refresh: triggers crons on the server, returns all live data
-        const refreshRes = await fetch('/api/refresh-live', { method: 'POST' });
-        const refreshData = await refreshRes.json();
-        if (refreshData.liveStats && refreshData.liveStats[fixtureId]) {
-          const matchStats = refreshData.liveStats[fixtureId];
-          setLiveStats(matchStats);
-          if (matchStats.status) {
-            setAnalysis(prev => prev ? ({
-              ...prev,
-              status: matchStats.status,
-              goals: matchStats.goals || prev.goals,
-            }) : prev);
+        const isFinished = ['FT', 'AET', 'PEN'].includes(analysis?.status?.short);
+
+        if (!isFinished) {
+          // Live match: force-refresh via API-Football, populates context with all live matches
+          const refreshRes = await fetch('/api/refresh-live', { method: 'POST' });
+          const refreshData = await refreshRes.json();
+          if (refreshData.liveStats && Object.keys(refreshData.liveStats).length > 0) {
+            setLiveStats(prev => ({ ...prev, ...refreshData.liveStats }));
+            return;
           }
-          return; // Got data from forced refresh
         }
 
-        // Fallback: read from live-poll (in case refresh-live was rate-limited)
+        // Finished match (or no live data): read from Redis cache first
         const res = await fetch(`/api/live-poll?fixtureId=${fixtureId}`);
         const data = await res.json();
-        const matchStats = data.liveStats?.find(s =>
-          Number(s.fixtureId) === Number(fixtureId)
-        );
+        const matchStats = data.liveStats?.find(s => Number(s.fixtureId) === Number(fixtureId));
         if (matchStats) {
-          setLiveStats(matchStats);
-          if (matchStats.status) {
-            setAnalysis(prev => prev ? ({
-              ...prev,
-              status: matchStats.status,
-              goals: matchStats.goals || prev.goals,
-            }) : prev);
-          }
+          setLiveStats(prev => ({ ...prev, [fixtureId]: matchStats }));
+          return;
+        }
+
+        // Not in Redis (expired or cron missed the FT window) — fetch from API-Football and cache
+        const fetchRes = await fetch(`/api/match/${fixtureId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'refresh-stats' }),
+        });
+        const fetchData = await fetchRes.json();
+        if (fetchData.stats) {
+          setLiveStats(prev => ({ ...prev, [fixtureId]: fetchData.stats }));
         }
       } catch {}
     };
 
     loadStats();
-  }, [fixtureId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fixtureId, !!analysis]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Real-time updates via Pusher (replaces 30s polling)
-  usePusherEvent('live-scores', 'update', useCallback((data) => {
-    if (!data?.matches) return;
-    const matchUpdate = data.matches.find(m => Number(m.fixtureId) === Number(fixtureId));
-    if (!matchUpdate) return;
-
-    setLiveStats(prev => ({
+  // Sync analysis status/goals when live data changes for this match (replaces Pusher handlers)
+  useEffect(() => {
+    const stats = allLiveStats[fixtureId];
+    if (!stats?.status) return;
+    setAnalysis(prev => prev ? ({
       ...prev,
-      ...matchUpdate,
-    }));
-    if (matchUpdate.status) {
-      setAnalysis(prev => prev ? ({
-        ...prev,
-        status: matchUpdate.status,
-        goals: matchUpdate.goals || prev.goals,
-      }) : prev);
-    }
-  }, [fixtureId]));
-
-  // Real-time corners updates (every 30 min from live-corners cron)
-  usePusherEvent('live-scores', 'corners-update', useCallback((data) => {
-    if (!data?.matches) return;
-    const cornerUpdate = data.matches.find(m => Number(m.fixtureId) === Number(fixtureId));
-    if (!cornerUpdate) return;
-
-    setLiveStats(prev => ({
-      ...prev,
-      corners: cornerUpdate.corners,
-    }));
-  }, [fixtureId]));
+      status: stats.status,
+      goals: stats.goals || prev.goals,
+    }) : prev);
+  }, [allLiveStats[fixtureId]?.status?.short, allLiveStats[fixtureId]?.goals?.home, allLiveStats[fixtureId]?.goals?.away]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [lineupsError, setLineupsError] = useState('');
 
@@ -568,48 +550,45 @@ export default function AnalisisPage() {
         )}
 
         {/* ===== SECCIÓN 9 — COMBINADA AUTOMÁTICA ===== */}
-        {/* Only show selections with real bookmaker odds (odd > 1). If < 2, hide entire section. */}
         {(() => {
-          if (!c) return null;
-          const validSels = c.selections.filter(sel => sel.odd && sel.odd > 1);
-          if (validSels.length < 2) return null;
-          const recalcOdd = validSels.reduce((acc, s) => acc * s.odd, 1);
-          const recalcProb = validSels.reduce((acc, s) => acc + s.probability, 0) / validSels.length;
-          const isHighRisk = recalcProb < 60;
+          if (!c || c.selections.length === 0) return null;
+          const allSels = c.selections;
+          const withOdds = allSels.filter(s => s.odd && s.odd > 1);
+          const recalcOdd = withOdds.length >= 2 ? withOdds.reduce((acc, s) => acc * s.odd, 1) : null;
+          const recalcProb = allSels.reduce((acc, s) => acc + s.probability, 0) / allSels.length;
+          const isHighRisk = recalcProb < 70;
           return (
             <Section title="Combinada automática" icon="&#127942;" sectionKey="combinada" collapsed={collapsed} toggle={toggleSection}>
               <div className="combinada-card">
                 {isHighRisk && (
                   <div className="combinada-warning">
-                    &#9888; Combinada de riesgo alto — probabilidad combinada: {cap(recalcProb)}%
+                    &#9888; Probabilidad combinada: {cap(recalcProb)}%
                   </div>
                 )}
                 <div className="combinada-selections">
-                  {validSels.map((sel, i) => {
-                    const isHighProb = sel.probability >= 70 && sel.probability <= 95;
-                    return (
-                      <div key={i} className={`combinada-item ${isHighProb ? 'alta-prob' : ''}`}>
-                        <div className="combinada-item-info">
-                          <span className="combinada-num">#{i + 1}</span>
-                          <span className="combinada-market">{sel.name}</span>
-                          {isHighProb && <span className="alta-prob-badge">Alta prob.</span>}
-                        </div>
-                        <div className="combinada-item-data">
-                          <ProbBar label="" value={sel.probability} compact />
-                          <span className="combinada-prob">{cap(sel.probability)}%</span>
-                          <span className="combinada-odd">{sel.odd.toFixed(2)}</span>
-                        </div>
+                  {allSels.map((sel, i) => (
+                    <div key={i} className="combinada-item alta-prob">
+                      <div className="combinada-item-info">
+                        <span className="combinada-num">#{i + 1}</span>
+                        <span className="combinada-market">{sel.name}</span>
                       </div>
-                    );
-                  })}
+                      <div className="combinada-item-data">
+                        <ProbBar label="" value={sel.probability} compact />
+                        <span className="combinada-prob">{cap(sel.probability)}%</span>
+                        {sel.odd && sel.odd > 1 && <span className="combinada-odd">{sel.odd.toFixed(2)}</span>}
+                      </div>
+                    </div>
+                  ))}
                 </div>
                 <div className="combinada-footer">
+                  {recalcOdd && (
+                    <div className="combinada-total">
+                      <span>Cuota combinada</span>
+                      <strong>{recalcOdd.toFixed(2)}</strong>
+                    </div>
+                  )}
                   <div className="combinada-total">
-                    <span>Cuota combinada</span>
-                    <strong>{recalcOdd.toFixed(2)}</strong>
-                  </div>
-                  <div className="combinada-total">
-                    <span>Probabilidad combinada</span>
+                    <span>Probabilidad media</span>
                     <strong className={isHighRisk ? 'danger' : 'safe'}>{cap(recalcProb)}%</strong>
                   </div>
                 </div>

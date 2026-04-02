@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '../../lib/supabase-auth';
 import { supabaseAdmin } from '../../lib/supabase';
 import ChatWidget from './chat-widget';
+import LiveStatsProvider from './live-stats-context';
 
 export const metadata = {
   title: 'Dashboard - CFanalisis',
@@ -27,7 +28,9 @@ export default async function DashboardLayout({ children }) {
 
   return (
     <>
-      {children}
+      <LiveStatsProvider>
+        {children}
+      </LiveStatsProvider>
       <ChatWidget />
     </>
   );

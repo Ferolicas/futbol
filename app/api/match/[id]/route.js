@@ -1,6 +1,6 @@
-import { getQuota, refreshLineups, refreshInjuries } from '../../../../lib/api-football';
+import { getQuota, refreshLineups, refreshInjuries, fetchMatchStats } from '../../../../lib/api-football';
 import { getCachedAnalysis, cacheAnalysis, getCachedFixtures } from '../../../../lib/sanity-cache';
-import { redisGet, KEYS } from '../../../../lib/redis';
+import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,6 +92,27 @@ export async function POST(request, { params }) {
       const injuries = await refreshInjuries(id);
       const quota = await getQuota();
       return Response.json({ injuries, quota });
+    }
+
+    if (action === 'refresh-stats') {
+      // Check Redis first — only call API if truly missing
+      const cached = await redisGet(KEYS.fixtureStats(id));
+      const hasStats = cached && (
+        (cached.corners?.total > 0) ||
+        (cached.yellowCards?.total > 0) ||
+        (cached.goalScorers?.length > 0) ||
+        (cached.cardEvents?.length > 0)
+      );
+      if (hasStats) {
+        return Response.json({ stats: cached, fromCache: true });
+      }
+
+      const stats = await fetchMatchStats(id);
+      if (!stats) return Response.json({ error: 'Match not found' }, { status: 404 });
+
+      await redisSet(KEYS.fixtureStats(id), stats, TTL.yesterday);
+      const quota = await getQuota();
+      return Response.json({ stats, quota });
     }
 
     return Response.json({ error: 'Invalid action' }, { status: 400 });
