@@ -1371,7 +1371,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 <LiveMatchDetails stats={liveStats} homeTeam={match.teams.home} awayTeam={match.teams.away} />
               )}
 
-              {/* Auto combinada — show all selections ≥70% probability */}
+              {/* Auto combinada */}
               {(() => {
                 const allSels = data.combinada?.selections || [];
                 if (allSels.length === 0) return null;
@@ -1398,53 +1398,25 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 );
               })()}
 
-              {/* Form summary */}
-              {data.calculatedProbabilities?.homeForm && (
-                <div className="form-mini">
-                  <div className="form-mini-team">
-                    <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} size={18} />
-                    <span className="form-mini-name">{match.teams.home.name}</span>
-                    <span className="form-mini-pts">{data.calculatedProbabilities.homeForm.points}/{data.calculatedProbabilities.homeForm.maxPoints}</span>
-                  </div>
-                  <div className="form-matches">
-                    {data.calculatedProbabilities.homeForm.results?.map((r, i) => (
-                      <div key={i} className="form-match">
-                        <span className={`fdot ${r.result.toLowerCase()}`}>{r.result}</span>
-                        <span className="form-score">{r.goalsFor}-{r.goalsAgainst}</span>
-                        <span className="form-vs">vs</span>
-                        {r.opponentLogo && <img src={r.opponentLogo} alt="" className="form-opp-logo" />}
-                        <span className="form-opp">{(r.opponent || '?').slice(0, 10)}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="form-mini-team">
-                    <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} size={18} />
-                    <span className="form-mini-name">{match.teams.away.name}</span>
-                    <span className="form-mini-pts">{data.calculatedProbabilities.awayForm?.points}/{data.calculatedProbabilities.awayForm?.maxPoints}</span>
-                  </div>
-                  <div className="form-matches">
-                    {data.calculatedProbabilities.awayForm?.results?.map((r, i) => (
-                      <div key={i} className="form-match">
-                        <span className={`fdot ${r.result.toLowerCase()}`}>{r.result}</span>
-                        <span className="form-score">{r.goalsFor}-{r.goalsAgainst}</span>
-                        <span className="form-vs">vs</span>
-                        {r.opponentLogo && <img src={r.opponentLogo} alt="" className="form-opp-logo" />}
-                        <span className="form-opp">{(r.opponent || '?').slice(0, 10)}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {data.calculatedProbabilities.h2hSummary?.total > 0 && (
-                    <div className="h2h-mini">
-                      <span className="h2h-mini-n green">{data.calculatedProbabilities.h2hSummary.homeWins}</span>
-                      <span className="h2h-mini-l">{match.teams.home.name.split(' ')[0]}</span>
-                      <span className="h2h-mini-n yellow">{data.calculatedProbabilities.h2hSummary.draws}</span>
-                      <span className="h2h-mini-l">Emp</span>
-                      <span className="h2h-mini-n red">{data.calculatedProbabilities.h2hSummary.awayWins}</span>
-                      <span className="h2h-mini-l">{match.teams.away.name.split(' ')[0]}</span>
-                    </div>
-                  )}
-                </div>
-              )}
+              {/* Últimos 5 partidos por equipo */}
+              <Last5Block
+                homeLastFive={data.homeLastFive}
+                awayLastFive={data.awayLastFive}
+                homeName={match.teams.home.name}
+                awayName={match.teams.away.name}
+                homeLogo={match.teams.home.logo}
+                awayLogo={match.teams.away.logo}
+              />
+
+              {/* Estadísticas de los últimos 5: avg/max/min */}
+              <StatsBlock
+                homeLastFive={data.homeLastFive}
+                awayLastFive={data.awayLastFive}
+                homeName={match.teams.home.name}
+                awayName={match.teams.away.name}
+                goalTiming={data.calculatedProbabilities?.goalTiming}
+                playerHighlights={data.playerHighlights}
+              />
 
               {/* Selectable markets — only show if there are markets with real odds */}
               {markets.length > 0 && <div className="markets">
@@ -1480,75 +1452,6 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                   })}
                 </div>
               </div>}
-
-              {/* Per-team breakdown — internal stats only, no betting markets */}
-              {data.calculatedProbabilities?.perTeam && (
-                <div className="perteam-section">
-                  <span className="perteam-disclaimer">Estadísticas internas</span>
-                  {[
-                    { key: 'home', name: match.teams.home.name, team: data.calculatedProbabilities.perTeam.home },
-                    { key: 'away', name: match.teams.away.name, team: data.calculatedProbabilities.perTeam.away },
-                  ].map(({ key, name, team }) => {
-                    if (!team) return null;
-                    const rows = [];
-                    if (team.corners) {
-                      Object.entries(team.corners).forEach(([k, v]) => {
-                        if (v >= 70) {
-                          const threshold = k.replace('over', '').replace('5', '.5');
-                          rows.push({ label: `Corners ${name}: +${threshold}`, prob: v });
-                        }
-                      });
-                    }
-                    if (team.cards) {
-                      Object.entries(team.cards).forEach(([k, v]) => {
-                        if (v >= 70) {
-                          const threshold = k.replace('over', '').replace('5', '.5');
-                          rows.push({ label: `Tarjetas ${name}: +${threshold}`, prob: v });
-                        }
-                      });
-                    }
-                    if (team.goals) {
-                      Object.entries(team.goals).forEach(([k, v]) => {
-                        if (v >= 70) {
-                          const threshold = k.replace('over', '').replace('5', '.5');
-                          rows.push({ label: `Goles ${name}: +${threshold}`, prob: v });
-                        }
-                      });
-                    }
-                    if (rows.length === 0) return null;
-                    return (
-                      <div key={key} className="perteam-group">
-                        {rows.sort((a, b) => b.prob - a.prob).map((r, i) => (
-                          <div key={i} className="perteam-row">
-                            <span className="perteam-label">{r.label}</span>
-                            <span className={`perteam-prob ${r.prob >= 80 ? 'hi' : 'md'}`}>{r.prob}%</span>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Goal timing */}
-              {data.calculatedProbabilities?.goalTiming?.combined && (
-                <div className="timing-section">
-                  <h4 className="timing-title">Probabilidad de gol por periodo</h4>
-                  <div className="timing-grid">
-                    {data.calculatedProbabilities.goalTiming.combined
-                      .filter(p => p.probability >= 70)
-                      .map((p, i) => (
-                        <div key={i} className={`timing-item ${p.highlight ? 'hot' : ''}`}>
-                          <span className="timing-period">Gol {p.period} min</span>
-                          <span className="timing-prob">{cap(p.probability)}%</span>
-                        </div>
-                      ))}
-                  </div>
-                  {data.calculatedProbabilities.goalTiming.combined.filter(p => p.probability >= 70).length === 0 && (
-                    <span className="timing-none">Sin periodos con probabilidad alta (&ge;70%)</span>
-                  )}
-                </div>
-              )}
 
               <button className="btn-full" onClick={(e) => { e.stopPropagation(); onViewFull(); }}>
                 Ver analisis completo &#8594;
@@ -1633,6 +1536,191 @@ function LiveStatsBar({ stats }) {
     </div>
   );
 }
+
+// ===================== LAST 5 BLOCK =====================
+// Shows last 5 results per team: result badge, score, opponent, corners, cards
+
+function Last5Block({ homeLastFive, awayLastFive, homeName, awayName, homeLogo, awayLogo }) {
+  const hasHome = Array.isArray(homeLastFive) && homeLastFive.length > 0;
+  const hasAway = Array.isArray(awayLastFive) && awayLastFive.length > 0;
+  if (!hasHome && !hasAway) return null;
+
+  const renderTeam = (matches, teamName, teamLogo) => (
+    <div className="l5-team">
+      <div className="l5-team-header">
+        <TeamLogo src={teamLogo} name={teamName} size={18} />
+        <span className="l5-team-name">{teamName}</span>
+      </div>
+      {matches.map((m, i) => (
+        <div key={i} className="l5-row">
+          <span className={`l5-result ${(m.r || '').toLowerCase()}`}>{m.r || '?'}</span>
+          <span className="l5-score">{m.gF ?? '?'}-{m.gA ?? '?'}</span>
+          <span className="l5-vs">vs</span>
+          {m.oL && <img src={m.oL} alt="" className="l5-opp-logo" />}
+          <span className="l5-opp">{(m.op || '?').slice(0, 11)}</span>
+          <span className="l5-stats">
+            {m.c?.total != null && <span className="l5-stat-chip c">{m.c.total}&#9965;</span>}
+            {m.y?.total != null && <span className="l5-stat-chip y">{m.y.total}&#128722;</span>}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="l5-block">
+      <div className="l5-title">Últimos 5 partidos</div>
+      <div className="l5-grid">
+        {hasHome && renderTeam(homeLastFive, homeName, homeLogo)}
+        {hasAway && renderTeam(awayLastFive, awayName, awayLogo)}
+      </div>
+    </div>
+  );
+}
+
+// ===================== STATS BLOCK =====================
+// avg/max/min corners, cards, goals — combined + per team
+// + goal timing highlights + player highlights
+
+function calcStats(matches, field) {
+  const vals = (matches || []).map(m => m[field]?.total).filter(v => v != null && !isNaN(v));
+  if (vals.length === 0) return null;
+  const avg = +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1);
+  const max = Math.max(...vals);
+  const min = Math.min(...vals);
+  return { avg, max, min };
+}
+
+function calcGoals(matches) {
+  const vals = (matches || []).map(m => (m.gF ?? 0) + (m.gA ?? 0)).filter(v => !isNaN(v));
+  if (vals.length === 0) return null;
+  const avg = +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1);
+  const max = Math.max(...vals);
+  const min = Math.min(...vals);
+  return { avg, max, min };
+}
+
+function calcGoalsFor(matches) {
+  const vals = (matches || []).map(m => m.gF).filter(v => v != null && !isNaN(v));
+  if (vals.length === 0) return null;
+  const avg = +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1);
+  const max = Math.max(...vals);
+  const min = Math.min(...vals);
+  return { avg, max, min };
+}
+
+function StatRow({ label, st }) {
+  if (!st) return null;
+  return (
+    <div className="sblk-row">
+      <span className="sblk-label">{label}</span>
+      <span className="sblk-val">Prom: <b>{st.avg}</b></span>
+      <span className="sblk-val hi">Máx: <b>{st.max}</b></span>
+      <span className="sblk-val lo">Mín: <b>{st.min}</b></span>
+    </div>
+  );
+}
+
+function StatsBlock({ homeLastFive, awayLastFive, homeName, awayName, goalTiming, playerHighlights }) {
+  const allMatches = [...(homeLastFive || []), ...(awayLastFive || [])];
+  if (allMatches.length === 0 && !goalTiming && !playerHighlights) return null;
+
+  // Combined totals (treat each match once for combined, or use both perspectives)
+  const homeCorners = calcStats(homeLastFive, 'c');
+  const awayCorners = calcStats(awayLastFive, 'c');
+  const homeCards = calcStats(homeLastFive, 'y');
+  const awayCards = calcStats(awayLastFive, 'y');
+  const homeGoals = calcGoals(homeLastFive);
+  const awayGoals = calcGoals(awayLastFive);
+  const homeGoalsFor = calcGoalsFor(homeLastFive);
+  const awayGoalsFor = calcGoalsFor(awayLastFive);
+
+  // Combined corners/cards/goals (average of both teams' averages)
+  const combCorners = (homeCorners && awayCorners)
+    ? { avg: +((homeCorners.avg + awayCorners.avg) / 2).toFixed(1), max: Math.max(homeCorners.max, awayCorners.max), min: Math.min(homeCorners.min, awayCorners.min) }
+    : homeCorners || awayCorners;
+  const combCards = (homeCards && awayCards)
+    ? { avg: +((homeCards.avg + awayCards.avg) / 2).toFixed(1), max: Math.max(homeCards.max, awayCards.max), min: Math.min(homeCards.min, awayCards.min) }
+    : homeCards || awayCards;
+  const combGoals = (homeGoals && awayGoals)
+    ? { avg: +((homeGoals.avg + awayGoals.avg) / 2).toFixed(1), max: Math.max(homeGoals.max, awayGoals.max), min: Math.min(homeGoals.min, awayGoals.min) }
+    : homeGoals || awayGoals;
+
+  const hotPeriods = goalTiming?.combined?.filter(p => p.probability > 85) || [];
+  const scorers = playerHighlights?.scorers || [];
+  const shooters = playerHighlights?.shooters || [];
+
+  return (
+    <div className="sblk">
+      <div className="sblk-title">Estadísticas últimos 5 partidos</div>
+
+      {/* Corners */}
+      {(combCorners || homeCorners || awayCorners) && (
+        <div className="sblk-section">
+          <div className="sblk-section-title">&#9965; Córners</div>
+          <StatRow label="Total combinado" st={combCorners} />
+          <StatRow label={homeName} st={homeCorners} />
+          <StatRow label={awayName} st={awayCorners} />
+        </div>
+      )}
+
+      {/* Cards */}
+      {(combCards || homeCards || awayCards) && (
+        <div className="sblk-section">
+          <div className="sblk-section-title">&#128722; Tarjetas amarillas</div>
+          <StatRow label="Total combinado" st={combCards} />
+          <StatRow label={homeName} st={homeCards} />
+          <StatRow label={awayName} st={awayCards} />
+        </div>
+      )}
+
+      {/* Goals */}
+      {(combGoals || homeGoals || awayGoals) && (
+        <div className="sblk-section">
+          <div className="sblk-section-title">&#9917; Goles totales</div>
+          <StatRow label="Total combinado" st={combGoals} />
+          <StatRow label={`${homeName} (anotados)`} st={homeGoalsFor} />
+          <StatRow label={`${awayName} (anotados)`} st={awayGoalsFor} />
+        </div>
+      )}
+
+      {/* Goal timing */}
+      {hotPeriods.length > 0 && (
+        <div className="sblk-section">
+          <div className="sblk-section-title">&#9201; Periodos con más probabilidad de gol</div>
+          <div className="sblk-timing">
+            {hotPeriods.map((p, i) => (
+              <span key={i} className="sblk-timing-chip">{p.period}&apos; — {cap(p.probability)}%</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Player highlights */}
+      {(scorers.length > 0 || shooters.length > 0) && (
+        <div className="sblk-section">
+          <div className="sblk-section-title">&#9733; Jugadores destacados</div>
+          {scorers.slice(0, 3).map((p, i) => (
+            <div key={i} className="sblk-player">
+              <span className="sblk-player-name">{p.name}</span>
+              <span className="sblk-player-team">{p.teamName}</span>
+              <span className="sblk-player-stat">&#9917; {p.totalGoals} goles / 5 partidos</span>
+            </div>
+          ))}
+          {shooters.slice(0, 2).map((p, i) => (
+            <div key={i} className="sblk-player">
+              <span className="sblk-player-name">{p.name}</span>
+              <span className="sblk-player-team">{p.teamName}</span>
+              <span className="sblk-player-stat">&#127919; {p.totalShots} remates / 5 partidos</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ========================== LIVE MATCH DETAILS ==========================
 
 function LiveMatchDetails({ stats, homeTeam, awayTeam }) {
   if (!stats) return null;

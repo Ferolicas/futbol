@@ -76,36 +76,47 @@ export async function POST(request) {
 
       send({ type: 'start', total });
 
-      for (let i = 0; i < fixtures.length; i += 5) {
-        const batch = fixtures.slice(i, i + 5);
-        await Promise.all(batch.map(async (fixture) => {
-          const fid = fixture.fixture?.id;
-          const name = `${fixture.teams?.home?.name || '?'} vs ${fixture.teams?.away?.name || '?'}`;
-          try {
-            if (!force) {
-              const existing = await getCachedAnalysis(fid, today);
-              if (existing) {
-                skipped++;
-                analyzedIds.push(fid);
-                if (existing.odds?.matchWinner) analyzedOdds[fid] = existing.odds.matchWinner;
-                analyzedData[fid] = buildSummary(existing);
-                send({ type: 'progress', current: analyzed + skipped + failed, total, analyzed, skipped, failed, match: name });
-                return;
-              }
+      const analyzeOne = async (fixture) => {
+        const fid = fixture.fixture?.id;
+        const name = `${fixture.teams?.home?.name || '?'} vs ${fixture.teams?.away?.name || '?'}`;
+        try {
+          if (!force) {
+            const existing = await getCachedAnalysis(fid, today);
+            if (existing) {
+              skipped++;
+              analyzedIds.push(fid);
+              if (existing.odds?.matchWinner) analyzedOdds[fid] = existing.odds.matchWinner;
+              analyzedData[fid] = buildSummary(existing);
+              send({ type: 'progress', current: analyzed + skipped + failed, total, analyzed, skipped, failed, match: name });
+              return;
             }
-            const result = await analyzeMatch(fixture, { date: today, force });
-            // analyzeMatch already saves to cache internally — don't overwrite with wrapper object
-            const a = result.analysis || result;
-            analyzed++;
-            analyzedIds.push(fid);
-            if (a.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
-            analyzedData[fid] = buildSummary(a);
-          } catch (e) {
-            failed++;
-            console.error(`[reanalyze] Failed ${fid}:`, e.message);
           }
-          send({ type: 'progress', current: analyzed + skipped + failed, total, analyzed, skipped, failed, match: name });
-        }));
+          let result;
+          try {
+            result = await analyzeMatch(fixture, { date: today, force });
+          } catch (e1) {
+            // Retry once after 2s
+            console.warn(`[reanalyze] Retry ${fid}: ${e1.message}`);
+            await new Promise(r => setTimeout(r, 2000));
+            result = await analyzeMatch(fixture, { date: today, force });
+          }
+          const a = result.analysis || result;
+          analyzed++;
+          analyzedIds.push(fid);
+          if (a.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
+          analyzedData[fid] = buildSummary(a);
+        } catch (e) {
+          failed++;
+          console.error(`[reanalyze] Failed ${fid}:`, e.message);
+        }
+        send({ type: 'progress', current: analyzed + skipped + failed, total, analyzed, skipped, failed, match: name });
+      };
+
+      // Process in batches of 3 with 800ms delay between batches to avoid API rate limits
+      for (let i = 0; i < fixtures.length; i += 3) {
+        const batch = fixtures.slice(i, i + 3);
+        await Promise.all(batch.map(analyzeOne));
+        if (i + 3 < fixtures.length) await new Promise(r => setTimeout(r, 800));
       }
 
       const analysisCache = { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData };
@@ -144,6 +155,18 @@ export async function POST(request) {
   });
 }
 
+function compactLastFive(lastFive) {
+  if (!Array.isArray(lastFive)) return [];
+  return lastFive.map(m => {
+    const e = m._enriched || {};
+    return {
+      r: e.result, s: e.score, gF: e.goalsFor, gA: e.goalsAgainst,
+      op: e.opponentName, oL: e.opponentLogo,
+      c: e.corners, y: e.yellowCards, rd: e.redCards,
+    };
+  });
+}
+
 function buildSummary(a) {
   return {
     fixtureId: a.fixtureId, homeTeam: a.homeTeam, awayTeam: a.awayTeam,
@@ -152,5 +175,8 @@ function buildSummary(a) {
     kickoff: a.kickoff, status: a.status, goals: a.goals, odds: a.odds,
     combinada: a.combinada, calculatedProbabilities: a.calculatedProbabilities,
     homePosition: a.homePosition, awayPosition: a.awayPosition,
+    homeLastFive: compactLastFive(a.homeLastFive),
+    awayLastFive: compactLastFive(a.awayLastFive),
+    playerHighlights: a.playerHighlights || null,
   };
 }
