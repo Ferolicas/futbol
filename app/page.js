@@ -33,6 +33,7 @@ export default function LandingPage() {
   }, []);
 
   const [prices, setPrices] = useState(null);
+  const [pricesLoading, setPricesLoading] = useState(true);
 
   // Detect user country for currency
   useEffect(() => {
@@ -40,18 +41,19 @@ export default function LandingPage() {
       .then(r => r.json())
       .then(data => {
         if (data.country_code) {
-          fetch(`/api/currency?country=${data.country_code}`)
+          return fetch(`/api/currency?country=${data.country_code}`)
             .then(r => r.json())
-            .then(setPrices)
-            .catch(() => {});
+            .then(setPrices);
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setPricesLoading(false));
   }, []);
 
   const fmtPrice = (usd, local, currency) => {
-    if (!local || currency === 'USD') return `$${usd} USD`;
-    return `$${usd} USD (~${currency} ${local.toLocaleString()})`;
+    if (pricesLoading) return '...';
+    if (!local || !currency || currency === 'USD') return `$${usd} USD`;
+    return `${Math.round(local).toLocaleString()} ${currency}`;
   };
 
   const features = [

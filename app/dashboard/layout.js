@@ -10,17 +10,18 @@ export const metadata = {
 export default async function DashboardLayout({ children }) {
   const supabase = createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
+  if (!user) redirect('/sign-in');
 
   // Check subscription status from user_profiles
   const { data: profile } = await supabaseAdmin
     .from('user_profiles')
-    .select('subscription_status, plan')
+    .select('subscription_status, role, plan')
     .eq('id', user.id)
     .single();
 
+  const isAdmin = ['admin', 'owner'].includes(profile?.role);
   const activeStatuses = ['active', 'trialing'];
-  if (!profile || !activeStatuses.includes(profile.subscription_status)) {
+  if (!isAdmin && (!profile || !activeStatuses.includes(profile.subscription_status))) {
     redirect('/planes');
   }
 

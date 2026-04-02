@@ -54,7 +54,7 @@ export default function SignUpPage() {
       <div className="login-bg" />
       <div className="login-container" style={{ maxWidth: '420px' }}>
         <div className="auth-card">
-          <img src="/vflogo.png" alt="CFanalisis" className="auth-logo" />
+          <Link href="/"><img src="/vflogo.png" alt="CFanalisis" className="auth-logo" style={{ cursor: 'pointer' }} /></Link>
           <h1 className="auth-title">Crear cuenta en CF Analisis</h1>
           <p className="auth-subtitle">Bienvenido! Completa los datos para registrarte.</p>
 

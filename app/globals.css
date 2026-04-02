@@ -1415,7 +1415,7 @@ body {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .hero-logo {
-  width: 140px; height: auto; margin-bottom: 24px;
+  width: 300px; height: auto; margin: 0 auto 24px; display: block;
   filter: drop-shadow(0 0 30px rgba(0,230,118,0.3));
   animation: heroIn 1s var(--bounce) both, logoPulse 3s ease-in-out 1.5s infinite;
 }
@@ -2598,7 +2598,7 @@ input:checked + .cb-mark::after {
   padding: 40px 28px; width: 100%; animation: modalIn .5s var(--bounce) both;
   text-align: center;
 }
-.auth-logo { width: 80px; height: auto; margin: 0 auto 20px; display: block; }
+.auth-logo { width: 200px; height: auto; margin: 0 auto 20px; display: block; }
 .auth-title { font-size: 1.4rem; font-weight: 800; color: var(--t1); margin-bottom: 6px; }
 .auth-subtitle { color: var(--t2); font-size: .9rem; margin-bottom: 24px; }
 .auth-form { display: flex; flex-direction: column; gap: 16px; text-align: left; }
@@ -2621,3 +2621,42 @@ input:checked + .cb-mark::after {
 .auth-link { color: var(--green); text-decoration: none; font-weight: 600; }
 .auth-link:hover { text-decoration: underline; }
 .auth-footer-text { text-align: center; color: var(--t2); font-size: .85rem; margin-top: 10px; }
+
+/* ===================== PLANES PAGE ===================== */
+.planes-page {
+  min-height: 100vh; position: relative;
+  display: flex; align-items: center; justify-content: center;
+  padding: 2rem 1rem; background: var(--bg-0);
+}
+.planes-bg {
+  position: fixed; inset: 0; z-index: 0;
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(0,230,118,0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at 70% 80%, rgba(68,138,255,0.06) 0%, transparent 50%);
+  pointer-events: none;
+}
+.planes-container {
+  position: relative; z-index: 1; width: 100%; max-width: 900px;
+}
+.planes-header {
+  text-align: center; margin-bottom: 2.5rem;
+}
+.planes-logo {
+  width: 200px; height: auto; margin: 0 auto 1rem; display: block;
+  filter: drop-shadow(0 0 20px rgba(0,230,118,0.3));
+}
+.planes-header h1 {
+  font-size: 1.8rem; font-weight: 800; color: var(--t1); margin-bottom: .5rem;
+}
+.planes-header p {
+  color: var(--t2); font-size: .95rem;
+}
+.planes-footer {
+  text-align: center; margin-top: 2rem;
+}
+.planes-signout {
+  background: none; border: 1px solid var(--brd); color: var(--t3);
+  padding: 8px 20px; border-radius: 8px; font-size: .85rem;
+  cursor: pointer; transition: all .2s;
+}
+.planes-signout:hover { border-color: var(--red); color: var(--red); }

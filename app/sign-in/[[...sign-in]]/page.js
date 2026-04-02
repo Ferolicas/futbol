@@ -18,15 +18,25 @@ export default function SignInPage() {
     setLoading(true);
 
     const supabase = getSupabaseBrowserClient();
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    const { data: { user }, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (authError) {
+      setLoading(false);
+      setError('Email o contraseña incorrectos');
+      return;
+    }
+
+    // Verificar si tiene plan activo
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('subscription_status, role')
+      .eq('id', user.id)
+      .single();
 
     setLoading(false);
 
-    if (authError) {
-      setError('Email o contraseña incorrectos');
-    } else {
-      router.replace('/dashboard');
-    }
+    const hasActivePlan = profile?.subscription_status === 'active' || profile?.role === 'admin';
+    router.replace(hasActivePlan ? '/dashboard' : '/planes');
   };
 
   return (
@@ -34,7 +44,7 @@ export default function SignInPage() {
       <div className="login-bg" />
       <div className="login-container" style={{ maxWidth: '420px' }}>
         <div className="auth-card">
-          <img src="/vflogo.png" alt="CFanalisis" className="auth-logo" />
+          <Link href="/"><img src="/vflogo.png" alt="CFanalisis" className="auth-logo" style={{ cursor: 'pointer' }} /></Link>
           <h1 className="auth-title">Iniciar sesion en CF Analisis</h1>
           <p className="auth-subtitle">Bienvenido de vuelta. Inicia sesion para continuar.</p>
 

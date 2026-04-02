@@ -32,8 +32,24 @@ export async function middleware(request) {
 
   if (isProtected && !user) {
     const url = request.nextUrl.clone();
-    url.pathname = '/login';
+    url.pathname = '/sign-in';
     return NextResponse.redirect(url);
+  }
+
+  // Dashboard — require active subscription (admins bypass)
+  if (pathname.startsWith('/dashboard') && user) {
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('subscription_status, role')
+      .eq('id', user.id)
+      .single();
+
+    const hasActivePlan = profile?.subscription_status === 'active' || ['admin', 'owner'].includes(profile?.role);
+    if (!hasActivePlan) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/planes';
+      return NextResponse.redirect(url);
+    }
   }
 
   // Admin routes — require admin or owner role

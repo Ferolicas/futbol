@@ -13,7 +13,7 @@ export default function AdminLayout({ children }) {
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
-      router.push('/login');
+      router.push('/sign-in');
       return;
     }
 

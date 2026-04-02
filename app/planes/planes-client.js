@@ -9,6 +9,7 @@ import PaymentModal from './PaymentModal';
 export default function PlanesClient({ userId, email }) {
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [prices, setPrices] = useState(null);
+  const [pricesLoading, setPricesLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [paymentData, setPaymentData] = useState(null);
@@ -19,13 +20,13 @@ export default function PlanesClient({ userId, email }) {
       .then(r => r.json())
       .then(data => {
         if (data.country_code) {
-          fetch(`/api/currency?country=${data.country_code}`)
+          return fetch(`/api/currency?country=${data.country_code}`)
             .then(r => r.json())
-            .then(setPrices)
-            .catch(() => {});
+            .then(setPrices);
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setPricesLoading(false));
   }, []);
 
   const handleSelectPlan = async (plan) => {
@@ -66,6 +67,7 @@ export default function PlanesClient({ userId, email }) {
   };
 
   const fmtPrice = (usd, local, currency) => {
+    if (pricesLoading) return '...';
     if (!local || !currency || currency === 'USD') return `$${usd} USD`;
     return `${Math.round(local).toLocaleString()} ${currency}`;
   };
