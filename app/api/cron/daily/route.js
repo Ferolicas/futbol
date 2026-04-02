@@ -4,9 +4,36 @@
  * Runs at 05:00 UTC (07:00 Spain). Uses Redis + Supabase only.
  */
 import { getFixtures, analyzeMatch, getQuota } from '../../../../lib/api-football';
-import { cacheAnalysis, cacheFixtures } from '../../../../lib/sanity-cache';
-import { redisSet, redisDel, KEYS, TTL } from '../../../../lib/redis';
+import { cacheFixtures } from '../../../../lib/sanity-cache';
+import { redisSet, KEYS, TTL } from '../../../../lib/redis';
 import { supabaseAdmin } from '../../../../lib/supabase';
+
+function compactLastFive(lastFive) {
+  if (!Array.isArray(lastFive)) return [];
+  return lastFive.map(m => {
+    const e = m._enriched || {};
+    return {
+      r: e.result, s: e.score, gF: e.goalsFor, gA: e.goalsAgainst,
+      op: e.opponentName, oL: e.opponentLogo,
+      c: e.corners, y: e.yellowCards, rd: e.redCards,
+    };
+  });
+}
+
+function buildSummary(a) {
+  if (!a) return null;
+  return {
+    fixtureId: a.fixtureId, homeTeam: a.homeTeam, awayTeam: a.awayTeam,
+    homeLogo: a.homeLogo, awayLogo: a.awayLogo, homeId: a.homeId, awayId: a.awayId,
+    league: a.league, leagueId: a.leagueId, leagueLogo: a.leagueLogo,
+    kickoff: a.kickoff, status: a.status, goals: a.goals, odds: a.odds,
+    combinada: a.combinada, calculatedProbabilities: a.calculatedProbabilities,
+    homePosition: a.homePosition, awayPosition: a.awayPosition,
+    homeLastFive: compactLastFive(a.homeLastFive),
+    awayLastFive: compactLastFive(a.awayLastFive),
+    playerHighlights: a.playerHighlights || null,
+  };
+}
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -30,6 +57,9 @@ export async function GET(request) {
       return Response.json({ success: true, message: 'Already completed', date: today, fixtureCount: existing.fixtureCount });
     }
   }
+
+  // Mark as started to prevent concurrent runs triggered by /api/fixtures Phase 4
+  await redisSet(`dailyBatch:${today}`, { started: true, startedAt: new Date().toISOString() }, 3600);
 
   console.log(`[daily] Starting for ${today}`);
   const startTime = Date.now();
@@ -75,26 +105,39 @@ export async function GET(request) {
 
     // 4. Analyze all fixtures in batches of 3
     let analyzed = 0, failed = 0, skipped = 0;
+    const analyzedIds = [];
+    const analyzedOdds = {};
+    const analyzedData = {};
     const BATCH = 3;
 
     for (let i = 0; i < fixtures.length; i += BATCH) {
       const batch = fixtures.slice(i, i + BATCH);
       await Promise.all(batch.map(async (fixture) => {
+        const fid = fixture.fixture.id;
         try {
           const result = await analyzeMatch(fixture, { date: today });
           if (!result || result.dataQuality === 'insufficient') { skipped++; return; }
-          await cacheAnalysis(fixture.fixture.id, { ...result, date: today });
+          // analyzeMatch already calls cacheAnalysis internally — do NOT call it again
+          // (calling it again with { ...result } passes the wrapper object, not the analysis,
+          //  which corrupts Redis and saves null odds/combinada/probabilities to Supabase)
           analyzed++;
+          const a = result.analysis || result;
+          analyzedIds.push(fid);
+          if (a?.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
+          const summary = buildSummary(a);
+          if (summary) analyzedData[fid] = summary;
         } catch (e) {
-          console.error(`[daily] fixture ${fixture.fixture.id}:`, e.message);
+          console.error(`[daily] fixture ${fid}:`, e.message);
           failed++;
         }
       }));
       if (i + BATCH < fixtures.length) await new Promise(r => setTimeout(r, 300));
     }
 
-    // 5. Invalidate analysis Redis cache
-    await redisDel(`analysis:${today}`);
+    // 5. Write fresh analysis summary cache (replaces the old delete approach)
+    if (analyzedIds.length > 0) {
+      await redisSet(`analysis:${today}`, { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData }, 12 * 3600).catch(() => {});
+    }
 
     // 6. Mark batch complete
     const batchState = { completed: true, fixtureCount: fixtures.length, analyzed, failed, skipped, date: today, completedAt: new Date().toISOString() };

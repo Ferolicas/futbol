@@ -4,7 +4,7 @@
  * Called internally by /api/cron/daily. NOT for direct use.
  */
 import { analyzeMatch } from '../../../../lib/api-football';
-import { getCachedFixturesRaw, cacheAnalysis } from '../../../../lib/sanity-cache';
+import { getCachedFixturesRaw } from '../../../../lib/sanity-cache';
 import { redisSet } from '../../../../lib/redis';
 import { triggerEvent } from '../../../../lib/pusher';
 
@@ -48,7 +48,7 @@ export async function POST(request) {
       try {
         const result = await analyzeMatch(fixture, { date });
         if (result) {
-          await cacheAnalysis(fixture.fixture.id, { ...result, date });
+          // analyzeMatch already calls cacheAnalysis internally — do NOT call again
           if (result.fromCache) cached++; else analyzed++;
         }
       } catch (e) {

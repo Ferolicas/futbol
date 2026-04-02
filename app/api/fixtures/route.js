@@ -191,7 +191,7 @@ export async function GET(request) {
       ? `https://${process.env.VERCEL_URL}`
       : 'http://localhost:3000');
 
-    if (fixtures.length > 0 && !batchFlag?.started) {
+    if (fixtures.length > 0 && !batchFlag?.started && !batchFlag?.completed) {
       fetch(`${baseUrl}/api/cron/daily?date=${date}`, {
         headers: { 'x-internal-trigger': 'true' },
       }).catch(() => {});
