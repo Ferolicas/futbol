@@ -1377,7 +1377,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 if (allSels.length === 0) return null;
                 const withOdds = allSels.filter(s => s.odd && s.odd > 1);
                 const cOdd = withOdds.length >= 2 ? withOdds.reduce((a, s) => a * s.odd, 1) : null;
-                const cProb = allSels.reduce((a, s) => a + s.probability, 0) / allSels.length;
+                const cProb = Math.round(allSels.reduce((a, s) => a + s.probability, 0) / allSels.length);
                 return (
                   <div className="auto-comb">
                     <div className="auto-comb-head">
@@ -1623,7 +1623,10 @@ function StatRow({ label, st }) {
 
 function StatsBlock({ homeLastFive, awayLastFive, homeName, awayName, goalTiming, playerHighlights }) {
   const allMatches = [...(homeLastFive || []), ...(awayLastFive || [])];
-  if (allMatches.length === 0 && !goalTiming && !playerHighlights) return null;
+  const hotPeriods = goalTiming?.combined?.filter(p => p.probability > 85) || [];
+  const scorers = playerHighlights?.scorers || [];
+  const shooters = playerHighlights?.shooters || [];
+  if (allMatches.length === 0 && hotPeriods.length === 0 && scorers.length === 0 && shooters.length === 0) return null;
 
   // Combined totals (treat each match once for combined, or use both perspectives)
   const homeCorners = calcStats(homeLastFive, 'c');
@@ -1645,10 +1648,6 @@ function StatsBlock({ homeLastFive, awayLastFive, homeName, awayName, goalTiming
   const combGoals = (homeGoals && awayGoals)
     ? { avg: +((homeGoals.avg + awayGoals.avg) / 2).toFixed(1), max: Math.max(homeGoals.max, awayGoals.max), min: Math.min(homeGoals.min, awayGoals.min) }
     : homeGoals || awayGoals;
-
-  const hotPeriods = goalTiming?.combined?.filter(p => p.probability > 85) || [];
-  const scorers = playerHighlights?.scorers || [];
-  const shooters = playerHighlights?.shooters || [];
 
   return (
     <div className="sblk">

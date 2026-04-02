@@ -92,14 +92,19 @@ export async function POST(request) {
             }
           }
           let result;
-          try {
-            result = await analyzeMatch(fixture, { date: today, force });
-          } catch (e1) {
-            // Retry once after 2s
-            console.warn(`[reanalyze] Retry ${fid}: ${e1.message}`);
-            await new Promise(r => setTimeout(r, 2000));
-            result = await analyzeMatch(fixture, { date: today, force });
+          let lastErr;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              result = await analyzeMatch(fixture, { date: today, force });
+              lastErr = null;
+              break;
+            } catch (e1) {
+              lastErr = e1;
+              console.warn(`[reanalyze] Attempt ${attempt + 1} failed for ${fid}: ${e1.message}`);
+              await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+            }
           }
+          if (lastErr) throw lastErr;
           const a = result.analysis || result;
           analyzed++;
           analyzedIds.push(fid);
@@ -112,11 +117,11 @@ export async function POST(request) {
         send({ type: 'progress', current: analyzed + skipped + failed, total, analyzed, skipped, failed, match: name });
       };
 
-      // Process in batches of 3 with 800ms delay between batches to avoid API rate limits
-      for (let i = 0; i < fixtures.length; i += 3) {
-        const batch = fixtures.slice(i, i + 3);
+      // Process in batches of 2 with 1.5s delay between batches to avoid API rate limits
+      for (let i = 0; i < fixtures.length; i += 2) {
+        const batch = fixtures.slice(i, i + 2);
         await Promise.all(batch.map(analyzeOne));
-        if (i + 3 < fixtures.length) await new Promise(r => setTimeout(r, 800));
+        if (i + 2 < fixtures.length) await new Promise(r => setTimeout(r, 1500));
       }
 
       const analysisCache = { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData };
