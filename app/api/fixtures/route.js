@@ -162,25 +162,42 @@ export async function GET(request) {
         });
       }
 
-      // For finished matches without stats, check Redis stats:{fid}
-      const ftWithoutStats = fixtures.filter(f => {
-        if (!FINISHED_STATUSES.includes(f.fixture?.status?.short)) return false;
+      // For finished or live matches without stats, check Redis stats:{fid}
+      // This handles: FT matches not in live:${date}, and live matches (2H/ET) near end
+      // that dropped out of live:${date} between the last cron run and this request
+      const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'BT', 'P'];
+      const needStats = fixtures.filter(f => {
+        const status = f.fixture?.status?.short;
+        const isRelevant = FINISHED_STATUSES.includes(status) || LIVE_STATUSES.includes(status);
+        if (!isRelevant) return false;
         const s = initialLiveStats[f.fixture.id];
         if (!s) return true;
         const hasRealStats =
           (s.corners?.total > 0) ||
           (s.yellowCards?.total > 0) ||
           (s.redCards?.home > 0 || s.redCards?.away > 0) ||
-          (s.cardEvents?.length > 0);
+          (s.cardEvents?.length > 0) ||
+          (s.goalScorers?.length > 0);
         return !hasRealStats;
       });
 
-      if (ftWithoutStats.length > 0) {
-        await Promise.all(ftWithoutStats.map(async (f) => {
+      if (needStats.length > 0) {
+        await Promise.all(needStats.map(async (f) => {
           const fid = f.fixture.id;
           const stats = await redisGet(KEYS.fixtureStats(fid));
           if (stats && FT_STATS_FIELDS.some(k => stats[k])) {
             initialLiveStats[fid] = stats;
+            // Also update fixture status/goals if stats shows a more advanced state
+            if (stats.status && !FINISHED_STATUSES.includes(f.fixture?.status?.short)) {
+              const idx = fixtures.findIndex(x => x.fixture.id === fid);
+              if (idx >= 0 && stats.status.elapsed > (fixtures[idx].fixture.status.elapsed || 0)) {
+                fixtures[idx] = {
+                  ...fixtures[idx],
+                  fixture: { ...fixtures[idx].fixture, status: stats.status },
+                  goals: stats.goals || fixtures[idx].goals,
+                };
+              }
+            }
           }
         }));
       }
