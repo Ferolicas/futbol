@@ -36,16 +36,30 @@ export async function middleware(request) {
     return NextResponse.redirect(url);
   }
 
+  // Fetch profile using service role (bypasses RLS) via REST API
+  const getProfile = async (userId) => {
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/user_profiles?id=eq.${userId}&select=subscription_status,role&limit=1`,
+        {
+          headers: {
+            apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+            Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+          },
+        }
+      );
+      const rows = await res.json();
+      return rows?.[0] || null;
+    } catch {
+      return null;
+    }
+  };
+
   // Dashboard — require active subscription (admins bypass)
   if (pathname.startsWith('/dashboard') && user) {
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('subscription_status, role')
-      .eq('id', user.id)
-      .single();
-
-    const hasActivePlan = profile?.subscription_status === 'active' || ['admin', 'owner'].includes(profile?.role);
-    if (!hasActivePlan) {
+    const profile = await getProfile(user.id);
+    const hasAccess = profile?.subscription_status === 'active' || ['admin', 'owner'].includes(profile?.role);
+    if (!hasAccess) {
       const url = request.nextUrl.clone();
       url.pathname = '/planes';
       return NextResponse.redirect(url);
@@ -54,12 +68,7 @@ export async function middleware(request) {
 
   // Admin routes — require admin or owner role
   if (pathname.startsWith('/admin') && user) {
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single();
-
+    const profile = await getProfile(user.id);
     if (!profile || !['admin', 'owner'].includes(profile.role)) {
       const url = request.nextUrl.clone();
       url.pathname = '/dashboard';

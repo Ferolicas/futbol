@@ -2642,8 +2642,16 @@ input:checked + .cb-mark::after {
   text-align: center; margin-bottom: 2.5rem;
 }
 .planes-logo {
-  width: 300px; height: auto; margin: 0 auto 1rem; display: block;
+  width: 250px; height: auto; margin: 0 auto 1rem; display: block;
   filter: drop-shadow(0 0 20px rgba(0,230,118,0.3));
+  position: relative;
+  animation: logoShine 3s ease-in-out infinite;
+}
+@keyframes logoShine {
+  0%   { filter: drop-shadow(0 0 20px rgba(0,230,118,0.3)) brightness(1); }
+  40%  { filter: drop-shadow(0 0 40px rgba(0,230,118,0.7)) brightness(1.25); }
+  60%  { filter: drop-shadow(0 0 40px rgba(0,230,118,0.7)) brightness(1.25); }
+  100% { filter: drop-shadow(0 0 20px rgba(0,230,118,0.3)) brightness(1); }
 }
 .planes-header h1 {
   font-size: 1.8rem; font-weight: 800; color: var(--t1); margin-bottom: .5rem;
