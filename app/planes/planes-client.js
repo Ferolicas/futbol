@@ -16,7 +16,7 @@ export default function PlanesClient({ userId, email }) {
 
   // Detect country and get prices
   useEffect(() => {
-    fetch('http://ip-api.com/json/?fields=countryCode,currency')
+    fetch('/api/detect-country')
       .then(r => r.json())
       .then(data => {
         if (data.countryCode) {

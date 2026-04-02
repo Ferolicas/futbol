@@ -37,7 +37,7 @@ export default function LandingPage() {
 
   // Detect user country for currency
   useEffect(() => {
-    fetch('http://ip-api.com/json/?fields=countryCode,currency')
+    fetch('/api/detect-country')
       .then(r => r.json())
       .then(data => {
         if (data.countryCode) {
