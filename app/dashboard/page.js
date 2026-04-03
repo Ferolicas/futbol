@@ -94,21 +94,25 @@ export default function Dashboard() {
     if (_dashCache) _dashCache.liveStats = liveStats;
   }, [liveStats]);
 
-  // Apply live data to fixtures — NEVER accepts a lower elapsed minute (prevents backwards jumps)
+  // Apply live data to fixtures — NEVER downgrade a finished match or go backwards in time
   const applyLiveUpdate = useCallback((prev, freshMatches) => {
+    const FT = ['FT', 'AET', 'PEN'];
     const updated = prev.map(f => {
       const fresh = freshMatches.find(m =>
         (m.fixtureId || m.fixture?.id) === f.fixture.id
       );
       if (!fresh) return f;
 
+      // NEVER downgrade a finished match — FT is final
+      if (FT.includes(f.fixture.status.short)) return f;
+
       const freshStatus = fresh.status || fresh.fixture?.status;
       const freshElapsed = freshStatus?.elapsed ?? fresh.elapsed;
       const currentElapsed = f.fixture.status.elapsed;
 
-      // Never go backwards: if current elapsed is higher, keep it
-      // (protects against stale data from any source)
-      if (currentElapsed && freshElapsed && freshElapsed < currentElapsed) {
+      // Never go backwards in elapsed time
+      if (currentElapsed && freshElapsed && freshElapsed < currentElapsed &&
+          !FT.includes(freshStatus?.short)) {
         return f;
       }
 
@@ -191,7 +195,22 @@ export default function Dashboard() {
     const updates = {};
     results.forEach((r, i) => {
       if (r.status === 'fulfilled' && r.value?.stats) {
-        updates[missing[i].fixture.id] = r.value.stats;
+        const fid = missing[i].fixture.id;
+        const stats = r.value.stats;
+        const existing = currentLiveStats[fid];
+        // Merge: take corners/cards/scorers but preserve FT status/goals
+        updates[fid] = {
+          ...(existing || {}),
+          corners: stats.corners || existing?.corners,
+          yellowCards: stats.yellowCards || existing?.yellowCards,
+          redCards: stats.redCards || existing?.redCards,
+          goalScorers: stats.goalScorers?.length > 0 ? stats.goalScorers : (existing?.goalScorers || []),
+          cardEvents: stats.cardEvents?.length > 0 ? stats.cardEvents : (existing?.cardEvents || []),
+          missedPenalties: stats.missedPenalties?.length > 0 ? stats.missedPenalties : (existing?.missedPenalties || []),
+          // Always keep the fixture's FT status, never overwrite with stale live status
+          status: existing?.status || missing[i].fixture.status,
+          goals: existing?.goals || missing[i].goals,
+        };
       }
     });
     if (Object.keys(updates).length > 0) {
@@ -199,7 +218,7 @@ export default function Dashboard() {
     }
   }, [setLiveStats]);
 
-  const loadFixtures = useCallback(async (d, { silent, tz } = {}) => {
+  const loadFixtures = useCallback(async (d, { silent, tz, clearLiveStats } = {}) => {
     if (!silent) setLoading(true);
     setError('');
     try {
@@ -233,10 +252,38 @@ export default function Dashboard() {
 
       // Populate initial live stats from /api/fixtures response (corners, cards, scorers)
       if (data.initialLiveStats && Object.keys(data.initialLiveStats).length > 0) {
-        setLiveStats(prev => ({ ...prev, ...data.initialLiveStats }));
+        if (clearLiveStats) {
+          // Date change: replace entirely with server data (old date data is irrelevant)
+          setLiveStats(data.initialLiveStats);
+        } else {
+          // Same date refresh: merge carefully, never downgrade FT stats
+          const FT = ['FT', 'AET', 'PEN'];
+          setLiveStats(prev => {
+            const next = { ...prev };
+            for (const [fid, fresh] of Object.entries(data.initialLiveStats)) {
+              const existing = next[fid];
+              if (existing && FT.includes(existing.status?.short)) {
+                next[fid] = {
+                  ...existing,
+                  corners: fresh.corners?.total > 0 ? fresh.corners : existing.corners,
+                  yellowCards: fresh.yellowCards?.total > 0 ? fresh.yellowCards : existing.yellowCards,
+                  redCards: fresh.redCards || existing.redCards,
+                  goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : existing.goalScorers,
+                  cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : existing.cardEvents,
+                  missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : existing.missedPenalties,
+                };
+              } else {
+                next[fid] = fresh;
+              }
+            }
+            return next;
+          });
+        }
+      } else if (clearLiveStats) {
+        setLiveStats({});
       }
 
-      // Background: fetch missing stats for finished matches immediately (no wait for cron)
+      // Background: fetch missing stats for finished matches (only if truly missing)
       refreshFinishedStats(fx, data.initialLiveStats || {});
 
       // Persist to module cache for instant back-navigation
@@ -262,16 +309,69 @@ export default function Dashboard() {
   const refreshLiveData = useCallback(async () => {
     setRefreshingLive(true);
     try {
-      const res = await fetch('/api/refresh-live', { method: 'POST' });
+      const res = await fetch('/api/refresh-live', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date }),
+      });
       const data = await res.json();
+      const FT = ['FT', 'AET', 'PEN'];
+
+      // Helper: merge live stats into state
+      const mergeLiveStats = (statsObj) => {
+        if (!statsObj || typeof statsObj !== 'object') return;
+        setLiveStats(prev => {
+          const next = { ...prev };
+          for (const [fid, fresh] of Object.entries(statsObj)) {
+            const existing = next[fid];
+            // If server says FT, always accept — this fixes stale "live" entries
+            if (FT.includes(fresh.status?.short)) {
+              next[fid] = {
+                ...(existing || {}),
+                ...fresh,
+                corners: fresh.corners?.total > 0 ? fresh.corners : (existing?.corners || fresh.corners),
+                goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : (existing?.goalScorers || []),
+                cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : (existing?.cardEvents || []),
+                missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : (existing?.missedPenalties || []),
+              };
+            } else if (existing && FT.includes(existing.status?.short)) {
+              // Existing is FT — only upgrade stats, never downgrade status
+              next[fid] = {
+                ...existing,
+                corners: fresh.corners?.total > 0 ? fresh.corners : existing.corners,
+                yellowCards: fresh.yellowCards?.total > 0 ? fresh.yellowCards : existing.yellowCards,
+                redCards: fresh.redCards || existing.redCards,
+                goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : existing.goalScorers,
+                cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : existing.cardEvents,
+                missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : existing.missedPenalties,
+              };
+            } else {
+              next[fid] = {
+                ...(existing || {}),
+                ...fresh,
+                corners: fresh.corners?.total > 0 ? fresh.corners : (existing?.corners || fresh.corners),
+                goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : (existing?.goalScorers || []),
+                missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : (existing?.missedPenalties || []),
+              };
+            }
+          }
+          return next;
+        });
+        setFixtures(prev => applyLiveUpdate(prev, Object.values(statsObj)));
+      };
+
+      // Merge today's live stats
       if (data.liveStats && typeof data.liveStats === 'object') {
-        setLiveStats(prev => ({ ...prev, ...data.liveStats }));
-        setFixtures(prev => applyLiveUpdate(prev, Object.values(data.liveStats)));
+        mergeLiveStats(data.liveStats);
+      }
+      // Merge viewed date live stats (fixes stale entries from past dates)
+      if (data.viewDateLiveStats && typeof data.viewDateLiveStats === 'object') {
+        mergeLiveStats(data.viewDateLiveStats);
       }
     } catch {} finally {
       setRefreshingLive(false);
     }
-  }, [applyLiveUpdate]);
+  }, [date, applyLiveUpdate]);
 
   // On mount: detect user timezone, correct date to local, then load fixtures
   useEffect(() => {
@@ -334,6 +434,35 @@ export default function Dashboard() {
     }).catch(() => {});
   }, []);
 
+  // Subscribe to push notifications (reusable — called by bell toggle AND auto on favorite)
+  const subscribePush = useCallback(async () => {
+    if (!pushSupported) return false;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) { setPushEnabled(true); return true; } // already subscribed
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') return false;
+      const vapidKey = process.env.NEXT_PUBLIC_VAPID_KEY;
+      if (!vapidKey) return false;
+      const padding = '='.repeat((4 - vapidKey.length % 4) % 4);
+      const base64 = (vapidKey + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const raw = window.atob(base64);
+      const appServerKey = new Uint8Array([...raw].map(c => c.charCodeAt(0)));
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appServerKey });
+      await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sub),
+      });
+      setPushEnabled(true);
+      return true;
+    } catch (e) {
+      console.error('[PUSH]', e);
+      return false;
+    }
+  }, [pushSupported]);
+
   const handlePushToggle = async () => {
     if (!pushSupported) return;
     try {
@@ -344,21 +473,7 @@ export default function Dashboard() {
         await fetch('/api/push/subscribe', { method: 'DELETE' });
         setPushEnabled(false);
       } else {
-        const permission = await Notification.requestPermission();
-        if (permission !== 'granted') return;
-        const vapidKey = process.env.NEXT_PUBLIC_VAPID_KEY;
-        if (!vapidKey) return;
-        const padding = '='.repeat((4 - vapidKey.length % 4) % 4);
-        const base64 = (vapidKey + padding).replace(/-/g, '+').replace(/_/g, '/');
-        const raw = window.atob(base64);
-        const appServerKey = new Uint8Array([...raw].map(c => c.charCodeAt(0)));
-        const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appServerKey });
-        await fetch('/api/push/subscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(sub),
-        });
-        setPushEnabled(true);
+        await subscribePush();
       }
     } catch (e) {
       console.error('[PUSH]', e);
@@ -436,10 +551,10 @@ export default function Dashboard() {
     setSelected(new Set());
     setSelectedMarkets({});
     setExpandedMatch(null);
-    // Clear live stats when switching dates to prevent stale data from previous view
-    setLiveStats({});
+    // Don't clear liveStats here — loadFixtures will replace them atomically
+    // to avoid flickering (empty → loaded). loadFixtures sets fresh stats from server.
     pusherLastUpdate.current = 0;
-    loadFixtures(nd, { tz: userTz });
+    loadFixtures(nd, { tz: userTz, clearLiveStats: true });
   };
 
   const visible = fixtures.filter(f => {
@@ -549,6 +664,7 @@ export default function Dashboard() {
   };
 
   // Toggle favorite — optimistic update + Supabase persist
+  // When ADDING a favorite, auto-enable push notifications so goals always arrive
   const toggleFavorite = async (e, fixtureId) => {
     e.stopPropagation();
     const isFav = favorites.includes(fixtureId);
@@ -562,6 +678,10 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fixtureId }),
       });
+      // Auto-subscribe to push when adding a favorite (not removing)
+      if (!isFav && !pushEnabled && pushSupported) {
+        subscribePush();
+      }
     } catch (e) {
       console.error('[toggleFavorite]', e.message);
     }
@@ -835,7 +955,7 @@ export default function Dashboard() {
               { key: 'live', label: 'En Vivo', count: liveCount },
               { key: 'upcoming', label: 'Proximos', count: upcomingCount },
               { key: 'finished', label: 'Finalizados' },
-              { key: 'favoritos', label: '&#9733; Favoritos', count: favoriteCount },
+              { key: 'favoritos', label: '\u2605 Favoritos', count: favoriteCount },
             ].map(c => (
               <button key={c.key} className={`chip ${statusFilter === c.key ? 'active' : ''} ${c.key === 'live' && liveCount > 0 ? 'pulse' : ''}`} onClick={() => setStatusFilter(c.key)}>
                 {c.key === 'live' && liveCount > 0 && <span className="dot-live" />}
@@ -1171,11 +1291,7 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
 
       <div className="mcard-body">
         <div className="mcard-team">
-          <div className="mcard-team-col">
-            {homePos && <span className="pos-badge">{homePos}&#176;</span>}
-            {winProb?.home != null && <span className="prob-badge">{winProb.home}%</span>}
-            <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} />
-          </div>
+          <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} />
           <span className="mcard-tname">{match.teams.home.name}</span>
         </div>
         <div className="mcard-score">
@@ -1185,11 +1301,7 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
           }
         </div>
         <div className="mcard-team right">
-          <div className="mcard-team-col">
-            {awayPos && <span className="pos-badge">{awayPos}&#176;</span>}
-            {winProb?.away != null && <span className="prob-badge">{winProb.away}%</span>}
-            <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} />
-          </div>
+          <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} />
           <span className="mcard-tname">{match.teams.away.name}</span>
         </div>
       </div>
@@ -1214,11 +1326,15 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
         </div>
       )}
 
-      {odds && (
+      {(odds || homePos || awayPos) && (
         <div className="mcard-odds">
-          <span className="odd-chip">{odds.home?.toFixed(2)}</span>
-          <span className="odd-chip x">{odds.draw?.toFixed(2)}</span>
-          <span className="odd-chip">{odds.away?.toFixed(2)}</span>
+          {homePos && <span className="pos-chip">{homePos}&#176;</span>}
+          {odds ? <>
+            <span className="odd-chip">{odds.home?.toFixed(2)}</span>
+            <span className="odd-chip x">{odds.draw?.toFixed(2)}</span>
+            <span className="odd-chip">{odds.away?.toFixed(2)}</span>
+          </> : <span className="odd-chip x">vs</span>}
+          {awayPos && <span className="pos-chip">{awayPos}&#176;</span>}
         </div>
       )}
 
@@ -1253,6 +1369,9 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
   const meta = match.leagueMeta || {};
   const flag = FLAGS[meta.country] || '';
   const selCount = Object.keys(selMarkets).length;
+  const homePos = data?.homePosition || standings?.[match.teams.home.id];
+  const awayPos = data?.awayPosition || standings?.[match.teams.away.id];
+  const winProb = data?.calculatedProbabilities?.winner;
 
   const markets = useMemo(() => {
     if (!data?.calculatedProbabilities) return [];
@@ -1278,9 +1397,9 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
       m.push({ id: 'k25', name: 'Más de 2.5 tarjetas', probability: p.cards.over25, odd: null, cat: 'Tarjetas' });
       m.push({ id: 'k35', name: 'Más de 3.5 tarjetas', probability: p.cards.over35, odd: null, cat: 'Tarjetas' });
     }
-    // Requisito #9: only show markets that have real odds (no odds = no display)
+    // Show all markets with high probability — odds optional
     return m
-      .filter(x => x.probability >= 70 && x.probability <= 95 && x.odd && x.odd > 1)
+      .filter(x => x.probability >= 70 && x.probability <= 95)
       .sort((a, b) => b.probability - a.probability);
   }, [data, match]);
 
@@ -1332,11 +1451,15 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
             ))}
           </div>
         )}
-        {odds && (
+        {(odds || homePos || awayPos) && (
           <div className="mcard-odds">
-            <span className="odd-chip">{odds.home?.toFixed(2)}</span>
-            <span className="odd-chip x">{odds.draw?.toFixed(2)}</span>
-            <span className="odd-chip">{odds.away?.toFixed(2)}</span>
+            {homePos && <span className="pos-chip">{homePos}&#176;</span>}
+            {odds ? <>
+              <span className="odd-chip">{odds.home?.toFixed(2)}</span>
+              <span className="odd-chip x">{odds.draw?.toFixed(2)}</span>
+              <span className="odd-chip">{odds.away?.toFixed(2)}</span>
+            </> : <span className="odd-chip x">vs</span>}
+            {awayPos && <span className="pos-chip">{awayPos}&#176;</span>}
           </div>
         )}
         <div className="acc-indicator">
@@ -1370,6 +1493,41 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
               {(live || finished) && liveStats && (
                 <LiveMatchDetails stats={liveStats} homeTeam={match.teams.home} awayTeam={match.teams.away} />
               )}
+
+              {/* Selectable markets — BEFORE auto combinada */}
+              {markets.length > 0 && <div className="markets">
+                <h4 className="markets-title">Selecciona para tu combinada</h4>
+                <div className="markets-grid">
+                  {markets.map(mkt => {
+                    const checked = !!selMarkets[mkt.id];
+                    const bkInfo = (() => {
+                      if (!data?.odds) return null;
+                      const country = detectCountry();
+                      const catMap = { 'BTTS': 'btts', 'Ganador': 'matchWinner', 'Goles': 'overUnder', 'Corners': 'corners', 'Tarjetas': 'cards' };
+                      return selectBookmakerOdds(data.odds, catMap[mkt.cat] || mkt.cat, country);
+                    })();
+                    return (
+                      <button
+                        key={mkt.id}
+                        className={`mkt ${checked ? 'on' : ''} ${mkt.probability >= 75 ? 'hi' : mkt.probability >= 50 ? 'md' : 'lo'}`}
+                        onClick={(e) => { e.stopPropagation(); onToggleMarket(mkt); }}
+                      >
+                        <span className="mkt-name">{mkt.name}</span>
+                        <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${cap(mkt.probability)}%` }} /></div>
+                        <div className="mkt-nums">
+                          <span className="mkt-pct">{cap(mkt.probability)}%</span>
+                          {mkt.odd && <span className="mkt-odd">{mkt.odd.toFixed(2)}</span>}
+                          {bkInfo && (() => {
+                            const logo = BOOKMAKER_LOGOS[bkInfo.bookmaker?.toLowerCase()] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => bkInfo.bookmaker?.toLowerCase()?.includes(k))?.[1];
+                            return logo ? <span className="mkt-bk"><img src={logo} alt="" className="bk-logo-lg" /></span> : null;
+                          })()}
+                          {checked && <span className="mkt-chk">&#10003;</span>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>}
 
               {/* Auto combinada */}
               {(() => {
@@ -1417,41 +1575,6 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 goalTiming={data.calculatedProbabilities?.goalTiming}
                 playerHighlights={data.playerHighlights}
               />
-
-              {/* Selectable markets — only show if there are markets with real odds */}
-              {markets.length > 0 && <div className="markets">
-                <h4 className="markets-title">Selecciona para tu combinada</h4>
-                <div className="markets-grid">
-                  {markets.map(mkt => {
-                    const checked = !!selMarkets[mkt.id];
-                    const bkInfo = (() => {
-                      if (!data?.odds) return null;
-                      const country = detectCountry();
-                      const catMap = { 'BTTS': 'btts', 'Ganador': 'matchWinner', 'Goles': 'overUnder', 'Corners': 'corners', 'Tarjetas': 'cards' };
-                      return selectBookmakerOdds(data.odds, catMap[mkt.cat] || mkt.cat, country);
-                    })();
-                    return (
-                      <button
-                        key={mkt.id}
-                        className={`mkt ${checked ? 'on' : ''} ${mkt.probability >= 75 ? 'hi' : mkt.probability >= 50 ? 'md' : 'lo'}`}
-                        onClick={(e) => { e.stopPropagation(); onToggleMarket(mkt); }}
-                      >
-                        <span className="mkt-name">{mkt.name}</span>
-                        <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${cap(mkt.probability)}%` }} /></div>
-                        <div className="mkt-nums">
-                          <span className="mkt-pct">{cap(mkt.probability)}%</span>
-                          <span className="mkt-odd">{mkt.odd.toFixed(2)}</span>
-                          {bkInfo && (() => {
-                            const logo = BOOKMAKER_LOGOS[bkInfo.bookmaker?.toLowerCase()] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => bkInfo.bookmaker?.toLowerCase()?.includes(k))?.[1];
-                            return logo ? <span className="mkt-bk"><img src={logo} alt="" className="bk-logo-lg" /></span> : null;
-                          })()}
-                          {checked && <span className="mkt-chk">&#10003;</span>}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>}
 
               <button className="btn-full" onClick={(e) => { e.stopPropagation(); onViewFull(); }}>
                 Ver analisis completo &#8594;

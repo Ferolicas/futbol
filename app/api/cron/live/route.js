@@ -198,10 +198,16 @@ export async function GET(request) {
       liveData.date = today;
       liveDetailsMap[fid] = liveData;
 
-      // For finished matches, persist stats with 48h TTL
+      // For finished matches, persist stats to Redis + Supabase (permanent)
       if (FINISHED_STATUSES.includes(match.fixture.status.short)) {
         liveData.savedAt = new Date().toISOString();
         await redisSet(KEYS.fixtureStats(fid), liveData, TTL.yesterday);
+        // Persist to Supabase so stats survive Redis TTL expiry
+        supabaseAdmin.from('match_analysis')
+          .update({ live_stats: liveData })
+          .eq('fixture_id', fid)
+          .then(() => {})
+          .catch(e => console.error(`[LIVE] Supabase stats save ${fid}:`, e.message));
       }
     }
 
@@ -231,15 +237,47 @@ export async function GET(request) {
       }));
     }
 
+    // Fetch individual fixtures for matches missing statistics (no corners)
+    // The ?live=all endpoint sometimes returns empty statistics for certain leagues.
+    // Only fetch for matches already handled by needsEventsFetch are excluded (already fetched above).
+    const alreadyFetched = new Set(needsEventsFetch.map(m => m.fixture.id));
+    const needsStatsFetch = tracked.filter(m => {
+      const fid = m.fixture.id;
+      if (alreadyFetched.has(fid)) return false;
+      const elapsed = m.fixture?.status?.elapsed || 0;
+      if (elapsed < 10) return false; // too early
+      const hasStats = (m.statistics || []).length > 0;
+      if (hasStats) return false;
+      // Check if we already have corners from a previous run (avoid re-fetching every minute)
+      const cached = existingLive[fid];
+      if (cached?.corners?.total > 0) return false;
+      return true;
+    });
+
+    if (needsStatsFetch.length > 0) {
+      await Promise.all(needsStatsFetch.map(async (match) => {
+        const fid = match.fixture.id;
+        const data = await apiFetch(`/fixtures?id=${fid}`);
+        apiCalls++;
+        if (data?.[0]) {
+          const full = data[0];
+          const fullData = extractLiveStats(full, full.events || [], full.statistics || []);
+          fullData.date = today;
+          liveDetailsMap[fid] = fullData;
+        }
+      }));
+    }
+
     // Send goal push notifications (fire and forget)
     sendGoalPushes(liveDetailsMap, existingLive).catch(err => console.error('[LIVE-CRON:pushes]', err.message));
 
-    // Merge live data (preserve goalScorers from existing if new data has none)
+    // Merge live data (preserve corners/goalScorers from existing if new data has none)
     const mergedLive = { ...existingLive };
     for (const [fid, data] of Object.entries(liveDetailsMap)) {
       const existing = existingLive[fid];
       mergedLive[fid] = {
         ...data,
+        corners: data.corners?.total > 0 ? data.corners : (existing?.corners || data.corners),
         goalScorers: data.goalScorers?.length > 0 ? data.goalScorers : (existing?.goalScorers || []),
         missedPenalties: data.missedPenalties?.length > 0 ? data.missedPenalties : (existing?.missedPenalties || []),
       };
@@ -280,6 +318,11 @@ export async function GET(request) {
             fullStats.date = today;
             fullStats.savedAt = new Date().toISOString();
             await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
+            // Persist to Supabase permanently
+            supabaseAdmin.from('match_analysis')
+              .update({ live_stats: fullStats })
+              .eq('fixture_id', fid)
+              .catch(e => console.error(`[LIVE:stale] Supabase stats save ${fid}:`, e.message));
             mergedLive[fid] = { ...fullStats, status: fresh.fixture.status };
             staleFixedCount++;
             finishedUpdates.push({ fixtureId: fid, status: fresh.fixture.status, goals: fresh.goals, score: fresh.score, corners: fullStats.corners, yellowCards: fullStats.yellowCards, redCards: fullStats.redCards, goalScorers: fullStats.goalScorers || [], missedPenalties: fullStats.missedPenalties || [] });
@@ -293,6 +336,38 @@ export async function GET(request) {
     // Save merged live data
     if (Object.keys(mergedLive).length > 0) {
       await redisSet(KEYS.liveStats(today), mergedLive, TTL.liveStats);
+    }
+
+    // Update fixtures:{date} cache with latest status/goals for all tracked + stale matches
+    // This prevents stale fixture status (showing 2H when match is actually FT)
+    const allUpdatedIds = new Set([
+      ...tracked.map(m => m.fixture.id),
+      ...staleIds,
+    ]);
+    if (allUpdatedIds.size > 0) {
+      const cachedFixtures = await redisGet(KEYS.fixtures(today));
+      if (Array.isArray(cachedFixtures) && cachedFixtures.length > 0) {
+        let changed = false;
+        const updated = cachedFixtures.map(f => {
+          const fid = f.fixture?.id;
+          if (!fid || !allUpdatedIds.has(fid)) return f;
+          const live = mergedLive[fid];
+          if (!live?.status) return f;
+          // Only update if status has advanced
+          if (f.fixture.status.short === live.status.short &&
+              (f.fixture.status.elapsed || 0) >= (live.status.elapsed || 0)) return f;
+          changed = true;
+          return {
+            ...f,
+            fixture: { ...f.fixture, status: live.status },
+            goals: live.goals || f.goals,
+            score: live.score || f.score,
+          };
+        });
+        if (changed) {
+          redisSet(KEYS.fixtures(today), updated, TTL.fixtures).catch(() => {});
+        }
+      }
     }
 
     // Push real-time update via Pusher

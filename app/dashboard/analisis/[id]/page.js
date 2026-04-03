@@ -220,12 +220,9 @@ export default function AnalisisPage() {
           </div>
           <div className="match-header-teams">
             <div className="header-team">
-              {a.homePosition && <span className="pos-badge-lg">{a.homePosition}°</span>}
-              {a.calculatedProbabilities?.winner?.home != null && (
-                <span className="prob-badge-lg">{cap(a.calculatedProbabilities.winner.home)}%</span>
-              )}
               <TeamLogo src={a.homeLogo} name={a.homeTeam} size={64} />
               <span className="header-team-name">{a.homeTeam}</span>
+              {a.homePosition && <span className="header-pos">{a.homePosition}°</span>}
             </div>
             <div className="header-vs">
               {a.goals && (a.goals.home !== null) ? (
@@ -235,12 +232,10 @@ export default function AnalisisPage() {
               )}
               <span className="header-date">{fmtDate(a.kickoff)}</span>
               {(() => {
-                // Show aggregate score for two-legged ties
                 const round = a.leagueRound || '';
                 const is2ndLeg = /2nd leg/i.test(round);
                 const is1stLeg = /1st leg/i.test(round);
                 if (!is2ndLeg && !is1stLeg) return null;
-                // Find the other leg from H2H (same teams, same season)
                 const otherLeg = (a.h2h || []).find(h => {
                   const hRound = h.league?.round || '';
                   if (is2ndLeg) return /1st leg/i.test(hRound);
@@ -249,17 +244,12 @@ export default function AnalisisPage() {
                 if (!otherLeg) return null;
                 const legGoals = a.goals || {};
                 const otherGoals = otherLeg.goals || {};
-                // Calculate aggregate from perspective of current home team
-                const curHomeIsLeg1Home = is1stLeg;
                 let aggHome, aggAway;
                 if (is2ndLeg) {
-                  // Current match is 2nd leg
-                  // Other leg (1st): check if current home was home or away in 1st leg
                   const wasHomeIn1st = otherLeg.teams?.home?.id === a.homeId;
                   aggHome = (legGoals.home ?? 0) + (wasHomeIn1st ? (otherGoals.home ?? 0) : (otherGoals.away ?? 0));
                   aggAway = (legGoals.away ?? 0) + (wasHomeIn1st ? (otherGoals.away ?? 0) : (otherGoals.home ?? 0));
                 } else {
-                  // Current match is 1st leg
                   const wasHomeIn2nd = otherLeg.teams?.home?.id === a.homeId;
                   aggHome = (legGoals.home ?? 0) + (wasHomeIn2nd ? (otherGoals.home ?? 0) : (otherGoals.away ?? 0));
                   aggAway = (legGoals.away ?? 0) + (wasHomeIn2nd ? (otherGoals.away ?? 0) : (otherGoals.home ?? 0));
@@ -274,14 +264,19 @@ export default function AnalisisPage() {
               })()}
             </div>
             <div className="header-team">
-              {a.awayPosition && <span className="pos-badge-lg">{a.awayPosition}°</span>}
-              {a.calculatedProbabilities?.winner?.away != null && (
-                <span className="prob-badge-lg">{cap(a.calculatedProbabilities.winner.away)}%</span>
-              )}
               <TeamLogo src={a.awayLogo} name={a.awayTeam} size={64} />
               <span className="header-team-name">{a.awayTeam}</span>
+              {a.awayPosition && <span className="header-pos">{a.awayPosition}°</span>}
             </div>
           </div>
+          {/* Probability summary row */}
+          {a.calculatedProbabilities?.winner && (
+            <div className="header-probs-row">
+              <span className="header-prob">{cap(a.calculatedProbabilities.winner.home)}%</span>
+              <span className="header-prob draw">{cap(a.calculatedProbabilities.winner.draw)}%</span>
+              <span className="header-prob">{cap(a.calculatedProbabilities.winner.away)}%</span>
+            </div>
+          )}
           {a.odds?.matchWinner && (
             <OddsWithBookmaker odds={a.odds} allBookmakerOdds={a.odds?.allBookmakerOdds} userCountry={userCountry} />
           )}

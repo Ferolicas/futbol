@@ -629,6 +629,7 @@ body {
   gap: 4px;
   margin-bottom: 6px;
   justify-content: center;
+  align-items: center;
 }
 .odd-chip {
   font-size: .65rem;
@@ -641,6 +642,16 @@ body {
   border: 1px solid rgba(255,215,64,.1);
 }
 .odd-chip.x { color: var(--t3); background: var(--bg-1); border-color: var(--brd); }
+.pos-chip {
+  font-size: .6rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--blue);
+  background: rgba(68,138,255,.12);
+  padding: 2px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
 
 .mcard-foot {
   display: flex;
@@ -1160,15 +1171,30 @@ body {
   background: var(--bg-0); border: 1px solid var(--brd); color: var(--t2); margin-bottom: 16px;
 }
 .match-header-status.live { background: rgba(255,61,87,.1); border-color: var(--red); color: var(--red); animation: pulse 1.5s infinite; }
-.match-header-teams { display: flex; align-items: center; justify-content: center; gap: 32px; margin-bottom: 16px; }
-.header-team { display: flex; flex-direction: column; align-items: center; gap: 10px; flex: 1; }
-.header-team-name { font-size: .95rem; font-weight: 700; text-align: center; }
-.header-vs { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.match-header-teams { display: flex; align-items: flex-start; justify-content: center; gap: 16px; margin-bottom: 12px; }
+.header-team { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.header-team-name { font-size: .92rem; font-weight: 700; text-align: center; line-height: 1.2; }
+.header-pos {
+  font-size: .65rem; font-weight: 700; color: var(--blue);
+  background: rgba(68,138,255,.12); padding: 2px 8px; border-radius: 10px;
+}
+.header-vs { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; padding-top: 12px; }
 .header-score { font-size: 1.8rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 .header-score.live { color: var(--red); }
-.header-time { font-size: 1.4rem; font-weight: 700; color: var(--green); }
-.header-date { font-size: .72rem; color: var(--t3); text-transform: capitalize; }
-.position-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 24px; padding: 0 8px; background: var(--blue); color: #fff; border-radius: 12px; font-size: .75rem; font-weight: 700; margin-bottom: 4px; }
+.header-time { font-size: 1.3rem; font-weight: 700; color: var(--green); }
+.header-date { font-size: .7rem; color: var(--t3); text-transform: capitalize; }
+.header-probs-row {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  margin-bottom: 12px;
+}
+.header-prob {
+  font-size: .78rem; font-weight: 700; color: var(--green);
+  background: rgba(0,230,118,.08); padding: 4px 14px; border-radius: 8px;
+  border: 1px solid rgba(0,230,118,.15);
+}
+.header-prob.draw {
+  color: var(--t3); background: var(--bg-0); border-color: var(--brd);
+}
 
 .odds-row { display: flex; align-items: center; justify-content: center; gap: 12px; padding-top: 16px; border-top: 1px solid var(--brd); margin-top: 16px; }
 .odd-badge { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 16px; background: var(--bg-0); border: 1px solid var(--brd); border-radius: var(--rs); min-width: 64px; }
@@ -1334,9 +1360,15 @@ body {
   .mcard-score { min-width: 42px; }
   .score-num { font-size: .9rem; }
 
-  .match-header-teams { gap: 16px; }
-  .header-team-name { font-size: .82rem; }
+  .match-header-card { padding: 16px 12px; }
+  .match-header-teams { gap: 10px; }
+  .header-team-name { font-size: .78rem; }
   .header-score { font-size: 1.4rem; }
+  .header-time { font-size: 1.1rem; }
+  .header-pos { font-size: .6rem; padding: 1px 6px; }
+  .header-probs-row { gap: 8px; margin-bottom: 8px; }
+  .header-prob { font-size: .7rem; padding: 3px 10px; }
+  .pos-chip { font-size: .55rem; padding: 1px 5px; }
 
   .lineups-grid, .last5-grid, .stats-grid, .prob-grid { grid-template-columns: 1fr; }
   .h2h-summary { gap: 16px; }
@@ -1354,10 +1386,18 @@ body {
   .mcard { padding: 10px; }
   .mcard-league { font-size: .62rem; }
   .mcard-tname { font-size: .72rem; }
+  .mcard-odds { gap: 3px; }
+  .odd-chip { font-size: .6rem; padding: 2px 7px; }
+  .pos-chip { font-size: .52rem; padding: 1px 4px; }
   .markets-grid { grid-template-columns: 1fr; }
 
   .tab { padding: 8px 6px; font-size: .75rem; }
   .tab-badge { min-width: 16px; height: 16px; font-size: .58rem; }
+
+  .match-header-teams { gap: 8px; }
+  .header-team-name { font-size: .72rem; }
+  .header-probs-row { gap: 6px; }
+  .header-prob { font-size: .65rem; padding: 2px 8px; }
 
   .apuesta-item { flex-wrap: wrap; }
   .apuesta-match { width: 100%; flex: none; }
@@ -2114,43 +2154,12 @@ body {
 .api-counter.warn .api-counter-reset { color: rgba(255,180,0,0.8); }
 .api-counter.danger .api-counter-reset { color: rgba(255,80,80,0.8); }
 
-/* ---- Match Card: Team Column (badges above logo) ---- */
-.mcard-team-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-}
-
 .mcard-time {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
   font-size: .72rem;
-}
-
-.pos-badge {
-  font-size: .55rem;
-  font-weight: 700;
-  color: var(--blue);
-  background: rgba(68,138,255,.12);
-  padding: 1px 5px;
-  border-radius: 6px;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.prob-badge {
-  font-size: .55rem;
-  font-weight: 700;
-  color: var(--green);
-  background: rgba(0,230,118,.10);
-  padding: 1px 5px;
-  border-radius: 6px;
-  line-height: 1.2;
-  white-space: nowrap;
 }
 
 /* ---- Custom Checkbox Mark ---- */
@@ -2590,8 +2599,7 @@ input:checked + .cb-mark::after {
 }
 
 @media (max-width: 480px) {
-  .mcard-team-col { gap: 1px; }
-  .pos-badge, .prob-badge { font-size: .5rem; padding: 0px 4px; }
+  .pos-chip { font-size: .48rem; padding: 1px 3px; }
   .form-matches { padding-left: 16px; }
   .form-match { font-size: .62rem; gap: 3px; }
   .form-match .fdot { width: 16px; height: 16px; font-size: .45rem; }

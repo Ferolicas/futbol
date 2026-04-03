@@ -1,6 +1,7 @@
 import { getQuota, refreshLineups, refreshInjuries, fetchMatchStats } from '../../../../lib/api-football';
 import { getCachedAnalysis, cacheAnalysis, getCachedFixtures } from '../../../../lib/sanity-cache';
 import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
+import { supabaseAdmin } from '../../../../lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
@@ -95,7 +96,7 @@ export async function POST(request, { params }) {
     }
 
     if (action === 'refresh-stats') {
-      // Check Redis first — only call API if truly missing
+      // L1: Check Redis
       const cached = await redisGet(KEYS.fixtureStats(id));
       const hasStats = cached && (
         (cached.corners?.total > 0) ||
@@ -107,10 +108,33 @@ export async function POST(request, { params }) {
         return Response.json({ stats: cached, fromCache: true });
       }
 
+      // L2: Check Supabase (permanent storage)
+      try {
+        const { data: row } = await supabaseAdmin
+          .from('match_analysis')
+          .select('live_stats')
+          .eq('fixture_id', Number(id))
+          .not('live_stats', 'is', null)
+          .limit(1)
+          .single();
+        if (row?.live_stats && (row.live_stats.corners || row.live_stats.yellowCards || row.live_stats.goalScorers?.length)) {
+          // Backfill Redis
+          redisSet(KEYS.fixtureStats(id), row.live_stats, TTL.yesterday).catch(() => {});
+          return Response.json({ stats: row.live_stats, fromCache: true });
+        }
+      } catch {}
+
+      // L3: Fetch from API
       const stats = await fetchMatchStats(id);
       if (!stats) return Response.json({ error: 'Match not found' }, { status: 404 });
 
       await redisSet(KEYS.fixtureStats(id), stats, TTL.yesterday);
+      // Persist to Supabase permanently
+      try {
+        await supabaseAdmin.from('match_analysis')
+          .update({ live_stats: stats })
+          .eq('fixture_id', Number(id));
+      } catch (e) { console.error(`[match:refresh-stats] Supabase save ${id}:`, e.message); }
       const quota = await getQuota();
       return Response.json({ stats, quota });
     }

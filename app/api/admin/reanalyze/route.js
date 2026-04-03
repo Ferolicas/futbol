@@ -1,5 +1,5 @@
 import { analyzeMatch, getFixtures, fetchMatchStats } from '../../../../lib/api-football';
-import { getCachedAnalysis, getAnalyzedFixtureIds, cacheAnalysis } from '../../../../lib/sanity-cache';
+import { getCachedAnalysis, getAnalyzedFixtureIds, cacheAnalysis, getAnalyzedMatchesFull } from '../../../../lib/sanity-cache';
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { redisGet, redisDel, redisSet, KEYS, TTL } from '../../../../lib/redis';
@@ -21,12 +21,10 @@ export async function POST(request) {
   const today = searchParams.get('date') || new Date().toISOString().split('T')[0];
   const force = searchParams.get('force') === 'true';
 
-  // force=true: clear ALL cached data for the date before re-running
+  // force=true: clear Redis caches so fresh API data is fetched.
+  // NOTE: Do NOT delete Supabase rows — if a match fails to re-analyze due to
+  // rate limits, the old Supabase row stays as fallback. Re-analysis UPSERTs on success.
   if (force) {
-    const { error: _errClear } = await supabaseAdmin.from('match_analysis').delete().eq('date', today);
-    if (_errClear) console.error('[reanalyze:force-clear]', _errClear.message);
-
-    // Clear fixture + analysis + live stats caches
     const existingFixtures = await redisGet(KEYS.fixtures(today));
     const fidsToClear = Array.isArray(existingFixtures)
       ? existingFixtures.map(f => f.fixture?.id).filter(Boolean)
@@ -35,8 +33,9 @@ export async function POST(request) {
     await Promise.all([
       redisDel(`analysis:${today}`),
       redisDel(KEYS.fixtures(today)),
-      redisDel(KEYS.liveStats(today)),
-      ...fidsToClear.map(fid => redisDel(KEYS.fixtureStats(fid))),
+      // Do NOT delete liveStats or fixtureStats — they contain live score data
+      // (corners, cards, scorers) that is independent of analysis. Deleting them
+      // causes live matches to lose their stats on page refresh.
       ...fidsToClear.map(fid => redisDel(`analysis:fixture:${fid}`)),
     ]);
   }
@@ -117,11 +116,39 @@ export async function POST(request) {
         send({ type: 'progress', current: analyzed + skipped + failed, total, analyzed, skipped, failed, match: name });
       };
 
-      // Process in batches of 2 with 1.5s delay between batches to avoid API rate limits
-      for (let i = 0; i < fixtures.length; i += 2) {
-        const batch = fixtures.slice(i, i + 2);
-        await Promise.all(batch.map(analyzeOne));
-        if (i + 2 < fixtures.length) await new Promise(r => setTimeout(r, 1500));
+      // Process ONE match at a time — each analysis triggers 40-70+ API calls internally,
+      // the rate limiter in api-football.js handles concurrency within each analysis.
+      // Running 2+ matches in parallel doubles the request flood and causes 429 cascades.
+      for (let i = 0; i < fixtures.length; i++) {
+        await analyzeOne(fixtures[i]);
+        if (i + 1 < fixtures.length) await new Promise(r => setTimeout(r, 1000));
+      }
+
+      // Merge fallback: fill in any failed fixtures from existing Supabase/Redis data
+      // This guarantees 100% coverage — failed analyses keep their last known good data
+      const failedFixtureIds = fixtures
+        .map(f => f.fixture?.id)
+        .filter(fid => fid != null && !analyzedIds.includes(fid));
+
+      if (failedFixtureIds.length > 0) {
+        send({ type: 'progress', current: total, total, analyzed, skipped, failed, match: `Recuperando ${failedFixtureIds.length} partidos sin analizar...` });
+        try {
+          const { analyzedOdds: existOdds, analyzedData: existData } = await getAnalyzedMatchesFull(failedFixtureIds);
+          let merged = 0;
+          for (const [fidStr, d] of Object.entries(existData)) {
+            const fid = Number(fidStr);
+            analyzedData[fid] = d;
+            analyzedIds.push(fid);
+            const odd = existOdds[fid] || d.odds?.matchWinner;
+            if (odd) analyzedOdds[fid] = odd;
+            merged++;
+          }
+          if (merged > 0) {
+            send({ type: 'progress', current: total, total, analyzed, skipped: skipped + merged, failed: failed - merged, match: `${merged} partidos recuperados del caché` });
+          }
+        } catch (e) {
+          console.error('[reanalyze] merge fallback failed:', e.message);
+        }
       }
 
       const analysisCache = { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData };
@@ -129,10 +156,10 @@ export async function POST(request) {
 
       // Re-fetch live stats (corners, cards, scorers) for finished matches
       const FINISHED = ['FT', 'AET', 'PEN'];
+      const liveStatsMap = {};
       const finishedFixtures = fixtures.filter(f => FINISHED.includes(f.fixture?.status?.short));
       if (finishedFixtures.length > 0) {
         send({ type: 'progress', current: total, total, analyzed, skipped, failed, match: 'Cargando estadísticas...' });
-        const liveStatsMap = {};
         await Promise.all(finishedFixtures.map(async (f) => {
           const fid = f.fixture.id;
           try {
@@ -140,15 +167,47 @@ export async function POST(request) {
             if (stats) {
               await redisSet(KEYS.fixtureStats(fid), stats, TTL.yesterday);
               liveStatsMap[fid] = stats;
+              // Persist to Supabase permanently
+              try {
+                await supabaseAdmin.from('match_analysis')
+                  .update({ live_stats: stats })
+                  .eq('fixture_id', fid);
+              } catch (e2) { console.error(`[reanalyze:stats] Supabase save ${fid}:`, e2.message); }
             }
           } catch (e) {
             console.error(`[reanalyze:stats] ${fid}:`, e.message);
           }
         }));
-        if (Object.keys(liveStatsMap).length > 0) {
-          await redisSet(KEYS.liveStats(today), liveStatsMap, TTL.yesterday).catch(() => {});
+      }
+
+      // Update live:{date} — merge fresh stats AND correct status for ALL fixtures
+      // This fixes: match was 2H in live:{date}, now is FT from fresh API data
+      const existingLive = await redisGet(KEYS.liveStats(today)) || {};
+      const updatedLive = { ...existingLive };
+      for (const f of fixtures) {
+        const fid = f.fixture?.id;
+        if (!fid) continue;
+        const existing = updatedLive[fid];
+        const freshStats = liveStatsMap?.[fid];
+        if (freshStats) {
+          // Finished match with full stats: use them, set correct FT status
+          updatedLive[fid] = {
+            ...freshStats,
+            status: f.fixture.status,
+            goals: f.goals,
+            score: f.score,
+          };
+        } else if (existing) {
+          // Update status/goals from fresh fixtures even without new stats
+          updatedLive[fid] = {
+            ...existing,
+            status: f.fixture.status,
+            goals: f.goals || existing.goals,
+            score: f.score || existing.score,
+          };
         }
       }
+      await redisSet(KEYS.liveStats(today), updatedLive, TTL.yesterday).catch(() => {});
 
       send({ type: 'done', analyzed, skipped, failed, total });
       controller.close();

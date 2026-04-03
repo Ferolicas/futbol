@@ -103,35 +103,31 @@ export async function GET(request) {
     }, { onConflict: 'date' });
     if (_err1) console.error('[daily:schedule]', _err1.message);
 
-    // 4. Analyze all fixtures in batches of 3
+    // 4. Analyze all fixtures ONE at a time — each analysis triggers 40-70+ API calls,
+    // the rate limiter in api-football.js handles concurrency within each analysis.
     let analyzed = 0, failed = 0, skipped = 0;
     const analyzedIds = [];
     const analyzedOdds = {};
     const analyzedData = {};
-    const BATCH = 3;
 
-    for (let i = 0; i < fixtures.length; i += BATCH) {
-      const batch = fixtures.slice(i, i + BATCH);
-      await Promise.all(batch.map(async (fixture) => {
-        const fid = fixture.fixture.id;
-        try {
-          const result = await analyzeMatch(fixture, { date: today });
-          if (!result || result.dataQuality === 'insufficient') { skipped++; return; }
-          // analyzeMatch already calls cacheAnalysis internally — do NOT call it again
-          // (calling it again with { ...result } passes the wrapper object, not the analysis,
-          //  which corrupts Redis and saves null odds/combinada/probabilities to Supabase)
-          analyzed++;
-          const a = result.analysis || result;
-          analyzedIds.push(fid);
-          if (a?.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
-          const summary = buildSummary(a);
-          if (summary) analyzedData[fid] = summary;
-        } catch (e) {
-          console.error(`[daily] fixture ${fid}:`, e.message);
-          failed++;
-        }
-      }));
-      if (i + BATCH < fixtures.length) await new Promise(r => setTimeout(r, 300));
+    for (const fixture of fixtures) {
+      const fid = fixture.fixture.id;
+      try {
+        const result = await analyzeMatch(fixture, { date: today });
+        if (!result) { skipped++; continue; }
+        // analyzeMatch already calls cacheAnalysis internally — do NOT call it again
+        analyzed++;
+        const a = result.analysis || result;
+        analyzedIds.push(fid);
+        if (a?.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
+        const summary = buildSummary(a);
+        if (summary) analyzedData[fid] = summary;
+      } catch (e) {
+        console.error(`[daily] fixture ${fid}:`, e.message);
+        failed++;
+      }
+      // Brief pause between matches to let rate limiter slots free up
+      await new Promise(r => setTimeout(r, 500));
     }
 
     // 5. Write fresh analysis summary cache (replaces the old delete approach)
