@@ -38,8 +38,17 @@ export async function GET(request) {
     // 1. Try Redis first (instant)
     const redisFixtures = await redisGet(KEYS.fixtures(date));
     if (redisFixtures && Array.isArray(redisFixtures) && redisFixtures.length > 0) {
-      const STALE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE', 'NS'];
-      const redisHasStale = isPastDate && redisFixtures.some(f => STALE_STATUSES.includes(f.fixture?.status?.short));
+      // Detect stale live statuses: a match showing 1H/2H/etc but kicked off >150min ago
+      // is impossible — the live cron or overnight cron may have frozen it.
+      // This check applies to ALL dates (not just isPastDate) since the live cron writes
+      // today's cache with live statuses that can go stale overnight.
+      const LIVE_CACHE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
+      const nowMs = Date.now();
+      const redisHasStale = redisFixtures.some(f => {
+        if (!LIVE_CACHE_STATUSES.includes(f.fixture?.status?.short)) return false;
+        const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
+        return kickoff > 0 && (nowMs - kickoff) > 150 * 60 * 1000;
+      });
       if (redisHasStale) {
         try {
           const result = await getFixtures(date, { forceApi: true });
@@ -47,8 +56,16 @@ export async function GET(request) {
           fromCache = false;
           redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(() => {});
         } catch (err) {
-          console.error('[fixtures] API fetch failed for past date:', err.message);
-          fixtures = redisFixtures;
+          console.error('[fixtures] API fetch failed for stale date:', err.message);
+          // Fallback: force-finish the stale live matches client-side
+          fixtures = redisFixtures.map(f => {
+            if (!LIVE_CACHE_STATUSES.includes(f.fixture?.status?.short)) return f;
+            const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
+            if (kickoff > 0 && (nowMs - kickoff) > 150 * 60 * 1000) {
+              return { ...f, fixture: { ...f.fixture, status: { short: 'FT', long: 'Match Finished', elapsed: 90 } } };
+            }
+            return f;
+          });
           fromCache = true;
         }
       } else {
