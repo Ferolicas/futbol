@@ -9,6 +9,7 @@ import { usePusherEvent } from '../../lib/use-pusher';
 import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
 import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/timezone';
 import { useLiveStats } from './live-stats-context';
+import { useSelectedMarkets } from './selected-markets-context';
 
 function detectCountry() {
   try {
@@ -64,8 +65,8 @@ export default function Dashboard() {
   const [batchRunning, setBatchRunning] = useState(false);
   // Accordion for Analizados
   const [expandedMatch, setExpandedMatch] = useState(null);
-  // Custom combinada: { fixtureId: { marketId: marketObj } }
-  const [selectedMarkets, setSelectedMarkets] = useState({});
+  // Custom combinada: shared via context so analisis/[id] page can add to it
+  const { selectedMarkets, toggleMarket, setSelectedMarkets } = useSelectedMarkets();
   const [showApuesta, setShowApuesta] = useState(true);
   // Multiple saved combinadas
   const [savedCombinadas, setSavedCombinadas] = useState([]);
@@ -599,19 +600,6 @@ export default function Dashboard() {
     });
   };
 
-  const toggleMarket = (fixtureId, market, matchName) => {
-    setSelectedMarkets(prev => {
-      const n = { ...prev };
-      n[fixtureId] = { ...(n[fixtureId] || {}) };
-      if (n[fixtureId][market.id]) {
-        delete n[fixtureId][market.id];
-        if (Object.keys(n[fixtureId]).length === 0) delete n[fixtureId];
-      } else {
-        n[fixtureId][market.id] = { ...market, matchName };
-      }
-      return n;
-    });
-  };
 
   const analyzeSelected = async () => {
     const toAnalyze = fixtures.filter(f => selected.has(f.fixture.id));
@@ -978,19 +966,31 @@ export default function Dashboard() {
             </button>
             {showApuesta && (
               <div className="apuesta-body">
-                {apuestaDelDia.selections.map((sel, i) => (
-                  <div key={i} className={`apuesta-item ${sel.priority === 2 ? 'upcoming' : sel.priority === 1 ? 'live' : 'done'}`}>
-                    <span className="apuesta-match">
-                      {sel.priority === 2 && <span className="apuesta-status ns">&#9679;</span>}
-                      {sel.priority === 1 && <span className="apuesta-status live">EN VIVO</span>}
-                      {sel.priority === 0 && <span className="apuesta-status fin">FIN</span>}
-                      {sel.matchName}
-                    </span>
-                    <span className="apuesta-mkt">{sel.name}</span>
-                    <span className="apuesta-prob">{cap(sel.probability)}%</span>
-                    <span className="apuesta-odd">{sel.odd.toFixed(2)}</span>
-                  </div>
-                ))}
+                {apuestaDelDia.selections.map((sel, i) => {
+                  const pct = cap(sel.probability);
+                  const probColor = pct >= 85 ? '#4ade80' : pct >= 80 ? '#fbbf24' : '#d97706';
+                  return (
+                    <div key={i} className={`apuesta-item ${sel.priority === 2 ? 'upcoming' : sel.priority === 1 ? 'live' : 'done'}`}>
+                      <span className="apuesta-match">
+                        {sel.priority === 2 && <span className="apuesta-status ns">&#9679;</span>}
+                        {sel.priority === 1 && <span className="apuesta-status live">EN VIVO</span>}
+                        {sel.priority === 0 && <span className="apuesta-status fin">FIN</span>}
+                        {sel.matchName}
+                      </span>
+                      <span className="apuesta-mkt">{(() => {
+                        const sufijos = { 'Goles': 'goles', 'Córners': 'córners', 'Tarjetas': 'tarjetas' };
+                        const sufijo = sufijos[sel.cat];
+                        if (sufijo && sel.name?.toLowerCase().endsWith(sufijo)) {
+                          const valor = sel.name.slice(0, sel.name.length - sufijo.length).trim();
+                          return <><span style={{ color: 'white', fontWeight: 600 }}>{sel.cat} totales — </span><span style={{ color: '#67e8f9' }}>{valor}</span></>;
+                        }
+                        return sel.name;
+                      })()}</span>
+                      <span className="apuesta-prob" style={{ color: probColor }}>{pct}%</span>
+                      <span className="apuesta-odd">{sel.odd.toFixed(2)}</span>
+                    </div>
+                  );
+                })}
                 {apuestaDelDia.combinedOdd > 1 && (
                   <div className="apuesta-foot">
                     <span>Cuota: <b>{apuestaDelDia.combinedOdd}</b></span>
@@ -1255,9 +1255,12 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
   const hasScore = live || finished;
   const meta = match.leagueMeta || {};
   const flag = FLAGS[meta.country] || '';
-  const winProb = matchData?.calculatedProbabilities?.winner;
   const homePos = matchData?.homePosition || standings?.[match.teams.home.id];
   const awayPos = matchData?.awayPosition || standings?.[match.teams.away.id];
+  const homeId = match.teams.home.id;
+  const tz = userTz || 'UTC';
+  const cardDate = new Date(match.fixture.date).toLocaleDateString('es', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long' });
+  const sLabel = { NS: 'PRÓXIMO', '1H': 'EN VIVO — 1T', '2H': 'EN VIVO — 2T', HT: 'ENTRETIEMPO', FT: 'FINALIZADO', ET: 'EN VIVO — Extra', P: 'EN VIVO — Penales', AET: 'FINALIZADO', PEN: 'FINALIZADO', SUSP: 'SUSPENDIDO', PST: 'POSPUESTO', CANC: 'CANCELADO' }[match.fixture.status.short] || match.fixture.status.short;
 
   return (
     <motion.div
@@ -1270,91 +1273,179 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
       whileHover={{ scale: 1.01 }}
       layout
     >
-      <div className="mcard-top">
-        <div className="mcard-league">
-          {match.league.logo && <img src={match.league.logo} alt="" className="league-ico" />}
-          <span>{flag} {match.league.name}</span>
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {/* ── Fila 1: Liga + Fecha ── */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '.82rem', fontWeight: 600, color: '#f1f5f9' }}>
+            {match.league.logo && <img src={match.league.logo} alt="" style={{ width: 18, height: 18, objectFit: 'contain' }} />}
+            <span>{flag} {match.league.name}</span>
+          </div>
+          <span style={{ fontSize: '.75rem', color: 'rgba(255,255,255,.6)', textTransform: 'capitalize' }}>{cardDate}</span>
         </div>
-        <div className="mcard-time">
-          {live ? (
-            <span className="badge-live">
-              <span className="dot-live" />
-              <MatchTimer elapsed={match.fixture.status.elapsed} status={match.fixture.status.short} />
-            </span>
-          ) : finished ? (
-            <span className="badge-ft">{statusText(match.fixture.status.short)}</span>
-          ) : (
-            <span className="badge-ns">{fmtTime(match.fixture.date, userTz)}</span>
+
+        {/* ── Fila 2: Local | Visitante + Cuotas ── */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px 12px' }}>
+          {/* Local — order 1 */}
+          <div style={{ order: 1, flex: 1, minWidth: 0 }}>
+            <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} size={36} />
+            <div style={{ fontSize: 'clamp(.9rem, 3vw, 1.25rem)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4, color: '#f1f5f9' }}>
+              {match.teams.home.name}
+            </div>
+            {homePos && <div style={{ fontSize: '.7rem', color: 'rgba(255,255,255,.55)' }}>{homePos}° posición</div>}
+          </div>
+
+          {/* Cuotas — order 3, fila propia en móvil */}
+          {odds && (
+            <div style={{ order: 3, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              <span style={{ padding: '4px 12px', background: 'rgba(251,191,36,.1)', border: '1px solid rgba(251,191,36,.2)', borderRadius: 8, fontWeight: 700, fontSize: '.82rem', color: '#fbbf24' }}>{odds.home?.toFixed(2)}</span>
+              <span style={{ padding: '4px 12px', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, fontWeight: 700, fontSize: '.82rem', color: 'rgba(255,255,255,.55)' }}>X {odds.draw?.toFixed(2)}</span>
+              <span style={{ padding: '4px 12px', background: 'rgba(251,191,36,.1)', border: '1px solid rgba(251,191,36,.2)', borderRadius: 8, fontWeight: 700, fontSize: '.82rem', color: '#fbbf24' }}>{odds.away?.toFixed(2)}</span>
+            </div>
           )}
-        </div>
-      </div>
 
-      <div className="mcard-body">
-        <div className="mcard-team">
-          <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} />
-          <span className="mcard-tname">{match.teams.home.name}</span>
+          {/* Visitante — order 2 */}
+          <div style={{ order: 2, flex: 1, minWidth: 0, textAlign: 'right' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} size={36} />
+            </div>
+            <div style={{ fontSize: 'clamp(.9rem, 3vw, 1.25rem)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4, color: '#f1f5f9' }}>
+              {match.teams.away.name}
+            </div>
+            {awayPos && <div style={{ fontSize: '.7rem', color: 'rgba(255,255,255,.55)' }}>{awayPos}° posición</div>}
+          </div>
         </div>
-        <div className="mcard-score">
-          {hasScore
-            ? <span className={`score-num ${live ? 'live' : ''}`}>{match.goals.home} - {match.goals.away}</span>
-            : <span className="score-vs">vs</span>
-          }
-        </div>
-        <div className="mcard-team right">
-          <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} />
-          <span className="mcard-tname">{match.teams.away.name}</span>
-        </div>
-      </div>
 
-      {/* Live stats bar: corners, cards */}
-      {(live || finished) && liveStats && <LiveStatsBar stats={liveStats} />}
+        {/* ── Score Box ── igual al de analisis/[id] */}
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <motion.div
+            style={{ width: '100%', borderRadius: 20, background: 'linear-gradient(135deg, rgba(30,135,105,.25), rgba(0,0,9,.4), rgba(30,135,105,.15))', border: '2px solid rgba(30,135,105,.5)', padding: '16px 20px', backdropFilter: 'blur(8px)' }}
+            animate={{ boxShadow: ['0 0 30px rgba(30,135,105,.3)', '0 0 50px rgba(30,135,105,.6)', '0 0 30px rgba(30,135,105,.3)'] }}
+            transition={{ duration: 2, repeat: Infinity }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
 
-      {/* Goal scorers compact */}
-      {(live || finished) && liveStats?.goalScorers?.length > 0 && (
-        <div className="mcard-scorers">
-          {liveStats.goalScorers.map((g, i) => (
-            <span key={i} className={`scorer-chip ${g.type === 'Own Goal' ? 'og' : ''}`}>
-              {g.minute}{g.extra ? `+${g.extra}` : ''}&apos; {g.player?.split(' ').pop()}
-              {g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
-            </span>
-          ))}
-          {liveStats.missedPenalties?.map((p, i) => (
-            <span key={`mp-${i}`} className="scorer-chip missed">
-              {p.minute}&apos; {p.player?.split(' ').pop()} (Penal fallado)
-            </span>
-          ))}
+              {/* Badge de estado */}
+              <div>
+                {live ? (
+                  <motion.div
+                    className="ap2-live-badge"
+                    animate={{ boxShadow: ['0 0 8px rgba(220,38,38,.6)', '0 0 18px rgba(220,38,38,1)', '0 0 8px rgba(220,38,38,.6)'] }}
+                    transition={{ duration: 1.2, repeat: Infinity }}
+                  >
+                    <motion.span className="ap2-live-dot" animate={{ opacity: [1, .3, 1] }} transition={{ duration: 1, repeat: Infinity }} />
+                    {match.fixture.status.short === 'HT' ? 'ENTRETIEMPO' : 'EN VIVO'}
+                    {match.fixture.status.elapsed > 0 && (
+                      <span style={{ marginLeft: 4 }}>
+                        <MatchTimer elapsed={match.fixture.status.elapsed} status={match.fixture.status.short} />
+                      </span>
+                    )}
+                  </motion.div>
+                ) : (
+                  <div style={{ padding: '4px 14px', borderRadius: 999, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700, color: 'white', letterSpacing: '.05em' }}>
+                    {sLabel}
+                  </div>
+                )}
+              </div>
+
+              {/* Marcador o Hora */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                {hasScore ? (
+                  <>
+                    <motion.span
+                      style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }}
+                      animate={{ textShadow: ['0 0 15px rgba(30,135,105,.5)', '0 0 25px rgba(30,135,105,1)', '0 0 15px rgba(30,135,105,.5)'] }}
+                      transition={{ duration: 2, repeat: Infinity }}
+                    >
+                      {match.goals.home}
+                    </motion.span>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
+                      {liveStats?.corners && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 8, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700, color: '#f1f5f9' }}>
+                          <span style={{ color: '#fbbf24' }}>🚩</span>
+                          <span>{liveStats.corners.home}</span>
+                          <span style={{ color: 'rgba(255,255,255,.4)' }}>-</span>
+                          <span>{liveStats.corners.away}</span>
+                          <span style={{ color: 'rgba(255,255,255,.4)', fontWeight: 400 }}>({liveStats.corners.home + liveStats.corners.away})</span>
+                        </div>
+                      )}
+                      {liveStats?.yellowCards && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 8, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700 }}>
+                          <span style={{ color: '#fbbf24' }}>🟨{liveStats.yellowCards.home}</span>
+                          <span style={{ color: '#ef4444' }}>🟥{liveStats.redCards?.home ?? 0}</span>
+                          <span style={{ color: 'rgba(255,255,255,.4)' }}>|</span>
+                          <span style={{ color: '#fbbf24' }}>🟨{liveStats.yellowCards.away}</span>
+                          <span style={{ color: '#ef4444' }}>🟥{liveStats.redCards?.away ?? 0}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <span style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }}>
+                      {match.goals.away}
+                    </span>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 'clamp(1.5rem, 5vw, 2rem)', fontWeight: 700, color: '#f1f5f9' }}>
+                    {fmtTime(match.fixture.date, userTz)}
+                  </div>
+                )}
+              </div>
+
+              {/* Goleadores — 2 columnas igual al analisis */}
+              {liveStats && (liveStats.goalScorers?.length > 0 || liveStats.missedPenalties?.length > 0) && (
+                <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {liveStats.goalScorers?.filter(g => g.teamId === homeId).map((g, i) => (
+                      <div key={i} style={{ fontSize: '.75rem', fontWeight: 600, color: '#6ee7b7', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {g.minute}{g.extra ? `+${g.extra}` : ''}&#39; {g.player}{g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
+                      </div>
+                    ))}
+                    {liveStats.missedPenalties?.filter(p => p.teamId === homeId).map((p, i) => (
+                      <div key={i} style={{ fontSize: '.75rem', color: '#fb923c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {p.player} ✗ {p.minute}&#39;
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'right' }}>
+                    {liveStats.goalScorers?.filter(g => g.teamId !== homeId).map((g, i) => (
+                      <div key={i} style={{ fontSize: '.75rem', fontWeight: 600, color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {g.minute}{g.extra ? `+${g.extra}` : ''}&#39; {g.player}{g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
+                      </div>
+                    ))}
+                    {liveStats.missedPenalties?.filter(p => p.teamId !== homeId).map((p, i) => (
+                      <div key={i} style={{ fontSize: '.75rem', color: '#fb923c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        ✗ {p.minute}&#39; {p.player}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            </div>
+          </motion.div>
         </div>
-      )}
 
-      {(odds || homePos || awayPos) && (
-        <div className="mcard-odds">
-          {homePos && <span className="pos-chip">{homePos}&#176;</span>}
-          {odds ? <>
-            <span className="odd-chip">{odds.home?.toFixed(2)}</span>
-            <span className="odd-chip x">{odds.draw?.toFixed(2)}</span>
-            <span className="odd-chip">{odds.away?.toFixed(2)}</span>
-          </> : <span className="odd-chip x">vs</span>}
-          {awayPos && <span className="pos-chip">{awayPos}&#176;</span>}
+        {/* ── Footer: selección / favorito / ocultar ── */}
+        <div className="mcard-foot">
+          {isAnalyzed ? (
+            <span className="tag-done">&#10003; ANALIZADO</span>
+          ) : (
+            <label className="mcard-cb" onClick={e => e.stopPropagation()}>
+              <input type="checkbox" checked={isSelected} onChange={onSelect} />
+              <span className="cb-mark" />
+            </label>
+          )}
+          {onFavorite && (
+            <button
+              className={`btn-fav${isFavorite ? ' active' : ''}`}
+              onClick={onFavorite}
+              title={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+            >&#9733;</button>
+          )}
+          <button className="btn-x" onClick={(e) => { e.stopPropagation(); onHide(e); }}>&#10005;</button>
         </div>
-      )}
 
-      <div className="mcard-foot">
-        {isAnalyzed ? (
-          <span className="tag-done">&#10003; ANALIZADO</span>
-        ) : (
-          <label className="mcard-cb" onClick={e => e.stopPropagation()}>
-            <input type="checkbox" checked={isSelected} onChange={onSelect} />
-            <span className="cb-mark" />
-          </label>
-        )}
-        {onFavorite && (
-          <button
-            className={`btn-fav${isFavorite ? ' active' : ''}`}
-            onClick={onFavorite}
-            title={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
-          >&#9733;</button>
-        )}
-        <button className="btn-x" onClick={(e) => { e.stopPropagation(); onHide(e); }}>&#10005;</button>
       </div>
     </motion.div>
   );
@@ -1372,6 +1463,10 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
   const homePos = data?.homePosition || standings?.[match.teams.home.id];
   const awayPos = data?.awayPosition || standings?.[match.teams.away.id];
   const winProb = data?.calculatedProbabilities?.winner;
+  const homeId = match.teams.home.id;
+  const tz = userTz || 'UTC';
+  const cardDate = new Date(match.fixture.date).toLocaleDateString('es', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long' });
+  const sLabel = { NS: 'PRÓXIMO', '1H': 'EN VIVO — 1T', '2H': 'EN VIVO — 2T', HT: 'ENTRETIEMPO', FT: 'FINALIZADO', ET: 'EN VIVO — Extra', P: 'EN VIVO — Penales', AET: 'FINALIZADO', PEN: 'FINALIZADO', SUSP: 'SUSPENDIDO', PST: 'POSPUESTO', CANC: 'CANCELADO' }[match.fixture.status.short] || match.fixture.status.short;
 
   const markets = useMemo(() => {
     if (!data?.calculatedProbabilities) return [];
@@ -1404,83 +1499,184 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
   }, [data, match]);
 
   return (
-    <div className={`acc-card ${isExpanded ? 'open' : ''} stagger`} style={{ '--i': idx }}>
+    <div className={`acc-card ${isExpanded ? 'open' : ''}`}>
       {/* Header */}
       <div className="acc-head" onClick={onToggle}>
-        <div className="mcard-top">
-          <div className="mcard-league">
-            {match.league.logo && <img src={match.league.logo} alt="" className="league-ico" />}
-            <span>{flag} {match.league.name}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* ── Fila 1: Liga + Fecha ── */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '.82rem', fontWeight: 600, color: '#f1f5f9' }}>
+              {match.league.logo && <img src={match.league.logo} alt="" style={{ width: 18, height: 18, objectFit: 'contain' }} />}
+              <span>{flag} {match.league.name}</span>
+            </div>
+            <span style={{ fontSize: '.75rem', color: 'rgba(255,255,255,.6)', textTransform: 'capitalize' }}>{cardDate}</span>
           </div>
-          <div className="mcard-time">
-            {live ? <span className="badge-live"><span className="dot-live" /><MatchTimer elapsed={match.fixture.status.elapsed} status={match.fixture.status.short} /></span>
-              : finished ? <span className="badge-ft">{statusText(match.fixture.status.short)}</span>
-              : <span className="badge-ns">{fmtTime(match.fixture.date, userTz)}</span>}
+
+          {/* ── Fila 2: Local | Visitante + Cuotas ── */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px 12px' }}>
+            {/* Local */}
+            <div style={{ order: 1, flex: 1, minWidth: 0 }}>
+              <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} size={36} />
+              <div style={{ fontSize: 'clamp(.9rem, 3vw, 1.25rem)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4, color: '#f1f5f9' }}>
+                {match.teams.home.name}
+              </div>
+              {homePos && <div style={{ fontSize: '.7rem', color: 'rgba(255,255,255,.55)' }}>{homePos}° posición</div>}
+            </div>
+
+            {/* Cuotas */}
+            {odds && (
+              <div style={{ order: 3, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                <span style={{ padding: '4px 12px', background: 'rgba(251,191,36,.1)', border: '1px solid rgba(251,191,36,.2)', borderRadius: 8, fontWeight: 700, fontSize: '.82rem', color: '#fbbf24' }}>{odds.home?.toFixed(2)}</span>
+                <span style={{ padding: '4px 12px', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, fontWeight: 700, fontSize: '.82rem', color: 'rgba(255,255,255,.55)' }}>X {odds.draw?.toFixed(2)}</span>
+                <span style={{ padding: '4px 12px', background: 'rgba(251,191,36,.1)', border: '1px solid rgba(251,191,36,.2)', borderRadius: 8, fontWeight: 700, fontSize: '.82rem', color: '#fbbf24' }}>{odds.away?.toFixed(2)}</span>
+              </div>
+            )}
+
+            {/* Visitante */}
+            <div style={{ order: 2, flex: 1, minWidth: 0, textAlign: 'right' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} size={36} />
+              </div>
+              <div style={{ fontSize: 'clamp(.9rem, 3vw, 1.25rem)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4, color: '#f1f5f9' }}>
+                {match.teams.away.name}
+              </div>
+              {awayPos && <div style={{ fontSize: '.7rem', color: 'rgba(255,255,255,.55)' }}>{awayPos}° posición</div>}
+            </div>
           </div>
-        </div>
-        <div className="mcard-body">
-          <div className="mcard-team">
-            <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} />
-            <span className="mcard-tname">{match.teams.home.name}</span>
+
+          {/* ── Score Box ── */}
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <motion.div
+              style={{ width: '100%', borderRadius: 20, background: 'linear-gradient(135deg, rgba(30,135,105,.25), rgba(0,0,9,.4), rgba(30,135,105,.15))', border: '2px solid rgba(30,135,105,.5)', padding: '16px 20px', backdropFilter: 'blur(8px)' }}
+              animate={{ boxShadow: ['0 0 30px rgba(30,135,105,.3)', '0 0 50px rgba(30,135,105,.6)', '0 0 30px rgba(30,135,105,.3)'] }}
+              transition={{ duration: 2, repeat: Infinity }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+
+                {/* Badge de estado */}
+                <div>
+                  {live ? (
+                    <motion.div
+                      className="ap2-live-badge"
+                      animate={{ boxShadow: ['0 0 8px rgba(220,38,38,.6)', '0 0 18px rgba(220,38,38,1)', '0 0 8px rgba(220,38,38,.6)'] }}
+                      transition={{ duration: 1.2, repeat: Infinity }}
+                    >
+                      <motion.span className="ap2-live-dot" animate={{ opacity: [1, .3, 1] }} transition={{ duration: 1, repeat: Infinity }} />
+                      {match.fixture.status.short === 'HT' ? 'ENTRETIEMPO' : 'EN VIVO'}
+                      {match.fixture.status.elapsed > 0 && (
+                        <span style={{ marginLeft: 4 }}>
+                          <MatchTimer elapsed={match.fixture.status.elapsed} status={match.fixture.status.short} />
+                        </span>
+                      )}
+                    </motion.div>
+                  ) : (
+                    <div style={{ padding: '4px 14px', borderRadius: 999, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700, color: 'white', letterSpacing: '.05em' }}>
+                      {sLabel}
+                    </div>
+                  )}
+                </div>
+
+                {/* Marcador o Hora */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {hasScore ? (
+                    <>
+                      <motion.span
+                        style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }}
+                        animate={{ textShadow: ['0 0 15px rgba(30,135,105,.5)', '0 0 25px rgba(30,135,105,1)', '0 0 15px rgba(30,135,105,.5)'] }}
+                        transition={{ duration: 2, repeat: Infinity }}
+                      >
+                        {match.goals.home}
+                      </motion.span>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
+                        {liveStats?.corners && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 8, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700, color: '#f1f5f9' }}>
+                            <span style={{ color: '#fbbf24' }}>🚩</span>
+                            <span>{liveStats.corners.home}</span>
+                            <span style={{ color: 'rgba(255,255,255,.4)' }}>-</span>
+                            <span>{liveStats.corners.away}</span>
+                            <span style={{ color: 'rgba(255,255,255,.4)', fontWeight: 400 }}>({liveStats.corners.home + liveStats.corners.away})</span>
+                          </div>
+                        )}
+                        {liveStats?.yellowCards && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 8, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700 }}>
+                            <span style={{ color: '#fbbf24' }}>🟨{liveStats.yellowCards.home}</span>
+                            <span style={{ color: '#ef4444' }}>🟥{liveStats.redCards?.home ?? 0}</span>
+                            <span style={{ color: 'rgba(255,255,255,.4)' }}>|</span>
+                            <span style={{ color: '#fbbf24' }}>🟨{liveStats.yellowCards.away}</span>
+                            <span style={{ color: '#ef4444' }}>🟥{liveStats.redCards?.away ?? 0}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <span style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }}>
+                        {match.goals.away}
+                      </span>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 'clamp(1.5rem, 5vw, 2rem)', fontWeight: 700, color: '#f1f5f9' }}>
+                      {fmtTime(match.fixture.date, userTz)}
+                    </div>
+                  )}
+                </div>
+
+                {/* Goleadores — 2 columnas */}
+                {liveStats && (liveStats.goalScorers?.length > 0 || liveStats.missedPenalties?.length > 0) && (
+                  <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {liveStats.goalScorers?.filter(g => g.teamId === homeId).map((g, i) => (
+                        <div key={i} style={{ fontSize: '.75rem', fontWeight: 600, color: '#6ee7b7', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {g.minute}{g.extra ? `+${g.extra}` : ''}&#39; {g.player}{g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
+                        </div>
+                      ))}
+                      {liveStats.missedPenalties?.filter(p => p.teamId === homeId).map((p, i) => (
+                        <div key={i} style={{ fontSize: '.75rem', color: '#fb923c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {p.player} ✗ {p.minute}&#39;
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'right' }}>
+                      {liveStats.goalScorers?.filter(g => g.teamId !== homeId).map((g, i) => (
+                        <div key={i} style={{ fontSize: '.75rem', fontWeight: 600, color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {g.minute}{g.extra ? `+${g.extra}` : ''}&#39; {g.player}{g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
+                        </div>
+                      ))}
+                      {liveStats.missedPenalties?.filter(p => p.teamId !== homeId).map((p, i) => (
+                        <div key={i} style={{ fontSize: '.75rem', color: '#fb923c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          ✗ {p.minute}&#39; {p.player}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </motion.div>
           </div>
-          <div className="mcard-score">
-            {hasScore
-              ? <span className={`score-num ${live ? 'live' : ''}`}>{match.goals.home} - {match.goals.away}</span>
-              : <span className="score-vs">vs</span>}
-          </div>
-          <div className="mcard-team right">
-            <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} />
-            <span className="mcard-tname">{match.teams.away.name}</span>
-          </div>
-        </div>
-        {/* Live stats bar in accordion header */}
-        {(live || finished) && liveStats && <LiveStatsBar stats={liveStats} />}
-        {/* Goal scorers compact — visible in header without opening accordion */}
-        {(live || finished) && liveStats?.goalScorers?.length > 0 && (
-          <div className="mcard-scorers">
-            {liveStats.goalScorers.map((g, i) => (
-              <span key={i} className={`scorer-chip ${g.type === 'Own Goal' ? 'og' : ''}`}>
-                {g.minute}{g.extra ? `+${g.extra}` : ''}&apos; {g.player?.split(' ').pop()}
-                {g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
+
+          {/* ── Indicador: remove / fav / selCount / prob / chevron ── */}
+          <div className="acc-indicator">
+            {onRemove && (
+              <button className="btn-x acc-rm" onClick={e => { e.stopPropagation(); onRemove(e); }} title="Eliminar de analizados">&#10005;</button>
+            )}
+            {onFavorite && (
+              <button
+                className={`btn-fav${isFavorite ? ' active' : ''}`}
+                onClick={e => { e.stopPropagation(); onFavorite(e); }}
+                title={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+              >&#9733;</button>
+            )}
+            {selCount > 0 && <span className="acc-sel-count">{selCount} sel.</span>}
+            {data?.combinada && (data.combinada.selections || []).length > 0 && (
+              <span className="acc-mini">
+                {cap(data.combinada.combinedProbability)}%
+                {data.combinada.combinedOdd > 1 ? ` | ${data.combinada.combinedOdd}x` : ''}
               </span>
-            ))}
-            {liveStats.missedPenalties?.map((p, i) => (
-              <span key={`mp-${i}`} className="scorer-chip missed">
-                {p.minute}&apos; {p.player?.split(' ').pop()} (Penal fallado)
-              </span>
-            ))}
+            )}
+            <span className={`chev-ico ${isExpanded ? 'up' : ''}`}>&#9662;</span>
           </div>
-        )}
-        {(odds || homePos || awayPos) && (
-          <div className="mcard-odds">
-            {homePos && <span className="pos-chip">{homePos}&#176;</span>}
-            {odds ? <>
-              <span className="odd-chip">{odds.home?.toFixed(2)}</span>
-              <span className="odd-chip x">{odds.draw?.toFixed(2)}</span>
-              <span className="odd-chip">{odds.away?.toFixed(2)}</span>
-            </> : <span className="odd-chip x">vs</span>}
-            {awayPos && <span className="pos-chip">{awayPos}&#176;</span>}
-          </div>
-        )}
-        <div className="acc-indicator">
-          {onRemove && (
-            <button className="btn-x acc-rm" onClick={onRemove} title="Eliminar de analizados">&#10005;</button>
-          )}
-          {onFavorite && (
-            <button
-              className={`btn-fav${isFavorite ? ' active' : ''}`}
-              onClick={onFavorite}
-              title={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
-            >&#9733;</button>
-          )}
-          {selCount > 0 && <span className="acc-sel-count">{selCount} sel.</span>}
-          {data?.combinada && (data.combinada.selections || []).length > 0 && (
-            <span className="acc-mini">
-              {cap(data.combinada.combinedProbability)}%
-              {data.combinada.combinedOdd > 1 ? ` | ${data.combinada.combinedOdd}x` : ''}
-            </span>
-          )}
-          <span className={`chev-ico ${isExpanded ? 'up' : ''}`}>&#9662;</span>
+
         </div>
       </div>
 
