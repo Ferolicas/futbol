@@ -321,6 +321,45 @@ export async function POST(request) {
         }));
       }
 
+      // Pass 2 for viewDate: scan fixtures cache — liveStats TTL (2h) may have expired
+      // but fixtures cache (26h) still shows stale live status
+      try {
+        const viewFixtures = await redisGet(KEYS.fixtures(viewDate));
+        if (Array.isArray(viewFixtures)) {
+          const staleInViewFixtures = viewFixtures.filter(f => {
+            const fid = String(f.fixture?.id);
+            return LIVE_STATUSES.includes(f.fixture?.status?.short)
+              && !FINISHED_STATUSES.includes(viewExisting[fid]?.status?.short);
+          });
+          for (const f of staleInViewFixtures) {
+            const fid = f.fixture.id;
+            const full = await apiFetchFixture(apiKey, fid);
+            apiCalls++;
+            if (full) {
+              const fullStats = extractLiveStats(full);
+              fullStats.date = viewDate;
+              if (FINISHED_STATUSES.includes(full.fixture.status.short)) {
+                fullStats.savedAt = new Date().toISOString();
+              }
+              viewExisting[String(fid)] = fullStats;
+              viewChanged = true;
+              viewDateStaleFixed++;
+              await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
+            } else {
+              // API returned nothing — force-finish to stop showing as live
+              viewExisting[String(fid)] = {
+                fixtureId: fid,
+                status: { short: 'FT', long: 'Match Finished', elapsed: 90 },
+                goals: f.goals,
+                date: viewDate,
+              };
+              viewChanged = true;
+              viewDateStaleFixed++;
+            }
+          }
+        }
+      } catch {}
+
       if (viewChanged) {
         await redisSet(KEYS.liveStats(viewDate), viewExisting, 48 * 3600);
         // Also update fixtures cache for the viewed date

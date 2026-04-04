@@ -307,13 +307,13 @@ export default function Dashboard() {
   // then updates all live stats (scores, corners, cards, goal scorers, minutes).
   const [refreshingLive, setRefreshingLive] = useState(false);
 
-  const refreshLiveData = useCallback(async () => {
+  const refreshLiveData = useCallback(async (overrideDate) => {
     setRefreshingLive(true);
     try {
       const res = await fetch('/api/refresh-live', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date }),
+        body: JSON.stringify({ date: overrideDate || date }),
       });
       const data = await res.json();
       const FT = ['FT', 'AET', 'PEN'];
@@ -374,14 +374,16 @@ export default function Dashboard() {
     }
   }, [date, applyLiveUpdate]);
 
-  // On mount: detect user timezone, correct date to local, then load fixtures
+  // On mount: detect user timezone, correct date to local, refresh live first, then load fixtures
   useEffect(() => {
     const tz = getUserTz();
     setUserTz(tz);
     const localDate = todayInTz(tz);
     setDate(localDate);
-    loadFixtures(localDate, { silent: !!_dashCache, tz });
-    refreshLiveData();
+    // Sequential: refresh live data (fixes stale statuses in Redis) before loading fixtures
+    refreshLiveData(localDate).finally(() => {
+      loadFixtures(localDate, { silent: !!_dashCache, tz });
+    });
   }, [loadFixtures, refreshLiveData]);
 
   // Live polling fallback (30s) when there are live matches — supplements Pusher
