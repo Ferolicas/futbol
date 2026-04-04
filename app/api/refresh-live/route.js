@@ -85,18 +85,14 @@ export async function POST(request) {
     const viewDate = body.date || null;
     const today = new Date().toISOString().split('T')[0];
 
-    console.log(`[REFRESH-LIVE] POST — server today=${today} viewDate=${viewDate} sameDay=${viewDate === today}`);
-
     // Rate limit — return cached data immediately if locked
     const lock = await redisGet(LOCK_KEY);
     if (lock) {
-      console.log('[REFRESH-LIVE] rate-limited, returning cache');
       const liveData = await redisGet(KEYS.liveStats(today));
       // Even when rate-limited, still return view date fixes
       let viewDateLiveStats = null;
       if (viewDate && viewDate !== today) {
         viewDateLiveStats = await redisGet(KEYS.liveStats(viewDate));
-        console.log(`[REFRESH-LIVE] rate-limited viewDate cache: ${viewDate} entries=${viewDateLiveStats ? Object.keys(viewDateLiveStats).length : 0}`);
       }
       return Response.json({
         success: true,
@@ -188,11 +184,6 @@ export async function POST(request) {
       };
     }
 
-    // Log merged state before stale detection
-    const mergedLiveEntries = Object.entries(merged).filter(([, e]) => LIVE_STATUSES.includes(e.status?.short));
-    console.log(`[REFRESH-LIVE] merged: total=${Object.keys(merged).length} liveEntries=${mergedLiveEntries.length} freshFids=${freshFids.size}`,
-      mergedLiveEntries.map(([fid, e]) => `${fid}:${e.status?.short}(${e.status?.elapsed})`));
-
     // Detect stale live statuses: matches that WERE live but are no longer in ?live=all.
     // Build kickoff map from fixtures:{date} cache — keep snapshot for Pass 2.
     const now = Date.now();
@@ -221,7 +212,6 @@ export async function POST(request) {
       // Skip if kicked off in the last 5 min — may not have appeared in live feed yet
       const kickoff = kickoffMap[fid] || 0;
       if (kickoff && (now - kickoff) < 5 * 60 * 1000) continue;
-      console.log(`[REFRESH-LIVE] Pass1 checking fid=${fid} status=${entry.status?.short} elapsed=${entry.status?.elapsed}`);
       const full = await apiFetchFixture(apiKey, Number(fid));
       apiCalls++;
       if (full && FINISHED_STATUSES.includes(full.fixture.status.short)) {
@@ -229,17 +219,12 @@ export async function POST(request) {
         fullStats.date = entry.date || today;
         fullStats.savedAt = new Date().toISOString();
         merged[fid] = fullStats;
-        console.log(`[REFRESH-LIVE] Pass1 fid=${fid}: ${entry.status?.short} → ${full.fixture.status.short}`);
         await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
-      } else {
-        // Not in live feed but API says still live — keep as-is or force FT if API returned nothing
-        if (!full) {
-          merged[fid] = { ...entry, status: { short: 'FT', long: 'Match Finished', elapsed: 90 } };
-          console.log(`[REFRESH-LIVE] Pass1 fid=${fid}: API null, forzando FT`);
-        } else {
-          console.log(`[REFRESH-LIVE] Pass1 fid=${fid}: API says ${full.fixture.status.short}, keeping`);
-        }
+      } else if (!full) {
+        // API returned nothing — force FT to stop showing as live
+        merged[fid] = { ...entry, status: { short: 'FT', long: 'Match Finished', elapsed: 90 } };
       }
+      // else: API confirms still live — keep current status
       staleFixed++;
     }
 
@@ -253,7 +238,6 @@ export async function POST(request) {
           && !freshFids.has(fid)
           && !FINISHED_STATUSES.includes(merged[fid]?.status?.short);
       });
-      console.log(`[REFRESH-LIVE] Pass2 today: ${staleInFixtures.length} stale in fixtures cache`, staleInFixtures.map(f => `${f.fixture?.id}:${f.fixture?.status?.short}`));
       for (const f of staleInFixtures) {
         const fid = f.fixture.id;
         // Skip if kicked off in the last 5 min
@@ -264,7 +248,6 @@ export async function POST(request) {
         if (full) {
           const fullStats = extractLiveStats(full);
           fullStats.date = today;
-          console.log(`[REFRESH-LIVE] Pass2 fid=${fid}: ${f.fixture?.status?.short} → ${full.fixture.status.short}`);
           merged[String(fid)] = fullStats;
           if (FINISHED_STATUSES.includes(full.fixture.status.short)) {
             fullStats.savedAt = new Date().toISOString();
@@ -272,7 +255,6 @@ export async function POST(request) {
             staleFixed++;
           }
         } else {
-          console.log(`[REFRESH-LIVE] Pass2 fid=${fid}: API null, forzando FT`);
           merged[String(fid)] = { fixtureId: fid, status: { short: 'FT', long: 'Match Finished', elapsed: 90 }, goals: f.goals, date: today };
           staleFixed++;
         }
@@ -316,13 +298,9 @@ export async function POST(request) {
       const viewExisting = await redisGet(KEYS.liveStats(viewDate)) || {};
       let viewChanged = false;
 
-      console.log(`[REFRESH-LIVE] viewDate=${viewDate} liveStats entries=${Object.keys(viewExisting).length}`);
-
       const staleEntries = Object.entries(viewExisting).filter(
         ([, entry]) => LIVE_STATUSES.includes(entry.status?.short)
       );
-
-      console.log(`[REFRESH-LIVE] viewDate Pass1: stale in liveStats=${staleEntries.length}`, staleEntries.map(([fid, e]) => `${fid}:${e.status?.short}`));
 
       if (staleEntries.length > 0) {
         await Promise.all(staleEntries.map(async ([fid, entry]) => {
@@ -331,17 +309,13 @@ export async function POST(request) {
           if (full) {
             const fullStats = extractLiveStats(full);
             fullStats.date = viewDate;
-            console.log(`[REFRESH-LIVE] Pass1 fid=${fid}: ${entry.status?.short} → ${full.fixture.status.short}`);
             if (FINISHED_STATUSES.includes(full.fixture.status.short)) {
               fullStats.savedAt = new Date().toISOString();
             }
             viewExisting[fid] = fullStats;
             viewChanged = true;
             viewDateStaleFixed++;
-            // Persist individual stats
             await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
-          } else {
-            console.log(`[REFRESH-LIVE] Pass1 fid=${fid}: apiFetchFixture returned null`);
           }
         }));
       }
@@ -350,14 +324,12 @@ export async function POST(request) {
       // but fixtures cache (26h) still shows stale live status
       try {
         const viewFixtures = await redisGet(KEYS.fixtures(viewDate));
-        console.log(`[REFRESH-LIVE] viewDate Pass2: fixtures cache entries=${Array.isArray(viewFixtures) ? viewFixtures.length : 'null/missing'}`);
         if (Array.isArray(viewFixtures)) {
           const staleInViewFixtures = viewFixtures.filter(f => {
             const fid = String(f.fixture?.id);
             return LIVE_STATUSES.includes(f.fixture?.status?.short)
               && !FINISHED_STATUSES.includes(viewExisting[fid]?.status?.short);
           });
-          console.log(`[REFRESH-LIVE] Pass2 stale in fixtures cache=${staleInViewFixtures.length}`, staleInViewFixtures.map(f => `${f.fixture?.id}:${f.fixture?.status?.short}`));
           for (const f of staleInViewFixtures) {
             const fid = f.fixture.id;
             const full = await apiFetchFixture(apiKey, fid);
@@ -365,7 +337,6 @@ export async function POST(request) {
             if (full) {
               const fullStats = extractLiveStats(full);
               fullStats.date = viewDate;
-              console.log(`[REFRESH-LIVE] Pass2 fid=${fid}: ${f.fixture?.status?.short} → ${full.fixture.status.short}`);
               if (FINISHED_STATUSES.includes(full.fixture.status.short)) {
                 fullStats.savedAt = new Date().toISOString();
               }
@@ -374,7 +345,6 @@ export async function POST(request) {
               viewDateStaleFixed++;
               await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
             } else {
-              console.log(`[REFRESH-LIVE] Pass2 fid=${fid}: API null, forzando FT`);
               // API returned nothing — force-finish to stop showing as live
               viewExisting[String(fid)] = {
                 fixtureId: fid,

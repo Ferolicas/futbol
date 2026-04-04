@@ -309,7 +309,6 @@ export default function Dashboard() {
 
   const refreshLiveData = useCallback(async (overrideDate) => {
     const sentDate = overrideDate || date;
-    console.log('[REFRESH] 🔄 llamando /api/refresh-live con date:', sentDate);
     setRefreshingLive(true);
     try {
       const res = await fetch('/api/refresh-live', {
@@ -318,41 +317,15 @@ export default function Dashboard() {
         body: JSON.stringify({ date: sentDate }),
       });
       const data = await res.json();
-      console.log('[REFRESH] ✅ respuesta del servidor:', {
-        success: data.success,
-        skipped: data.skipped,
-        reason: data.reason,
-        liveCount: data.liveCount,
-        staleFixed: data.staleFixed,
-        viewDateStaleFixed: data.viewDateStaleFixed,
-        apiCalls: data.apiCalls,
-        hasLiveStats: !!data.liveStats && Object.keys(data.liveStats).length,
-        hasViewDateLiveStats: !!data.viewDateLiveStats && Object.keys(data.viewDateLiveStats || {}).length,
-        viewDateLiveStatsSample: data.viewDateLiveStats
-          ? Object.entries(data.viewDateLiveStats).slice(0, 5).map(([fid, s]) => `${fid}:${s.status?.short}`)
-          : null,
-        liveStatsSample: data.liveStats
-          ? Object.entries(data.liveStats).slice(0, 5).map(([fid, s]) => `${fid}:${s.status?.short}`)
-          : null,
-      });
       const FT = ['FT', 'AET', 'PEN'];
 
       // Helper: merge live stats into state
-      const mergeLiveStats = (statsObj, label) => {
+      const mergeLiveStats = (statsObj) => {
         if (!statsObj || typeof statsObj !== 'object') return;
-        const ftEntries = Object.entries(statsObj).filter(([, s]) => FT.includes(s.status?.short));
-        const liveEntries = Object.entries(statsObj).filter(([, s]) => !FT.includes(s.status?.short) && s.status?.short);
-        console.log(`[REFRESH] merge ${label}: total=${Object.keys(statsObj).length} FT=${ftEntries.length} live=${liveEntries.length}`,
-          ftEntries.slice(0, 5).map(([fid, s]) => `${fid}:${s.status?.short}`),
-          liveEntries.slice(0, 5).map(([fid, s]) => `${fid}:${s.status?.short}`)
-        );
         setLiveStats(prev => {
           const next = { ...prev };
           for (const [fid, fresh] of Object.entries(statsObj)) {
             const existing = next[fid];
-            if (existing?.status?.short !== fresh.status?.short) {
-              console.log(`[REFRESH] estado cambió fid=${fid}: ${existing?.status?.short} → ${fresh.status?.short}`);
-            }
             // If server says FT, always accept — this fixes stale "live" entries
             if (FT.includes(fresh.status?.short)) {
               next[fid] = {
@@ -391,15 +364,13 @@ export default function Dashboard() {
 
       // Merge today's live stats
       if (data.liveStats && typeof data.liveStats === 'object') {
-        mergeLiveStats(data.liveStats, 'liveStats(today)');
+        mergeLiveStats(data.liveStats);
       }
       // Merge viewed date live stats (fixes stale entries from past dates)
       if (data.viewDateLiveStats && typeof data.viewDateLiveStats === 'object') {
-        mergeLiveStats(data.viewDateLiveStats, 'viewDateLiveStats');
+        mergeLiveStats(data.viewDateLiveStats);
       }
-    } catch (err) {
-      console.error('[REFRESH] ❌ error:', err);
-    } finally {
+    } catch {} finally {
       setRefreshingLive(false);
     }
   }, [date, applyLiveUpdate]);
