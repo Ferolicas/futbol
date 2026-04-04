@@ -894,9 +894,6 @@ export default function Dashboard() {
           </div>
         </motion.header>
 
-        {/* OWNER: API counter */}
-        {isOwner && <ApiCounter quota={quota} />}
-
         {/* CONTROLS: Date + Filters */}
         <div className="controls-row">
           <div className="date-nav">

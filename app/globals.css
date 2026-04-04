@@ -3072,13 +3072,13 @@ input:checked + .cb-mark::after {
   background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
   border-radius: 20px; padding: 12px 20px; color: white;
 }
-.app .brand-logo { height: 32px; }
+.app .brand-logo { height: 64px; }
 .app .user-name, .app .btn-signout, .app .btn-reload, .app .btn-bell { color: white; }
 .app .btn-signout { background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.15); border-radius: 8px; }
 .app .btn-reload { background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.15); border-radius: 8px; }
 
 /* Controls */
-.app .controls-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.app .controls-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: nowrap; }
 .app .date-nav { backdrop-filter: blur(12px); background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-radius: 14px; padding: 4px 8px; }
 .app .date-nav button { background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12); border-radius: 8px; color: white; }
 .app .date-nav button:hover { background: rgba(30,135,105,.25); border-color: rgba(30,135,105,.5); color: white; }
