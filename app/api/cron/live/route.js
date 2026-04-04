@@ -28,17 +28,23 @@ function verifyCronAuth(request) {
 async function apiFetch(endpoint) {
   const key = process.env.FOOTBALL_API_KEY;
   if (!key) return null;
-  const res = await fetch(`https://${API_HOST}${endpoint}`, {
-    headers: { 'x-apisports-key': key },
-    cache: 'no-store',
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  if (data.errors && Object.keys(data.errors).length > 0) {
-    console.error('[LIVE] API error:', data.errors);
+  try {
+    const res = await fetch(`https://${API_HOST}${endpoint}`, {
+      headers: { 'x-apisports-key': key },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.errors && Object.keys(data.errors).length > 0) {
+      console.error('[LIVE] API error:', data.errors);
+      return null;
+    }
+    return data.response || [];
+  } catch (e) {
+    console.error('[LIVE] apiFetch network error:', endpoint, e.message);
     return null;
   }
-  return data.response || [];
 }
 
 function extractLiveStats(match, events, stats) {
@@ -403,6 +409,7 @@ export async function GET(request) {
     });
   } catch (error) {
     console.error('[LIVE] Error:', error.message);
-    return Response.json({ error: error.message }, { status: 500 });
+    // Return 200 so cron-job.org does not disable the cron on transient errors
+    return Response.json({ success: false, error: error.message, timestamp: new Date().toISOString() });
   }
 }
