@@ -888,7 +888,7 @@ export default function Dashboard() {
                 {pushEnabled ? '🔔' : '🔕'}
               </button>
             )}
-            <button className="btn-reload" onClick={() => { loadFixtures(date); refreshLiveData(); }} disabled={loading || refreshingLive}>
+            <button className="btn-reload" onClick={async () => { await refreshLiveData(); loadFixtures(date); }} disabled={loading || refreshingLive}>
               <span className={loading || refreshingLive ? 'spin' : ''}>&#8635;</span>
             </button>
           </div>
