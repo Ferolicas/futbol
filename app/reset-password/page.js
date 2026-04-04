@@ -1,29 +1,21 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { getSupabaseBrowserClient } from '../../lib/supabase-client';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function ResetPasswordPage() {
+function ResetPasswordForm() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [ready, setReady] = useState(false);
+  const [tokenError, setTokenError] = useState(false);
   const router = useRouter();
-  const supabase = getSupabaseBrowserClient();
+  const searchParams = useSearchParams();
+  const token = searchParams.get('token');
 
   useEffect(() => {
-    // Supabase redirects here with recovery token in URL hash
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') setReady(true);
-    });
-    // Also check current session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) setReady(true);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
+    if (!token) setTokenError(true);
+  }, [token]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -33,10 +25,15 @@ export default function ResetPasswordPage() {
 
     setLoading(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) throw error;
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, password }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Error al restablecer');
       setSuccess(true);
-      setTimeout(() => router.push('/dashboard'), 2000);
+      setTimeout(() => router.push('/sign-in'), 2500);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -57,11 +54,14 @@ export default function ResetPasswordPage() {
 
         {success ? (
           <p style={{ color: '#10b981' }}>✓ Contraseña actualizada. Redirigiendo...</p>
-        ) : !ready ? (
-          <p style={{ color: '#64748b' }}>Verificando enlace de recuperación...</p>
+        ) : tokenError ? (
+          <>
+            <p style={{ color: '#ef4444' }}>Enlace inválido o expirado.</p>
+            <a href="/forgot-password" style={{ color: '#22d3ee', fontSize: '0.9rem' }}>Solicitar un nuevo enlace</a>
+          </>
         ) : (
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="Nueva contraseña (mín. 8 chars)" style={inputStyle} />
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="Nueva contraseña (mín. 8 chars)" style={inputStyle} autoFocus />
             <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required placeholder="Confirmar contraseña" style={inputStyle} />
             {error && <p style={{ color: '#ef4444', margin: 0, fontSize: '0.85rem' }}>{error}</p>}
             <button type="submit" disabled={loading} style={{ padding: '0.875rem', background: '#22d3ee', color: '#0a0e17', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>
@@ -71,5 +71,17 @@ export default function ResetPasswordPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={
+      <div style={{ minHeight: '100vh', background: '#0a0e17', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <p style={{ color: '#64748b', fontFamily: 'system-ui' }}>Cargando...</p>
+      </div>
+    }>
+      <ResetPasswordForm />
+    </Suspense>
   );
 }
