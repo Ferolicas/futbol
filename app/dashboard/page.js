@@ -1296,13 +1296,22 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
           </div>
 
           {/* Cuotas — order 3, fila propia en móvil */}
-          {odds && (
-            <div style={{ order: 3, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-              <span style={{ padding: '4px 12px', background: 'rgba(251,191,36,.1)', border: '1px solid rgba(251,191,36,.2)', borderRadius: 8, fontWeight: 700, fontSize: '.82rem', color: '#fbbf24' }}>{odds.home?.toFixed(2)}</span>
-              <span style={{ padding: '4px 12px', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, fontWeight: 700, fontSize: '.82rem', color: 'rgba(255,255,255,.55)' }}>X {odds.draw?.toFixed(2)}</span>
-              <span style={{ padding: '4px 12px', background: 'rgba(251,191,36,.1)', border: '1px solid rgba(251,191,36,.2)', borderRadius: 8, fontWeight: 700, fontSize: '.82rem', color: '#fbbf24' }}>{odds.away?.toFixed(2)}</span>
-            </div>
-          )}
+          {odds && (() => {
+            const bkName = data?.odds?.bookmaker;
+            const bkLogo = bkName ? (BOOKMAKER_LOGOS[bkName.toLowerCase()] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => bkName.toLowerCase().includes(k))?.[1]) : null;
+            return (
+              <div style={{ order: 3, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                {bkName && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 999, background: 'linear-gradient(to right, rgba(59,130,246,.2), rgba(168,85,247,.2))', border: '1px solid rgba(59,130,246,.3)' }}>
+                    {bkLogo && <img src={bkLogo} alt={bkName} style={{ height: 12 }} />}
+                  </div>
+                )}
+                {odds.home != null && <div style={{ padding: '4px 12px', borderRadius: 8, background: 'linear-gradient(135deg, #22c55e, #16a34a)', fontWeight: 700, fontSize: '.82rem', color: '#fff' }}>{odds.home.toFixed(2)}</div>}
+                {odds.draw != null && <div style={{ padding: '4px 12px', borderRadius: 8, background: 'linear-gradient(135deg, #f59e0b, #d97706)', fontWeight: 700, fontSize: '.82rem', color: '#fff' }}>X {odds.draw.toFixed(2)}</div>}
+                {odds.away != null && <div style={{ padding: '4px 12px', borderRadius: 8, background: 'linear-gradient(135deg, #ef4444, #dc2626)', fontWeight: 700, fontSize: '.82rem', color: '#fff' }}>{odds.away.toFixed(2)}</div>}
+              </div>
+            );
+          })()}
 
           {/* Visitante — order 2 */}
           <div style={{ order: 2, flex: 1, minWidth: 0, textAlign: 'right' }}>
@@ -1525,13 +1534,22 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
             </div>
 
             {/* Cuotas */}
-            {odds && (
-              <div style={{ order: 3, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                <span style={{ padding: '4px 12px', background: 'rgba(251,191,36,.1)', border: '1px solid rgba(251,191,36,.2)', borderRadius: 8, fontWeight: 700, fontSize: '.82rem', color: '#fbbf24' }}>{odds.home?.toFixed(2)}</span>
-                <span style={{ padding: '4px 12px', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, fontWeight: 700, fontSize: '.82rem', color: 'rgba(255,255,255,.55)' }}>X {odds.draw?.toFixed(2)}</span>
-                <span style={{ padding: '4px 12px', background: 'rgba(251,191,36,.1)', border: '1px solid rgba(251,191,36,.2)', borderRadius: 8, fontWeight: 700, fontSize: '.82rem', color: '#fbbf24' }}>{odds.away?.toFixed(2)}</span>
-              </div>
-            )}
+            {odds && (() => {
+              const bkName = data?.odds?.bookmaker;
+              const bkLogo = bkName ? (BOOKMAKER_LOGOS[bkName.toLowerCase()] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => bkName.toLowerCase().includes(k))?.[1]) : null;
+              return (
+                <div style={{ order: 3, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  {bkName && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 999, background: 'linear-gradient(to right, rgba(59,130,246,.2), rgba(168,85,247,.2))', border: '1px solid rgba(59,130,246,.3)' }}>
+                      {bkLogo && <img src={bkLogo} alt={bkName} style={{ height: 12 }} />}
+                    </div>
+                  )}
+                  {odds.home != null && <div style={{ padding: '4px 12px', borderRadius: 8, background: 'linear-gradient(135deg, #22c55e, #16a34a)', fontWeight: 700, fontSize: '.82rem', color: '#fff' }}>{odds.home.toFixed(2)}</div>}
+                  {odds.draw != null && <div style={{ padding: '4px 12px', borderRadius: 8, background: 'linear-gradient(135deg, #f59e0b, #d97706)', fontWeight: 700, fontSize: '.82rem', color: '#fff' }}>X {odds.draw.toFixed(2)}</div>}
+                  {odds.away != null && <div style={{ padding: '4px 12px', borderRadius: 8, background: 'linear-gradient(135deg, #ef4444, #dc2626)', fontWeight: 700, fontSize: '.82rem', color: '#fff' }}>{odds.away.toFixed(2)}</div>}
+                </div>
+              );
+            })()}
 
             {/* Visitante */}
             <div style={{ order: 2, flex: 1, minWidth: 0, textAlign: 'right' }}>
