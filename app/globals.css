@@ -272,7 +272,7 @@ body {
 }
 
 .brand-logo {
-  height: 120px;
+  height: 144px;
   width: auto;
   object-fit: contain;
 }
@@ -1430,7 +1430,7 @@ body {
 /* ===================== RESPONSIVE ===================== */
 @media (max-width: 768px) {
   .container, .analysis-container { padding: 10px; }
-  .brand-logo { height: 100px; }
+  .brand-logo { height: 120px; }
 
   .controls-row { flex-direction: row; flex-wrap: wrap; }
   .date-display { min-width: 100px; font-size: .8rem; }
@@ -3072,7 +3072,7 @@ input:checked + .cb-mark::after {
   background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
   border-radius: 20px; padding: 12px 20px; color: white;
 }
-.app .brand-logo { height: 64px; }
+.app .brand-logo { height: 77px; }
 .app .user-name, .app .btn-signout, .app .btn-reload, .app .btn-bell { color: white; }
 .app .btn-signout { background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.15); border-radius: 8px; }
 .app .btn-reload { background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.15); border-radius: 8px; }
