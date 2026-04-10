@@ -36,6 +36,18 @@ export async function middleware(request) {
     return NextResponse.redirect(url);
   }
 
+  // Landing / sign-in / sign-up — redirect to dashboard if already authenticated
+  const authPages = ['/', '/sign-in', '/sign-up'];
+  if (authPages.includes(pathname) && user) {
+    const profile = await getProfile(user.id);
+    const hasAccess = profile?.subscription_status === 'active' || ['admin', 'owner'].includes(profile?.role);
+    if (hasAccess) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/dashboard';
+      return NextResponse.redirect(url);
+    }
+  }
+
   // Fetch profile using service role (bypasses RLS) via REST API
   const getProfile = async (userId) => {
     try {
@@ -80,5 +92,5 @@ export async function middleware(request) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/admin/:path*', '/planes/:path*'],
+  matcher: ['/', '/sign-in', '/sign-up', '/dashboard/:path*', '/admin/:path*', '/planes/:path*'],
 };
