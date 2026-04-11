@@ -3,40 +3,13 @@
  * Daily batch: fetch fixtures + analyze all matches.
  * Runs at 05:00 UTC (07:00 Spain). Uses Redis + Supabase only.
  */
-import { getFixtures, analyzeMatch, getQuota } from '../../../../lib/api-football';
+import { getFixtures } from '../../../../lib/api-football';
 import { cacheFixtures } from '../../../../lib/sanity-cache';
 import { redisSet, KEYS, TTL } from '../../../../lib/redis';
 import { supabaseAdmin } from '../../../../lib/supabase';
 
-function compactLastFive(lastFive) {
-  if (!Array.isArray(lastFive)) return [];
-  return lastFive.map(m => {
-    const e = m._enriched || {};
-    return {
-      r: e.result, s: e.score, gF: e.goalsFor, gA: e.goalsAgainst,
-      op: e.opponentName, oL: e.opponentLogo,
-      c: e.corners, y: e.yellowCards, rd: e.redCards,
-    };
-  });
-}
-
-function buildSummary(a) {
-  if (!a) return null;
-  return {
-    fixtureId: a.fixtureId, homeTeam: a.homeTeam, awayTeam: a.awayTeam,
-    homeLogo: a.homeLogo, awayLogo: a.awayLogo, homeId: a.homeId, awayId: a.awayId,
-    league: a.league, leagueId: a.leagueId, leagueLogo: a.leagueLogo,
-    kickoff: a.kickoff, status: a.status, goals: a.goals, odds: a.odds,
-    combinada: a.combinada, calculatedProbabilities: a.calculatedProbabilities,
-    homePosition: a.homePosition, awayPosition: a.awayPosition,
-    homeLastFive: compactLastFive(a.homeLastFive),
-    awayLastFive: compactLastFive(a.awayLastFive),
-    playerHighlights: a.playerHighlights || null,
-  };
-}
-
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -103,47 +76,24 @@ export async function GET(request) {
     }, { onConflict: 'date' });
     if (_err1) console.error('[daily:schedule]', _err1.message);
 
-    // 4. Analyze all fixtures ONE at a time — each analysis triggers 40-70+ API calls,
-    // the rate limiter in api-football.js handles concurrency within each analysis.
-    let analyzed = 0, failed = 0, skipped = 0;
-    const analyzedIds = [];
-    const analyzedOdds = {};
-    const analyzedData = {};
+    // 4. Initialize empty analysis cache and kick off the batch chain.
+    // analyze-batch handles all fixtures in lotes of 10, chaining itself until done.
+    // This request returns immediately — analysis runs in the background.
+    await redisSet(`analysis:${today}`, { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} }, 12 * 3600).catch(() => {});
 
-    for (const fixture of fixtures) {
-      const fid = fixture.fixture.id;
-      try {
-        const result = await analyzeMatch(fixture, { date: today });
-        if (!result) { skipped++; continue; }
-        // analyzeMatch already calls cacheAnalysis internally — do NOT call it again
-        analyzed++;
-        const a = result.analysis || result;
-        analyzedIds.push(fid);
-        if (a?.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
-        const summary = buildSummary(a);
-        if (summary) analyzedData[fid] = summary;
-      } catch (e) {
-        console.error(`[daily] fixture ${fid}:`, e.message);
-        failed++;
-      }
-      // Brief pause between matches to let rate limiter slots free up
-      await new Promise(r => setTimeout(r, 500));
-    }
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL
+      || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
-    // 5. Write fresh analysis summary cache (replaces the old delete approach)
-    if (analyzedIds.length > 0) {
-      await redisSet(`analysis:${today}`, { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData }, 12 * 3600).catch(() => {});
-    }
+    fetch(`${baseUrl}/api/cron/analyze-batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-internal-trigger': 'true' },
+      body: JSON.stringify({ offset: 0, batchSize: 10, date: today, totalFixtures: fixtures.length }),
+    }).catch(e => console.error('[daily] Failed to start analyze-batch chain:', e.message));
 
-    // 6. Mark batch complete
-    const batchState = { completed: true, fixtureCount: fixtures.length, analyzed, failed, skipped, date: today, completedAt: new Date().toISOString() };
-    await redisSet(`dailyBatch:${today}`, batchState, 86400);
-
-    const quota = await getQuota();
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`[daily] Done in ${duration}s — analyzed:${analyzed} failed:${failed} skipped:${skipped}`);
+    console.log(`[daily] Fixtures cached, analysis chain started for ${fixtures.length} fixtures in ${duration}s`);
 
-    return Response.json({ success: true, date: today, fixtureCount: fixtures.length, analyzed, failed, skipped, duration: `${duration}s`, quota });
+    return Response.json({ success: true, date: today, fixtureCount: fixtures.length, message: 'Analysis chain started', duration: `${duration}s` });
   } catch (e) {
     console.error('[daily]', e.message);
     return Response.json({ error: e.message }, { status: 500 });

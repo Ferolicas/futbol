@@ -26,10 +26,7 @@ export default function SignInPage() {
       return;
     }
 
-    // Verificar acceso server-side (evita problemas de RLS con anon key)
-    const { redirect } = await fetch('/api/auth/check-access').then(r => r.json());
-    setLoading(false);
-    router.replace(redirect);
+    router.replace('/dashboard');
   };
 
   return (
