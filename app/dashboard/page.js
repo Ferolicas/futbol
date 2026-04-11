@@ -79,9 +79,12 @@ export default function Dashboard() {
   const [reanalyzeProgress, setReanalyzeProgress] = useState(null);
   // Track Pusher activity (for debugging/diagnostics)
   const pusherLastUpdate = useRef(0);
+  // Ref to always have the latest liveStats without adding it as a loadFixtures dependency
+  const liveStatsRef = useRef(liveStats);
   // Web push notifications
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushSupported, setPushSupported] = useState(false);
+  const [pushError, setPushError] = useState(null);
 
   // Seed context from navigation cache when layout remounts (e.g. user navigated outside /dashboard and back)
   useEffect(() => {
@@ -90,8 +93,9 @@ export default function Dashboard() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync context back to navigation cache so back-navigation is instant
+  // Keep liveStatsRef in sync (used in loadFixtures to avoid stale closure)
   useEffect(() => {
+    liveStatsRef.current = liveStats;
     if (_dashCache) _dashCache.liveStats = liveStats;
   }, [liveStats]);
 
@@ -138,33 +142,41 @@ export default function Dashboard() {
     setReanalyzeDone(false);
     setReanalyzeProgress(null);
     try {
-      const res = await fetch(`/api/admin/reanalyze?date=${date}&force=true`, { method: 'POST' });
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+      let offset = 0;
+      let total = null;
+      let totalAnalyzed = 0;
 
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.type === 'progress' || data.type === 'start') {
-              setReanalyzeProgress(data);
-            }
-            if (data.type === 'done') {
-              setReanalyzeProgress(data);
-              setReanalyzeDone(true);
-              setTimeout(() => { setReanalyzeDone(false); setReanalyzeProgress(null); }, 4000);
-              loadFixtures(date);
-            }
-          } catch {}
+        const res = await fetch(
+          `/api/admin/reanalyze?date=${date}&force=true&offset=${offset}`,
+          { method: 'POST' }
+        );
+
+        if (!res.ok) {
+          console.error('[REANALYZE] HTTP error:', res.status);
+          break;
         }
+
+        const data = await res.json();
+        if (total === null) total = data.total;
+        totalAnalyzed = data.totalAnalyzed;
+
+        setReanalyzeProgress({
+          current: Math.min(offset + 10, total),
+          total,
+          analyzed: totalAnalyzed,
+          skipped: 0,
+          match: data.hasMore ? `Lote ${Math.floor(offset / 10) + 1}...` : 'Finalizando...',
+        });
+
+        if (!data.hasMore) break;
+        offset = data.nextOffset;
       }
+
+      setReanalyzeProgress(p => ({ ...p, match: '' }));
+      setReanalyzeDone(true);
+      loadFixtures(date);
+      setTimeout(() => { setReanalyzeDone(false); setReanalyzeProgress(null); }, 5000);
     } catch (e) {
       console.error('[REANALYZE]', e);
     } finally {
@@ -232,7 +244,23 @@ export default function Dashboard() {
         return;
       }
       const fx = data.fixtures || [];
-      setFixtures(fx);
+      // Apply current liveStats on top of server data — prevents loadFixtures from
+      // overwriting a FT status that refreshLiveData already fixed in React state
+      // when the server Redis cache hasn't caught up yet.
+      const currentLive = liveStatsRef.current;
+      const FT_SET = new Set(['FT', 'AET', 'PEN']);
+      const fxWithLiveOverride = Object.keys(currentLive).length > 0
+        ? fx.map(f => {
+            const live = currentLive[f.fixture?.id];
+            if (!live) return f;
+            // Only upgrade to FT, never downgrade
+            if (FT_SET.has(live.status?.short) && !FT_SET.has(f.fixture?.status?.short)) {
+              return { ...f, fixture: { ...f.fixture, status: live.status }, goals: live.goals || f.goals, score: live.score || f.score };
+            }
+            return f;
+          })
+        : fx;
+      setFixtures(fxWithLiveOverride);
       setFromCache(data.fromCache || false);
       setHidden(data.hidden || []);
       setFavorites(data.favorites || []);
@@ -307,14 +335,14 @@ export default function Dashboard() {
   // then updates all live stats (scores, corners, cards, goal scorers, minutes).
   const [refreshingLive, setRefreshingLive] = useState(false);
 
-  const refreshLiveData = useCallback(async (overrideDate) => {
+  const refreshLiveData = useCallback(async (overrideDate, { force = false } = {}) => {
     const sentDate = overrideDate || date;
     setRefreshingLive(true);
     try {
       const res = await fetch('/api/refresh-live', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: sentDate }),
+        body: JSON.stringify({ date: sentDate, force }),
       });
       const data = await res.json();
       const FT = ['FT', 'AET', 'PEN'];
@@ -444,9 +472,12 @@ export default function Dashboard() {
     try {
       const reg = await navigator.serviceWorker.ready;
       const existing = await reg.pushManager.getSubscription();
-      if (existing) { setPushEnabled(true); return true; } // already subscribed
+      if (existing) { setPushEnabled(true); setPushError(null); return true; } // already subscribed
       const permission = await Notification.requestPermission();
-      if (permission !== 'granted') return false;
+      if (permission !== 'granted') {
+        setPushError('Activa los permisos de notificación en tu navegador');
+        return false;
+      }
       const vapidKey = process.env.NEXT_PUBLIC_VAPID_KEY;
       if (!vapidKey) return false;
       const padding = '='.repeat((4 - vapidKey.length % 4) % 4);
@@ -460,27 +491,35 @@ export default function Dashboard() {
         body: JSON.stringify(sub),
       });
       setPushEnabled(true);
+      setPushError(null);
       return true;
     } catch (e) {
       console.error('[PUSH]', e);
+      setPushError('No se pudo activar las notificaciones');
       return false;
     }
   }, [pushSupported]);
 
   const handlePushToggle = async () => {
     if (!pushSupported) return;
+    setPushError(null);
     try {
       const reg = await navigator.serviceWorker.ready;
       const existing = await reg.pushManager.getSubscription();
       if (existing) {
         await existing.unsubscribe();
-        await fetch('/api/push/subscribe', { method: 'DELETE' });
+        await fetch('/api/push/subscribe', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: existing.endpoint }),
+        });
         setPushEnabled(false);
       } else {
         await subscribePush();
       }
     } catch (e) {
       console.error('[PUSH]', e);
+      setPushError('Error al cambiar notificaciones');
     }
   };
 
@@ -669,8 +708,9 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fixtureId }),
       });
-      // Auto-subscribe to push when adding a favorite (not removing)
-      if (!isFav && !pushEnabled && pushSupported) {
+      // Auto-subscribe to push when adding a favorite — only if permission already granted
+      // (don't prompt the permission dialog as a side-effect of starring a match)
+      if (!isFav && !pushEnabled && pushSupported && Notification.permission === 'granted') {
         subscribePush();
       }
     } catch (e) {
@@ -883,15 +923,20 @@ export default function Dashboard() {
               </div>
             )}
             {pushSupported && (
-              <button
-                className={`btn-bell${pushEnabled ? ' btn-bell--on' : ''}`}
-                onClick={handlePushToggle}
-                title={pushEnabled ? 'Desactivar notificaciones de goles' : 'Activar notificaciones de goles'}
-              >
-                {pushEnabled ? '🔔' : '🔕'}
-              </button>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                <button
+                  className={`btn-bell${pushEnabled ? ' btn-bell--on' : ''}`}
+                  onClick={handlePushToggle}
+                  title={pushEnabled ? 'Desactivar notificaciones de goles (solo partidos favoritos)' : 'Activar notificaciones de goles (solo partidos favoritos)'}
+                >
+                  {pushEnabled ? '🔔' : '🔕'}
+                </button>
+                {pushError && (
+                  <span style={{ fontSize: 11, color: '#ef4444', maxWidth: 180, textAlign: 'right' }}>{pushError}</span>
+                )}
+              </div>
             )}
-            <button className="btn-reload" onClick={async () => { await refreshLiveData(); loadFixtures(date); }} disabled={loading || refreshingLive}>
+            <button className="btn-reload" onClick={async () => { await refreshLiveData(undefined, { force: true }); loadFixtures(date); }} disabled={loading || refreshingLive}>
               <span className={loading || refreshingLive ? 'spin' : ''}>&#8635;</span>
             </button>
           </div>

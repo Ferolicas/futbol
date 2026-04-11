@@ -96,7 +96,10 @@ export async function POST(request, { params }) {
     }
 
     if (action === 'refresh-stats') {
-      // L1: Check Redis
+      // L1: Check Redis — return if stats present OR if we already attempted a fetch (savedAt flag).
+      // The savedAt flag means we've already called the API for this fixture (possibly a lower-league
+      // match with no stats). Without this guard, every page load would re-call the API for the same
+      // empty-stats fixture and waste quota.
       const cached = await redisGet(KEYS.fixtureStats(id));
       const hasStats = cached && (
         (cached.corners?.total > 0) ||
@@ -104,7 +107,7 @@ export async function POST(request, { params }) {
         (cached.goalScorers?.length > 0) ||
         (cached.cardEvents?.length > 0)
       );
-      if (hasStats) {
+      if (hasStats || cached?.savedAt) {
         return Response.json({ stats: cached, fromCache: true });
       }
 

@@ -38,30 +38,45 @@ export async function GET(request) {
     // 1. Try Redis first (instant)
     const redisFixtures = await redisGet(KEYS.fixtures(date));
     if (redisFixtures && Array.isArray(redisFixtures) && redisFixtures.length > 0) {
-      // Detect stale live statuses: a match showing 1H/2H/etc but kicked off >150min ago
-      // is impossible — the live cron or overnight cron may have frozen it.
-      // This check applies to ALL dates (not just isPastDate) since the live cron writes
-      // today's cache with live statuses that can go stale overnight.
+      // Detect stale statuses in the Redis cache:
+      // - Live-type (1H, 2H, etc.) that kicked off >110min ago — match must be done
+      // - NS (not started) that kicked off >110min ago — match was never tracked by live cron
+      //   (e.g. lower-league Argentine night games at 1 AM, cache still shows NS at 3 AM)
+      // 110min = 90min regular + 20min buffer. In both cases a fresh API fetch is needed.
       const LIVE_CACHE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
       const nowMs = Date.now();
       const redisHasStale = redisFixtures.some(f => {
-        if (!LIVE_CACHE_STATUSES.includes(f.fixture?.status?.short)) return false;
+        const status = f.fixture?.status?.short;
         const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
-        return kickoff > 0 && (nowMs - kickoff) > 150 * 60 * 1000;
+        if (!kickoff || (nowMs - kickoff) <= 110 * 60 * 1000) return false;
+        // Live-type status past expected end time, or NS past kickoff+110min
+        return LIVE_CACHE_STATUSES.includes(status) || status === 'NS';
       });
       if (redisHasStale) {
         try {
           const result = await getFixtures(date, { forceApi: true });
           fixtures = result.fixtures || redisFixtures;
+          // Post-process: if the fresh API response still returns NS for a match whose kickoff
+          // was >130 min ago, force-finish it. Lower leagues (e.g. B Metropolitana Argentina)
+          // can have multi-hour lag before the API updates the status from NS.
+          fixtures = fixtures.map(f => {
+            if (f.fixture?.status?.short !== 'NS') return f;
+            const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
+            if (kickoff > 0 && (nowMs - kickoff) > 130 * 60 * 1000) {
+              return { ...f, fixture: { ...f.fixture, status: { short: 'FT', long: 'Match Finished', elapsed: 90 } } };
+            }
+            return f;
+          });
           fromCache = false;
           redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(() => {});
         } catch (err) {
           console.error('[fixtures] API fetch failed for stale date:', err.message);
-          // Fallback: force-finish the stale live matches client-side
+          // Fallback: force-finish stale live or NS matches client-side
           fixtures = redisFixtures.map(f => {
-            if (!LIVE_CACHE_STATUSES.includes(f.fixture?.status?.short)) return f;
+            const status = f.fixture?.status?.short;
             const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
-            if (kickoff > 0 && (nowMs - kickoff) > 150 * 60 * 1000) {
+            if (kickoff > 0 && (nowMs - kickoff) > 110 * 60 * 1000 &&
+                (LIVE_CACHE_STATUSES.includes(status) || status === 'NS')) {
               return { ...f, fixture: { ...f.fixture, status: { short: 'FT', long: 'Match Finished', elapsed: 90 } } };
             }
             return f;

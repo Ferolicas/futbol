@@ -83,11 +83,12 @@ export async function POST(request) {
     let body = {};
     try { body = await request.json(); } catch {}
     const viewDate = body.date || null;
+    const force = body.force === true; // manual user press — bypass rate limit
     const today = new Date().toISOString().split('T')[0];
 
-    // Rate limit — return cached data immediately if locked
+    // Rate limit — return cached data immediately if locked (unless manual force)
     const lock = await redisGet(LOCK_KEY);
-    if (lock) {
+    if (lock && !force) {
       const liveData = await redisGet(KEYS.liveStats(today));
       // Even when rate-limited, still return view date fixes
       let viewDateLiveStats = null;
@@ -104,7 +105,8 @@ export async function POST(request) {
       }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
-    await redisSet(LOCK_KEY, '1', LOCK_TTL);
+    // Manual force: use a 5s lock to prevent double-tap spam; automatic: 15s
+    await redisSet(LOCK_KEY, '1', force ? 5 : LOCK_TTL);
 
     const apiKey = process.env.FOOTBALL_API_KEY;
     if (!apiKey) {
@@ -231,10 +233,15 @@ export async function POST(request) {
     // Pass 2: stale entries visible in fixtures cache but NOT in liveStats.
     // Root cause: liveStats TTL is 2h, fixtures cache TTL is 26h — after liveStats expires,
     // Pass 1 finds nothing but fixtures still show the old live status.
+    // Also catches NS fixtures whose kickoff was >110min ago (match played but cron never
+    // tracked it, e.g. lower-league night games not in ALL_LEAGUE_IDS live feed).
     if (fixturesCacheSnapshot) {
       const staleInFixtures = fixturesCacheSnapshot.filter(f => {
         const fid = String(f.fixture?.id);
-        return LIVE_STATUSES.includes(f.fixture?.status?.short)
+        const status = f.fixture?.status?.short;
+        const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
+        const isStaleNs = status === 'NS' && kickoff > 0 && (now - kickoff) > 110 * 60 * 1000;
+        return (LIVE_STATUSES.includes(status) || isStaleNs)
           && !freshFids.has(fid)
           && !FINISHED_STATUSES.includes(merged[fid]?.status?.short);
       });
@@ -248,11 +255,31 @@ export async function POST(request) {
         if (full) {
           const fullStats = extractLiveStats(full);
           fullStats.date = today;
-          merged[String(fid)] = fullStats;
           if (FINISHED_STATUSES.includes(full.fixture.status.short)) {
             fullStats.savedAt = new Date().toISOString();
+            merged[String(fid)] = fullStats;
             await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
             staleFixed++;
+          } else if (f.fixture?.status?.short === 'NS' && kickoff > 0 && (now - kickoff) > 130 * 60 * 1000) {
+            // API lag: lower leagues (e.g. B Metropolitana Argentina) can return NS for hours
+            // after kickoff — the feed simply hasn't updated. Force-finish heuristically.
+            // Spread fullStats to capture any events/stats the API does have (e.g. goals),
+            // then override status to FT regardless.
+            const forceEntry = {
+              ...fullStats,
+              status: { short: 'FT', long: 'Match Finished', elapsed: 90 },
+              goals: fullStats.goals?.home != null ? fullStats.goals : (f.goals || fullStats.goals),
+              score: fullStats.score || f.score,
+              savedAt: new Date().toISOString(),
+            };
+            merged[String(fid)] = forceEntry;
+            // Save to stats:{fid} so /api/fixtures needStats processing can find it
+            // and won't make redundant API calls on subsequent page loads
+            await redisSet(KEYS.fixtureStats(fid), forceEntry, TTL.yesterday);
+            staleFixed++;
+          } else {
+            // API confirms still live or another non-finished state — update with fresh data
+            merged[String(fid)] = fullStats;
           }
         } else {
           merged[String(fid)] = { fixtureId: fid, status: { short: 'FT', long: 'Match Finished', elapsed: 90 }, goals: f.goals, date: today };
@@ -321,17 +348,22 @@ export async function POST(request) {
       }
 
       // Pass 2 for viewDate: scan fixtures cache — liveStats TTL (2h) may have expired
-      // but fixtures cache (26h) still shows stale live status
+      // but fixtures cache (26h) still shows stale live or NS status
       try {
         const viewFixtures = await redisGet(KEYS.fixtures(viewDate));
         if (Array.isArray(viewFixtures)) {
+          const viewNow = Date.now();
           const staleInViewFixtures = viewFixtures.filter(f => {
             const fid = String(f.fixture?.id);
-            return LIVE_STATUSES.includes(f.fixture?.status?.short)
+            const status = f.fixture?.status?.short;
+            const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
+            const isStaleNs = status === 'NS' && kickoff > 0 && (viewNow - kickoff) > 110 * 60 * 1000;
+            return (LIVE_STATUSES.includes(status) || isStaleNs)
               && !FINISHED_STATUSES.includes(viewExisting[fid]?.status?.short);
           });
           for (const f of staleInViewFixtures) {
             const fid = f.fixture.id;
+            const vKickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
             const full = await apiFetchFixture(apiKey, fid);
             apiCalls++;
             if (full) {
@@ -339,11 +371,29 @@ export async function POST(request) {
               fullStats.date = viewDate;
               if (FINISHED_STATUSES.includes(full.fixture.status.short)) {
                 fullStats.savedAt = new Date().toISOString();
+                viewExisting[String(fid)] = fullStats;
+                viewChanged = true;
+                viewDateStaleFixed++;
+                await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
+              } else if (f.fixture?.status?.short === 'NS' && vKickoff > 0 && (viewNow - vKickoff) > 130 * 60 * 1000) {
+                // API lag for lower leagues — force-finish heuristically
+                const forceEntry = {
+                  ...fullStats,
+                  status: { short: 'FT', long: 'Match Finished', elapsed: 90 },
+                  goals: fullStats.goals?.home != null ? fullStats.goals : (f.goals || fullStats.goals),
+                  score: fullStats.score || f.score,
+                  savedAt: new Date().toISOString(),
+                };
+                viewExisting[String(fid)] = forceEntry;
+                await redisSet(KEYS.fixtureStats(fid), forceEntry, TTL.yesterday);
+                viewChanged = true;
+                viewDateStaleFixed++;
+              } else {
+                viewExisting[String(fid)] = fullStats;
+                viewChanged = true;
+                viewDateStaleFixed++;
+                await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
               }
-              viewExisting[String(fid)] = fullStats;
-              viewChanged = true;
-              viewDateStaleFixed++;
-              await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
             } else {
               // API returned nothing — force-finish to stop showing as live
               viewExisting[String(fid)] = {

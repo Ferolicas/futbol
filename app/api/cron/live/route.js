@@ -96,6 +96,13 @@ function extractLiveStats(match, events, stats) {
   };
 }
 
+// Normalize subscription column — may be a single object or an array of objects
+function toSubArray(stored) {
+  if (!stored) return [];
+  const parsed = typeof stored === 'string' ? JSON.parse(stored) : stored;
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
 async function sendGoalPushes(liveDetailsMap, existingLive) {
   const goals = [];
   for (const [fid, data] of Object.entries(liveDetailsMap)) {
@@ -127,18 +134,53 @@ async function sendGoalPushes(liveDetailsMap, existingLive) {
     favoritesByUser[row.user_id] = (favRows || []).map(r => r.fixture_id);
   }));
 
+  // Track expired endpoints per user so we can clean them up after all sends
+  const expiredByUser = {}; // { userId: Set<endpoint> }
+
   for (const goal of goals) {
     const title = `⚽ GOL! ${goal.homeTeam} ${goal.homeScore}-${goal.awayScore} ${goal.awayTeam}`;
     const body = goal.scorer ? `${goal.scorer} · min. ${goal.minute}` : `min. ${goal.minute || '?'}`;
     await Promise.allSettled(subs.map(async (row) => {
-      try {
-        const userFavorites = favoritesByUser[row.user_id] || [];
-        if (!userFavorites.includes(goal.fixtureId)) return;
-        const sub = typeof row.subscription === 'string' ? JSON.parse(row.subscription) : row.subscription;
-        await sendPushNotification(sub, { title, body, tag: `goal-${goal.fixtureId}` });
-      } catch {}
+      const userFavorites = favoritesByUser[row.user_id] || [];
+      if (!userFavorites.includes(goal.fixtureId)) return;
+
+      const deviceSubs = toSubArray(row.subscription);
+      await Promise.allSettled(deviceSubs.map(async (sub) => {
+        if (!sub?.endpoint) return;
+        const result = await sendPushNotification(sub, { title, body, tag: `goal-${goal.fixtureId}` });
+        if (result === 'expired') {
+          if (!expiredByUser[row.user_id]) expiredByUser[row.user_id] = new Set();
+          expiredByUser[row.user_id].add(sub.endpoint);
+        }
+      }));
     }));
   }
+
+  // Purge expired subscriptions from Supabase
+  const usersWithExpired = Object.keys(expiredByUser);
+  if (usersWithExpired.length === 0) return;
+
+  await Promise.allSettled(usersWithExpired.map(async (userId) => {
+    try {
+      const expiredEndpoints = expiredByUser[userId];
+      const { data: row } = await supabaseAdmin
+        .from('push_subscriptions')
+        .select('subscription')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (!row) return;
+
+      const remaining = toSubArray(row.subscription).filter(s => !expiredEndpoints.has(s?.endpoint));
+
+      if (remaining.length === 0) {
+        await supabaseAdmin.from('push_subscriptions').delete().eq('user_id', userId);
+      } else {
+        await supabaseAdmin.from('push_subscriptions').update({ subscription: remaining }).eq('user_id', userId);
+      }
+    } catch (e) {
+      console.error('[PUSH:purge-expired]', userId, e.message);
+    }
+  }));
 }
 
 export async function GET(request) {
