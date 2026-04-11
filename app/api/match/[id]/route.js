@@ -1,9 +1,10 @@
-import { getQuota, refreshLineups, refreshInjuries, fetchMatchStats } from '../../../../lib/api-football';
+import { getQuota, refreshLineups, refreshInjuries, fetchMatchStats, analyzeMatch } from '../../../../lib/api-football';
 import { getCachedAnalysis, cacheAnalysis, getCachedFixtures } from '../../../../lib/sanity-cache';
 import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
 import { supabaseAdmin } from '../../../../lib/supabase';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 export async function GET(request, { params }) {
   const { id } = params;
@@ -140,6 +141,25 @@ export async function POST(request, { params }) {
       } catch (e) { console.error(`[match:refresh-stats] Supabase save ${id}:`, e.message); }
       const quota = await getQuota();
       return Response.json({ stats, quota });
+    }
+
+    if (action === 'analyze') {
+      // On-demand analysis for a single fixture
+      const fixtures = await getCachedFixtures(date);
+      if (!fixtures || fixtures.length === 0) {
+        return Response.json({ error: 'No fixtures cached for this date. Try again later.' }, { status: 404 });
+      }
+      const fixture = fixtures.find(f => f.fixture.id === Number(id));
+      if (!fixture) {
+        return Response.json({ error: 'Fixture not found in cache for this date.' }, { status: 404 });
+      }
+      const result = await analyzeMatch(fixture, { date });
+      if (!result || result.dataQuality === 'insufficient') {
+        return Response.json({ error: 'Insufficient data to analyze this match.' }, { status: 422 });
+      }
+      await cacheAnalysis(id, { ...result, date }).catch(() => {});
+      const quota = await getQuota();
+      return Response.json({ analysis: result.analysis || result, quota });
     }
 
     return Response.json({ error: 'Invalid action' }, { status: 400 });

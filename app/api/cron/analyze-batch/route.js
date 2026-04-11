@@ -9,7 +9,7 @@ import { redisSet } from '../../../../lib/redis';
 import { triggerEvent } from '../../../../lib/pusher';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function POST(request) {
   const isInternal = request.headers.get('x-internal-trigger') === 'true';

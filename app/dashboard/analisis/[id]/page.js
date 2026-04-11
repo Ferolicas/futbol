@@ -53,6 +53,8 @@ export default function AnalisisPage() {
   const [combinada, setCombinada] = useState(null);
   const { selectedMarkets, toggleMarket } = useSelectedMarkets();
   const [collapsed, setCollapsed] = useState({});
+  const [notAnalyzed, setNotAnalyzed] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [refreshingLineups, setRefreshingLineups] = useState(false);
   const [refreshingInjuries, setRefreshingInjuries] = useState(false);
   const [userCountry, setUserCountry] = useState('default');
@@ -72,13 +74,42 @@ export default function AnalisisPage() {
 
   const toggleSection = (key) => setCollapsed(prev => ({ ...prev, [key]: !prev[key] }));
 
+  const doAnalyze = async () => {
+    setAnalyzing(true);
+    setError('');
+    try {
+      const localDate = todayInTz(getUserTz());
+      const res = await fetch(`/api/match/${fixtureId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'analyze', date: localDate }),
+      });
+      const data = await res.json();
+      if (data.error) { setError(data.error); return; }
+      setNotAnalyzed(false);
+      setAnalysis(data.analysis);
+      if (data.quota) setQuota(data.quota);
+      const probs = data.analysis.calculatedProbabilities || computeAllProbabilities(data.analysis);
+      setProbabilities(probs);
+      const teamNames = { home: data.analysis.homeTeam, away: data.analysis.awayTeam };
+      const combo = data.analysis.combinada || buildCombinada(probs, data.analysis.odds, data.analysis.playerHighlights, teamNames);
+      setCombinada(combo);
+    } catch (e) {
+      setError(e.message || 'Error al analizar');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
   const loadAnalysis = useCallback(async () => {
     setLoading(true);
     setError('');
+    setNotAnalyzed(false);
     try {
       const localDate = todayInTz(getUserTz());
       const res = await fetch(`/api/match/${fixtureId}?date=${localDate}`);
       const data = await res.json();
+      if (data.notFound) { setNotAnalyzed(true); return; }
       if (data.error) { setError(data.error); return; }
       setAnalysis(data.analysis);
       if (data.quota) setQuota(data.quota);
@@ -188,6 +219,49 @@ export default function AnalisisPage() {
         <div style={{ position: 'relative', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', flexDirection: 'column', gap: 16 }}>
           <div className="ap2-spinner" />
           <span style={{  color: 'white', fontSize: '.9rem' }}>Cargando análisis…</span>
+        </div>
+      </div>
+    );
+  }
+
+  // ── NOT ANALYZED YET ──
+  if (notAnalyzed) {
+    return (
+      <div style={{ minHeight: '100vh', position: 'relative', overflow: 'hidden', color: 'white' }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 0, background: 'linear-gradient(181deg, #030000 10%, #000009 14%, #1E8769 67%)' }} />
+        <div style={{ position: 'relative', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', flexDirection: 'column', gap: 16, padding: 24 }}>
+          <div className="ap2-glass" style={{ maxWidth: 400, width: '100%', textAlign: 'center', padding: 32 }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>🔍</div>
+            <h3 style={{ fontWeight: 700, marginBottom: 8 }}>Partido sin analizar</h3>
+            <p style={{ color: 'rgba(255,255,255,0.6)', marginBottom: 24, fontSize: '.9rem' }}>
+              Este partido aún no tiene análisis. Puedes generarlo ahora.
+            </p>
+            {error && (
+              <p style={{ color: '#ef4444', fontSize: '.85rem', marginBottom: 16 }}>{error}</p>
+            )}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+              <motion.button
+                className="ap2-back-btn"
+                onClick={() => router.push('/dashboard')}
+                whileHover={{ scale: 1.05 }} whileTap={{ scale: .95 }}
+              >
+                <ChevronLeft size={16} /> Volver
+              </motion.button>
+              <motion.button
+                style={{ padding: '10px 22px', borderRadius: 10, background: analyzing ? 'rgba(34,211,238,0.3)' : 'linear-gradient(to right, #1E8769, #22d3ee)', border: 'none', color: 'white', fontWeight: 700, cursor: analyzing ? 'not-allowed' : 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 8 }}
+                onClick={doAnalyze}
+                disabled={analyzing}
+                whileHover={analyzing ? {} : { scale: 1.05 }}
+                whileTap={analyzing ? {} : { scale: .95 }}
+              >
+                {analyzing ? (
+                  <><span className="ap2-spinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> Analizando...</>
+                ) : (
+                  <><Zap size={16} /> Analizar partido</>
+                )}
+              </motion.button>
+            </div>
+          </div>
         </div>
       </div>
     );
