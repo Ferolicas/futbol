@@ -5,7 +5,7 @@ import { supabaseAdmin } from '../../../../lib/supabase';
 import { redisGet, redisDel, redisSet, KEYS, TTL } from '../../../../lib/redis';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60; // Each batch of 10 fits in 60s
+export const maxDuration = 300;
 
 const OWNER_EMAIL = 'ferneyolicas@gmail.com';
 const BATCH_SIZE = 10;
