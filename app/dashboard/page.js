@@ -145,10 +145,12 @@ export default function Dashboard() {
       let offset = 0;
       let total = null;
       let totalAnalyzed = 0;
+      let totalSkipped = 0;
 
       while (true) {
+        // No force=true — the backend decides what to skip (already analyzed, live, finished)
         const res = await fetch(
-          `/api/admin/reanalyze?date=${date}&force=true&offset=${offset}`,
+          `/api/admin/reanalyze?date=${date}&offset=${offset}`,
           { method: 'POST' }
         );
 
@@ -160,12 +162,13 @@ export default function Dashboard() {
         const data = await res.json();
         if (total === null) total = data.total;
         totalAnalyzed = data.totalAnalyzed;
+        totalSkipped  = (totalSkipped || 0) + (data.batchSkipped || 0);
 
         setReanalyzeProgress({
           current: Math.min(offset + 10, total),
           total,
           analyzed: totalAnalyzed,
-          skipped: 0,
+          skipped: totalSkipped,
           match: data.hasMore ? `Lote ${Math.floor(offset / 10) + 1}...` : 'Finalizando...',
         });
 
@@ -901,10 +904,10 @@ export default function Dashboard() {
                   disabled={reanalyzing}
                 >
                   {reanalyzeDone
-                    ? `Done: ${reanalyzeProgress?.analyzed || 0} nuevos, ${reanalyzeProgress?.skipped || 0} ya listos`
+                    ? `✓ ${reanalyzeProgress?.analyzed || 0} analizados · ${reanalyzeProgress?.skipped || 0} saltados`
                     : reanalyzing
-                      ? `${reanalyzeProgress ? Math.round((reanalyzeProgress.current / reanalyzeProgress.total) * 100) : 0}% — ${reanalyzeProgress?.match || 'Iniciando...'}`
-                      : 'Re-analizar todo'}
+                      ? `${reanalyzeProgress ? Math.round((reanalyzeProgress.current / reanalyzeProgress.total) * 100) : 0}% · ${reanalyzeProgress?.analyzed || 0} nuevos · ${reanalyzeProgress?.match || 'Iniciando...'}`
+                      : 'Re-analizar pendientes'}
                 </button>
                 {reanalyzing && reanalyzeProgress && (
                   <div className="reanalyze-bar">

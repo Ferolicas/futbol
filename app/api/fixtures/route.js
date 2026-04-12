@@ -1,6 +1,6 @@
 import { getFixtures, getQuota, getCachedStandingsPositions } from '../../../lib/api-football';
 import { getAnalyzedMatchesFull, getAnalyzedFixtureIds } from '../../../lib/sanity-cache';
-import { redisGet, redisSet, KEYS } from '../../../lib/redis';
+import { redisGet, redisSet, KEYS, TTL } from '../../../lib/redis';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { filterFixturesByLocalDate } from '../../../lib/timezone';
@@ -357,14 +357,21 @@ export async function GET(request) {
     }
 
     // ===== PHASE 4: Auto-trigger daily batch =====
+    // Guard: only trigger if no batch has started/completed AND we haven't sent a trigger
+    // in the last 4 hours (prevents multiple triggers when dailyBatch key expires mid-analysis).
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
       : 'http://localhost:3000');
 
     if (fixtures.length > 0 && !batchFlag?.started && !batchFlag?.completed) {
-      fetch(`${baseUrl}/api/cron/daily?date=${date}`, {
-        headers: { 'x-internal-trigger': 'true' },
-      }).catch(() => {});
+      const triggerLockKey = `daily-trigger-lock:${date}`;
+      const alreadyTriggered = await redisGet(triggerLockKey);
+      if (!alreadyTriggered) {
+        await redisSet(triggerLockKey, '1', 4 * 3600); // 4-hour lock prevents repeated triggers
+        fetch(`${baseUrl}/api/cron/daily?date=${date}`, {
+          headers: { 'x-internal-trigger': 'true' },
+        }).catch(() => {});
+      }
     }
 
     // ===== PHASE 5: User data (auth resolved above) =====

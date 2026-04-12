@@ -23,16 +23,19 @@ export async function GET(request) {
   const today = searchParams.get('date') || new Date().toISOString().split('T')[0];
   const force = searchParams.get('force') === 'true';
 
-  // Check if already completed today
+  // Check if already started or completed today — both block re-entry
   if (!force) {
     const existing = await redisGet(`dailyBatch:${today}`);
     if (existing?.completed) {
       return Response.json({ success: true, message: 'Already completed', date: today, fixtureCount: existing.fixtureCount });
     }
+    if (existing?.started) {
+      return Response.json({ success: true, message: 'Already started', date: today, startedAt: existing.startedAt });
+    }
   }
 
-  // Mark as started to prevent concurrent runs triggered by /api/fixtures Phase 4
-  await redisSet(`dailyBatch:${today}`, { started: true, startedAt: new Date().toISOString() }, 3600);
+  // Mark as started — 24h TTL prevents re-triggers for the rest of the day
+  await redisSet(`dailyBatch:${today}`, { started: true, startedAt: new Date().toISOString() }, 86400);
 
   console.log(`[daily] Starting for ${today}`);
   const startTime = Date.now();
