@@ -1,7 +1,13 @@
 /**
  * GET /api/cron/fixtures
- * Runs at 10AM Spain (08:00 UTC): fetch today's fixtures, save to Redis + Supabase.
- * Also generates matchSchedule for live/lineups crons.
+ * Fetches fixtures for the target date, caches in Redis + Supabase,
+ * and saves matchSchedule for the live/lineups crons.
+ *
+ * Target date logic:
+ *   - If UTC hour >= 22 (= midnight Spain CEST): fetch TOMORROW UTC
+ *     so users see the next day's matches as soon as midnight hits.
+ *   - Otherwise: fetch TODAY UTC (manual triggers, fallback).
+ *   - ?date=YYYY-MM-DD param always overrides both.
  */
 import { getFixtures, getQuota } from '../../../../lib/api-football';
 import { saveMatchSchedule } from '../../../../lib/supabase-cache';
@@ -24,19 +30,31 @@ export async function GET(request) {
   }
 
   try {
-    const today = new Date().toISOString().split('T')[0];
-    console.log(`[CRON:fixtures] Loading fixtures for ${today}...`);
+    const { searchParams } = new URL(request.url);
 
-    const result = await getFixtures(today, { forceApi: true });
+    // Auto-detect target date.
+    // At 22:00+ UTC (= midnight Spain CEST / 23:00 CET), fetch tomorrow UTC
+    // so the next day's fixtures are cached the moment Spain's date flips.
+    const now = new Date();
+    const utcHour = now.getUTCHours();
+    const todayUTC    = now.toISOString().split('T')[0];
+    const tomorrowUTC = new Date(now.getTime() + 86400000).toISOString().split('T')[0];
+
+    const targetDate = searchParams.get('date')
+      || (utcHour >= 22 ? tomorrowUTC : todayUTC);
+
+    console.log(`[CRON:fixtures] UTC hour=${utcHour} → fetching fixtures for ${targetDate}`);
+
+    const result   = await getFixtures(targetDate, { forceApi: true });
     const fixtures = result.fixtures || [];
 
-    // Cache fixtures in Redis + Supabase
+    // Cache in Redis + Supabase
     if (fixtures.length > 0) {
-      await cacheFixtures(today, fixtures);
-      await redisSet(KEYS.fixtures(today), fixtures, 7200);
+      await cacheFixtures(targetDate, fixtures);
+      await redisSet(KEYS.fixtures(targetDate), fixtures, 7200);
     }
 
-    // Generate matchSchedule for live/lineups crons
+    // Build matchSchedule for live/lineups crons
     const kickoffTimes = fixtures.map(f => {
       const kickoff = new Date(f.fixture.date).getTime();
       return { fixtureId: f.fixture.id, kickoff, expectedEnd: kickoff + 120 * 60 * 1000 };
@@ -44,32 +62,19 @@ export async function GET(request) {
 
     const scheduleData = {
       kickoffTimes,
-      firstKickoff: kickoffTimes[0]?.kickoff || null,
+      firstKickoff:    kickoffTimes[0]?.kickoff || null,
       lastExpectedEnd: kickoffTimes.length > 0 ? Math.max(...kickoffTimes.map(k => k.expectedEnd)) : null,
-      fixtureCount: fixtures.length,
+      fixtureCount:    fixtures.length,
     };
 
-    await saveMatchSchedule(today, scheduleData);
-    console.log(`[CRON:fixtures] matchSchedule saved: ${fixtures.length} matches`);
-
-    // Also fetch tomorrow's fixtures (cache warming)
-    let tomorrowCount = 0;
-    try {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const tomorrowDate = tomorrow.toISOString().split('T')[0];
-      const tResult = await getFixtures(tomorrowDate);
-      tomorrowCount = tResult.fixtures?.length || 0;
-    } catch (e) {
-      console.error('[CRON:fixtures] Tomorrow fetch failed:', e.message);
-    }
+    await saveMatchSchedule(targetDate, scheduleData);
+    console.log(`[CRON:fixtures] matchSchedule saved for ${targetDate}: ${fixtures.length} matches`);
 
     const quota = await getQuota();
     return Response.json({
       success: true,
-      date: today,
+      targetDate,
       fixtureCount: fixtures.length,
-      tomorrowCount,
       quota,
       timestamp: new Date().toISOString(),
     });
