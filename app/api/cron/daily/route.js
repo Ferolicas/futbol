@@ -46,10 +46,8 @@ export async function GET(request) {
       return Response.json({ success: true, date: today, fixtureCount: 0, message: 'No fixtures today' });
     }
 
-    // Initialize empty analysis summary and kick off the batch chain.
-    // analyze-batch chains itself until all fixtures are processed.
-    await redisSet(`analysis:${today}`, { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} }, 12 * 3600).catch(() => {});
-
+    // Kick off the batch chain.
+    // analyze-batch builds analysis:${today} incrementally (no empty-init needed).
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL
       || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 

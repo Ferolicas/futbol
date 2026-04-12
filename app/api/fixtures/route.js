@@ -377,9 +377,10 @@ export async function GET(request) {
     // ===== PHASE 5: User data (auth resolved above) =====
     const [analysisResult, oddsResult, standingsResult] = await Promise.all([
 
-      // Analysis: use Redis cache or fall back to Supabase
+      // Analysis: use Redis cache only if it has actual data — empty object means
+      // analysis is still running; fall through to Supabase to show partial progress.
       (async () => {
-        if (cachedAnalysisData) return cachedAnalysisData;
+        if (cachedAnalysisData?.globallyAnalyzed?.length > 0) return cachedAnalysisData;
         if (fixtureIds.length === 0) return { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
 
         // Get analyzed fixture IDs — also check adjacent dates for cross-midnight fixtures
