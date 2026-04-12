@@ -1,17 +1,28 @@
+/**
+ * /api/admin/reanalyze
+ *
+ * POST (session auth)   → validates owner, kicks off the server-side chain, returns immediately.
+ *                         Browser can close — execution continues on Vercel.
+ * POST (x-internal-trigger) → processes one batch of 10, chains itself to the next offset.
+ * GET  (session auth)   → returns current progress from Redis for frontend polling.
+ */
 import { analyzeMatch, getFixtures, fetchMatchStats, resetRateLimiter } from '../../../../lib/api-football';
 import { getCachedAnalysis } from '../../../../lib/sanity-cache';
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../../lib/supabase';
-import { redisGet, redisDel, redisSet, KEYS, TTL } from '../../../../lib/redis';
+import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-const OWNER_EMAIL = 'ferneyolicas@gmail.com';
-const BATCH_SIZE = 10;
+const OWNER_EMAIL      = 'ferneyolicas@gmail.com';
+const BATCH_SIZE       = 10;
+const PROGRESS_TTL     = 4 * 3600; // keep progress visible for 4 hours
 
 const FINISHED_STATUSES = new Set(['FT', 'AET', 'PEN']);
-const LIVE_STATUSES    = new Set(['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE', 'INT']);
+const LIVE_STATUSES     = new Set(['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE', 'INT']);
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
 function compactLastFive(lastFive) {
   if (!Array.isArray(lastFive)) return [];
@@ -39,182 +50,244 @@ function buildSummary(a) {
   };
 }
 
-export async function POST(request) {
+function getBaseUrl() {
+  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
+  if (process.env.NEXTAUTH_URL)        return process.env.NEXTAUTH_URL;
+  if (process.env.VERCEL_URL)          return `https://${process.env.VERCEL_URL}`;
+  return 'http://localhost:3000';
+}
+
+// ─── GET — progress polling ────────────────────────────────────────────────────
+
+export async function GET(request) {
   const supabase = createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return Response.json({ error: 'Not authenticated' }, { status: 401 });
-  if (user.email?.toLowerCase() !== OWNER_EMAIL) {
+  if (!user || user.email?.toLowerCase() !== OWNER_EMAIL) {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   const { searchParams } = new URL(request.url);
-  const today = searchParams.get('date') || new Date().toISOString().split('T')[0];
+  const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
+
+  const progress = await redisGet(`reanalyze-progress:${date}`);
+  return Response.json(progress || { running: false, completed: false });
+}
+
+// ─── POST — start (session) or continue batch (internal) ─────────────────────
+
+export async function POST(request) {
+  const isInternal = request.headers.get('x-internal-trigger') === 'true';
+
+  // Internal batch calls skip session auth
+  if (!isInternal) {
+    const supabase = createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return Response.json({ error: 'Not authenticated' }, { status: 401 });
+    if (user.email?.toLowerCase() !== OWNER_EMAIL) {
+      return Response.json({ error: 'Forbidden' }, { status: 403 });
+    }
+  }
+
+  const { searchParams } = new URL(request.url);
+  const date   = searchParams.get('date') || new Date().toISOString().split('T')[0];
   const offset = parseInt(searchParams.get('offset') || '0', 10);
 
-  let allFixtures = null;
+  // ── offset=0 AND called from browser: set up and kick off chain, return immediately ──
+  if (offset === 0 && !isInternal) {
+    // Check if already running
+    const current = await redisGet(`reanalyze-progress:${date}`);
+    if (current?.running) {
+      return Response.json({ started: false, message: 'Already running', progress: current });
+    }
 
-  // First batch (offset=0): fetch/use cached fixtures — do NOT wipe existing analysis
-  if (offset === 0) {
-    // Try Redis first, avoid an API call if fixtures already cached today
-    let cachedFixtures = await redisGet(KEYS.fixtures(today));
-
-    if (!cachedFixtures || !Array.isArray(cachedFixtures) || cachedFixtures.length === 0) {
-      // Not in Redis — fetch fresh from API
+    // Ensure fixtures are in Redis (fetch from API only if missing)
+    let fixtures = await redisGet(KEYS.fixtures(date));
+    if (!fixtures || !Array.isArray(fixtures) || fixtures.length === 0) {
       resetRateLimiter();
       try {
-        const result = await getFixtures(today, { forceApi: true });
-        cachedFixtures = result.fixtures || [];
-        if (cachedFixtures.length > 0) {
-          await redisSet(KEYS.fixtures(today), cachedFixtures, 48 * 3600).catch(() => {});
+        const result = await getFixtures(date, { forceApi: true });
+        fixtures = result.fixtures || [];
+        if (fixtures.length > 0) {
+          await redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(() => {});
         }
-      } catch {}
+      } catch (e) {
+        return Response.json({ error: `Failed to load fixtures: ${e.message}` }, { status: 500 });
+      }
     }
 
-    if (!cachedFixtures || cachedFixtures.length === 0) {
-      return Response.json({ success: true, analyzed: 0, total: 0, hasMore: false, message: 'No fixtures for this date' });
+    if (!fixtures || fixtures.length === 0) {
+      return Response.json({ started: false, message: 'No fixtures for this date' });
     }
 
-    allFixtures = cachedFixtures;
-  } else {
-    // offset > 0: load fixtures from Redis
-    allFixtures = await redisGet(KEYS.fixtures(today));
-    if (!Array.isArray(allFixtures) || allFixtures.length === 0) {
-      return Response.json({ error: 'Fixtures not in cache — restart from offset 0' }, { status: 400 });
-    }
+    // Initialize progress in Redis
+    const progress = {
+      running: true, completed: false,
+      date, total: fixtures.length,
+      offset: 0, analyzed: 0, skipped: 0, failed: 0,
+      startedAt: new Date().toISOString(),
+    };
+    await redisSet(`reanalyze-progress:${date}`, progress, PROGRESS_TTL);
+
+    // Fire first internal batch (fire-and-forget — browser can close)
+    fetch(`${getBaseUrl()}/api/admin/reanalyze?date=${date}&offset=0`, {
+      method: 'POST',
+      headers: { 'x-internal-trigger': 'true' },
+    }).catch(e => console.error('[reanalyze] Failed to start chain:', e.message));
+
+    return Response.json({ started: true, total: fixtures.length });
+  }
+
+  // ── Internal batch processing ──────────────────────────────────────────────
+  const allFixtures = await redisGet(KEYS.fixtures(date));
+  if (!Array.isArray(allFixtures) || allFixtures.length === 0) {
+    await redisSet(`reanalyze-progress:${date}`, {
+      running: false, completed: false, error: 'Fixtures not in cache',
+    }, PROGRESS_TTL);
+    return Response.json({ error: 'Fixtures not in cache' }, { status: 400 });
   }
 
   const total = allFixtures.length;
   const batch = allFixtures.slice(offset, offset + BATCH_SIZE);
 
   if (batch.length === 0) {
-    return Response.json({ success: true, analyzed: 0, total, offset, hasMore: false });
+    // Reached the end
+    await _finalize(date, total, allFixtures);
+    return Response.json({ success: true, message: 'All batches complete' });
   }
 
-  // Load accumulated analysis summary (built up across batches — preserved from cron runs)
-  const existing = await redisGet(`analysis:${today}`) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
-  const analyzedIds    = existing.globallyAnalyzed || [];
-  const analyzedOdds   = existing.analyzedOdds || {};
-  const analyzedData   = existing.analyzedData || {};
-  const analyzedIdSet  = new Set(analyzedIds);
+  // Load current progress counters
+  const prog = await redisGet(`reanalyze-progress:${date}`) || {
+    running: true, completed: false, date, total, offset,
+    analyzed: 0, skipped: 0, failed: 0,
+  };
 
-  let analyzed = 0, skipped = 0, failed = 0;
+  // Load accumulated analysis summary
+  const existing     = await redisGet(`analysis:${date}`) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
+  const analyzedIds  = existing.globallyAnalyzed || [];
+  const analyzedOdds = existing.analyzedOdds || {};
+  const analyzedData = existing.analyzedData || {};
+  const analyzedSet  = new Set(analyzedIds);
+
+  let batchAnalyzed = 0, batchSkipped = 0, batchFailed = 0;
 
   for (const fixture of batch) {
     const fid    = fixture.fixture?.id;
     const status = fixture.fixture?.status?.short;
 
-    // Skip finished matches — apostamos antes del partido, no tiene sentido analizarlos ahora
-    if (FINISHED_STATUSES.has(status)) {
-      skipped++;
-      continue;
+    // Skip finished matches — partido terminado, no se puede apostar
+    if (FINISHED_STATUSES.has(status)) { batchSkipped++; continue; }
+
+    // Skip live matches — partido en curso, no se puede apostar
+    if (LIVE_STATUSES.has(status)) { batchSkipped++; continue; }
+
+    // Skip already-analyzed NS matches (verify per-fixture cache exists)
+    if (analyzedSet.has(fid)) {
+      const cached = await getCachedAnalysis(fid, date, { strict: true });
+      if (cached) { batchSkipped++; continue; }
+      // Cache expired — fall through and re-analyze
     }
 
-    // Skip live matches — el partido ya empezó, no se puede apostar
-    if (LIVE_STATUSES.has(status)) {
-      skipped++;
-      continue;
-    }
-
-    // Skip already analyzed NS matches — they have a valid analysis in cache
-    if (analyzedIdSet.has(fid)) {
-      // Double-check the per-fixture cache is actually there and fresh
-      const cached = await getCachedAnalysis(fid, today, { strict: true });
-      if (cached) {
-        skipped++;
-        continue;
-      }
-      // Cache miss (expired or never saved) — fall through and re-analyze
-    }
-
-    // Only analyze NS / TBD / upcoming fixtures
+    // Analyze (up to 3 attempts)
     let result = null;
-    let lastErr = null;
-
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        // Do NOT pass force:true — analyzeMatch will check its own cache first
-        result = await analyzeMatch(fixture, { date: today });
-        lastErr = null;
+        result = await analyzeMatch(fixture, { date });
         break;
       } catch (e) {
-        lastErr = e;
         console.warn(`[reanalyze] Attempt ${attempt + 1} failed for ${fid}: ${e.message}`);
-        await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+        if (attempt < 2) await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
       }
     }
 
     if (result) {
       const a = result.analysis || result;
-      if (!result.fromCache) analyzed++;
-      else skipped++; // was already cached — counts as skipped
+      if (result.fromCache) batchSkipped++;
+      else batchAnalyzed++;
       analyzedIds.push(fid);
-      analyzedIdSet.add(fid);
+      analyzedSet.add(fid);
       if (a.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
       analyzedData[fid] = buildSummary(a);
     } else {
-      failed++;
-      console.error(`[reanalyze] All attempts failed for ${fid}:`, lastErr?.message);
+      batchFailed++;
+      console.error(`[reanalyze] All attempts failed for fixture ${fid}`);
     }
   }
 
-  // Persist accumulated progress (safe even if later batches never arrive)
-  await redisSet(`analysis:${today}`, { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData }, 12 * 3600).catch(() => {});
+  // Persist accumulated analysis summary
+  await redisSet(`analysis:${date}`, { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData }, 12 * 3600).catch(() => {});
 
-  const nextOffset = offset + BATCH_SIZE;
-  const hasMore = nextOffset < total;
+  // Update progress counters
+  const nextOffset   = offset + BATCH_SIZE;
+  const hasMore      = nextOffset < total;
+  const newAnalyzed  = (prog.analyzed || 0) + batchAnalyzed;
+  const newSkipped   = (prog.skipped  || 0) + batchSkipped;
+  const newFailed    = (prog.failed   || 0) + batchFailed;
 
-  // Last batch: update live stats for finished matches if needed
+  const updatedProg = {
+    ...prog,
+    offset: nextOffset,
+    analyzed: newAnalyzed,
+    skipped:  newSkipped,
+    failed:   newFailed,
+    running:  hasMore,
+    completed: !hasMore,
+    ...(hasMore ? {} : { completedAt: new Date().toISOString() }),
+  };
+  await redisSet(`reanalyze-progress:${date}`, updatedProg, PROGRESS_TTL);
+
   if (!hasMore) {
-    const finishedFixtures = allFixtures.filter(f => FINISHED_STATUSES.has(f.fixture?.status?.short));
-    if (finishedFixtures.length > 0) {
-      const liveStatsMap = {};
-      await Promise.all(finishedFixtures.map(async (f) => {
-        const fid = f.fixture.id;
-        // Only fetch stats if not already in Redis
-        const existing = await redisGet(KEYS.fixtureStats(fid));
-        if (existing?.corners?.total > 0 || existing?.goalScorers?.length > 0) return;
-        try {
-          const stats = await fetchMatchStats(fid);
-          if (stats) {
-            await redisSet(KEYS.fixtureStats(fid), stats, TTL.yesterday);
-            liveStatsMap[fid] = stats;
-            await supabaseAdmin.from('match_analysis')
-              .update({ live_stats: stats })
-              .eq('fixture_id', fid)
-              .catch(() => {});
-          }
-        } catch {}
-      }));
-
-      if (Object.keys(liveStatsMap).length > 0) {
-        const existingLive = await redisGet(KEYS.liveStats(today)) || {};
-        const updatedLive = { ...existingLive };
-        for (const [fid, freshStats] of Object.entries(liveStatsMap)) {
-          const f = allFixtures.find(x => x.fixture?.id === Number(fid));
-          updatedLive[fid] = { ...freshStats, status: f?.fixture?.status, goals: f?.goals, score: f?.score };
-        }
-        await redisSet(KEYS.liveStats(today), updatedLive, TTL.yesterday).catch(() => {});
-      }
-    }
-
-    // Mark daily batch as completed so Phase 4 doesn't re-trigger analysis
-    await redisSet(`dailyBatch:${today}`, {
-      completed: true,
-      fixtureCount: total,
-      completedAt: new Date().toISOString(),
-      source: 'manual-reanalyze',
-    }, 86400).catch(() => {});
+    await _finalize(date, total, allFixtures);
+    return Response.json({ success: true, ...updatedProg });
   }
 
-  return Response.json({
-    success: true,
-    offset,
-    nextOffset,
-    hasMore,
-    total,
-    batchAnalyzed: analyzed,
-    batchSkipped: skipped,
-    batchFailed: failed,
-    totalAnalyzed: analyzedIds.length,
-  });
+  // Chain next batch (fire-and-forget — this function returns immediately)
+  fetch(`${getBaseUrl()}/api/admin/reanalyze?date=${date}&offset=${nextOffset}`, {
+    method: 'POST',
+    headers: { 'x-internal-trigger': 'true' },
+  }).catch(e => console.error(`[reanalyze] Chain to offset ${nextOffset} failed:`, e.message));
+
+  return Response.json({ success: true, ...updatedProg });
+}
+
+// ─── finalize: update live stats for finished matches + mark dailyBatch done ──
+
+async function _finalize(date, total, allFixtures) {
+  const FINISHED = ['FT', 'AET', 'PEN'];
+  const finishedFixtures = allFixtures.filter(f => FINISHED.includes(f.fixture?.status?.short));
+
+  if (finishedFixtures.length > 0) {
+    const liveStatsMap = {};
+    await Promise.all(finishedFixtures.map(async (f) => {
+      const fid = f.fixture.id;
+      const existing = await redisGet(KEYS.fixtureStats(fid));
+      if (existing?.corners?.total > 0 || existing?.goalScorers?.length > 0) return;
+      try {
+        const stats = await fetchMatchStats(fid);
+        if (stats) {
+          await redisSet(KEYS.fixtureStats(fid), stats, TTL.yesterday);
+          liveStatsMap[fid] = stats;
+          supabaseAdmin.from('match_analysis')
+            .update({ live_stats: stats })
+            .eq('fixture_id', fid)
+            .catch(() => {});
+        }
+      } catch {}
+    }));
+
+    if (Object.keys(liveStatsMap).length > 0) {
+      const existingLive = await redisGet(KEYS.liveStats(date)) || {};
+      const updatedLive  = { ...existingLive };
+      for (const [fid, stats] of Object.entries(liveStatsMap)) {
+        const f = allFixtures.find(x => x.fixture?.id === Number(fid));
+        updatedLive[fid] = { ...stats, status: f?.fixture?.status, goals: f?.goals, score: f?.score };
+      }
+      await redisSet(KEYS.liveStats(date), updatedLive, TTL.yesterday).catch(() => {});
+    }
+  }
+
+  // Mark daily batch completed so Phase 4 of /api/fixtures doesn't re-trigger
+  await redisSet(`dailyBatch:${date}`, {
+    completed: true, fixtureCount: total,
+    completedAt: new Date().toISOString(), source: 'manual-reanalyze',
+  }, 86400).catch(() => {});
 }

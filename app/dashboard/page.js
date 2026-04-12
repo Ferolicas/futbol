@@ -141,48 +141,61 @@ export default function Dashboard() {
     setReanalyzing(true);
     setReanalyzeDone(false);
     setReanalyzeProgress(null);
+
     try {
-      let offset = 0;
-      let total = null;
-      let totalAnalyzed = 0;
-      let totalSkipped = 0;
-
-      while (true) {
-        // No force=true — the backend decides what to skip (already analyzed, live, finished)
-        const res = await fetch(
-          `/api/admin/reanalyze?date=${date}&offset=${offset}`,
-          { method: 'POST' }
-        );
-
-        if (!res.ok) {
-          console.error('[REANALYZE] HTTP error:', res.status);
-          break;
-        }
-
-        const data = await res.json();
-        if (total === null) total = data.total;
-        totalAnalyzed = data.totalAnalyzed;
-        totalSkipped  = (totalSkipped || 0) + (data.batchSkipped || 0);
-
-        setReanalyzeProgress({
-          current: Math.min(offset + 10, total),
-          total,
-          analyzed: totalAnalyzed,
-          skipped: totalSkipped,
-          match: data.hasMore ? `Lote ${Math.floor(offset / 10) + 1}...` : 'Finalizando...',
-        });
-
-        if (!data.hasMore) break;
-        offset = data.nextOffset;
+      // Kick off server-side chain — returns immediately, browser can close
+      const res = await fetch(`/api/admin/reanalyze?date=${date}`, { method: 'POST' });
+      if (!res.ok) {
+        console.error('[REANALYZE] Failed to start:', res.status);
+        setReanalyzing(false);
+        return;
+      }
+      const startData = await res.json();
+      if (!startData.started) {
+        // Already running — just start polling
+        console.log('[REANALYZE]', startData.message);
       }
 
-      setReanalyzeProgress(p => ({ ...p, match: '' }));
-      setReanalyzeDone(true);
-      loadFixtures(date);
-      setTimeout(() => { setReanalyzeDone(false); setReanalyzeProgress(null); }, 5000);
+      // Poll progress from Redis every 3 seconds
+      const poll = async () => {
+        try {
+          const r = await fetch(`/api/admin/reanalyze?date=${date}`);
+          if (!r.ok) return;
+          const p = await r.json();
+
+          if (p.total) {
+            setReanalyzeProgress({
+              current: p.offset || 0,
+              total: p.total,
+              analyzed: p.analyzed || 0,
+              skipped: p.skipped || 0,
+            });
+          }
+
+          if (p.completed) {
+            setReanalyzeDone(true);
+            setReanalyzing(false);
+            loadFixtures(date);
+            setTimeout(() => { setReanalyzeDone(false); setReanalyzeProgress(null); }, 6000);
+            return; // stop polling
+          }
+
+          if (!p.running && !p.completed) {
+            // Job not found or errored — stop
+            setReanalyzing(false);
+            return;
+          }
+
+          setTimeout(poll, 3000); // next poll
+        } catch (e) {
+          console.error('[REANALYZE] poll error:', e);
+          setTimeout(poll, 5000);
+        }
+      };
+
+      setTimeout(poll, 2000); // first poll after 2s
     } catch (e) {
       console.error('[REANALYZE]', e);
-    } finally {
       setReanalyzing(false);
     }
   };
@@ -906,7 +919,9 @@ export default function Dashboard() {
                   {reanalyzeDone
                     ? `✓ ${reanalyzeProgress?.analyzed || 0} analizados · ${reanalyzeProgress?.skipped || 0} saltados`
                     : reanalyzing
-                      ? `${reanalyzeProgress ? Math.round((reanalyzeProgress.current / reanalyzeProgress.total) * 100) : 0}% · ${reanalyzeProgress?.analyzed || 0} nuevos · ${reanalyzeProgress?.match || 'Iniciando...'}`
+                      ? reanalyzeProgress
+                        ? `${Math.round((reanalyzeProgress.current / reanalyzeProgress.total) * 100)}% · ${reanalyzeProgress.analyzed} nuevos`
+                        : 'Iniciando...'
                       : 'Re-analizar pendientes'}
                 </button>
                 {reanalyzing && reanalyzeProgress && (
