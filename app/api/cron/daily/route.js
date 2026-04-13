@@ -54,7 +54,7 @@ export async function GET(request) {
     fetch(`${baseUrl}/api/cron/analyze-batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-internal-trigger': 'true' },
-      body: JSON.stringify({ offset: 0, batchSize: 10, date: today, totalFixtures: fixtures.length }),
+      body: JSON.stringify({ offset: 0, batchSize: 50, date: today, totalFixtures: fixtures.length }),
     }).catch(e => console.error('[daily] Failed to start analyze-batch chain:', e.message));
 
     console.log(`[daily] Analysis chain started for ${fixtures.length} fixtures on ${today}`);

@@ -10,6 +10,7 @@ import { analyzeMatch } from '../../../../lib/api-football';
 import { getCachedFixturesRaw } from '../../../../lib/sanity-cache';
 import { redisGet, redisSet } from '../../../../lib/redis';
 import { triggerEvent } from '../../../../lib/pusher';
+import { waitUntil } from '@vercel/functions';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -112,11 +113,15 @@ export async function POST(request) {
       const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL
         || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
-      fetch(`${baseUrl}/api/cron/analyze-batch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-internal-trigger': 'true' },
-        body: JSON.stringify({ offset: nextOffset, batchSize, date, totalFixtures: allFixtures.length }),
-      }).catch(() => {});
+      // waitUntil keeps the function alive until the chained request is fully sent,
+      // preventing Vercel from killing the function before the next batch starts.
+      waitUntil(
+        fetch(`${baseUrl}/api/cron/analyze-batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-internal-trigger': 'true' },
+          body: JSON.stringify({ offset: nextOffset, batchSize, date, totalFixtures: allFixtures.length }),
+        }).catch(e => console.error('[ANALYZE-BATCH] chain failed:', e.message))
+      );
     } else {
       await _markComplete(date, allFixtures.length);
     }
