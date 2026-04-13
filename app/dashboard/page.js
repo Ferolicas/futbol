@@ -784,7 +784,6 @@ export default function Dashboard() {
     const now = new Date();
     const allBets = [];
     Object.entries(analyzedData).forEach(([fid, data]) => {
-      if (!data?.combinada?.selections) return;
       const fx = fixtures.find(f => f.fixture.id === Number(fid));
       const status = fx?.fixture?.status?.short;
       const matchTime = fx ? new Date(fx.fixture.date) : null;
@@ -796,9 +795,13 @@ export default function Dashboard() {
       const mn = fx ? `${fx.teams.home.name} vs ${fx.teams.away.name}` : `${data.homeTeam || '?'} vs ${data.awayTeam || '?'}`;
       const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
-      data.combinada.selections.forEach(sel => {
-        // Requisito #9: only include bets with real odds
-        if (sel.probability >= 90 && sel.odd && sel.odd > 1) {
+      // Rebuild combinada to get all expanded markets (not just cached version)
+      const liveComb = data.calculatedProbabilities
+        ? buildCombinada(data.calculatedProbabilities, data.odds, data.playerHighlights, { home: homeTeam, away: awayTeam })
+        : null;
+      const selections = liveComb?.selections || data?.combinada?.selections || [];
+      selections.forEach(sel => {
+        if (sel.probability >= 80) {
           allBets.push({ ...sel, fixtureId: fid, matchName: mn, priority, matchTime, homeTeam, awayTeam });
         }
       });
