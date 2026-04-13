@@ -126,6 +126,27 @@ export async function GET(request) {
           console.error(`[FINALIZE-CRON] Supabase error for fixture ${fid}:`, error.message);
         } else {
           finalized++;
+
+          // Update match_predictions with actual result (enables calibration)
+          const hGoals = match.goals?.home ?? null;
+          const aGoals = match.goals?.away ?? null;
+          let actualResult = null;
+          if (hGoals !== null && aGoals !== null) {
+            actualResult = hGoals > aGoals ? 'H' : hGoals < aGoals ? 'A' : 'D';
+          }
+          const actualBtts   = hGoals > 0 && aGoals > 0;
+          const totalGoals   = hGoals !== null ? hGoals + aGoals : null;
+          const totalCorners = (getStat(homeStats, 'Corner Kicks') || 0) + (getStat(awayStats, 'Corner Kicks') || 0);
+
+          await supabaseAdmin.from('match_predictions').update({
+            actual_home_goals: hGoals,
+            actual_away_goals: aGoals,
+            actual_result:     actualResult,
+            actual_btts:       actualBtts,
+            actual_total_goals: totalGoals,
+            actual_corners:    totalCorners || null,
+            finalized_at:      new Date().toISOString(),
+          }).eq('fixture_id', fid);
         }
       } catch (err) {
         console.error(`[FINALIZE-CRON] Failed to finalize fixture ${fid}:`, err.message);
