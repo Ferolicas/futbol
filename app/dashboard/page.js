@@ -1053,7 +1053,7 @@ export default function Dashboard() {
                         return sel.name;
                       })()}</span>
                       <span className="apuesta-prob" style={{ color: probColor }}>{pct}%</span>
-                      <span className="apuesta-odd">{sel.odd.toFixed(2)}</span>
+                      {sel.odd != null && <span className="apuesta-odd">{sel.odd.toFixed(2)}</span>}
                     </div>
                   );
                 })}
@@ -1845,7 +1845,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                   {markets.map(mkt => {
                     const checked = !!selMarkets[mkt.id];
                     const bkInfo = (() => {
-                      if (!data?.odds) return null;
+                      if (!mkt.odd || !data?.odds) return null; // no logo for markets without real odds
                       const country = detectCountry();
                       const catMap = { 'BTTS': 'btts', 'Ganador': 'matchWinner', 'Goles': 'overUnder', 'Corners': 'corners', 'Tarjetas': 'cards' };
                       return selectBookmakerOdds(data.odds, catMap[mkt.cat] || mkt.cat, country);
@@ -1863,7 +1863,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                           {mkt.odd && <span className="mkt-odd">{mkt.odd.toFixed(2)}</span>}
                           {bkInfo && (() => {
                             const logo = BOOKMAKER_LOGOS[bkInfo.bookmaker?.toLowerCase()] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => bkInfo.bookmaker?.toLowerCase()?.includes(k))?.[1];
-                            return logo ? <span className="mkt-bk"><img src={logo} alt="" className="bk-logo-lg" /></span> : null;
+                            return logo ? <span className="mkt-bk"><img src={logo} alt="" className="bk-logo-lg" onError={(e) => { e.target.style.display = 'none'; }} /></span> : null;
                           })()}
                           {checked && <span className="mkt-chk">&#10003;</span>}
                         </div>
