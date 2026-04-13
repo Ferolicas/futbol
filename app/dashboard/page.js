@@ -797,7 +797,7 @@ export default function Dashboard() {
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
       data.combinada.selections.forEach(sel => {
         // Requisito #9: only include bets with real odds
-        if (sel.probability >= 65 && sel.odd && sel.odd > 1) {
+        if (sel.probability >= 90 && sel.odd && sel.odd > 1) {
           allBets.push({ ...sel, fixtureId: fid, matchName: mn, priority, matchTime, homeTeam, awayTeam });
         }
       });
@@ -809,7 +809,6 @@ export default function Dashboard() {
     const usedTeams = new Set();
     const usedMatches = new Set();
     for (const bet of allBets) {
-      if (picked.length >= 5) break;
       // Skip if both teams in this match are already used
       if (usedTeams.has(bet.homeTeam) && usedTeams.has(bet.awayTeam)) continue;
       // Limit 1 pick per match to spread across games
@@ -827,11 +826,10 @@ export default function Dashboard() {
         picked.push(bet);
       }
     }
-    const top = picked.slice(0, 5);
-    if (top.length === 0) return null;
-    const co = top.reduce((a, b) => b.odd ? a * b.odd : a, 1);
-    const cp = top.reduce((a, b) => a + b.probability, 0) / top.length;
-    return { selections: top, combinedOdd: +co.toFixed(2), combinedProbability: +cp.toFixed(1) };
+    if (picked.length === 0) return null;
+    const co = picked.reduce((a, b) => b.odd ? a * b.odd : a, 1);
+    const cp = picked.reduce((a, b) => a + b.probability, 0) / picked.length;
+    return { selections: picked, combinedOdd: +co.toFixed(2), combinedProbability: +cp.toFixed(1) };
   }, [analyzedData, fixtures]);
 
   const customCombinada = useMemo(() => {
@@ -1029,6 +1027,7 @@ export default function Dashboard() {
             </button>
             {showApuesta && (
               <div className="apuesta-body">
+                <div className="apuesta-scroll">
                 {apuestaDelDia.selections.map((sel, i) => {
                   const pct = cap(sel.probability);
                   const probColor = pct >= 85 ? '#4ade80' : pct >= 80 ? '#fbbf24' : '#d97706';
@@ -1054,6 +1053,7 @@ export default function Dashboard() {
                     </div>
                   );
                 })}
+                </div>
                 {apuestaDelDia.combinedOdd > 1 && (
                   <div className="apuesta-foot">
                     <span>Cuota: <b>{apuestaDelDia.combinedOdd}</b></span>

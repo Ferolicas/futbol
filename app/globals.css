@@ -490,6 +490,15 @@ body {
 .chev.up { transform: rotate(180deg); }
 
 .apuesta-body { padding: 0 16px 14px; }
+.apuesta-scroll {
+  max-height: 215px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(30,135,105,.5) transparent;
+}
+.apuesta-scroll::-webkit-scrollbar { width: 4px; }
+.apuesta-scroll::-webkit-scrollbar-track { background: transparent; }
+.apuesta-scroll::-webkit-scrollbar-thumb { background: rgba(30,135,105,.5); border-radius: 2px; }
 .apuesta-item {
   display: flex;
   align-items: center;
