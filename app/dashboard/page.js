@@ -8,6 +8,7 @@ import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
 import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
 import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/timezone';
+import { buildCombinada } from '../../lib/combinada';
 import { useLiveStats } from './live-stats-context';
 import { useSelectedMarkets } from './selected-markets-context';
 
@@ -1544,27 +1545,90 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
     if (!data?.calculatedProbabilities) return [];
     const p = data.calculatedProbabilities;
     const o = data.odds;
+    const ph = data.playerHighlights;
+    const hn = match.teams.home.name;
+    const an = match.teams.away.name;
     const m = [];
+
+    // Ganador
+    if (p.winner?.home >= 30) m.push({ id: 'w-h', name: `Gana ${hn}`, probability: p.winner.home, odd: o?.matchWinner?.home || null, cat: 'Ganador' });
+    if (p.winner?.draw >= 20) m.push({ id: 'w-d', name: 'Empate', probability: p.winner.draw, odd: o?.matchWinner?.draw || null, cat: 'Ganador' });
+    if (p.winner?.away >= 30) m.push({ id: 'w-a', name: `Gana ${an}`, probability: p.winner.away, odd: o?.matchWinner?.away || null, cat: 'Ganador' });
+
+    // BTTS
     if (p.btts >= 50) m.push({ id: 'btts-yes', name: 'Ambos marcan SI', probability: p.btts, odd: o?.btts?.yes || null, cat: 'BTTS' });
     if (p.bttsNo >= 50) m.push({ id: 'btts-no', name: 'Ambos marcan NO', probability: p.bttsNo, odd: o?.btts?.no || null, cat: 'BTTS' });
-    if (p.winner?.home >= 30) m.push({ id: 'w-h', name: `Gana ${match.teams.home.name}`, probability: p.winner.home, odd: o?.matchWinner?.home || null, cat: 'Ganador' });
-    if (p.winner?.draw >= 20) m.push({ id: 'w-d', name: 'Empate', probability: p.winner.draw, odd: o?.matchWinner?.draw || null, cat: 'Ganador' });
-    if (p.winner?.away >= 30) m.push({ id: 'w-a', name: `Gana ${match.teams.away.name}`, probability: p.winner.away, odd: o?.matchWinner?.away || null, cat: 'Ganador' });
+
+    // Goles totales
     if (p.overUnder) {
       m.push({ id: 'o15', name: 'Más de 1.5 goles', probability: p.overUnder.over15, odd: o?.overUnder?.['Over_1_5'] || null, cat: 'Goles' });
       m.push({ id: 'o25', name: 'Más de 2.5 goles', probability: p.overUnder.over25, odd: o?.overUnder?.['Over_2_5'] || null, cat: 'Goles' });
       m.push({ id: 'o35', name: 'Más de 3.5 goles', probability: p.overUnder.over35, odd: o?.overUnder?.['Over_3_5'] || null, cat: 'Goles' });
       m.push({ id: 'u25', name: 'Menos de 2.5 goles', probability: p.overUnder.under25, odd: o?.overUnder?.['Under_2_5'] || null, cat: 'Goles' });
     }
+
+    // Goles por equipo
+    if (p.perTeam?.home?.goals) {
+      m.push({ id: 'hg05', name: `${hn} marca`, probability: p.perTeam.home.goals.over05, odd: null, cat: `Goles ${hn}` });
+      m.push({ id: 'hg15', name: `${hn} — más de 1.5`, probability: p.perTeam.home.goals.over15, odd: null, cat: `Goles ${hn}` });
+    }
+    if (p.perTeam?.away?.goals) {
+      m.push({ id: 'ag05', name: `${an} marca`, probability: p.perTeam.away.goals.over05, odd: null, cat: `Goles ${an}` });
+      m.push({ id: 'ag15', name: `${an} — más de 1.5`, probability: p.perTeam.away.goals.over15, odd: null, cat: `Goles ${an}` });
+    }
+
+    // Córners totales
     if (p.corners) {
       m.push({ id: 'c85', name: 'Más de 8.5 córners', probability: p.corners.over85, odd: null, cat: 'Córners' });
       m.push({ id: 'c95', name: 'Más de 9.5 córners', probability: p.corners.over95, odd: null, cat: 'Córners' });
+      m.push({ id: 'c105', name: 'Más de 10.5 córners', probability: p.corners.over105, odd: null, cat: 'Córners' });
     }
+
+    // Córners por equipo
+    if (p.perTeam?.home?.corners) {
+      const hc = p.perTeam.home.corners;
+      m.push({ id: 'hc35', name: `${hn} — más de 3.5 córners`, probability: hc.over35, odd: null, cat: `Córners ${hn}` });
+      m.push({ id: 'hc45', name: `${hn} — más de 4.5 córners`, probability: hc.over45, odd: null, cat: `Córners ${hn}` });
+    }
+    if (p.perTeam?.away?.corners) {
+      const ac = p.perTeam.away.corners;
+      m.push({ id: 'ac35', name: `${an} — más de 3.5 córners`, probability: ac.over35, odd: null, cat: `Córners ${an}` });
+      m.push({ id: 'ac45', name: `${an} — más de 4.5 córners`, probability: ac.over45, odd: null, cat: `Córners ${an}` });
+    }
+
+    // Tarjetas totales
     if (p.cards) {
       m.push({ id: 'k25', name: 'Más de 2.5 tarjetas', probability: p.cards.over25, odd: null, cat: 'Tarjetas' });
       m.push({ id: 'k35', name: 'Más de 3.5 tarjetas', probability: p.cards.over35, odd: null, cat: 'Tarjetas' });
     }
-    // Show all markets with high probability — odds optional
+
+    // Tarjetas por equipo
+    if (p.perTeam?.home?.cards) m.push({ id: 'hk15', name: `${hn} — más de 1.5 tarjetas`, probability: p.perTeam.home.cards.over15, odd: null, cat: `Tarjetas ${hn}` });
+    if (p.perTeam?.away?.cards) m.push({ id: 'ak15', name: `${an} — más de 1.5 tarjetas`, probability: p.perTeam.away.cards.over15, odd: null, cat: `Tarjetas ${an}` });
+
+    // Periodos de gol
+    if (p.goalTiming?.combined) {
+      p.goalTiming.combined.forEach(t => {
+        m.push({ id: `timing-${t.period}`, name: `Gol en ${t.period} min`, probability: t.probability, odd: null, cat: 'Periodos' });
+      });
+    }
+
+    // Goleadores
+    if (ph?.scorers) {
+      ph.scorers.slice(0, 3).forEach(s => {
+        const prob = Math.round(s.goals.filter(g => g >= 1).length / (s.goals.length || 5) * 100);
+        m.push({ id: `scorer-${s.id}`, name: `Goleador — ${s.name}`, probability: prob, odd: null, cat: 'Goleadores' });
+      });
+    }
+
+    // Remates al arco
+    if (ph?.shooters) {
+      ph.shooters.slice(0, 3).forEach(s => {
+        const prob = Math.round(s.shotsOnGoal.filter(sh => sh >= 1).length / (s.shotsOnGoal.length || 5) * 100);
+        m.push({ id: `shooter-${s.id}`, name: `Remates — ${s.name}`, probability: prob, odd: null, cat: 'Remates' });
+      });
+    }
+
     return m
       .filter(x => x.probability >= 70 && x.probability <= 95)
       .sort((a, b) => b.probability - a.probability);
@@ -1806,9 +1870,12 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 </div>
               </div>}
 
-              {/* Auto combinada */}
+              {/* Auto combinada — rebuilt client-side so it always reflects current logic */}
               {(() => {
-                const allSels = data.combinada?.selections || [];
+                const liveComb = data.calculatedProbabilities
+                  ? buildCombinada(data.calculatedProbabilities, data.odds, data.playerHighlights, { home: match.teams.home.name, away: match.teams.away.name })
+                  : null;
+                const allSels = liveComb?.selections || data.combinada?.selections || [];
                 if (allSels.length === 0) return null;
                 const withOdds = allSels.filter(s => s.odd && s.odd > 1);
                 const cOdd = withOdds.length >= 2 ? withOdds.reduce((a, s) => a * s.odd, 1) : null;
