@@ -15,6 +15,9 @@ import { waitUntil } from '@vercel/functions';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
+const SAFETY_TIMEOUT_MS = 270 * 1000;
+const PERSIST_EVERY = 3;
+
 function compactLastFive(lastFive) {
   if (!Array.isArray(lastFive)) return [];
   return lastFive.map(m => {
@@ -48,6 +51,8 @@ export async function POST(request) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const startTime = Date.now();
+
   try {
     const { offset, batchSize, date, totalFixtures } = await request.json();
 
@@ -64,57 +69,26 @@ export async function POST(request) {
 
     console.log(`[ANALYZE-BATCH] Processing ${batch.length} matches (offset ${offset}/${allFixtures.length})`);
 
-    // Load current accumulated summary — built up across batches
     const existing     = await redisGet(`analysis:${date}`) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
     const analyzedIds  = existing.globallyAnalyzed || [];
     const analyzedOdds = existing.analyzedOdds || {};
     const analyzedData = existing.analyzedData || {};
 
+    const persistProgress = () =>
+      redisSet(`analysis:${date}`, { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData }, 12 * 3600).catch(() => {});
+
     let analyzed = 0, cached = 0, failed = 0;
+    let processedInBatch = 0;
+    let abortedEarly = false;
+    let chainScheduled = false;
 
-    await Promise.all(batch.map(async (fixture) => {
-      try {
-        const result = await analyzeMatch(fixture, { date });
-        if (!result) return;
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL
+      || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
-        const a = result.analysis || result;
-        const fid = fixture.fixture.id;
-
-        if (result.fromCache) {
-          cached++;
-        } else {
-          analyzed++;
-        }
-
-        // Update accumulated summary (whether from cache or freshly analyzed)
-        if (!analyzedIds.includes(fid)) analyzedIds.push(fid);
-        if (a?.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
-        const summary = buildSummary(a);
-        if (summary) analyzedData[fid] = summary;
-      } catch (e) {
-        failed++;
-        console.error(`[ANALYZE-BATCH] Failed ${fixture.fixture.id}:`, e.message);
-      }
-    }));
-
-    // Persist accumulated summary after every batch — frontend reads this on next request
-    await redisSet(`analysis:${date}`, { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData }, 12 * 3600).catch(() => {});
-
-    const nextOffset = offset + batchSize;
-    const hasMore    = nextOffset < allFixtures.length;
-
-    await triggerEvent('analysis', 'batch-progress', {
-      date,
-      progress: `${Math.min(offset + batchSize, allFixtures.length)}/${allFixtures.length}`,
-      analyzed, cached, failed,
-    }).catch(() => {});
-
-    if (hasMore) {
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL
-        || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
-
-      // waitUntil keeps the function alive until the chained request is fully sent,
-      // preventing Vercel from killing the function before the next batch starts.
+    // Schedule the next batch with a given offset. Idempotent — only fires once per request.
+    const scheduleNextBatch = (nextOffset) => {
+      if (chainScheduled) return;
+      chainScheduled = true;
       waitUntil(
         fetch(`${baseUrl}/api/cron/analyze-batch`, {
           method: 'POST',
@@ -122,12 +96,61 @@ export async function POST(request) {
           body: JSON.stringify({ offset: nextOffset, batchSize, date, totalFixtures: allFixtures.length }),
         }).catch(e => console.error('[ANALYZE-BATCH] chain failed:', e.message))
       );
+    };
+
+    await Promise.all(batch.map(async (fixture) => {
+      if (abortedEarly) return;
+      if (Date.now() - startTime > SAFETY_TIMEOUT_MS) {
+        abortedEarly = true;
+        return;
+      }
+
+      try {
+        const result = await analyzeMatch(fixture, { date });
+        if (!result) return;
+
+        const a = result.analysis || result;
+        const fid = fixture.fixture.id;
+
+        if (result.fromCache) cached++;
+        else analyzed++;
+
+        if (!analyzedIds.includes(fid)) analyzedIds.push(fid);
+        if (a?.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
+        const summary = buildSummary(a);
+        if (summary) analyzedData[fid] = summary;
+
+        processedInBatch++;
+        if (processedInBatch % PERSIST_EVERY === 0) {
+          await persistProgress();
+        }
+      } catch (e) {
+        failed++;
+        console.error(`[ANALYZE-BATCH] Failed ${fixture.fixture.id}:`, e.message);
+      }
+    }));
+
+    await persistProgress();
+
+    // If we hit the safety timeout, retry the SAME offset on the next instance.
+    // Already-analyzed fixtures will return fromCache=true and breeze through.
+    const nextOffset = abortedEarly ? offset : offset + batchSize;
+    const hasMore    = nextOffset < allFixtures.length;
+
+    await triggerEvent('analysis', 'batch-progress', {
+      date,
+      progress: `${Math.min(nextOffset, allFixtures.length)}/${allFixtures.length}`,
+      analyzed, cached, failed, abortedEarly,
+    }).catch(() => {});
+
+    if (hasMore) {
+      scheduleNextBatch(nextOffset);
     } else {
       await _markComplete(date, allFixtures.length);
     }
 
     return Response.json({
-      success: true, analyzed, cached, failed, hasMore,
+      success: true, analyzed, cached, failed, hasMore, abortedEarly,
       progress: `${Math.min(nextOffset, allFixtures.length)}/${allFixtures.length}`,
       totalAnalyzed: analyzedIds.length,
     });
