@@ -96,7 +96,7 @@ export async function POST(request) {
         await activateUser(profile, plan, customerId);
 
         try {
-          const sub = await createPostPaymentSubscription(customerId, plan);
+          const sub = await createPostPaymentSubscription(customerId, plan, pi.payment_method, pi.created);
           console.log(`[webhook] Subscription created for ${plan}: ${sub.id}`);
         } catch (e) {
           console.error('[webhook] Failed to create subscription:', e.message);
