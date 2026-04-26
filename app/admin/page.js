@@ -14,10 +14,18 @@ export default function AdminPanel() {
         <button className={`admin-tab ${tab === 'tickets' ? 'active' : ''}`} onClick={() => setTab('tickets')}>
           Tickets
         </button>
+        <button className={`admin-tab ${tab === 'activos' ? 'active' : ''}`} onClick={() => setTab('activos')}>
+          Clientes Activos
+        </button>
+        <button className={`admin-tab ${tab === 'pendientes' ? 'active' : ''}`} onClick={() => setTab('pendientes')}>
+          Clientes Pendientes
+        </button>
       </div>
 
       {tab === 'chat' && <ChatSection />}
       {tab === 'tickets' && <TicketsSection />}
+      {tab === 'activos' && <ActiveClientsSection />}
+      {tab === 'pendientes' && <PendingClientsSection />}
     </div>
   );
 }
@@ -295,6 +303,104 @@ function TicketCard({ ticket, replyInputs, setReplyInputs, sendReply, replying }
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ── CLIENTS SECTIONS ── */
+function useClients(refreshMs = 15000) {
+  const [data, setData] = useState({ active: [], pending: [], counts: { active: 0, pending: 0 } });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/admin/clients', { cache: 'no-store' });
+        const json = await res.json();
+        if (!cancelled && json.active) setData(json);
+      } catch {}
+      if (!cancelled) setLoading(false);
+    };
+    load();
+    const iv = setInterval(load, refreshMs);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [refreshMs]);
+
+  return { ...data, loading };
+}
+
+function ActiveClientsSection() {
+  const { active, loading } = useClients(15000);
+  if (loading) return <p style={{ color: 'var(--t2)', padding: '20px' }}>Cargando clientes...</p>;
+
+  return (
+    <div className="admin-tickets-panel">
+      <h3 className="admin-section-title">Clientes Activos ({active.length})</h3>
+      {active.length === 0 && <p style={{ color: 'var(--t3)', padding: '12px' }}>Sin clientes activos</p>}
+      <div className="admin-ticket-list">
+        {active.map(c => (
+          <div key={c.id} className="admin-ticket open">
+            <div className="admin-ticket-top">
+              <span className="admin-ticket-id">{c.name || '(sin nombre)'}</span>
+              <span className={`admin-ticket-status ${c.role === 'admin' || c.role === 'owner' ? 'open' : 'closed'}`}>
+                {c.role === 'admin' || c.role === 'owner' ? 'ADMIN' : (c.plan || '').toUpperCase()}
+              </span>
+            </div>
+            <div className="admin-ticket-meta">
+              <span>{c.email}</span>
+              <span>Registro: {fmtDate(c.created_at)}</span>
+            </div>
+            <div className="admin-ticket-meta">
+              <span>Último pago: {c.last_payment_at ? fmtDate(c.last_payment_at) : '—'}</span>
+              <span style={{ color: c.next_payment_at ? 'var(--accent)' : 'var(--t3)', fontWeight: 600 }}>
+                Siguiente pago: {c.next_payment_at ? fmtDate(c.next_payment_at) : '—'}
+              </span>
+            </div>
+            {c.last_payment_amount != null && (
+              <div className="admin-ticket-meta">
+                <span>Monto: {(c.last_payment_amount / 100).toFixed(2)} {(c.last_payment_currency || '').toUpperCase()}</span>
+                <span>Estado Stripe: {c.stripe_status || '—'}</span>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PendingClientsSection() {
+  const { pending, loading } = useClients(15000);
+  if (loading) return <p style={{ color: 'var(--t2)', padding: '20px' }}>Cargando clientes...</p>;
+
+  return (
+    <div className="admin-tickets-panel">
+      <h3 className="admin-section-title">Clientes Pendientes ({pending.length})</h3>
+      {pending.length === 0 && <p style={{ color: 'var(--t3)', padding: '12px' }}>Sin clientes pendientes</p>}
+      <div className="admin-ticket-list">
+        {pending.map(c => (
+          <div key={c.id} className="admin-ticket closed">
+            <div className="admin-ticket-top">
+              <span className="admin-ticket-id">{c.name || '(sin nombre)'}</span>
+              <span className="admin-ticket-status closed">
+                {(c.subscription_status || 'sin pago').toUpperCase()}
+              </span>
+            </div>
+            <div className="admin-ticket-meta">
+              <span>{c.email}</span>
+              <span>Registrado: {fmtDate(c.created_at)}</span>
+            </div>
+            {c.stripe_customer_id && (
+              <div className="admin-ticket-meta">
+                <span style={{ color: 'var(--t3)', fontSize: '0.8rem' }}>
+                  Stripe: {c.stripe_customer_id} (sin pago confirmado)
+                </span>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

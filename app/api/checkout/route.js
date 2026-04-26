@@ -35,9 +35,8 @@ export async function POST(request) {
       currency: currency || 'USD',
     });
 
-    // Save stripe customer ID
+    // Save only the Stripe customer ID — plan stays null until webhook confirms payment
     const { error: _err1 } = await supabaseAdmin.from('user_profiles').update({
-      plan,
       subscription_status: 'pending',
       stripe_customer_id: result.customerId,
       updated_at: new Date().toISOString(),
