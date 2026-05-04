@@ -21,6 +21,11 @@ const MARKETS = [
   { key: 'over_35',       pCol: 'p_over_35',       outcome: (r) => r.actual_total_goals > 3.5,        gate: (r) => r.actual_total_goals != null,       label: 'Over 3.5 goles' },
   { key: 'corners_85',    pCol: 'p_corners_over_85', outcome: (r) => r.actual_corners > 8.5,          gate: (r) => r.actual_corners != null && r.actual_corners > 0, label: 'Corners +8.5' },
   { key: 'corners_95',    pCol: 'p_corners_over_95', outcome: (r) => r.actual_corners > 9.5,          gate: (r) => r.actual_corners != null && r.actual_corners > 0, label: 'Corners +9.5' },
+  { key: 'cards_25',      pCol: 'p_cards_over_25', outcome: (r) => r.actual_total_cards > 2.5,        gate: (r) => r.actual_total_cards != null,       label: 'Tarjetas +2.5' },
+  { key: 'cards_35',      pCol: 'p_cards_over_35', outcome: (r) => r.actual_total_cards > 3.5,        gate: (r) => r.actual_total_cards != null,       label: 'Tarjetas +3.5' },
+  { key: 'cards_45',      pCol: 'p_cards_over_45', outcome: (r) => r.actual_total_cards > 4.5,        gate: (r) => r.actual_total_cards != null,       label: 'Tarjetas +4.5' },
+  { key: 'first_goal_30', pCol: 'p_first_goal_30', outcome: (r) => r.actual_first_goal_minute != null && r.actual_first_goal_minute <= 30, gate: (r) => r.actual_total_goals != null, label: 'Primer gol ≤30\'' },
+  { key: 'first_goal_45', pCol: 'p_first_goal_45', outcome: (r) => r.actual_first_goal_minute != null && r.actual_first_goal_minute <= 45, gate: (r) => r.actual_total_goals != null, label: 'Primer gol ≤45\'' },
 ];
 
 const BUCKETS = [

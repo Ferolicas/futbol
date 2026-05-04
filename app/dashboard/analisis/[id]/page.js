@@ -764,37 +764,81 @@ export default function AnalisisPage() {
           {/* ══════════════════════════════════════════
               SECCIÓN 8 — PROBABILIDADES CALCULADAS
           ══════════════════════════════════════════ */}
-          {p && (
-            <GlassSection title="% Probabilidades calculadas" icon={<Percent size={22} style={{ color: '#2dd4bf' }} />} sectionKey="probs" collapsed={collapsed} toggle={toggleSection} delay={.8}>
-              <div className="ap2-prob-grid">
-                {[
-                  { title: 'Ambos marcan (BTTS)', items: [{ label: 'Sí', value: p.btts }, { label: 'No', value: p.bttsNo }] },
-                  { title: 'Ganador del partido', items: [{ label: a.homeTeam, value: p.winner.home }, { label: 'Empate', value: p.winner.draw }, { label: a.awayTeam, value: p.winner.away }] },
-                  { title: 'Más/Menos goles', subtitle: `Esperado: ${p.overUnder.expectedTotal} goles`, items: [{ label: 'Más de 1.5', value: p.overUnder.over15 }, { label: 'Más de 2.5', value: p.overUnder.over25 }, { label: 'Más de 3.5', value: p.overUnder.over35 }] },
-                  { title: 'Córners totales', items: [{ label: 'Más de 8.5', value: p.corners.over85 }, { label: 'Más de 9.5', value: p.corners.over95 }, { label: 'Más de 10.5', value: p.corners.over105 }] },
-                  { title: 'Tarjetas totales', items: [{ label: 'Más de 2.5', value: p.cards.over25 }, { label: 'Más de 3.5', value: p.cards.over35 }, { label: 'Más de 4.5', value: p.cards.over45 }] },
-                ].map((cat, catIdx) => (
-                  <motion.div
-                    key={catIdx}
-                    className="ap2-prob-inner"
-                    style={{ background: 'linear-gradient(135deg, rgba(45,212,191,.07), rgba(0,212,255,.07))', border: '1px solid rgba(45,212,191,.2)' }}
-                    initial={{ opacity: 0, scale: .9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: .85 + catIdx * .08 }}
-                    whileHover={{ scale: 1.02 }}
-                  >
-                    <div style={{ fontWeight: 700, marginBottom: 4, fontSize: '.95rem' }}>{cat.title}</div>
-                    {cat.subtitle && <div style={{ fontSize: '.75rem',  color: 'white', marginBottom: 10 }}>{cat.subtitle}</div>}
-                    <div style={{ marginTop: 10 }}>
-                      {cat.items.map((item, i) => (
-                        <ProbBar key={i} label={item.label} value={item.value} delay={.9 + catIdx * .08 + i * .03} />
-                      ))}
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            </GlassSection>
-          )}
+          {p && (() => {
+            // Solo mostrar opciones cuya cuota exista en al menos una de las 8 casas autorizadas.
+            const o = a.odds || {};
+            const hasOdd = (v) => isFinite(parseFloat(v)) && parseFloat(v) > 1;
+            const cats = [
+              {
+                title: 'Ambos marcan (BTTS)',
+                items: [
+                  hasOdd(o.btts?.yes) && { label: 'Sí', value: p.btts },
+                  hasOdd(o.btts?.no)  && { label: 'No', value: p.bttsNo },
+                ].filter(Boolean),
+              },
+              {
+                title: 'Ganador del partido',
+                items: [
+                  hasOdd(o.matchWinner?.home) && { label: a.homeTeam, value: p.winner.home },
+                  hasOdd(o.matchWinner?.draw) && { label: 'Empate',   value: p.winner.draw },
+                  hasOdd(o.matchWinner?.away) && { label: a.awayTeam, value: p.winner.away },
+                ].filter(Boolean),
+              },
+              {
+                title: 'Más/Menos goles',
+                subtitle: `Esperado: ${p.overUnder.expectedTotal} goles`,
+                items: [
+                  hasOdd(o.overUnder?.['Over_1_5']) && { label: 'Más de 1.5', value: p.overUnder.over15 },
+                  hasOdd(o.overUnder?.['Over_2_5']) && { label: 'Más de 2.5', value: p.overUnder.over25 },
+                  hasOdd(o.overUnder?.['Over_3_5']) && { label: 'Más de 3.5', value: p.overUnder.over35 },
+                ].filter(Boolean),
+              },
+              {
+                title: 'Córners totales',
+                items: [
+                  hasOdd(o.corners?.['Over_8_5'])  && { label: 'Más de 8.5',  value: p.corners.over85  },
+                  hasOdd(o.corners?.['Over_9_5'])  && { label: 'Más de 9.5',  value: p.corners.over95  },
+                  hasOdd(o.corners?.['Over_10_5']) && { label: 'Más de 10.5', value: p.corners.over105 },
+                ].filter(Boolean),
+              },
+              {
+                title: 'Tarjetas totales',
+                items: [
+                  hasOdd(o.cards?.['Over_2_5']) && { label: 'Más de 2.5', value: p.cards.over25 },
+                  hasOdd(o.cards?.['Over_3_5']) && { label: 'Más de 3.5', value: p.cards.over35 },
+                  hasOdd(o.cards?.['Over_4_5']) && { label: 'Más de 4.5', value: p.cards.over45 },
+                ].filter(Boolean),
+              },
+            ].filter(c => c.items.length > 0);
+
+            if (cats.length === 0) return null;
+
+            return (
+              <GlassSection title="% Probabilidades calculadas" icon={<Percent size={22} style={{ color: '#2dd4bf' }} />} sectionKey="probs" collapsed={collapsed} toggle={toggleSection} delay={.8}>
+                <div className="ap2-prob-grid">
+                  {cats.map((cat, catIdx) => (
+                    <motion.div
+                      key={catIdx}
+                      className="ap2-prob-inner"
+                      style={{ background: 'linear-gradient(135deg, rgba(45,212,191,.07), rgba(0,212,255,.07))', border: '1px solid rgba(45,212,191,.2)' }}
+                      initial={{ opacity: 0, scale: .9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: .85 + catIdx * .08 }}
+                      whileHover={{ scale: 1.02 }}
+                    >
+                      <div style={{ fontWeight: 700, marginBottom: 4, fontSize: '.95rem' }}>{cat.title}</div>
+                      {cat.subtitle && <div style={{ fontSize: '.75rem',  color: 'white', marginBottom: 10 }}>{cat.subtitle}</div>}
+                      <div style={{ marginTop: 10 }}>
+                        {cat.items.map((item, i) => (
+                          <ProbBar key={i} label={item.label} value={item.value} delay={.9 + catIdx * .08 + i * .03} />
+                        ))}
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              </GlassSection>
+            );
+          })()}
 
           {/* ══════════════════════════════════════════
               SECCIÓN 9 — COMBINADA AUTOMÁTICA

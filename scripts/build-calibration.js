@@ -11,15 +11,21 @@ const s = createClient(
 );
 
 const MARKETS = [
-  { key: 'home_win',   pCol: 'p_home_win',         outcome: (r) => r.actual_result === 'H',     gate: (r) => r.actual_result != null },
-  { key: 'draw',       pCol: 'p_draw',             outcome: (r) => r.actual_result === 'D',     gate: (r) => r.actual_result != null },
-  { key: 'away_win',   pCol: 'p_away_win',         outcome: (r) => r.actual_result === 'A',     gate: (r) => r.actual_result != null },
-  { key: 'btts',       pCol: 'p_btts',             outcome: (r) => r.actual_btts === true,      gate: (r) => r.actual_btts != null },
-  { key: 'over_15',    pCol: 'p_over_15',          outcome: (r) => r.actual_total_goals > 1.5,  gate: (r) => r.actual_total_goals != null },
-  { key: 'over_25',    pCol: 'p_over_25',          outcome: (r) => r.actual_total_goals > 2.5,  gate: (r) => r.actual_total_goals != null },
-  { key: 'over_35',    pCol: 'p_over_35',          outcome: (r) => r.actual_total_goals > 3.5,  gate: (r) => r.actual_total_goals != null },
-  { key: 'corners_85', pCol: 'p_corners_over_85',  outcome: (r) => r.actual_corners > 8.5,      gate: (r) => r.actual_corners != null && r.actual_corners > 0 },
-  { key: 'corners_95', pCol: 'p_corners_over_95',  outcome: (r) => r.actual_corners > 9.5,      gate: (r) => r.actual_corners != null && r.actual_corners > 0 },
+  { key: 'home_win',     pCol: 'p_home_win',         outcome: (r) => r.actual_result === 'H',     gate: (r) => r.actual_result != null },
+  { key: 'draw',         pCol: 'p_draw',             outcome: (r) => r.actual_result === 'D',     gate: (r) => r.actual_result != null },
+  { key: 'away_win',     pCol: 'p_away_win',         outcome: (r) => r.actual_result === 'A',     gate: (r) => r.actual_result != null },
+  { key: 'btts',         pCol: 'p_btts',             outcome: (r) => r.actual_btts === true,      gate: (r) => r.actual_btts != null },
+  { key: 'over_15',      pCol: 'p_over_15',          outcome: (r) => r.actual_total_goals > 1.5,  gate: (r) => r.actual_total_goals != null },
+  { key: 'over_25',      pCol: 'p_over_25',          outcome: (r) => r.actual_total_goals > 2.5,  gate: (r) => r.actual_total_goals != null },
+  { key: 'over_35',      pCol: 'p_over_35',          outcome: (r) => r.actual_total_goals > 3.5,  gate: (r) => r.actual_total_goals != null },
+  { key: 'corners_85',   pCol: 'p_corners_over_85',  outcome: (r) => r.actual_corners > 8.5,      gate: (r) => r.actual_corners != null && r.actual_corners > 0 },
+  { key: 'corners_95',   pCol: 'p_corners_over_95',  outcome: (r) => r.actual_corners > 9.5,      gate: (r) => r.actual_corners != null && r.actual_corners > 0 },
+  { key: 'cards_25',     pCol: 'p_cards_over_25',    outcome: (r) => r.actual_total_cards > 2.5,  gate: (r) => r.actual_total_cards != null },
+  { key: 'cards_35',     pCol: 'p_cards_over_35',    outcome: (r) => r.actual_total_cards > 3.5,  gate: (r) => r.actual_total_cards != null },
+  { key: 'cards_45',     pCol: 'p_cards_over_45',    outcome: (r) => r.actual_total_cards > 4.5,  gate: (r) => r.actual_total_cards != null },
+  // Para "primer gol antes del minuto X": si el partido fue 0-0, no hay primer gol → contamos como NO ocurrido (false).
+  { key: 'first_goal_30', pCol: 'p_first_goal_30',   outcome: (r) => r.actual_first_goal_minute != null && r.actual_first_goal_minute <= 30, gate: (r) => r.actual_total_goals != null },
+  { key: 'first_goal_45', pCol: 'p_first_goal_45',   outcome: (r) => r.actual_first_goal_minute != null && r.actual_first_goal_minute <= 45, gate: (r) => r.actual_total_goals != null },
 ];
 
 /**

@@ -61,6 +61,32 @@ function extractResult(match) {
   const hCorners = getStat(homeStats, 'Corner Kicks') || 0;
   const aCorners = getStat(awayStats, 'Corner Kicks') || 0;
 
+  // Tarjetas totales (yellow + red, ambos equipos). Si la stat es null, fallback a contar eventos Card.
+  const yh = getStat(homeStats, 'Yellow Cards');
+  const ya = getStat(awayStats, 'Yellow Cards');
+  const rh = getStat(homeStats, 'Red Cards');
+  const ra = getStat(awayStats, 'Red Cards');
+  const fromStats = [yh, ya, rh, ra].some(v => v != null);
+  const totalCards = fromStats
+    ? (yh || 0) + (ya || 0) + (rh || 0) + (ra || 0)
+    : cardEvents.length;
+
+  // Minutos de gol y minuto del primer gol
+  const goalMinutes = goalEvents
+    .map(e => (e.time?.elapsed != null ? e.time.elapsed + (e.time.extra || 0) : null))
+    .filter(m => m != null)
+    .sort((a, b) => a - b);
+  const firstGoalMinute = goalMinutes.length > 0 ? goalMinutes[0] : null;
+
+  // Goleadores reales en formato compacto
+  const goalScorers = goalEvents.map(e => ({
+    player_id: e.player?.id ?? null,
+    name: e.player?.name ?? null,
+    team_id: e.team?.id ?? null,
+    minute: e.time?.elapsed != null ? e.time.elapsed + (e.time.extra || 0) : null,
+    detail: e.detail || null,
+  }));
+
   return {
     homeId, awayId, homeStats, awayStats,
     hGoals, aGoals,
@@ -69,6 +95,10 @@ function extractResult(match) {
     totalGoals:   hGoals !== null ? hGoals + aGoals : null,
     totalCorners: hCorners + aCorners,
     hCorners, aCorners,
+    totalCards,
+    firstGoalMinute,
+    goalMinutes,
+    goalScorers,
     goalEvents, cardEvents,
   };
 }
@@ -101,13 +131,17 @@ async function upsertMatchResult(fid, date, match, r) {
 
 async function updatePrediction(fid, r) {
   return supabaseAdmin.from('match_predictions').update({
-    actual_home_goals:  r.hGoals,
-    actual_away_goals:  r.aGoals,
-    actual_result:      r.actualResult,
-    actual_btts:        r.actualBtts,
-    actual_total_goals: r.totalGoals,
-    actual_corners:     r.totalCorners || null,
-    finalized_at:       new Date().toISOString(),
+    actual_home_goals:        r.hGoals,
+    actual_away_goals:        r.aGoals,
+    actual_result:            r.actualResult,
+    actual_btts:              r.actualBtts,
+    actual_total_goals:       r.totalGoals,
+    actual_corners:           r.totalCorners || null,
+    actual_total_cards:       r.totalCards ?? null,
+    actual_first_goal_minute: r.firstGoalMinute ?? null,
+    actual_goal_minutes:      r.goalMinutes && r.goalMinutes.length ? r.goalMinutes : null,
+    actual_goal_scorers:      r.goalScorers && r.goalScorers.length ? r.goalScorers : null,
+    finalized_at:             new Date().toISOString(),
   }).eq('fixture_id', fid);
 }
 
@@ -192,12 +226,31 @@ export async function GET(request) {
             // Already in match_results — just close the prediction row
             const hGoals = existing.goals?.home ?? null;
             const aGoals = existing.goals?.away ?? null;
+            const yc = existing.yellow_cards || {};
+            const rc = existing.red_cards || {};
+            const totalCards = (yc.home || 0) + (yc.away || 0) + (rc.home || 0) + (rc.away || 0);
+            const scorers = Array.isArray(existing.goal_scorers) ? existing.goal_scorers : [];
+            const goalMinutes = scorers
+              .map(e => (e.time?.elapsed != null ? e.time.elapsed + (e.time.extra || 0) : null))
+              .filter(m => m != null)
+              .sort((a, b) => a - b);
+            const goalScorers = scorers.map(e => ({
+              player_id: e.player?.id ?? null,
+              name: e.player?.name ?? null,
+              team_id: e.team?.id ?? null,
+              minute: e.time?.elapsed != null ? e.time.elapsed + (e.time.extra || 0) : null,
+              detail: e.detail || null,
+            }));
             const r = {
               hGoals, aGoals,
               actualResult: hGoals === null ? null : hGoals > aGoals ? 'H' : hGoals < aGoals ? 'A' : 'D',
               actualBtts:   hGoals > 0 && aGoals > 0,
               totalGoals:   hGoals !== null ? hGoals + aGoals : null,
               totalCorners: existing.corners?.total || null,
+              totalCards:   totalCards || null,
+              firstGoalMinute: goalMinutes[0] ?? null,
+              goalMinutes,
+              goalScorers,
             };
             await updatePrediction(fid, r).catch(() => {});
             pass2++;

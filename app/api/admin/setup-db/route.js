@@ -68,6 +68,19 @@ DO $$ BEGIN
     ALTER TABLE public.push_subscriptions ADD CONSTRAINT push_subscriptions_user_id_key UNIQUE (user_id);
   END IF;
 END $$;
+
+-- Calibración v1.2: tarjetas, primer gol, goleadores
+ALTER TABLE public.match_predictions
+  ADD COLUMN IF NOT EXISTS p_cards_over_25 INTEGER,
+  ADD COLUMN IF NOT EXISTS p_cards_over_35 INTEGER,
+  ADD COLUMN IF NOT EXISTS p_cards_over_45 INTEGER,
+  ADD COLUMN IF NOT EXISTS p_first_goal_30 INTEGER,
+  ADD COLUMN IF NOT EXISTS p_first_goal_45 INTEGER,
+  ADD COLUMN IF NOT EXISTS predicted_scorers JSONB,
+  ADD COLUMN IF NOT EXISTS actual_total_cards INTEGER,
+  ADD COLUMN IF NOT EXISTS actual_first_goal_minute INTEGER,
+  ADD COLUMN IF NOT EXISTS actual_goal_minutes INTEGER[],
+  ADD COLUMN IF NOT EXISTS actual_goal_scorers JSONB;
 `;
 
 export async function GET(request) {
