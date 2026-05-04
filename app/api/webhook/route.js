@@ -40,7 +40,7 @@ async function findUserByCustomer(customerId, userId) {
 
 async function activateUser(profile, plan, customerId) {
   const { error: _err1 } = await supabaseAdmin.from('user_profiles').update({
-    plan: plan || 'plataforma',
+    plan: plan || 'mensual',
     subscription_status: 'active',
     stripe_customer_id: customerId,
     updated_at: new Date().toISOString(),
@@ -51,7 +51,7 @@ async function activateUser(profile, plan, customerId) {
     await sendWelcomeEmail({
       to: profile.email,
       name: profile.name,
-      plan: plan || 'plataforma',
+      plan: plan || 'mensual',
       password: '(la contrasena que elegiste al registrarte)',
     });
   } catch (e) {

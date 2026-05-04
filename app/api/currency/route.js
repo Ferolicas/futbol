@@ -1,5 +1,5 @@
 import { convertAmount, getCurrencyFromCountry, SUPPORTED_CURRENCIES } from '../../../lib/currency';
-import { PLANS } from '../../../lib/stripe';
+import { PLANS, PLAN_IDS } from '../../../lib/stripe';
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -9,29 +9,29 @@ export async function GET(request) {
   const targetCurrency = currency || (country ? getCurrencyFromCountry(country) : 'USD');
 
   try {
-    // Convert both plan prices
-    const [plat1, plat2, ases1, ases2, ases3] = await Promise.all([
-      convertAmount(PLANS.plataforma.firstMonthPrice / 100, targetCurrency),
-      convertAmount(PLANS.plataforma.regularPrice / 100, targetCurrency),
-      convertAmount(PLANS.asesoria.initialPrice / 100, targetCurrency),
-      convertAmount(PLANS.asesoria.secondMonthPrice / 100, targetCurrency),
-      convertAmount(PLANS.asesoria.regularPrice / 100, targetCurrency),
-    ]);
+    // Convierte el precio de cada plan a la moneda local en paralelo
+    const conversions = await Promise.all(
+      PLAN_IDS.map((id) => convertAmount(PLANS[id].price / 100, targetCurrency))
+    );
+
+    const plans = {};
+    PLAN_IDS.forEach((id, idx) => {
+      const cfg = PLANS[id];
+      plans[id] = {
+        usd: cfg.price / 100,
+        local: conversions[idx].amount,
+        currency: targetCurrency,
+        label: cfg.label,
+        name: cfg.name,
+        interval: cfg.interval,
+        intervalCount: cfg.intervalCount,
+      };
+    });
 
     return Response.json({
       currency: targetCurrency,
-      rate: plat1.rate,
-      plans: {
-        plataforma: {
-          firstMonth: { usd: 15, local: plat1.amount, currency: targetCurrency },
-          regular: { usd: 15, local: plat2.amount, currency: targetCurrency },
-        },
-        asesoria: {
-          initial: { usd: 50, local: ases1.amount, currency: targetCurrency },
-          secondMonth: { usd: 15, local: ases2.amount, currency: targetCurrency },
-          regular: { usd: 15, local: ases3.amount, currency: targetCurrency },
-        },
-      },
+      rate: conversions[0]?.rate ?? 1,
+      plans,
       supportedCurrencies: SUPPORTED_CURRENCIES,
     });
   } catch (error) {

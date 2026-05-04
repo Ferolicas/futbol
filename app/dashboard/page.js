@@ -801,8 +801,11 @@ export default function Dashboard() {
         : null;
       const selections = liveComb?.selections || data?.combinada?.selections || [];
       selections.forEach(sel => {
-        if (sel.probability >= 80) {
-          allBets.push({ ...sel, fixtureId: fid, matchName: mn, priority, matchTime, homeTeam, awayTeam });
+        // Apuesta del día: solo 92%-100%. Mostramos 95% como tope visual
+        // (nada se muestra como 100% para evitar dar falsa certeza).
+        if (sel.probability >= 92) {
+          const displayProb = Math.min(95, sel.probability);
+          allBets.push({ ...sel, probability: displayProb, fixtureId: fid, matchName: mn, priority, matchTime, homeTeam, awayTeam });
         }
       });
     });

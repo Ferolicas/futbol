@@ -122,7 +122,7 @@ export default function LandingPage() {
           <div className="step">
             <div className="step-n">2</div>
             <h3>Elige tu plan</h3>
-            <p>Plataforma o Asesoria segun tus necesidades</p>
+            <p>Semanal, mensual, trimestral, semestral o anual</p>
           </div>
           <div className="step-arrow">&#8594;</div>
           <div className="step">
@@ -136,50 +136,38 @@ export default function LandingPage() {
       {/* PRICING */}
       <section className="pricing" id="pricing">
         <h2 className="landing-section-title">Planes de acceso</h2>
-        <p className="section-sub">Invierte en tu ventaja. Primer mes con 50% de descuento.</p>
+        <p className="section-sub">Elige el periodo que mejor se ajuste a ti. Cobro automatico, cancela cuando quieras.</p>
         <div className="pricing-grid">
-          {/* Plan 1: Plataforma */}
-          <div className="plan-card">
-            <div className="plan-badge">Popular</div>
-            <h3 className="plan-name">Plan Plataforma</h3>
-            <p className="plan-desc">Acceso total a estadisticas, analisis y herramientas de apuesta</p>
-            <div className="plan-price">
-              <span className="plan-amount">{fmtPrice(15, prices?.plans?.plataforma?.firstMonth?.local, prices?.currency)}</span>
-              <span className="plan-period">/ mes</span>
-            </div>
-            <ul className="plan-features">
-              <li>Analisis estadistico completo</li>
-              <li>Apuesta del Dia inteligente</li>
-              <li>Combinadas automaticas</li>
-              <li>Marcadores en vivo</li>
-              <li>15+ ligas internacionales</li>
-              <li>Corners, tarjetas, BTTS</li>
-            </ul>
-            <button className="btn-plan" onClick={() => router.push('/sign-up')}>Empezar Ahora</button>
-          </div>
-
-          {/* Plan 2: Asesoria */}
-          <div className="plan-card premium">
-            <div className="plan-badge premium">VIP</div>
-            <h3 className="plan-name">Plan Asesoria</h3>
-            <p className="plan-desc">Formacion en apuestas, estrategias, bankroll + acceso total a plataforma</p>
-            <div className="plan-price">
-              <span className="plan-amount">{fmtPrice(50, prices?.plans?.asesoria?.initial?.local, prices?.currency)}</span>
-              <span className="plan-period">pago unico inicial</span>
-            </div>
-            <div className="plan-after">
-              Luego {fmtPrice(15, prices?.plans?.asesoria?.regular?.local, prices?.currency)}/mes
-            </div>
-            <ul className="plan-features">
-              <li>Todo lo del Plan Plataforma</li>
-              <li>Formacion personalizada en apuestas</li>
-              <li>Estrategias de bankroll management</li>
-              <li>Soporte prioritario 1 a 1</li>
-              <li>Sesiones de asesoria mensual</li>
-              <li>Acceso a comunidad VIP</li>
-            </ul>
-            <button className="btn-plan premium" onClick={() => router.push('/sign-up')}>Quiero Asesoria VIP</button>
-          </div>
+          {[
+            { id: 'semanal',    badge: null,             usd: 7,  perLabel: '/ semana' },
+            { id: 'mensual',    badge: 'Popular',        usd: 15, perLabel: '/ mes' },
+            { id: 'trimestral', badge: null,             usd: 35, perLabel: '/ 3 meses' },
+            { id: 'semestral',  badge: 'Mejor precio',   usd: 80, perLabel: '/ 6 meses' },
+            { id: 'anual',      badge: 'VIP',            usd: 70, perLabel: '/ año' },
+          ].map((plan) => {
+            const isPremium = plan.badge === 'VIP';
+            return (
+              <div key={plan.id} className={`plan-card ${isPremium ? 'premium' : ''}`}>
+                {plan.badge && <div className={`plan-badge ${isPremium ? 'premium' : ''}`}>{plan.badge}</div>}
+                <h3 className="plan-name">{`Plan ${plan.id.charAt(0).toUpperCase() + plan.id.slice(1)}`}</h3>
+                <p className="plan-desc">Acceso total a estadisticas, analisis y herramientas de apuesta</p>
+                <div className="plan-price">
+                  <span className="plan-amount">{fmtPrice(plan.usd, prices?.plans?.[plan.id]?.local, prices?.currency)}</span>
+                  <span className="plan-period">{plan.perLabel}</span>
+                </div>
+                <div className="plan-after">Cobro automatico cada periodo</div>
+                <ul className="plan-features">
+                  <li>Analisis estadistico completo</li>
+                  <li>Apuesta del Dia inteligente</li>
+                  <li>Combinadas automaticas</li>
+                  <li>Marcadores en vivo</li>
+                  <li>15+ ligas internacionales</li>
+                  <li>Corners, tarjetas, BTTS</li>
+                </ul>
+                <button className={`btn-plan ${isPremium ? 'premium' : ''}`} onClick={() => router.push('/sign-up')}>Empezar Ahora</button>
+              </div>
+            );
+          })}
         </div>
       </section>
 

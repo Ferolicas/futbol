@@ -1391,7 +1391,7 @@ function PlayerHighlights({ highlights }) {
         <div>
           <div style={{ fontSize: '.85rem',  color: 'white', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Target size={16} style={{ color: '#4ade80' }} />
-            ⚽ Goleadores en racha <small style={{  color: 'white' }}>(gol en 3+ de últimos 5)</small>
+            ⚽ Goleadores en racha <small style={{  color: 'white' }}>(gol en 8+ de últimos 10)</small>
           </div>
           {scorers.map((pl, i) => (
             <motion.div
@@ -1439,7 +1439,7 @@ function PlayerHighlights({ highlights }) {
         <div>
           <div style={{ fontSize: '.85rem',  color: 'white', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Crosshair size={16} style={{ color: '#60a5fa' }} />
-            🎯 Rematadores consistentes <small style={{  color: 'white' }}>(remate en 4+ de últimos 5)</small>
+            🎯 Rematadores consistentes <small style={{  color: 'white' }}>(remate en 8+ de últimos 10)</small>
           </div>
           {shooters.map((pl, i) => (
             <motion.div

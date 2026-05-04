@@ -6,6 +6,25 @@ const supabaseBrowser = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, proce
 import { motion } from 'framer-motion';
 import PaymentModal from './PaymentModal';
 
+// Orden, etiquetas y badges de los 5 planes (claves IDs en lib/stripe.js)
+const PLAN_ORDER = [
+  { id: 'semanal',    badge: null,        usd: 7,  perLabel: '/ semana' },
+  { id: 'mensual',    badge: 'Popular',   usd: 15, perLabel: '/ mes' },
+  { id: 'trimestral', badge: null,        usd: 35, perLabel: '/ 3 meses' },
+  { id: 'semestral',  badge: 'Mejor precio', usd: 80, perLabel: '/ 6 meses' },
+  { id: 'anual',      badge: 'VIP',       usd: 70, perLabel: '/ año' },
+];
+
+const PLATFORM_DESCRIPTION = 'Acceso total a estadisticas, analisis y herramientas de apuesta';
+const PLATFORM_FEATURES = [
+  'Analisis estadistico completo',
+  'Apuesta del Dia inteligente',
+  'Combinadas automaticas',
+  'Marcadores en vivo',
+  '15+ ligas internacionales',
+  'Corners, tarjetas, BTTS',
+];
+
 export default function PlanesClient({ userId, email }) {
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [prices, setPrices] = useState(null);
@@ -14,7 +33,6 @@ export default function PlanesClient({ userId, email }) {
   const [error, setError] = useState('');
   const [paymentData, setPaymentData] = useState(null);
 
-  // Detect country and get prices
   useEffect(() => {
     fetch('/api/detect-country')
       .then(r => r.json())
@@ -43,9 +61,8 @@ export default function PlanesClient({ userId, email }) {
       const data = await res.json();
 
       if (data.clientSecret) {
-        const localDisplay = plan === 'plataforma'
-          ? fmtPrice(15, prices?.plans?.plataforma?.firstMonth?.local, prices?.currency)
-          : fmtPrice(50, prices?.plans?.asesoria?.initial?.local, prices?.currency);
+        const planMeta = PLAN_ORDER.find(p => p.id === plan);
+        const localDisplay = fmtPrice(planMeta.usd, prices?.plans?.[plan]?.local, prices?.currency);
         setPaymentData({
           clientSecret: data.clientSecret,
           plan: data.plan,
@@ -95,72 +112,43 @@ export default function PlanesClient({ userId, email }) {
         {error && <div className="modal-error">{error}</div>}
 
         <div className="pricing-grid">
-          {/* Plan 1: Plataforma */}
-          <motion.div
-            className={`plan-card ${selectedPlan === 'plataforma' ? 'selected' : ''}`}
-            initial={{ opacity: 0, x: -30 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.3, duration: 0.5 }}
-            whileHover={{ scale: 1.02 }}
-            onClick={() => !loading && handleSelectPlan('plataforma')}
-            style={{ cursor: loading ? 'wait' : 'pointer' }}
-          >
-            <div className="plan-badge">Popular</div>
-            <h3 className="plan-name">Plan Plataforma</h3>
-            <p className="plan-desc">Acceso total a estadisticas, analisis y herramientas de apuesta</p>
-            <div className="plan-price">
-              <span className="plan-amount">
-                {fmtPrice(15, prices?.plans?.plataforma?.firstMonth?.local, prices?.currency)}
-              </span>
-              <span className="plan-period">/ mes</span>
-            </div>
-            <ul className="plan-features">
-              <li>Analisis estadistico completo</li>
-              <li>Apuesta del Dia inteligente</li>
-              <li>Combinadas automaticas</li>
-              <li>Marcadores en vivo</li>
-              <li>15+ ligas internacionales</li>
-              <li>Corners, tarjetas, BTTS</li>
-            </ul>
-            {loading && selectedPlan === 'plataforma' && (
-              <div className="modal-loading">Preparando pago...</div>
-            )}
-          </motion.div>
-
-          {/* Plan 2: Asesoria */}
-          <motion.div
-            className={`plan-card premium ${selectedPlan === 'asesoria' ? 'selected' : ''}`}
-            initial={{ opacity: 0, x: 30 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.4, duration: 0.5 }}
-            whileHover={{ scale: 1.02 }}
-            onClick={() => !loading && handleSelectPlan('asesoria')}
-            style={{ cursor: loading ? 'wait' : 'pointer' }}
-          >
-            <div className="plan-badge premium">VIP</div>
-            <h3 className="plan-name">Plan Asesoria</h3>
-            <p className="plan-desc">Formacion en apuestas, estrategias, bankroll + acceso total a plataforma</p>
-            <div className="plan-price">
-              <span className="plan-amount">
-                {fmtPrice(50, prices?.plans?.asesoria?.initial?.local, prices?.currency)}
-              </span>
-              <span className="plan-period">pago unico inicial</span>
-            </div>
-            <div className="plan-after">
-              Luego {fmtPrice(15, prices?.plans?.asesoria?.regular?.local, prices?.currency)}/mes
-            </div>
-            <ul className="plan-features">
-              <li>Todo lo del Plan Plataforma</li>
-              <li>Formacion personalizada en apuestas</li>
-              <li>Estrategias de bankroll management</li>
-              <li>Soporte prioritario 1 a 1</li>
-              <li>Sesiones de asesoria mensual</li>
-              <li>Acceso a comunidad VIP</li>
-            </ul>
-            {loading && selectedPlan === 'asesoria' && (
-              <div className="modal-loading">Preparando pago...</div>
-            )}
-          </motion.div>
+          {PLAN_ORDER.map((plan, idx) => {
+            const isSelected = selectedPlan === plan.id;
+            const localPrice = prices?.plans?.[plan.id]?.local;
+            const currency = prices?.currency;
+            const isPremium = plan.badge === 'VIP';
+            return (
+              <motion.div
+                key={plan.id}
+                className={`plan-card ${isPremium ? 'premium' : ''} ${isSelected ? 'selected' : ''}`}
+                initial={{ opacity: 0, y: 30 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 + idx * 0.08, duration: 0.5 }}
+                whileHover={{ scale: 1.02 }}
+                onClick={() => !loading && handleSelectPlan(plan.id)}
+                style={{ cursor: loading ? 'wait' : 'pointer' }}
+              >
+                {plan.badge && (
+                  <div className={`plan-badge ${isPremium ? 'premium' : ''}`}>{plan.badge}</div>
+                )}
+                <h3 className="plan-name">{`Plan ${plan.id.charAt(0).toUpperCase() + plan.id.slice(1)}`}</h3>
+                <p className="plan-desc">{PLATFORM_DESCRIPTION}</p>
+                <div className="plan-price">
+                  <span className="plan-amount">{fmtPrice(plan.usd, localPrice, currency)}</span>
+                  <span className="plan-period">{plan.perLabel}</span>
+                </div>
+                <div className="plan-after">Cobro automatico cada periodo, cancela cuando quieras</div>
+                <ul className="plan-features">
+                  {PLATFORM_FEATURES.map((f) => (
+                    <li key={f}>{f}</li>
+                  ))}
+                </ul>
+                {loading && isSelected && (
+                  <div className="modal-loading">Preparando pago...</div>
+                )}
+              </motion.div>
+            );
+          })}
         </div>
 
         <div className="planes-footer">

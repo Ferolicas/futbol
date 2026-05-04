@@ -1,4 +1,4 @@
-import { createEmbeddedPayment } from '../../../lib/stripe';
+import { createEmbeddedPayment, isValidPlan } from '../../../lib/stripe';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../lib/supabase';
 
@@ -12,7 +12,7 @@ export async function POST(request) {
     if (!plan || !email) {
       return Response.json({ error: 'Missing required fields' }, { status: 400 });
     }
-    if (!['plataforma', 'asesoria'].includes(plan)) {
+    if (!isValidPlan(plan)) {
       return Response.json({ error: 'Invalid plan' }, { status: 400 });
     }
 

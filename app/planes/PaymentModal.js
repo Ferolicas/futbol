@@ -6,26 +6,33 @@ import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
 
+const PLATFORM_LINES = [
+  'Acceso total a estadisticas, analisis y herramientas',
+  'Apuesta del Dia, combinadas y marcadores en vivo',
+  '15+ ligas internacionales',
+  'Cancela cuando quieras',
+];
+
 const PLAN_CONDITIONS = {
-  plataforma: {
-    title: 'Plan Plataforma',
-    lines: [
-      'Suscripcion mensual',
-      'Primer mes: $15 USD (50% de descuento)',
-      'A partir del segundo mes: $30 USD/mes',
-      'Acceso total a estadisticas, analisis y herramientas',
-      'Cancela cuando quieras',
-    ],
+  semanal: {
+    title: 'Plan Semanal',
+    lines: ['Suscripcion semanal — $7 USD/semana', 'Cobro automatico cada 7 dias', ...PLATFORM_LINES],
   },
-  asesoria: {
-    title: 'Plan Asesoria',
-    lines: [
-      'Pago unico de $100 USD',
-      '1 mes de asesoria personalizada + acceso a plataforma',
-      'Formacion en apuestas, estrategias y bankroll',
-      'Soporte prioritario 1 a 1',
-      'Luego: $15 USD el segundo mes, $30 USD/mes en adelante',
-    ],
+  mensual: {
+    title: 'Plan Mensual',
+    lines: ['Suscripcion mensual — $15 USD/mes', 'Cobro automatico cada mes', ...PLATFORM_LINES],
+  },
+  trimestral: {
+    title: 'Plan Trimestral',
+    lines: ['Suscripcion trimestral — $35 USD cada 3 meses', 'Cobro automatico cada 3 meses', ...PLATFORM_LINES],
+  },
+  semestral: {
+    title: 'Plan Semestral',
+    lines: ['Suscripcion semestral — $80 USD cada 6 meses', 'Cobro automatico cada 6 meses', ...PLATFORM_LINES],
+  },
+  anual: {
+    title: 'Plan Anual',
+    lines: ['Suscripcion anual — $70 USD/año', 'Cobro automatico cada 12 meses', ...PLATFORM_LINES],
   },
 };
 
@@ -35,7 +42,7 @@ function PaymentForm({ plan, displayAmount, onClose }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const conditions = PLAN_CONDITIONS[plan];
+  const conditions = PLAN_CONDITIONS[plan] || { title: 'Plan', lines: PLATFORM_LINES };
 
   const handleSubmit = async (e) => {
     e.preventDefault();

@@ -81,6 +81,14 @@ ALTER TABLE public.match_predictions
   ADD COLUMN IF NOT EXISTS actual_first_goal_minute INTEGER,
   ADD COLUMN IF NOT EXISTS actual_goal_minutes INTEGER[],
   ADD COLUMN IF NOT EXISTS actual_goal_scorers JSONB;
+
+-- Planes v2: semanal/mensual/trimestral/semestral/anual.
+-- Conserva los IDs antiguos ('plataforma','asesoria') para usuarios legacy
+-- y suma los 5 nuevos.
+ALTER TABLE public.user_profiles DROP CONSTRAINT IF EXISTS user_profiles_plan_check;
+ALTER TABLE public.user_profiles
+  ADD CONSTRAINT user_profiles_plan_check
+  CHECK (plan IN ('free','plataforma','asesoria','semanal','mensual','trimestral','semestral','anual'));
 `;
 
 export async function GET(request) {

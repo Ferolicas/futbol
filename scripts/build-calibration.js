@@ -102,12 +102,26 @@ function buildKnots(rows, pCol, outcomeFn) {
   console.log(`\nMuestras: ${rows.length}`);
 
   const calibration = {};
+  const skipped = [];
   for (const m of MARKETS) {
     const valid = rows.filter((r) => r[m.pCol] != null && m.gate(r));
     const { knots, samples } = buildKnots(valid, m.pCol, m.outcome);
+    // Gate de calidad: si la dispersión es degenerada (predicciones casi
+    // todas iguales) la calibración isotónica empeora en lugar de mejorar.
+    // Requiere ≥3 buckets con ≥20 muestras para considerarse fiable.
+    const goodBuckets = samples.filter(s => s.n >= 20).length;
+    if (goodBuckets < 3) {
+      skipped.push({ key: m.key, n: valid.length, goodBuckets });
+      console.log(`\n  ${m.key.padEnd(14)}  n=${valid.length}  ⚠ SKIP (solo ${goodBuckets} buckets fiables)`);
+      continue;
+    }
     calibration[m.key] = knots;
-    console.log(`\n  ${m.key.padEnd(12)}  n=${valid.length}  knots=${knots.length}`);
+    console.log(`\n  ${m.key.padEnd(14)}  n=${valid.length}  knots=${knots.length}`);
     console.log('    ', knots.map(([x, y]) => `${x}→${y}`).join('  '));
+  }
+  if (skipped.length > 0) {
+    console.log(`\n⚠ Mercados sin calibrar (datos insuficientes, se usa raw):`);
+    skipped.forEach(s => console.log(`   - ${s.key}: ${s.goodBuckets} buckets con ≥20 muestras`));
   }
 
   // Persist to app_config
