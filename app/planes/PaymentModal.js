@@ -32,7 +32,7 @@ const PLAN_CONDITIONS = {
   },
   anual: {
     title: 'Plan Anual',
-    lines: ['Suscripcion anual — $70 USD/año', 'Cobro automatico cada 12 meses', ...PLATFORM_LINES],
+    lines: ['Suscripcion anual — €100 EUR/año (antes €120, ahorras €20)', 'Cobro automatico cada 12 meses', ...PLATFORM_LINES],
   },
 };
 

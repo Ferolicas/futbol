@@ -9,18 +9,32 @@ export async function GET(request) {
   const targetCurrency = currency || (country ? getCurrencyFromCountry(country) : 'USD');
 
   try {
-    // Convierte el precio de cada plan a la moneda local en paralelo
+    // Convierte el precio de cada plan a la moneda local en paralelo.
+    // Si el plan tiene fixedCurrency=true, no se convierte (siempre se cobra en su moneda nativa).
     const conversions = await Promise.all(
-      PLAN_IDS.map((id) => convertAmount(PLANS[id].price / 100, targetCurrency))
+      PLAN_IDS.map((id) => {
+        const cfg = PLANS[id];
+        const srcCurrency = (cfg.currency || 'usd').toUpperCase();
+        const sourceAmount = cfg.price / 100;
+        if (cfg.fixedCurrency) {
+          return Promise.resolve({ amount: sourceAmount, currency: srcCurrency, rate: 1, original: sourceAmount });
+        }
+        return convertAmount(sourceAmount, targetCurrency, srcCurrency);
+      })
     );
 
     const plans = {};
     PLAN_IDS.forEach((id, idx) => {
       const cfg = PLANS[id];
+      const srcCurrency = (cfg.currency || 'usd').toUpperCase();
       plans[id] = {
-        usd: cfg.price / 100,
+        usd: cfg.price / 100, // legacy: amount in plan's source currency
+        nativeAmount: cfg.price / 100,
+        nativeCurrency: srcCurrency,
+        originalAmount: cfg.originalPrice ? cfg.originalPrice / 100 : null,
+        fixedCurrency: !!cfg.fixedCurrency,
         local: conversions[idx].amount,
-        currency: targetCurrency,
+        currency: conversions[idx].currency,
         label: cfg.label,
         name: cfg.name,
         interval: cfg.interval,

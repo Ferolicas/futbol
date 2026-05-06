@@ -50,10 +50,26 @@ export default function LandingPage() {
       .finally(() => setPricesLoading(false));
   }, []);
 
-  const fmtPrice = (usd, local, currency) => {
+  const fmtPrice = (planId) => {
     if (pricesLoading) return '...';
-    if (!local || !currency || currency === 'USD') return `$${usd} USD`;
+    const p = prices?.plans?.[planId];
+    // Plan con fixedCurrency (ej. anual EUR): mostrar siempre su moneda nativa
+    if (p?.fixedCurrency) {
+      const sym = p.nativeCurrency === 'EUR' ? '€' : p.nativeCurrency === 'USD' ? '$' : '';
+      return `${sym}${p.nativeAmount} ${p.nativeCurrency}`;
+    }
+    const local = p?.local;
+    const currency = p?.currency;
+    const fallback = p?.nativeAmount ?? p?.usd;
+    if (!local || !currency || currency === 'USD') return `$${fallback} USD`;
     return `${Math.round(local).toLocaleString()} ${currency}`;
+  };
+
+  const fmtOriginal = (planId) => {
+    const p = prices?.plans?.[planId];
+    if (!p?.originalAmount) return null;
+    const sym = p.nativeCurrency === 'EUR' ? '€' : p.nativeCurrency === 'USD' ? '$' : '';
+    return `${sym}${p.originalAmount}`;
   };
 
   const features = [
@@ -139,20 +155,24 @@ export default function LandingPage() {
         <p className="section-sub">Elige el periodo que mejor se ajuste a ti. Cobro automatico, cancela cuando quieras.</p>
         <div className="pricing-grid">
           {[
-            { id: 'semanal',    badge: null,             usd: 7,  perLabel: '/ semana' },
-            { id: 'mensual',    badge: 'Popular',        usd: 15, perLabel: '/ mes' },
-            { id: 'trimestral', badge: null,             usd: 35, perLabel: '/ 3 meses' },
-            { id: 'semestral',  badge: 'Mejor precio',   usd: 80, perLabel: '/ 6 meses' },
-            { id: 'anual',      badge: 'VIP',            usd: 70, perLabel: '/ año' },
+            { id: 'semanal',    badge: null,             perLabel: '/ semana' },
+            { id: 'mensual',    badge: 'Popular',        perLabel: '/ mes' },
+            { id: 'trimestral', badge: null,             perLabel: '/ 3 meses' },
+            { id: 'semestral',  badge: 'Mejor precio',   perLabel: '/ 6 meses' },
+            { id: 'anual',      badge: 'VIP',            perLabel: '/ año' },
           ].map((plan) => {
             const isPremium = plan.badge === 'VIP';
+            const original = fmtOriginal(plan.id);
             return (
               <div key={plan.id} className={`plan-card ${isPremium ? 'premium' : ''}`}>
                 {plan.badge && <div className={`plan-badge ${isPremium ? 'premium' : ''}`}>{plan.badge}</div>}
                 <h3 className="plan-name">{`Plan ${plan.id.charAt(0).toUpperCase() + plan.id.slice(1)}`}</h3>
                 <p className="plan-desc">Acceso total a estadisticas, analisis y herramientas de apuesta</p>
                 <div className="plan-price">
-                  <span className="plan-amount">{fmtPrice(plan.usd, prices?.plans?.[plan.id]?.local, prices?.currency)}</span>
+                  {original && (
+                    <span className="plan-amount-original" style={{ textDecoration: 'line-through', opacity: 0.55, marginRight: 8, fontSize: '0.7em' }}>{original}</span>
+                  )}
+                  <span className="plan-amount">{fmtPrice(plan.id)}</span>
                   <span className="plan-period">{plan.perLabel}</span>
                 </div>
                 <div className="plan-after">Cobro automatico cada periodo</div>
