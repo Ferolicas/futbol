@@ -4,6 +4,7 @@ import { supabaseAdmin } from '../../lib/supabase';
 import ChatWidget from './chat-widget';
 import LiveStatsProvider from './live-stats-context';
 import SelectedMarketsProvider from './selected-markets-context';
+import SportToggle from './components/SportToggle';
 
 export const metadata = {
   title: 'Dashboard - CFanalisis',
@@ -31,6 +32,9 @@ export default async function DashboardLayout({ children }) {
     <>
       <SelectedMarketsProvider>
         <LiveStatsProvider>
+          <div style={{ paddingTop: 16 }}>
+            <SportToggle />
+          </div>
           {children}
         </LiveStatsProvider>
       </SelectedMarketsProvider>
