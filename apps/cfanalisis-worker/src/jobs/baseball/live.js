@@ -8,6 +8,7 @@
  * Payload: {}
  */
 import { getBaseballLiveGames, getBaseballQuota, supabaseAdmin, redisGet, redisSet } from '../../shared.js';
+import { mapPool } from '../../pool.js';
 
 const LIVE_BUDGET = 30;
 const SAFETY_RESERVE = 5;
@@ -74,8 +75,7 @@ export async function runBaseballLive(_payload = {}) {
 
   const liveGames = await getBaseballLiveGames();
 
-  let updated = 0;
-  for (const g of liveGames) {
+  const upsertResults = await mapPool(liveGames, 8, async (g) => {
     const fid = g.id;
     const homeScore = g.scores?.home?.total ?? null;
     const awayScore = g.scores?.away?.total ?? null;
@@ -85,7 +85,7 @@ export async function runBaseballLive(_payload = {}) {
     const awayErrors = g.scores?.away?.errors ?? null;
     const innings = g.scores?.home?.innings || g.innings || null;
 
-    await supabaseAdmin.from('baseball_match_results').upsert({
+    const { error } = await supabaseAdmin.from('baseball_match_results').upsert({
       fixture_id: fid,
       league_id: g.league?.id,
       date: today,
@@ -102,8 +102,12 @@ export async function runBaseballLive(_payload = {}) {
       innings,
       updated_at: new Date().toISOString(),
     });
-    updated++;
-  }
+    if (error) throw new Error(`upsert: ${error.message || error}`);
+    return fid;
+  });
+  const updated = upsertResults.filter(r => r.ok).length;
+  const upsertFails = upsertResults.length - updated;
+  if (upsertFails > 0) console.error(`[job:baseball-live] ${upsertFails}/${liveGames.length} upserts failed`);
 
   await redisSet(callsKey(today), liveCallsToday + 1, 36 * 3600);
   await redisSet(lastCallKey, now, 36 * 3600);

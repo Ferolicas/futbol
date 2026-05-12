@@ -1,12 +1,23 @@
 // @ts-nocheck
 /**
  * Job: futbol-analyze-all-today
- * Port of /api/cron/analyze-all-today. Forces a fresh fetch + analysis of all
- * fixtures for a given date.
+ *
+ * Force-refresh path: fetches fixtures from API directly (bypassing the
+ * daily cache when `force=true`) and analyzes any that aren't yet in
+ * Supabase. Uses the same worker-pool concurrency model as analyze-batch.
+ *
+ * Throws on any partial failure → BullMQ retries; cached fixtures
+ * short-circuit on the next attempt.
  *
  * Payload: { date?: string, force?: boolean }
  */
-import { getFixtures, analyzeMatch, getQuota, getAnalyzedFixtureIds, redisSet } from '../../shared.js';
+import {
+  getFixtures, analyzeMatch, getQuota,
+  getAnalyzedFixtureIds, redisSet,
+} from '../../shared.js';
+import { mapPool } from '../../pool.js';
+
+const ANALYZE_CONCURRENCY = 25;
 
 function compactLastFive(lastFive) {
   if (!Array.isArray(lastFive)) return [];
@@ -48,61 +59,69 @@ export async function runAnalyzeAllToday(payload = {}) {
   }
 
   const alreadyAnalyzed = forceAll ? [] : await getAnalyzedFixtureIds(date);
-  const toAnalyze = forceAll ? allFixtures : allFixtures.filter(f => !alreadyAnalyzed.includes(f.fixture.id));
+  const alreadySet = new Set(alreadyAnalyzed.map(Number));
+  const toAnalyze = forceAll
+    ? allFixtures
+    : allFixtures.filter(f => !alreadySet.has(Number(f.fixture.id)));
 
   if (toAnalyze.length === 0) {
     return { ok: true, message: 'all already analyzed', analyzed: 0, total: allFixtures.length, date };
   }
 
-  const BATCH_SIZE = 3;
-  const results = { success: 0, failed: 0, skipped: 0, errors: [] };
   const analyzedIds = [];
   const analyzedOdds = {};
   const analyzedData = {};
+  let success = 0, skipped = 0;
+  const errors = [];
 
-  for (let i = 0; i < toAnalyze.length; i += BATCH_SIZE) {
-    const batch = toAnalyze.slice(i, i + BATCH_SIZE);
-    await Promise.all(batch.map(async (fixture) => {
-      const fid = fixture.fixture.id;
-      try {
-        const result = await analyzeMatch(fixture, { date });
-        if (!result || result.dataQuality === 'insufficient') {
-          results.skipped++;
-          return;
-        }
-        results.success++;
-        const a = result.analysis || result;
-        analyzedIds.push(fid);
-        if (a?.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
-        const summary = buildSummary(a);
-        if (summary) analyzedData[fid] = summary;
-      } catch (e) {
-        console.error(`[job:futbol-analyze-all-today] fixture ${fid}:`, e.message);
-        results.failed++;
-        results.errors.push({ fixtureId: fid, error: e.message });
-      }
-    }));
-    if (i + BATCH_SIZE < toAnalyze.length) {
-      await new Promise(r => setTimeout(r, 500));
+  const results = await mapPool(toAnalyze, ANALYZE_CONCURRENCY, async (fixture) => {
+    const fid = Number(fixture.fixture.id);
+    const result = await analyzeMatch(fixture, { date });
+    if (!result || result.dataQuality === 'insufficient') {
+      return { fid, kind: 'skip' };
+    }
+    const a = result.analysis || result;
+    success++;
+    analyzedIds.push(fid);
+    if (a?.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
+    const summary = buildSummary(a);
+    if (summary) analyzedData[fid] = summary;
+    return { fid, kind: 'ok' };
+  });
+
+  results.forEach((r, idx) => {
+    if (r.ok) {
+      if (r.value.kind === 'skip') skipped++;
+    } else {
+      const fid = Number(toAnalyze[idx].fixture.id);
+      errors.push({ fixtureId: fid, error: r.error.message });
+      console.error(`[job:futbol-analyze-all-today] failed ${fid}:`, r.error.message);
+    }
+  });
+
+  if (analyzedIds.length > 0) {
+    try {
+      await redisSet(`analysis:${date}`, { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData }, 12 * 3600);
+    } catch (e) {
+      console.error('[job:futbol-analyze-all-today] persist:', e.message);
     }
   }
 
-  if (analyzedIds.length > 0) {
-    await redisSet(`analysis:${date}`, { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData }, 12 * 3600).catch(() => {});
-  }
+  const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
+  const quota = await getQuota().catch(() => null);
 
-  const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-  const quota = await getQuota();
+  if (errors.length > 0) {
+    throw new Error(`analyze-all-today incomplete: ${errors.length} failures in ${durationSec}s`);
+  }
 
   return {
     ok: true,
     date,
     total: allFixtures.length,
-    analyzed: results.success,
-    failed: results.failed,
-    skipped: results.skipped,
-    duration: `${duration}s`,
+    analyzed: success,
+    skipped,
+    durationSec: Number(durationSec),
+    concurrency: ANALYZE_CONCURRENCY,
     quota,
-    errors: results.errors.slice(0, 5),
   };
 }

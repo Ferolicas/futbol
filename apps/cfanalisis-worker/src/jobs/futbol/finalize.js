@@ -9,6 +9,9 @@
  * Payload: {} (none)
  */
 import { redisGet, KEYS, supabaseAdmin } from '../../shared.js';
+import { mapPool } from '../../pool.js';
+
+const FINALIZE_CONCURRENCY = 10;
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 const API_HOST = 'v3.football.api-sports.io';
@@ -131,9 +134,11 @@ export async function runFinalize(_payload = {}) {
   const today     = new Date().toISOString().split('T')[0];
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
-  let pass1 = 0, pass2 = 0, apiCalls = 0;
+  let pass1 = 0, pass2 = 0;
+  let apiCalls = 0;
+  const errors = [];
 
-  // ── PASS 1 — Redis
+  // ── PASS 1 — Redis (fast path, no API calls except for missing results)
   try {
     const liveStats = await redisGet(KEYS.liveStats(today));
     if (liveStats && typeof liveStats === 'object') {
@@ -147,30 +152,38 @@ export async function runFinalize(_payload = {}) {
         const existingIds = new Set((existing || []).map(r => r.fixture_id));
         const toSave = finishedFids.filter(fid => !existingIds.has(fid));
 
-        for (const fid of toSave) {
-          try {
-            const match = await fetchFixture(fid, apiKey);
-            apiCalls++;
-            if (!match) continue;
-            if (!FINISHED_STATUSES.includes(match.fixture?.status?.short)) continue;
+        const p1Results = await mapPool(toSave, FINALIZE_CONCURRENCY, async (fid) => {
+          const match = await fetchFixture(fid, apiKey);
+          apiCalls++;
+          if (!match) return { fid, status: 'no-match' };
+          if (!FINISHED_STATUSES.includes(match.fixture?.status?.short)) return { fid, status: 'not-finished' };
 
-            const r = extractResult(match);
-            const { error } = await upsertMatchResult(fid, today, match, r);
-            if (!error) {
-              pass1++;
-              await updatePrediction(fid, r).catch(() => {});
-            }
-          } catch (e) {
-            console.error(`[job:futbol-finalize P1] fixture ${fid}:`, e.message);
+          const r = extractResult(match);
+          const { error } = await upsertMatchResult(fid, today, match, r);
+          if (error) throw new Error(`upsert: ${error.message || error}`);
+          // updatePrediction returns a Promise (async function) — safe to await
+          try { await updatePrediction(fid, r); } catch (e) {
+            console.warn(`[finalize P1] updatePrediction ${fid}:`, e.message);
           }
-        }
+          return { fid, status: 'finalized' };
+        });
+
+        p1Results.forEach((r, idx) => {
+          if (!r.ok) {
+            errors.push({ pass: 1, fixtureId: toSave[idx], error: r.error.message });
+            console.error(`[job:futbol-finalize P1] fixture ${toSave[idx]}:`, r.error.message);
+          } else if (r.value.status === 'finalized') {
+            pass1++;
+          }
+        });
       }
     }
   } catch (e) {
     console.error('[job:futbol-finalize P1]', e.message);
+    errors.push({ pass: 1, error: e.message });
   }
 
-  // ── PASS 2 — Supabase fallback
+  // ── PASS 2 — Supabase fallback (catches Redis-expired matches)
   try {
     const twoHoursAgo = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
     const { data: unfinalized } = await supabaseAdmin
@@ -189,62 +202,69 @@ export async function runFinalize(_payload = {}) {
 
       const resultsMap = new Map((alreadyInResults || []).map(r => [r.fixture_id, r]));
 
-      for (const { fixture_id: fid, date } of unfinalized) {
-        try {
-          const existing = resultsMap.get(fid);
+      const p2Results = await mapPool(unfinalized, FINALIZE_CONCURRENCY, async ({ fixture_id: fid, date }) => {
+        const existing = resultsMap.get(fid);
 
-          if (existing) {
-            const hGoals = existing.goals?.home ?? null;
-            const aGoals = existing.goals?.away ?? null;
-            const yc = existing.yellow_cards || {};
-            const rc = existing.red_cards || {};
-            const totalCards = (yc.home || 0) + (yc.away || 0) + (rc.home || 0) + (rc.away || 0);
-            const scorers = Array.isArray(existing.goal_scorers) ? existing.goal_scorers : [];
-            const goalMinutes = scorers
-              .map(e => (e.time?.elapsed != null ? e.time.elapsed + (e.time.extra || 0) : null))
-              .filter(m => m != null)
-              .sort((a, b) => a - b);
-            const goalScorers = scorers.map(e => ({
-              player_id: e.player?.id ?? null,
-              name: e.player?.name ?? null,
-              team_id: e.team?.id ?? null,
-              minute: e.time?.elapsed != null ? e.time.elapsed + (e.time.extra || 0) : null,
-              detail: e.detail || null,
-            }));
-            const r = {
-              hGoals, aGoals,
-              actualResult: hGoals === null ? null : hGoals > aGoals ? 'H' : hGoals < aGoals ? 'A' : 'D',
-              actualBtts:   hGoals > 0 && aGoals > 0,
-              totalGoals:   hGoals !== null ? hGoals + aGoals : null,
-              totalCorners: existing.corners?.total || null,
-              totalCards:   totalCards || null,
-              firstGoalMinute: goalMinutes[0] ?? null,
-              goalMinutes,
-              goalScorers,
-            };
-            await updatePrediction(fid, r).catch(() => {});
-            pass2++;
-          } else {
-            const match = await fetchFixture(fid, apiKey);
-            apiCalls++;
-            if (!match) continue;
-            if (!FINISHED_STATUSES.includes(match.fixture?.status?.short)) continue;
-
-            const r = extractResult(match);
-            const { error } = await upsertMatchResult(fid, date, match, r);
-            if (!error) {
-              pass2++;
-              await updatePrediction(fid, r).catch(() => {});
-            }
-          }
-        } catch (e) {
-          console.error(`[job:futbol-finalize P2] fixture ${fid}:`, e.message);
+        if (existing) {
+          const hGoals = existing.goals?.home ?? null;
+          const aGoals = existing.goals?.away ?? null;
+          const yc = existing.yellow_cards || {};
+          const rc = existing.red_cards || {};
+          const totalCards = (yc.home || 0) + (yc.away || 0) + (rc.home || 0) + (rc.away || 0);
+          const scorers = Array.isArray(existing.goal_scorers) ? existing.goal_scorers : [];
+          const goalMinutes = scorers
+            .map(e => (e.time?.elapsed != null ? e.time.elapsed + (e.time.extra || 0) : null))
+            .filter(m => m != null)
+            .sort((a, b) => a - b);
+          const goalScorers = scorers.map(e => ({
+            player_id: e.player?.id ?? null,
+            name: e.player?.name ?? null,
+            team_id: e.team?.id ?? null,
+            minute: e.time?.elapsed != null ? e.time.elapsed + (e.time.extra || 0) : null,
+            detail: e.detail || null,
+          }));
+          const r = {
+            hGoals, aGoals,
+            actualResult: hGoals === null ? null : hGoals > aGoals ? 'H' : hGoals < aGoals ? 'A' : 'D',
+            actualBtts:   hGoals > 0 && aGoals > 0,
+            totalGoals:   hGoals !== null ? hGoals + aGoals : null,
+            totalCorners: existing.corners?.total || null,
+            totalCards:   totalCards || null,
+            firstGoalMinute: goalMinutes[0] ?? null,
+            goalMinutes,
+            goalScorers,
+          };
+          await updatePrediction(fid, r);
+          return { fid, status: 'finalized-from-results' };
         }
-      }
+
+        const match = await fetchFixture(fid, apiKey);
+        apiCalls++;
+        if (!match) return { fid, status: 'no-match' };
+        if (!FINISHED_STATUSES.includes(match.fixture?.status?.short)) return { fid, status: 'not-finished' };
+
+        const r = extractResult(match);
+        const { error } = await upsertMatchResult(fid, date, match, r);
+        if (error) throw new Error(`upsert: ${error.message || error}`);
+        try { await updatePrediction(fid, r); } catch (e) {
+          console.warn(`[finalize P2] updatePrediction ${fid}:`, e.message);
+        }
+        return { fid, status: 'finalized-from-api' };
+      });
+
+      p2Results.forEach((r, idx) => {
+        if (!r.ok) {
+          errors.push({ pass: 2, fixtureId: unfinalized[idx].fixture_id, error: r.error.message });
+          console.error(`[job:futbol-finalize P2] fixture ${unfinalized[idx].fixture_id}:`, r.error.message);
+        } else if (r.value.status?.startsWith('finalized')) {
+          pass2++;
+        }
+      });
     }
   } catch (e) {
     console.error('[job:futbol-finalize P2]', e.message);
+    errors.push({ pass: 2, error: e.message });
   }
 
-  return { ok: true, pass1, pass2, apiCalls };
+  return { ok: true, pass1, pass2, apiCalls, errors: errors.length, concurrency: FINALIZE_CONCURRENCY };
 }

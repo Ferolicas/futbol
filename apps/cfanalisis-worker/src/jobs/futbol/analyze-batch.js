@@ -1,15 +1,28 @@
 // @ts-nocheck
 /**
  * Job: futbol-analyze-batch
- * Port of /api/cron/analyze-batch. Since the worker has no time limit, this
- * version analyzes ALL remaining fixtures in a single job (no HTTP chaining
- * via waitUntil), persisting progress to Redis every PERSIST_EVERY matches.
  *
- * Payload: { offset?: number, batchSize?: number, date: string, totalFixtures?: number }
+ * Analyzes every fixture for `date`. Uses a worker-pool (mapPool) so we
+ * always keep ANALYZE_CONCURRENCY matches in flight; the shared rate
+ * limiter inside lib/api-football.js (~9 req/s) is the real ceiling, not
+ * batch alignment.
+ *
+ * Idempotent on retry: analyzeMatch returns `fromCache=true` for fixtures
+ * already in Supabase, so re-runs are nearly free for the already-done
+ * ones and only re-attempt the failures.
+ *
+ * If any fixture still has no analysis at the end, the job throws — BullMQ
+ * retries with exponential backoff (see attempts in queues.ts). That
+ * guarantees no match is silently dropped because the process died or
+ * because the API hiccupped on one call.
+ *
+ * Payload: { date: 'YYYY-MM-DD' }
  */
 import { analyzeMatch, getCachedFixturesRaw, redisGet, redisSet, triggerEvent } from '../../shared.js';
+import { mapPool } from '../../pool.js';
 
-const PERSIST_EVERY = 3;
+const ANALYZE_CONCURRENCY = 25;
+const PERSIST_EVERY = 5;
 
 function compactLastFive(lastFive) {
   if (!Array.isArray(lastFive)) return [];
@@ -39,20 +52,25 @@ function buildSummary(a) {
 }
 
 async function markComplete(date, fixtureCount) {
-  await redisSet(`dailyBatch:${date}`, {
-    date, completed: true, fixtureCount,
-    completedAt: new Date().toISOString(),
-  }, 86400);
-  await triggerEvent('analysis', 'batch-complete', {
-    date, fixtureCount, timestamp: new Date().toISOString(),
-  }).catch(() => {});
+  try {
+    await redisSet(`dailyBatch:${date}`, {
+      date, completed: true, fixtureCount,
+      completedAt: new Date().toISOString(),
+    }, 86400);
+  } catch (e) {
+    console.error('[job:futbol-analyze-batch] markComplete redis:', e.message);
+  }
+  try {
+    await triggerEvent('analysis', 'batch-complete', {
+      date, fixtureCount, timestamp: new Date().toISOString(),
+    });
+  } catch {}
 }
 
 export async function runAnalyzeBatch(payload = {}) {
   const { date } = payload;
   if (!date) throw new Error('analyze-batch: date is required');
-  const startOffset = Number(payload.offset || 0);
-  const batchSize   = Number(payload.batchSize || 10);
+  const startedAt = Date.now();
 
   const allFixtures = await getCachedFixturesRaw(date);
   if (!allFixtures || allFixtures.length === 0) {
@@ -60,53 +78,84 @@ export async function runAnalyzeBatch(payload = {}) {
   }
 
   const existing     = (await redisGet(`analysis:${date}`)) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
-  const analyzedIds  = existing.globallyAnalyzed || [];
-  const analyzedOdds = existing.analyzedOdds || {};
-  const analyzedData = existing.analyzedData || {};
+  const analyzedIds  = new Set((existing.globallyAnalyzed || []).map(Number));
+  const analyzedOdds = { ...(existing.analyzedOdds || {}) };
+  const analyzedData = { ...(existing.analyzedData || {}) };
 
-  const persistProgress = () =>
-    redisSet(`analysis:${date}`, { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData }, 12 * 3600).catch(() => {});
+  let analyzed = 0, cached = 0, processed = 0;
+  const failedFids = [];
+  let persistInFlight = null;
 
-  let analyzed = 0, cached = 0, failed = 0;
-  let processedTotal = 0;
+  // Debounced persistence: at most one Redis write in flight at a time,
+  // each one captures a fresh snapshot. Race-safe because the body is
+  // single-threaded; the worst case is a slightly-stale snapshot.
+  const schedulePersist = () => {
+    if (persistInFlight) return;
+    persistInFlight = redisSet(`analysis:${date}`, {
+      globallyAnalyzed: [...analyzedIds],
+      analyzedOdds,
+      analyzedData,
+    }, 12 * 3600)
+      .catch(e => console.error('[job:futbol-analyze-batch] persist:', e.message))
+      .finally(() => { persistInFlight = null; });
+  };
 
-  // No Vercel time limit — process the whole tail of the list in batches.
-  for (let offset = startOffset; offset < allFixtures.length; offset += batchSize) {
-    const batch = allFixtures.slice(offset, offset + batchSize);
+  const results = await mapPool(allFixtures, ANALYZE_CONCURRENCY, async (fixture) => {
+    const fid = Number(fixture.fixture.id);
+    const result = await analyzeMatch(fixture, { date });
+    if (!result) return { fid, skipped: true };
 
-    await Promise.all(batch.map(async (fixture) => {
-      try {
-        const result = await analyzeMatch(fixture, { date });
-        if (!result) return;
+    const a = result.analysis || result;
+    if (result.fromCache) cached++; else analyzed++;
+    analyzedIds.add(fid);
+    if (a?.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
+    const summary = buildSummary(a);
+    if (summary) analyzedData[fid] = summary;
 
-        const a = result.analysis || result;
-        const fid = fixture.fixture.id;
+    processed++;
+    if (processed % PERSIST_EVERY === 0) schedulePersist();
+    return { fid, skipped: false };
+  });
 
-        if (result.fromCache) cached++;
-        else analyzed++;
+  // Collect failures (don't lose track of which fixtures didn't make it)
+  results.forEach((r, idx) => {
+    if (!r.ok) {
+      const fid = Number(allFixtures[idx].fixture.id);
+      failedFids.push(fid);
+      console.error(`[job:futbol-analyze-batch] failed ${fid}:`, r.error.message);
+    }
+  });
 
-        if (!analyzedIds.includes(fid)) analyzedIds.push(fid);
-        if (a?.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
-        const summary = buildSummary(a);
-        if (summary) analyzedData[fid] = summary;
+  // Final persistence (await any in-flight write first, then one more snapshot)
+  if (persistInFlight) await persistInFlight.catch(() => {});
+  try {
+    await redisSet(`analysis:${date}`, {
+      globallyAnalyzed: [...analyzedIds],
+      analyzedOdds,
+      analyzedData,
+    }, 12 * 3600);
+  } catch (e) {
+    console.error('[job:futbol-analyze-batch] final persist:', e.message);
+  }
 
-        processedTotal++;
-        if (processedTotal % PERSIST_EVERY === 0) {
-          await persistProgress();
-        }
-      } catch (e) {
-        failed++;
-        console.error(`[job:futbol-analyze-batch] failed ${fixture.fixture.id}:`, e.message);
-      }
-    }));
-
-    await persistProgress();
-
+  try {
     await triggerEvent('analysis', 'batch-progress', {
       date,
-      progress: `${Math.min(offset + batchSize, allFixtures.length)}/${allFixtures.length}`,
-      analyzed, cached, failed,
-    }).catch(() => {});
+      progress: `${analyzedIds.size}/${allFixtures.length}`,
+      analyzed, cached, failed: failedFids.length,
+    });
+  } catch {}
+
+  const durationSec = ((Date.now() - startedAt) / 1000).toFixed(1);
+
+  // If ANY fixture failed, throw — BullMQ will retry with backoff. On retry,
+  // analyzeMatch returns fromCache=true for completed ones so we only re-do
+  // the failures.
+  if (failedFids.length > 0) {
+    console.error(
+      `[job:futbol-analyze-batch] ${failedFids.length}/${allFixtures.length} fixtures failed in ${durationSec}s — throwing for BullMQ retry`,
+    );
+    throw new Error(`analyze-batch incomplete: ${failedFids.length} failures (${failedFids.slice(0, 10).join(',')}${failedFids.length > 10 ? '…' : ''})`);
   }
 
   await markComplete(date, allFixtures.length);
@@ -114,8 +163,11 @@ export async function runAnalyzeBatch(payload = {}) {
   return {
     ok: true,
     date,
-    analyzed, cached, failed,
-    totalAnalyzed: analyzedIds.length,
     total: allFixtures.length,
+    analyzed,
+    cached,
+    failed: 0,
+    durationSec: Number(durationSec),
+    concurrency: ANALYZE_CONCURRENCY,
   };
 }

@@ -31,12 +31,47 @@ const defaultJobOpts: JobsOptions = {
   removeOnFail: { count: 200, age: 7 * 24 * 3600 },
 };
 
+// Heavy analysis / data-integrity jobs deserve more retries. Each retry of
+// analyze-batch reanalyzes only the previously-failed fixtures (cached ones
+// short-circuit), so 5 attempts × exponential backoff almost guarantees full
+// coverage even through API hiccups.
+const analyzeJobOpts: JobsOptions = {
+  ...defaultJobOpts,
+  attempts: 5,
+  backoff: { type: 'exponential', delay: 10000 },
+};
+
+// High-frequency live polls — don't retry forever, they'll fire again soon
+// anyway. Fail fast and let the next minute's cron try.
+const liveJobOpts: JobsOptions = {
+  ...defaultJobOpts,
+  attempts: 1,
+};
+
+const opts: Record<QueueName, JobsOptions> = {
+  'futbol-fixtures':         defaultJobOpts,
+  'futbol-daily':            defaultJobOpts,
+  'futbol-analyze-batch':    analyzeJobOpts,
+  'futbol-analyze-all-today':analyzeJobOpts,
+  'futbol-finalize':         analyzeJobOpts,
+  'futbol-cleanup':          defaultJobOpts,
+  'futbol-lineups':          defaultJobOpts,
+  'futbol-live':             liveJobOpts,
+  'futbol-live-corners':     liveJobOpts,
+  'futbol-odds':             defaultJobOpts,
+  'baseball-fixtures':       defaultJobOpts,
+  'baseball-analyze':        analyzeJobOpts,
+  'baseball-live':           liveJobOpts,
+  'baseball-finalize':       analyzeJobOpts,
+  'baseball-cleanup':        defaultJobOpts,
+};
+
 export const queues: Record<QueueName, Queue> = Object.fromEntries(
   QUEUE_NAMES.map((name) => [
     name,
     new Queue(name, {
       connection: bullConnection,
-      defaultJobOptions: defaultJobOpts,
+      defaultJobOptions: opts[name],
     }),
   ]),
 ) as Record<QueueName, Queue>;

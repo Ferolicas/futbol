@@ -12,6 +12,11 @@ import {
   computeAllProbabilities, buildCombinada, triggerEvent,
   redisGet, redisSet, KEYS, getMatchSchedule,
 } from '../../shared.js';
+import { mapPool } from '../../pool.js';
+
+// All matches in the 50-min window are processed concurrently. The shared
+// rate limiter in lib/api-football.js still throttles actual HTTP starts.
+const LINEUPS_CONCURRENCY = 15;
 
 const API_HOST = 'v3.football.api-sports.io';
 
@@ -150,50 +155,86 @@ export async function runLineups(_payload = {}) {
   }
 
   let updated = 0, apiCalls = 0, fallbackCount = 0;
-  const updatedFixtureIds = [], lineupImpacts = [];
+  const updatedFixtureIds = [], lineupImpacts = [], errors = [];
 
-  for (let i = 0; i < matchesNearKickoff.length; i += 5) {
-    const batch = matchesNearKickoff.slice(i, i + 5);
-    await Promise.all(batch.map(async (match) => {
-      const fixtureId = match.fixture.id;
-      const homeId = match.teams?.home?.id, awayId = match.teams?.away?.id;
-      const homeTeam = match.teams?.home?.name || 'Home', awayTeam = match.teams?.away?.name || 'Away';
-      try {
-        const [lineups, injuries] = await Promise.all([
-          fetchFromApi(`/fixtures/lineups?fixture=${fixtureId}`),
-          fetchFromApi(`/injuries?fixture=${fixtureId}`),
-        ]);
-        apiCalls += 2;
-        if (!lineups?.length) return;
+  const results = await mapPool(matchesNearKickoff, LINEUPS_CONCURRENCY, async (match) => {
+    const fixtureId = match.fixture.id;
+    const homeId = match.teams?.home?.id, awayId = match.teams?.away?.id;
+    const homeTeam = match.teams?.home?.name || 'Home', awayTeam = match.teams?.away?.name || 'Away';
 
-        const existing = await getCachedAnalysis(fixtureId, today);
-        if (existing) {
-          const updatedAnalysis = { ...existing, lineups: { available: true, data: lineups }, injuries: injuries || existing.injuries, lineupsUpdatedAt: new Date().toISOString(), hasLineup: true };
-          const eHomeId = existing.homeId || homeId, eAwayId = existing.awayId || awayId;
-          const { impacts, homeMissing, awayMissing } = buildImpacts(lineups, existing.homeUsualXI, existing.awayUsualXI, eHomeId, eAwayId, existing.homeTeam || homeTeam, existing.awayTeam || awayTeam);
-          updatedAnalysis.lineupImpact = impacts.length > 0 ? impacts : null;
-          updatedAnalysis.lineupCheck = { homeMissing: homeMissing.missing, awayMissing: awayMissing.missing, checkedAt: new Date().toISOString() };
-          const probs = computeAllProbabilities(updatedAnalysis);
-          updatedAnalysis.calculatedProbabilities = probs;
-          const teamNames = { home: updatedAnalysis.homeTeam, away: updatedAnalysis.awayTeam };
-          updatedAnalysis.combinada = buildCombinada(probs, updatedAnalysis.odds, updatedAnalysis.playerHighlights, teamNames);
-          await cacheAnalysis(fixtureId, updatedAnalysis);
-          updated++; updatedFixtureIds.push(fixtureId);
-          if (impacts.length > 0) lineupImpacts.push({ fixtureId, impacts });
-        } else {
-          fallbackCount++;
-          const [homeDerived, awayDerived] = await Promise.all([deriveUsualXIOnTheFly(homeId), deriveUsualXIOnTheFly(awayId)]);
-          apiCalls += homeDerived.apiCalls + awayDerived.apiCalls;
-          const { impacts, homeMissing, awayMissing } = buildImpacts(lineups, homeDerived.usualXI, awayDerived.usualXI, homeId, awayId, homeTeam, awayTeam);
-          await redisSet(`lineups:${fixtureId}`, { fixtureId, lineups, injuries, homeUsualXI: homeDerived.usualXI, awayUsualXI: awayDerived.usualXI, lineupImpact: impacts.length > 0 ? impacts : null, lineupCheck: { homeMissing: homeMissing.missing, awayMissing: awayMissing.missing, checkedAt: new Date().toISOString() }, fetchedAt: new Date().toISOString() }, 7200);
-          updated++; updatedFixtureIds.push(fixtureId);
-          if (impacts.length > 0) lineupImpacts.push({ fixtureId, impacts });
-        }
-      } catch (e) {
-        console.error(`[job:futbol-lineups] fixture ${fixtureId}:`, e.message);
-      }
-    }));
-  }
+    const [lineups, injuries] = await Promise.all([
+      fetchFromApi(`/fixtures/lineups?fixture=${fixtureId}`),
+      fetchFromApi(`/injuries?fixture=${fixtureId}`),
+    ]);
+    apiCalls += 2;
+    if (!lineups?.length) return { fixtureId, skipped: true };
+
+    const existing = await getCachedAnalysis(fixtureId, today);
+    if (existing) {
+      const updatedAnalysis = {
+        ...existing,
+        lineups: { available: true, data: lineups },
+        injuries: injuries || existing.injuries,
+        lineupsUpdatedAt: new Date().toISOString(),
+        hasLineup: true,
+      };
+      const eHomeId = existing.homeId || homeId, eAwayId = existing.awayId || awayId;
+      const { impacts, homeMissing, awayMissing } = buildImpacts(
+        lineups, existing.homeUsualXI, existing.awayUsualXI,
+        eHomeId, eAwayId, existing.homeTeam || homeTeam, existing.awayTeam || awayTeam,
+      );
+      updatedAnalysis.lineupImpact = impacts.length > 0 ? impacts : null;
+      updatedAnalysis.lineupCheck = {
+        homeMissing: homeMissing.missing,
+        awayMissing: awayMissing.missing,
+        checkedAt: new Date().toISOString(),
+      };
+      const probs = computeAllProbabilities(updatedAnalysis);
+      updatedAnalysis.calculatedProbabilities = probs;
+      const teamNames = { home: updatedAnalysis.homeTeam, away: updatedAnalysis.awayTeam };
+      updatedAnalysis.combinada = buildCombinada(probs, updatedAnalysis.odds, updatedAnalysis.playerHighlights, teamNames);
+      await cacheAnalysis(fixtureId, updatedAnalysis);
+      updated++;
+      updatedFixtureIds.push(fixtureId);
+      if (impacts.length > 0) lineupImpacts.push({ fixtureId, impacts });
+      return { fixtureId, skipped: false, fallback: false };
+    }
+
+    fallbackCount++;
+    const [homeDerived, awayDerived] = await Promise.all([
+      deriveUsualXIOnTheFly(homeId),
+      deriveUsualXIOnTheFly(awayId),
+    ]);
+    apiCalls += homeDerived.apiCalls + awayDerived.apiCalls;
+    const { impacts, homeMissing, awayMissing } = buildImpacts(
+      lineups, homeDerived.usualXI, awayDerived.usualXI,
+      homeId, awayId, homeTeam, awayTeam,
+    );
+    await redisSet(`lineups:${fixtureId}`, {
+      fixtureId, lineups, injuries,
+      homeUsualXI: homeDerived.usualXI,
+      awayUsualXI: awayDerived.usualXI,
+      lineupImpact: impacts.length > 0 ? impacts : null,
+      lineupCheck: {
+        homeMissing: homeMissing.missing,
+        awayMissing: awayMissing.missing,
+        checkedAt: new Date().toISOString(),
+      },
+      fetchedAt: new Date().toISOString(),
+    }, 7200);
+    updated++;
+    updatedFixtureIds.push(fixtureId);
+    if (impacts.length > 0) lineupImpacts.push({ fixtureId, impacts });
+    return { fixtureId, skipped: false, fallback: true };
+  });
+
+  results.forEach((r, idx) => {
+    if (!r.ok) {
+      const fid = matchesNearKickoff[idx].fixture.id;
+      errors.push({ fixtureId: fid, error: r.error.message });
+      console.error(`[job:futbol-lineups] failed ${fid}:`, r.error.message);
+    }
+  });
 
   for (let i = 0; i < apiCalls; i++) await incrementApiCallCount();
 
@@ -204,5 +245,19 @@ export async function runLineups(_payload = {}) {
     }
   }
 
-  return { ok: true, matchesChecked: matchesNearKickoff.length, updated, apiCalls, fallbackCount, lineupImpacts: lineupImpacts.length };
+  // If a meaningful share of the window failed, throw so BullMQ retries.
+  // Tolerate sporadic API hiccups: only retry if >25% failed (rare).
+  if (errors.length > 0 && errors.length / matchesNearKickoff.length > 0.25) {
+    throw new Error(`lineups partial failure: ${errors.length}/${matchesNearKickoff.length}`);
+  }
+
+  return {
+    ok: true,
+    matchesChecked: matchesNearKickoff.length,
+    updated,
+    apiCalls,
+    fallbackCount,
+    lineupImpacts: lineupImpacts.length,
+    errors: errors.length,
+  };
 }

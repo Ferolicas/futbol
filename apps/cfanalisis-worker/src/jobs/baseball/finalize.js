@@ -7,6 +7,7 @@
  * Payload: {}
  */
 import { supabaseAdmin } from '../../shared.js';
+import { mapPool } from '../../pool.js';
 
 const FINISHED = new Set(['FT', 'AOT', 'POST', 'CANC', 'INTR']);
 
@@ -51,24 +52,20 @@ export async function runBaseballFinalize(_payload = {}) {
   const resultsMap = new Map((results || []).map(r => [r.fixture_id, r]));
 
   let finalized = 0, skipped = 0;
-  for (const pred of predictions) {
+  const errors = [];
+
+  const updResults = await mapPool(predictions, 10, async (pred) => {
     const r = resultsMap.get(pred.fixture_id);
-    if (!r || !FINISHED.has(r.status)) {
-      skipped++;
-      continue;
-    }
+    if (!r || !FINISHED.has(r.status)) return { fid: pred.fixture_id, status: 'skip' };
     const homeScore = r.home_score;
     const awayScore = r.away_score;
-    if (homeScore == null || awayScore == null) {
-      skipped++;
-      continue;
-    }
+    if (homeScore == null || awayScore == null) return { fid: pred.fixture_id, status: 'skip' };
 
     const f5Home = sumF5(r.innings?.home || r.innings);
     const f5Away = sumF5(r.innings?.away || r.innings);
     const f5Total = f5Home != null && f5Away != null ? f5Home + f5Away : null;
 
-    await supabaseAdmin.from('baseball_match_predictions').update({
+    const { error } = await supabaseAdmin.from('baseball_match_predictions').update({
       actual_home_score: homeScore,
       actual_away_score: awayScore,
       actual_total_runs: homeScore + awayScore,
@@ -82,8 +79,20 @@ export async function runBaseballFinalize(_payload = {}) {
       finalized_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('fixture_id', pred.fixture_id);
+    if (error) throw new Error(`update: ${error.message || error}`);
+    return { fid: pred.fixture_id, status: 'finalized' };
+  });
 
-    finalized++;
+  updResults.forEach((r, idx) => {
+    if (!r.ok) {
+      errors.push({ fixtureId: predictions[idx].fixture_id, error: r.error.message });
+      console.error(`[job:baseball-finalize] fixture ${predictions[idx].fixture_id}:`, r.error.message);
+    } else if (r.value.status === 'finalized') finalized++;
+    else skipped++;
+  });
+
+  if (errors.length > 0) {
+    throw new Error(`baseball-finalize incomplete: ${errors.length} failures`);
   }
 
   return { ok: true, examined: predictions.length, finalized, skipped };
