@@ -3,6 +3,8 @@ import Fastify from 'fastify';
 import { isValidQueue, queues, QUEUE_NAMES, type QueueName } from './queues.js';
 import { getErrors } from './errors-log.js';
 import { redisGet } from './shared.js';
+import { runFutbolCalibration } from './jobs/calibration/futbol.js';
+import { runBaseballCalibration } from './jobs/calibration/baseball.js';
 
 const SECRET = process.env.WORKER_SECRET || '';
 
@@ -193,10 +195,11 @@ export function buildServer() {
     }
   });
 
-  // Re-enqueue a single job (manual retry from the dashboard)
+  // Re-enqueue a single job (manual retry from the dashboard) OR enqueue a
+  // fresh job in a queue when no jobId is provided.
   app.post('/admin/retry', async (req, reply) => {
     if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
-    const body = (req.body || {}) as { queue?: string; jobId?: string };
+    const body = (req.body || {}) as { queue?: string; jobId?: string; payload?: unknown };
     if (!body.queue || !isValidQueue(body.queue)) {
       return reply.code(400).send({ error: 'queue invalid' });
     }
@@ -207,11 +210,35 @@ export function buildServer() {
         await job.retry();
         return { ok: true, retried: body.jobId };
       }
-      // No jobId → enqueue a fresh job in that queue (useful for "run now" buttons)
-      const job = await queues[body.queue].add(body.queue, body || {});
+      // Fresh job with optional payload from caller (e.g. {force: true} for
+      // analyze-all-today).
+      const job = await queues[body.queue].add(body.queue, body.payload ?? {});
       return { ok: true, enqueued: job.id };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(500).send({ ok: false, error: msg });
+    }
+  });
+
+  // Synchronous calibration. Builds + persists + returns {before, after,
+  // per-market diff} so the dashboard can show what changed. Blocks the
+  // request until done — typical run is a few seconds, occasionally up to
+  // ~30s when the predictions table is large.
+  app.post('/admin/calibrate', async (req, reply) => {
+    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+    const sport = ((req.query as { sport?: string }).sport || 'futbol').toLowerCase();
+    if (sport !== 'futbol' && sport !== 'baseball') {
+      return reply.code(400).send({ error: 'sport must be futbol|baseball' });
+    }
+    const startedAt = Date.now();
+    try {
+      const result = sport === 'baseball'
+        ? await runBaseballCalibration()
+        : await runFutbolCalibration();
+      return { ok: true, durationMs: Date.now() - startedAt, ...result };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      req.log.error({ err: msg }, `/admin/calibrate ${sport} failed`);
       return reply.code(500).send({ ok: false, error: msg });
     }
   });

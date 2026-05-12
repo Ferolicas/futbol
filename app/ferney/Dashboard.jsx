@@ -67,6 +67,10 @@ export default function FerneyDashboard({ user }) {
   const [loading, setLoading] = useState(true);
   const [paused, setPaused] = useState(false);
   const [retryBusy, setRetryBusy] = useState(null);
+  // Actions
+  const [actionBusy, setActionBusy] = useState(null);
+  const [actionMsg, setActionMsg] = useState(null);
+  const [calibrationResult, setCalibrationResult] = useState(null);
 
   const fetchOnce = useCallback(async () => {
     try {
@@ -107,11 +111,64 @@ export default function FerneyDashboard({ user }) {
       await fetch('/api/admin/ferney', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ queue, jobId }),
+        body: JSON.stringify({ action: 'retry', queue, jobId }),
       });
       await fetchOnce();
     } finally {
       setRetryBusy(null);
+    }
+  };
+
+  const onReanalyze = async () => {
+    if (!confirm(`¿Re-analizar TODOS los partidos del ${date}? Esto puede tardar varios minutos y consumir cuota API.`)) return;
+    setActionBusy('reanalyze');
+    setActionMsg(null);
+    try {
+      const res = await fetch('/api/admin/ferney', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'enqueue',
+          queue: 'futbol-analyze-all-today',
+          payload: { date, force: true },
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setActionMsg({ kind: 'ok', text: `Re-análisis encolado (job #${data.enqueued || data.jobId || '?'}). Mira el progreso arriba en "Jobs activos".` });
+        await fetchOnce();
+      } else {
+        setActionMsg({ kind: 'bad', text: `Error: ${data.error || `HTTP ${res.status}`}` });
+      }
+    } catch (e) {
+      setActionMsg({ kind: 'bad', text: `Error: ${e.message}` });
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
+  const onCalibrate = async (sport) => {
+    if (!confirm(`¿Recalibrar modelo ${sport}? Recalcula los nudos isotónicos desde el histórico finalizado.`)) return;
+    setActionBusy(`calibrate-${sport}`);
+    setActionMsg(null);
+    setCalibrationResult(null);
+    try {
+      const res = await fetch('/api/admin/ferney', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'calibrate', sport }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setCalibrationResult(data);
+        setActionMsg({ kind: 'ok', text: `Calibración ${sport} completada en ${(data.durationMs / 1000).toFixed(1)}s.` });
+      } else {
+        setActionMsg({ kind: 'bad', text: `Error: ${data.error || `HTTP ${res.status}`}` });
+      }
+    } catch (e) {
+      setActionMsg({ kind: 'bad', text: `Error: ${e.message}` });
+    } finally {
+      setActionBusy(null);
     }
   };
 
@@ -173,6 +230,136 @@ export default function FerneyDashboard({ user }) {
         {err && (
           <div className="rounded border border-red-800 bg-red-950/40 p-3 text-sm text-red-200">
             Error: {err}
+          </div>
+        )}
+
+        {/* === Acciones === */}
+        <section>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-zinc-400">Acciones</h2>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={onReanalyze}
+              disabled={!!actionBusy}
+              className="rounded border border-emerald-700 bg-emerald-900/30 px-3 py-2 text-sm font-medium hover:bg-emerald-900/50 disabled:opacity-50"
+            >
+              {actionBusy === 'reanalyze' ? '⏳ Encolando…' : `↻ Re-analizar todo el día (${date})`}
+            </button>
+            <button
+              onClick={() => onCalibrate('futbol')}
+              disabled={!!actionBusy}
+              className="rounded border border-sky-700 bg-sky-900/30 px-3 py-2 text-sm font-medium hover:bg-sky-900/50 disabled:opacity-50"
+            >
+              {actionBusy === 'calibrate-futbol' ? '⏳ Calibrando fútbol…' : '⚙ Recalibrar fútbol'}
+            </button>
+            <button
+              onClick={() => onCalibrate('baseball')}
+              disabled={!!actionBusy}
+              className="rounded border border-amber-700 bg-amber-900/30 px-3 py-2 text-sm font-medium hover:bg-amber-900/50 disabled:opacity-50"
+            >
+              {actionBusy === 'calibrate-baseball' ? '⏳ Calibrando baseball…' : '⚾ Recalibrar baseball'}
+            </button>
+          </div>
+          {actionMsg && (
+            <div className={`mt-2 rounded border p-2 text-sm ${
+              actionMsg.kind === 'ok'
+                ? 'border-emerald-700 bg-emerald-950/40 text-emerald-200'
+                : 'border-red-800 bg-red-950/40 text-red-200'
+            }`}>
+              {actionMsg.text}
+            </div>
+          )}
+        </section>
+
+        {/* === Modal calibración === */}
+        {calibrationResult && (
+          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4">
+            <div className="w-full max-w-4xl rounded-lg border border-zinc-800 bg-zinc-950 p-5 shadow-2xl">
+              <div className="mb-3 flex items-baseline justify-between">
+                <h3 className="text-lg font-semibold">
+                  Calibración {calibrationResult.sport} · resultado
+                </h3>
+                <button
+                  onClick={() => setCalibrationResult(null)}
+                  className="rounded border border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-800"
+                >
+                  Cerrar
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <StatCard label="Muestras totales" value={calibrationResult.sampleSize} />
+                <StatCard
+                  label="Mercados antes"
+                  value={calibrationResult.before?.marketsCount ?? '—'}
+                  sub={calibrationResult.before?.builtAt ? fmtDateTime(calibrationResult.before.builtAt) : 'sin datos previos'}
+                />
+                <StatCard
+                  label="Mercados ahora"
+                  value={calibrationResult.after?.marketsCount ?? '—'}
+                  sub={fmtDateTime(calibrationResult.after?.builtAt)}
+                  tone="ok"
+                />
+                <StatCard
+                  label="Duración"
+                  value={`${(calibrationResult.durationMs / 1000).toFixed(1)}s`}
+                />
+              </div>
+
+              <div className="mt-4 overflow-x-auto rounded border border-zinc-800">
+                <table className="w-full text-sm">
+                  <thead className="bg-zinc-900 text-xs uppercase tracking-wider text-zinc-400">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Mercado</th>
+                      <th className="px-3 py-2 text-right">Muestras</th>
+                      <th className="px-3 py-2 text-left">Estado</th>
+                      <th className="px-3 py-2 text-right">Δ máx</th>
+                      <th className="px-3 py-2 text-right">Δ medio</th>
+                      <th className="px-3 py-2 text-left">Mayor cambio</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(calibrationResult.markets || []).map((m) => {
+                      const isNew = m.status === 'calibrated' && !m.beforeKnots;
+                      const skipped = m.status !== 'calibrated';
+                      const dM = m.diff?.maxShift;
+                      const dA = m.diff?.meanShift;
+                      const big = m.diff?.biggest;
+                      const sign = (v) => (v > 0 ? '+' : '') + v;
+                      return (
+                        <tr key={m.key} className="border-t border-zinc-800 hover:bg-zinc-900/40">
+                          <td className="px-3 py-2 font-mono text-xs">{m.key}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{m.samples}</td>
+                          <td className="px-3 py-2 text-xs">
+                            {skipped ? (
+                              <span className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-400">{m.status}</span>
+                            ) : isNew ? (
+                              <span className="rounded bg-sky-900/40 px-2 py-0.5 text-sky-200">nuevo</span>
+                            ) : (
+                              <span className="rounded bg-emerald-900/40 px-2 py-0.5 text-emerald-200">recalibrado</span>
+                            )}
+                          </td>
+                          <td className={`px-3 py-2 text-right tabular-nums ${
+                            dM != null && Math.abs(dM) > 3 ? 'text-amber-300' : ''
+                          }`}>
+                            {dM != null ? `${sign(dM)}pp` : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-zinc-400">
+                            {dA != null ? `${dA}pp` : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-zinc-400">
+                            {big ? `en ${big.x}%: ${big.before}→${big.after}` : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-3 text-xs text-zinc-500">
+                Δ = cambio en puntos porcentuales sobre la curva calibrada. Valores &gt;3pp indican un mercado donde la nueva calibración cambió notablemente.
+              </div>
+            </div>
           </div>
         )}
 

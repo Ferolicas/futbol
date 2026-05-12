@@ -11,7 +11,7 @@ import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../../lib/supabase';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 15;
+export const maxDuration = 60; // calibration can take 20-30s on large prediction tables
 
 async function requireAdmin() {
   const supabase = createSupabaseServerClient();
@@ -68,6 +68,12 @@ export async function GET(request) {
   }
 }
 
+/**
+ * POST body shapes (action-routed):
+ *   { action: 'retry',     queue, jobId }          → re-run a failed job
+ *   { action: 'enqueue',   queue, payload }        → kick off a fresh job (e.g. force re-analysis)
+ *   { action: 'calibrate', sport: 'futbol'|'baseball' }  → synchronous calibration (slow, up to ~30s)
+ */
 export async function POST(request) {
   const user = await requireAdmin();
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
@@ -76,22 +82,49 @@ export async function POST(request) {
   if (!cfg) return Response.json({ error: 'worker not configured' }, { status: 500 });
 
   const body = await request.json().catch(() => ({}));
-  const { queue, jobId } = body || {};
-  if (!queue) return Response.json({ error: 'queue required' }, { status: 400 });
+  const action = body?.action;
+
+  // Calibration is potentially slow → longer timeout
+  const isCalibrate = action === 'calibrate';
+  const timeoutMs = isCalibrate ? 60_000 : 15_000;
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(`${cfg.url}/admin/retry`, {
+    let workerUrl;
+    let workerBody;
+
+    if (isCalibrate) {
+      const sport = body.sport === 'baseball' ? 'baseball' : 'futbol';
+      workerUrl = `${cfg.url}/admin/calibrate?sport=${sport}`;
+      workerBody = '{}';
+    } else if (action === 'retry' || action === 'enqueue') {
+      if (!body.queue) return Response.json({ error: 'queue required' }, { status: 400 });
+      workerUrl = `${cfg.url}/admin/retry`;
+      workerBody = JSON.stringify({
+        queue: body.queue,
+        jobId: action === 'retry' ? body.jobId : undefined,
+        payload: action === 'enqueue' ? body.payload : undefined,
+      });
+    } else {
+      // Backwards-compat: legacy clients post { queue, jobId } directly
+      if (!body.queue) return Response.json({ error: 'action required' }, { status: 400 });
+      workerUrl = `${cfg.url}/admin/retry`;
+      workerBody = JSON.stringify({ queue: body.queue, jobId: body.jobId });
+    }
+
+    const res = await fetch(workerUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${cfg.secret}`,
-      },
-      body: JSON.stringify({ queue, jobId }),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.secret}` },
+      body: workerBody,
+      signal: controller.signal,
       cache: 'no-store',
     });
     const text = await res.text();
     return new Response(text, { status: res.status, headers: { 'Content-Type': 'application/json' } });
   } catch (e) {
     return Response.json({ error: e.message }, { status: 502 });
+  } finally {
+    clearTimeout(t);
   }
 }

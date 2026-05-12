@@ -1,0 +1,23 @@
+name: Deploy Worker to VPS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/cfanalisis-worker/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /apps/futbol
+            git pull
+            pm2 restart cfanalisis-worker
