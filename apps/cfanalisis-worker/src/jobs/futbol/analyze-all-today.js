@@ -16,6 +16,7 @@ import {
   getAnalyzedFixtureIds, redisSet,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
+import { logError } from '../../errors-log.js';
 
 const ANALYZE_CONCURRENCY = 25;
 
@@ -46,10 +47,15 @@ function buildSummary(a) {
   };
 }
 
-export async function runAnalyzeAllToday(payload = {}) {
+/** @param {any} payload @param {any} [job] */
+export async function runAnalyzeAllToday(payload = {}, job = null) {
   const date = payload.date || new Date().toISOString().split('T')[0];
   const forceAll = payload.force === true;
   const startTime = Date.now();
+  const reportProgress = async (extra) => {
+    if (!job?.updateProgress) return;
+    try { await job.updateProgress(extra); } catch {}
+  };
 
   const { fixtures } = await getFixtures(date, { forceApi: forceAll });
   const allFixtures = fixtures || [];
@@ -72,12 +78,23 @@ export async function runAnalyzeAllToday(payload = {}) {
   const analyzedOdds = {};
   const analyzedData = {};
   let success = 0, skipped = 0;
+  let processed = 0;
   const errors = [];
+
+  await reportProgress({
+    phase: 'analyzing', processed: 0, total: toAnalyze.length,
+    analyzed: 0, skipped: 0, failed: 0, startedAt: startTime,
+  });
 
   const results = await mapPool(toAnalyze, ANALYZE_CONCURRENCY, async (fixture) => {
     const fid = Number(fixture.fixture.id);
     const result = await analyzeMatch(fixture, { date });
     if (!result || result.dataQuality === 'insufficient') {
+      processed++;
+      await reportProgress({
+        phase: 'analyzing', processed, total: toAnalyze.length,
+        analyzed: success, skipped: skipped + 1, failed: errors.length, startedAt: startTime,
+      });
       return { fid, kind: 'skip' };
     }
     const a = result.analysis || result;
@@ -86,18 +103,34 @@ export async function runAnalyzeAllToday(payload = {}) {
     if (a?.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
     const summary = buildSummary(a);
     if (summary) analyzedData[fid] = summary;
+    processed++;
+    await reportProgress({
+      phase: 'analyzing', processed, total: toAnalyze.length,
+      analyzed: success, skipped, failed: errors.length, startedAt: startTime,
+    });
     return { fid, kind: 'ok' };
   });
 
-  results.forEach((r, idx) => {
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
     if (r.ok) {
       if (r.value.kind === 'skip') skipped++;
     } else {
-      const fid = Number(toAnalyze[idx].fixture.id);
+      const fixture = toAnalyze[i];
+      const fid = Number(fixture.fixture.id);
       errors.push({ fixtureId: fid, error: r.error.message });
       console.error(`[job:futbol-analyze-all-today] failed ${fid}:`, r.error.message);
+      await logError(date, {
+        job: 'futbol-analyze-all-today',
+        fixtureId: fid,
+        homeTeam: fixture.teams?.home?.name,
+        awayTeam: fixture.teams?.away?.name,
+        league: fixture.league?.name,
+        kickoff: fixture.fixture?.date,
+        error: r.error.message,
+      });
     }
-  });
+  }
 
   if (analyzedIds.length > 0) {
     try {

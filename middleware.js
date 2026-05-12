@@ -27,7 +27,7 @@ export async function middleware(request) {
   const { pathname } = request.nextUrl;
 
   // Protected routes
-  const protectedPaths = ['/dashboard', '/admin', '/planes'];
+  const protectedPaths = ['/dashboard', '/admin', '/ferney', '/planes'];
   const isProtected = protectedPaths.some(p => pathname.startsWith(p));
 
   if (isProtected && !user) {
@@ -78,8 +78,8 @@ export async function middleware(request) {
     }
   }
 
-  // Admin routes — require admin or owner role
-  if (pathname.startsWith('/admin') && user) {
+  // Admin routes (and /ferney panel) — require admin or owner role
+  if ((pathname.startsWith('/admin') || pathname.startsWith('/ferney')) && user) {
     const profile = await getProfile(user.id);
     if (!profile || !['admin', 'owner'].includes(profile.role)) {
       const url = request.nextUrl.clone();
@@ -92,5 +92,5 @@ export async function middleware(request) {
 }
 
 export const config = {
-  matcher: ['/', '/sign-in', '/sign-up', '/dashboard/:path*', '/admin/:path*', '/planes/:path*'],
+  matcher: ['/', '/sign-in', '/sign-up', '/dashboard/:path*', '/admin/:path*', '/ferney/:path*', '/ferney', '/planes/:path*'],
 };

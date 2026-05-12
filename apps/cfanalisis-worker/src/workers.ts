@@ -24,11 +24,12 @@ import { runBaseballCleanup } from './jobs/baseball/cleanup.js';
 const handlers: Record<QueueName, Processor> = {
   'futbol-fixtures':         async (job) => runFixtures(job.data),
   'futbol-daily':            async (job) => runDaily(job.data),
-  'futbol-analyze-batch':    async (job) => runAnalyzeBatch(job.data),
-  'futbol-analyze-all-today':async (job) => runAnalyzeAllToday(job.data),
+  // Pass the job to analyze/lineups handlers so they can call job.updateProgress()
+  'futbol-analyze-batch':    async (job) => runAnalyzeBatch(job.data, job),
+  'futbol-analyze-all-today':async (job) => runAnalyzeAllToday(job.data, job),
   'futbol-finalize':         async (job) => runFinalize(job.data),
   'futbol-cleanup':          async (job) => runCleanup(job.data),
-  'futbol-lineups':          async (job) => runLineups(job.data),
+  'futbol-lineups':          async (job) => runLineups(job.data, job),
   'futbol-live':             async (job) => runLive(job.data),
   'futbol-live-corners':     async (job) => runLiveCorners(job.data),
   'futbol-odds':             async (job) => runOdds(job.data),

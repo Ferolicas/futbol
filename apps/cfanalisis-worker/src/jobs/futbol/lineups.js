@@ -13,6 +13,7 @@ import {
   redisGet, redisSet, KEYS, getMatchSchedule,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
+import { logError } from '../../errors-log.js';
 
 // All matches in the 50-min window are processed concurrently. The shared
 // rate limiter in lib/api-football.js still throttles actual HTTP starts.
@@ -105,7 +106,8 @@ function buildImpacts(lineups, homeUsualXI, awayUsualXI, homeId, awayId, homeTea
   return { impacts, homeMissing, awayMissing };
 }
 
-export async function runLineups(_payload = {}) {
+/** @param {any} _payload @param {any} [_job] */
+export async function runLineups(_payload = {}, _job = null) {
   const today = new Date().toISOString().split('T')[0];
   const now = Date.now();
   const WINDOW_MS = 45 * 60 * 1000;
@@ -228,13 +230,24 @@ export async function runLineups(_payload = {}) {
     return { fixtureId, skipped: false, fallback: true };
   });
 
-  results.forEach((r, idx) => {
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
     if (!r.ok) {
-      const fid = matchesNearKickoff[idx].fixture.id;
+      const m = matchesNearKickoff[i];
+      const fid = m.fixture.id;
       errors.push({ fixtureId: fid, error: r.error.message });
       console.error(`[job:futbol-lineups] failed ${fid}:`, r.error.message);
+      await logError(today, {
+        job: 'futbol-lineups',
+        fixtureId: fid,
+        homeTeam: m.teams?.home?.name,
+        awayTeam: m.teams?.away?.name,
+        league: m.league?.name,
+        kickoff: m.fixture?.date,
+        error: r.error.message,
+      });
     }
-  });
+  }
 
   for (let i = 0; i < apiCalls; i++) await incrementApiCallCount();
 

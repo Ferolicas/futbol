@@ -20,6 +20,7 @@
  */
 import { analyzeMatch, getCachedFixturesRaw, redisGet, redisSet, triggerEvent } from '../../shared.js';
 import { mapPool } from '../../pool.js';
+import { logError } from '../../errors-log.js';
 
 const ANALYZE_CONCURRENCY = 25;
 const PERSIST_EVERY = 5;
@@ -67,10 +68,15 @@ async function markComplete(date, fixtureCount) {
   } catch {}
 }
 
-export async function runAnalyzeBatch(payload = {}) {
+/** @param {any} payload @param {any} [job] */
+export async function runAnalyzeBatch(payload = {}, job = null) {
   const { date } = payload;
   if (!date) throw new Error('analyze-batch: date is required');
   const startedAt = Date.now();
+  const reportProgress = async (extra) => {
+    if (!job?.updateProgress) return;
+    try { await job.updateProgress(extra); } catch {}
+  };
 
   const allFixtures = await getCachedFixturesRaw(date);
   if (!allFixtures || allFixtures.length === 0) {
@@ -100,6 +106,11 @@ export async function runAnalyzeBatch(payload = {}) {
       .finally(() => { persistInFlight = null; });
   };
 
+  await reportProgress({
+    phase: 'analyzing', processed: 0, total: allFixtures.length,
+    analyzed: 0, cached: 0, failed: 0, startedAt,
+  });
+
   const results = await mapPool(allFixtures, ANALYZE_CONCURRENCY, async (fixture) => {
     const fid = Number(fixture.fixture.id);
     const result = await analyzeMatch(fixture, { date });
@@ -114,17 +125,33 @@ export async function runAnalyzeBatch(payload = {}) {
 
     processed++;
     if (processed % PERSIST_EVERY === 0) schedulePersist();
+    await reportProgress({
+      phase: 'analyzing', processed, total: allFixtures.length,
+      analyzed, cached, failed: failedFids.length, startedAt,
+    });
     return { fid, skipped: false };
   });
 
   // Collect failures (don't lose track of which fixtures didn't make it)
-  results.forEach((r, idx) => {
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
     if (!r.ok) {
-      const fid = Number(allFixtures[idx].fixture.id);
+      const fixture = allFixtures[i];
+      const fid = Number(fixture.fixture.id);
       failedFids.push(fid);
       console.error(`[job:futbol-analyze-batch] failed ${fid}:`, r.error.message);
+      // Persist a rich error entry for the /ferney dashboard
+      await logError(date, {
+        job: 'futbol-analyze-batch',
+        fixtureId: fid,
+        homeTeam: fixture.teams?.home?.name,
+        awayTeam: fixture.teams?.away?.name,
+        league: fixture.league?.name,
+        kickoff: fixture.fixture?.date,
+        error: r.error.message,
+      });
     }
-  });
+  }
 
   // Final persistence (await any in-flight write first, then one more snapshot)
   if (persistInFlight) await persistInFlight.catch(() => {});
@@ -147,6 +174,13 @@ export async function runAnalyzeBatch(payload = {}) {
   } catch {}
 
   const durationSec = ((Date.now() - startedAt) / 1000).toFixed(1);
+
+  await reportProgress({
+    phase: failedFids.length > 0 ? 'failed' : 'complete',
+    processed: allFixtures.length, total: allFixtures.length,
+    analyzed, cached, failed: failedFids.length, startedAt,
+    durationSec: Number(durationSec),
+  });
 
   // If ANY fixture failed, throw — BullMQ will retry with backoff. On retry,
   // analyzeMatch returns fromCache=true for completed ones so we only re-do
