@@ -7,12 +7,11 @@
  *
  * Payload: {}
  */
-import { getCachedAnalysis, cacheAnalysis, incrementApiCallCount } from '../../../../../lib/sanity-cache.js';
-import { computeAllProbabilities } from '../../../../../lib/calculations.js';
-import { buildCombinada } from '../../../../../lib/combinada.js';
-import { triggerEvent } from '../../../../../lib/pusher.js';
-import { redisGet, redisSet, KEYS } from '../../../../../lib/redis.js';
-import { getMatchSchedule } from '../../../../../lib/supabase-cache.js';
+import {
+  getCachedAnalysis, cacheAnalysis, incrementApiCallCount,
+  computeAllProbabilities, buildCombinada, triggerEvent,
+  redisGet, redisSet, KEYS, getMatchSchedule,
+} from '../../shared.js';
 
 const API_HOST = 'v3.football.api-sports.io';
 

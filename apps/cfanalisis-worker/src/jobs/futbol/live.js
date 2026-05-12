@@ -7,13 +7,12 @@
  *
  * Payload: {}
  */
-import { ALL_LEAGUE_IDS } from '../../../../../lib/leagues.js';
-import { triggerEvent } from '../../../../../lib/pusher.js';
-import { redisGet, redisSet, KEYS, TTL } from '../../../../../lib/redis.js';
-import { incrementApiCallCount } from '../../../../../lib/sanity-cache.js';
-import { sendPushNotification } from '../../../../../lib/webpush.js';
-import { supabaseAdmin } from '../../../../../lib/supabase.js';
-import { getMatchSchedule } from '../../../../../lib/supabase-cache.js';
+import {
+  ALL_LEAGUE_IDS, triggerEvent,
+  redisGet, redisSet, KEYS, TTL,
+  incrementApiCallCount, sendPushNotification,
+  supabaseAdmin, getMatchSchedule,
+} from '../../shared.js';
 
 const API_HOST = 'v3.football.api-sports.io';
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];

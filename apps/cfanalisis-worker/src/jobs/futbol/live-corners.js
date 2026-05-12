@@ -6,9 +6,7 @@
  *
  * Payload: {}
  */
-import { triggerEvent } from '../../../../../lib/pusher.js';
-import { redisGet, redisSet, KEYS, TTL } from '../../../../../lib/redis.js';
-import { incrementApiCallCount } from '../../../../../lib/sanity-cache.js';
+import { triggerEvent, redisGet, redisSet, KEYS, TTL, incrementApiCallCount } from '../../shared.js';
 
 const API_HOST = 'v3.football.api-sports.io';
 const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];

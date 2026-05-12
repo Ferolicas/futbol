@@ -6,9 +6,7 @@
  *
  * Payload: {}
  */
-import { redisGet, redisSet, KEYS } from '../../../../../lib/redis.js';
-import { fetchOddsForFixtures } from '../../../../../lib/odds-api.js';
-import { triggerEvent } from '../../../../../lib/pusher.js';
+import { redisGet, redisSet, KEYS, fetchOddsForFixtures, triggerEvent } from '../../shared.js';
 
 const FINISHED = ['FT', 'AET', 'PEN', 'AWD', 'WO'];
 

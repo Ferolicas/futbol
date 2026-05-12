@@ -6,10 +6,12 @@
  *
  * Payload: { date?: string }
  */
-import { getBaseballFixturesByDate, getBaseballOddsByGame, getBaseballTeamStats, getBaseballH2H, getBaseballQuota } from '../../../../../lib/api-baseball.js';
-import { computeBaseballProbabilities, buildBaseballCombinada, scoreBaseballDataQuality, extractBestOdds } from '../../../../../lib/baseball-model.js';
-import { calibrateBaseballProbabilities, flattenProbabilitiesForStorage } from '../../../../../lib/baseball-calibration.js';
-import { supabaseAdmin } from '../../../../../lib/supabase.js';
+import {
+  getBaseballFixturesByDate, getBaseballOddsByGame, getBaseballTeamStats, getBaseballH2H, getBaseballQuota,
+  computeBaseballProbabilities, buildBaseballCombinada, scoreBaseballDataQuality, extractBestOdds,
+  calibrateBaseballProbabilities, flattenProbabilitiesForStorage,
+  supabaseAdmin,
+} from '../../shared.js';
 
 export async function runBaseballAnalyze(payload = {}) {
   const date = payload.date || new Date().toISOString().split('T')[0];

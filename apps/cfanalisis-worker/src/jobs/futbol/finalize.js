@@ -8,8 +8,7 @@
  *
  * Payload: {} (none)
  */
-import { redisGet, KEYS } from '../../../../../lib/redis.js';
-import { supabaseAdmin } from '../../../../../lib/supabase.js';
+import { redisGet, KEYS, supabaseAdmin } from '../../shared.js';
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 const API_HOST = 'v3.football.api-sports.io';

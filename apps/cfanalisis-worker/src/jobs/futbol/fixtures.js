@@ -6,10 +6,7 @@
  *
  * Payload: { date?: 'YYYY-MM-DD', forceApi?: boolean }
  */
-import { getFixtures, getQuota } from '../../../../../lib/api-football.js';
-import { saveMatchSchedule } from '../../../../../lib/supabase-cache.js';
-import { cacheFixtures } from '../../../../../lib/sanity-cache.js';
-import { redisSet, KEYS } from '../../../../../lib/redis.js';
+import { getFixtures, getQuota, saveMatchSchedule, cacheFixtures, redisSet, KEYS } from '../../shared.js';
 
 export async function runFixtures(payload = {}) {
   const now = new Date();

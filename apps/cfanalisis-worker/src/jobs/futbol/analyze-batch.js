@@ -7,10 +7,7 @@
  *
  * Payload: { offset?: number, batchSize?: number, date: string, totalFixtures?: number }
  */
-import { analyzeMatch } from '../../../../../lib/api-football.js';
-import { getCachedFixturesRaw } from '../../../../../lib/sanity-cache.js';
-import { redisGet, redisSet } from '../../../../../lib/redis.js';
-import { triggerEvent } from '../../../../../lib/pusher.js';
+import { analyzeMatch, getCachedFixturesRaw, redisGet, redisSet, triggerEvent } from '../../shared.js';
 
 const PERSIST_EVERY = 3;
 

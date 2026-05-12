@@ -6,7 +6,7 @@
  *
  * Payload: { purge?: boolean }
  */
-import { supabaseAdmin } from '../../../../../lib/supabase.js';
+import { supabaseAdmin } from '../../shared.js';
 
 function cutoffDateStr(days) {
   const d = new Date();

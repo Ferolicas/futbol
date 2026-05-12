@@ -7,8 +7,7 @@
  *
  * Payload: { date?: 'YYYY-MM-DD', force?: boolean }
  */
-import { getFixtures } from '../../../../../lib/api-football.js';
-import { redisGet, redisSet } from '../../../../../lib/redis.js';
+import { getFixtures, redisGet, redisSet } from '../../shared.js';
 import { queues } from '../../queues.js';
 
 export async function runDaily(payload = {}) {

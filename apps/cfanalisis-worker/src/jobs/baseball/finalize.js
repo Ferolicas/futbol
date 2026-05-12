@@ -6,7 +6,7 @@
  *
  * Payload: {}
  */
-import { supabaseAdmin } from '../../../../../lib/supabase.js';
+import { supabaseAdmin } from '../../shared.js';
 
 const FINISHED = new Set(['FT', 'AOT', 'POST', 'CANC', 'INTR']);
 

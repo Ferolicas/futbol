@@ -7,9 +7,7 @@
  *
  * Payload: {}
  */
-import { getBaseballLiveGames, getBaseballQuota } from '../../../../../lib/api-baseball.js';
-import { supabaseAdmin } from '../../../../../lib/supabase.js';
-import { redisGet, redisSet } from '../../../../../lib/redis.js';
+import { getBaseballLiveGames, getBaseballQuota, supabaseAdmin, redisGet, redisSet } from '../../shared.js';
 
 const LIVE_BUDGET = 30;
 const SAFETY_RESERVE = 5;

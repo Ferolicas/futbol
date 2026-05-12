@@ -6,9 +6,7 @@
  *
  * Payload: { date?: string, force?: boolean }
  */
-import { getFixtures, analyzeMatch, getQuota } from '../../../../../lib/api-football.js';
-import { getAnalyzedFixtureIds } from '../../../../../lib/sanity-cache.js';
-import { redisSet } from '../../../../../lib/redis.js';
+import { getFixtures, analyzeMatch, getQuota, getAnalyzedFixtureIds, redisSet } from '../../shared.js';
 
 function compactLastFive(lastFive) {
   if (!Array.isArray(lastFive)) return [];

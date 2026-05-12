@@ -5,8 +5,7 @@
  *
  * Payload: { date?: 'YYYY-MM-DD' }
  */
-import { getBaseballFixturesByDate, getBaseballQuota } from '../../../../../lib/api-baseball.js';
-import { supabaseAdmin } from '../../../../../lib/supabase.js';
+import { getBaseballFixturesByDate, getBaseballQuota, supabaseAdmin } from '../../shared.js';
 
 export async function runBaseballFixtures(payload = {}) {
   const now = new Date();
