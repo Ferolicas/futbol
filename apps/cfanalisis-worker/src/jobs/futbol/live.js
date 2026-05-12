@@ -224,11 +224,17 @@ export async function runLive(_payload = {}) {
     if (FINISHED_STATUSES.includes(match.fixture.status.short)) {
       liveData.savedAt = new Date().toISOString();
       await redisSet(KEYS.fixtureStats(fid), liveData, TTL.yesterday);
-      supabaseAdmin.from('match_analysis')
-        .update({ live_stats: liveData })
-        .eq('fixture_id', fid)
-        .then(() => {})
-        .catch(e => console.error(`[live] supabase stats save ${fid}:`, e.message));
+      // Fire-and-forget Supabase write. PostgrestFilterBuilder is thenable
+      // but not a real Promise — wrap in async IIFE to get proper try/catch.
+      void (async () => {
+        try {
+          await supabaseAdmin.from('match_analysis')
+            .update({ live_stats: liveData })
+            .eq('fixture_id', fid);
+        } catch (e) {
+          console.error(`[live] supabase stats save ${fid}:`, e.message);
+        }
+      })();
     }
   }
 
@@ -327,10 +333,17 @@ export async function runLive(_payload = {}) {
           fullStats.date = today;
           fullStats.savedAt = new Date().toISOString();
           await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
-          supabaseAdmin.from('match_analysis')
-            .update({ live_stats: fullStats })
-            .eq('fixture_id', fid)
-            .catch(e => console.error(`[live:stale] supabase stats save ${fid}:`, e.message));
+          // Fire-and-forget Supabase write. PostgrestFilterBuilder is thenable
+          // but not a real Promise — wrap in async IIFE to get proper try/catch.
+          void (async () => {
+            try {
+              await supabaseAdmin.from('match_analysis')
+                .update({ live_stats: fullStats })
+                .eq('fixture_id', fid);
+            } catch (e) {
+              console.error(`[live:stale] supabase stats save ${fid}:`, e.message);
+            }
+          })();
           mergedLive[fid] = { ...fullStats, status: fresh.fixture.status };
           staleFixedCount++;
           finishedUpdates.push({ fixtureId: fid, status: fresh.fixture.status, goals: fresh.goals, score: fresh.score, corners: fullStats.corners, yellowCards: fullStats.yellowCards, redCards: fullStats.redCards, goalScorers: fullStats.goalScorers || [], missedPenalties: fullStats.missedPenalties || [] });
