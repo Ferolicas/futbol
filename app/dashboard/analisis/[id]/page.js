@@ -785,28 +785,61 @@ export default function AnalisisPage() {
                 ].filter(Boolean),
               },
               {
-                title: 'Más/Menos goles',
+                title: 'Goles totales del partido',
                 subtitle: `Esperado: ${p.overUnder.expectedTotal} goles`,
                 items: [
-                  hasOdd(o.overUnder?.['Over_1_5']) && { label: 'Más de 1.5', value: p.overUnder.over15 },
-                  hasOdd(o.overUnder?.['Over_2_5']) && { label: 'Más de 2.5', value: p.overUnder.over25 },
-                  hasOdd(o.overUnder?.['Over_3_5']) && { label: 'Más de 3.5', value: p.overUnder.over35 },
+                  hasOdd(o.overUnder?.['Over_1_5']) && { label: 'Total partido — Más de 1.5', value: p.overUnder.over15 },
+                  hasOdd(o.overUnder?.['Over_2_5']) && { label: 'Total partido — Más de 2.5', value: p.overUnder.over25 },
+                  hasOdd(o.overUnder?.['Over_3_5']) && { label: 'Total partido — Más de 3.5', value: p.overUnder.over35 },
                 ].filter(Boolean),
               },
               {
-                title: 'Córners totales',
+                title: 'Goles por equipo',
                 items: [
-                  hasOdd(o.corners?.['Over_8_5'])  && { label: 'Más de 8.5',  value: p.corners.over85  },
-                  hasOdd(o.corners?.['Over_9_5'])  && { label: 'Más de 9.5',  value: p.corners.over95  },
-                  hasOdd(o.corners?.['Over_10_5']) && { label: 'Más de 10.5', value: p.corners.over105 },
+                  hasOdd(o.homeGoals?.['Over_0_5']) && p.perTeam?.home?.goals && { label: `Local (${a.homeTeam}) — Más de 0.5`,     value: p.perTeam.home.goals.over05 },
+                  hasOdd(o.homeGoals?.['Over_1_5']) && p.perTeam?.home?.goals && { label: `Local (${a.homeTeam}) — Más de 1.5`,     value: p.perTeam.home.goals.over15 },
+                  hasOdd(o.homeGoals?.['Over_2_5']) && p.perTeam?.home?.goals && { label: `Local (${a.homeTeam}) — Más de 2.5`,     value: p.perTeam.home.goals.over25 },
+                  hasOdd(o.awayGoals?.['Over_0_5']) && p.perTeam?.away?.goals && { label: `Visitante (${a.awayTeam}) — Más de 0.5`, value: p.perTeam.away.goals.over05 },
+                  hasOdd(o.awayGoals?.['Over_1_5']) && p.perTeam?.away?.goals && { label: `Visitante (${a.awayTeam}) — Más de 1.5`, value: p.perTeam.away.goals.over15 },
+                  hasOdd(o.awayGoals?.['Over_2_5']) && p.perTeam?.away?.goals && { label: `Visitante (${a.awayTeam}) — Más de 2.5`, value: p.perTeam.away.goals.over25 },
                 ].filter(Boolean),
               },
               {
-                title: 'Tarjetas totales',
+                title: 'Córners totales del partido',
                 items: [
-                  hasOdd(o.cards?.['Over_2_5']) && { label: 'Más de 2.5', value: p.cards.over25 },
-                  hasOdd(o.cards?.['Over_3_5']) && { label: 'Más de 3.5', value: p.cards.over35 },
-                  hasOdd(o.cards?.['Over_4_5']) && { label: 'Más de 4.5', value: p.cards.over45 },
+                  hasOdd(o.corners?.['Over_8_5'])  && { label: 'Total partido — Más de 8.5',  value: p.corners.over85  },
+                  hasOdd(o.corners?.['Over_9_5'])  && { label: 'Total partido — Más de 9.5',  value: p.corners.over95  },
+                  hasOdd(o.corners?.['Over_10_5']) && { label: 'Total partido — Más de 10.5', value: p.corners.over105 },
+                ].filter(Boolean),
+              },
+              {
+                title: 'Córners por equipo',
+                items: [
+                  hasOdd(o.homeCorners?.['Over_3_5']) && p.perTeam?.home?.corners && { label: `Local (${a.homeTeam}) — Más de 3.5`,     value: p.perTeam.home.corners.over35 },
+                  hasOdd(o.homeCorners?.['Over_4_5']) && p.perTeam?.home?.corners && { label: `Local (${a.homeTeam}) — Más de 4.5`,     value: p.perTeam.home.corners.over45 },
+                  hasOdd(o.homeCorners?.['Over_5_5']) && p.perTeam?.home?.corners && { label: `Local (${a.homeTeam}) — Más de 5.5`,     value: p.perTeam.home.corners.over55 },
+                  hasOdd(o.awayCorners?.['Over_3_5']) && p.perTeam?.away?.corners && { label: `Visitante (${a.awayTeam}) — Más de 3.5`, value: p.perTeam.away.corners.over35 },
+                  hasOdd(o.awayCorners?.['Over_4_5']) && p.perTeam?.away?.corners && { label: `Visitante (${a.awayTeam}) — Más de 4.5`, value: p.perTeam.away.corners.over45 },
+                  hasOdd(o.awayCorners?.['Over_5_5']) && p.perTeam?.away?.corners && { label: `Visitante (${a.awayTeam}) — Más de 5.5`, value: p.perTeam.away.corners.over55 },
+                ].filter(Boolean),
+              },
+              {
+                title: 'Tarjetas totales del partido',
+                items: [
+                  hasOdd(o.cards?.['Over_2_5']) && { label: 'Total partido — Más de 2.5', value: p.cards.over25 },
+                  hasOdd(o.cards?.['Over_3_5']) && { label: 'Total partido — Más de 3.5', value: p.cards.over35 },
+                  hasOdd(o.cards?.['Over_4_5']) && { label: 'Total partido — Más de 4.5', value: p.cards.over45 },
+                ].filter(Boolean),
+              },
+              {
+                title: 'Tarjetas por equipo',
+                items: [
+                  hasOdd(o.homeCards?.['Over_0_5']) && p.perTeam?.home?.cards && { label: `Local (${a.homeTeam}) — Más de 0.5`,     value: p.perTeam.home.cards.over05 },
+                  hasOdd(o.homeCards?.['Over_1_5']) && p.perTeam?.home?.cards && { label: `Local (${a.homeTeam}) — Más de 1.5`,     value: p.perTeam.home.cards.over15 },
+                  hasOdd(o.homeCards?.['Over_2_5']) && p.perTeam?.home?.cards && { label: `Local (${a.homeTeam}) — Más de 2.5`,     value: p.perTeam.home.cards.over25 },
+                  hasOdd(o.awayCards?.['Over_0_5']) && p.perTeam?.away?.cards && { label: `Visitante (${a.awayTeam}) — Más de 0.5`, value: p.perTeam.away.cards.over05 },
+                  hasOdd(o.awayCards?.['Over_1_5']) && p.perTeam?.away?.cards && { label: `Visitante (${a.awayTeam}) — Más de 1.5`, value: p.perTeam.away.cards.over15 },
+                  hasOdd(o.awayCards?.['Over_2_5']) && p.perTeam?.away?.cards && { label: `Visitante (${a.awayTeam}) — Más de 2.5`, value: p.perTeam.away.cards.over25 },
                 ].filter(Boolean),
               },
             ].filter(c => c.items.length > 0);

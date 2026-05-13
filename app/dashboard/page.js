@@ -540,6 +540,23 @@ export default function Dashboard() {
     }
   };
 
+  // Test push — fires a notification end-to-end to verify SW + VAPID + sub
+  const handlePushTest = async () => {
+    setPushError(null);
+    try {
+      const res = await fetch('/api/push/test', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        setPushError(null);
+        alert(`✅ Push de prueba enviado a ${data.delivered}/${data.devicesCount} dispositivo(s). Revisa tu sistema operativo.`);
+      } else {
+        setPushError(data.reason || 'No se pudo enviar el push de prueba');
+      }
+    } catch (e) {
+      setPushError('Error de red al probar push');
+    }
+  };
+
   // === PUSHER REAL-TIME EVENTS ===
   // Only subscribe to Pusher for today's date — past dates are historical/fixed
   const isViewingToday = date === todayInTz(userTz);
@@ -781,62 +798,65 @@ export default function Dashboard() {
   });
 
   const apuestaDelDia = useMemo(() => {
-    const now = new Date();
-    const allBets = [];
+    // Reglas:
+    //  - Solo selecciones con probabilidad ≥ 90% Y cuota real ≥ 1.20
+    //  - SIN límite por partido: si un partido tiene 10 opciones que cumplen,
+    //    se muestran las 10
+    //  - Orden: NS > en vivo > finalizado, dentro de cada grupo prob desc
+    //  - Cap visual 95% (nunca se muestra 100% para no dar falsa certeza)
+    const MIN_PROB = 90;
+    const MIN_ODD  = 1.20;
+    const all = [];
+
     Object.entries(analyzedData).forEach(([fid, data]) => {
       const fx = fixtures.find(f => f.fixture.id === Number(fid));
       const status = fx?.fixture?.status?.short;
-      const matchTime = fx ? new Date(fx.fixture.date) : null;
-      // Priority: upcoming > live > finished (prefer matches not yet played)
       let priority = 0;
       if (status === 'NS') priority = 2;
       else if (isLive(status)) priority = 1;
-      else if (isFinished(status)) priority = 0;
       const mn = fx ? `${fx.teams.home.name} vs ${fx.teams.away.name}` : `${data.homeTeam || '?'} vs ${data.awayTeam || '?'}`;
       const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
-      // Rebuild combinada to get all expanded markets (not just cached version)
+
+      // Reconstruimos en vivo para incluir mercados per-team y de jugador
       const liveComb = data.calculatedProbabilities
         ? buildCombinada(data.calculatedProbabilities, data.odds, data.playerHighlights, { home: homeTeam, away: awayTeam })
         : null;
       const selections = liveComb?.selections || data?.combinada?.selections || [];
+
       selections.forEach(sel => {
-        // Apuesta del día: solo 92%-100%. Mostramos 95% como tope visual
-        // (nada se muestra como 100% para evitar dar falsa certeza).
-        if (sel.probability >= 92) {
-          const displayProb = Math.min(95, sel.probability);
-          allBets.push({ ...sel, probability: displayProb, fixtureId: fid, matchName: mn, priority, matchTime, homeTeam, awayTeam });
-        }
+        if (sel.probability < MIN_PROB) return;
+        if (!sel.odd || sel.odd < MIN_ODD) return;
+        all.push({
+          ...sel,
+          probability: Math.min(95, sel.probability),
+          fixtureId: fid,
+          matchName: mn,
+          homeTeam,
+          awayTeam,
+          priority,
+          matchTime: fx ? new Date(fx.fixture.date) : null,
+        });
       });
     });
-    // Sort: priority desc (upcoming first), then probability desc
-    allBets.sort((a, b) => b.priority - a.priority || b.probability - a.probability);
-    // Pick from different matches/teams - at least 3 from different teams
-    const picked = [];
-    const usedTeams = new Set();
-    const usedMatches = new Set();
-    for (const bet of allBets) {
-      // Skip if both teams in this match are already used
-      if (usedTeams.has(bet.homeTeam) && usedTeams.has(bet.awayTeam)) continue;
-      // Limit 1 pick per match to spread across games
-      if (usedMatches.has(bet.fixtureId) && picked.length < 3) continue;
-      picked.push(bet);
-      usedTeams.add(bet.homeTeam);
-      usedTeams.add(bet.awayTeam);
-      usedMatches.add(bet.fixtureId);
-    }
-    // If we still have < 3, fill with remaining high-prob bets from any match
-    if (picked.length < 3) {
-      for (const bet of allBets) {
-        if (picked.length >= 3) break;
-        if (picked.some(p => p.fixtureId === bet.fixtureId && p.id === bet.id)) continue;
-        picked.push(bet);
-      }
-    }
-    if (picked.length === 0) return null;
-    const co = picked.reduce((a, b) => b.odd ? a * b.odd : a, 1);
-    const cp = picked.reduce((a, b) => a + b.probability, 0) / picked.length;
-    return { selections: picked, combinedOdd: +co.toFixed(2), combinedProbability: +cp.toFixed(1) };
+
+    if (all.length === 0) return null;
+
+    // Orden: priority desc (NS primero), después prob desc, después cuota desc
+    all.sort((a, b) =>
+      b.priority - a.priority ||
+      b.probability - a.probability ||
+      (b.odd || 0) - (a.odd || 0)
+    );
+
+    const combinedOdd         = all.reduce((acc, m) => acc * (m.odd || 1), 1);
+    const combinedProbability = all.reduce((acc, m) => acc + m.probability, 0) / all.length;
+
+    return {
+      selections: all,
+      combinedOdd: +combinedOdd.toFixed(2),
+      combinedProbability: +combinedProbability.toFixed(1),
+    };
   }, [analyzedData, fixtures]);
 
   const customCombinada = useMemo(() => {
@@ -947,15 +967,35 @@ export default function Dashboard() {
             )}
             {pushSupported && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                <button
-                  className={`btn-bell${pushEnabled ? ' btn-bell--on' : ''}`}
-                  onClick={handlePushToggle}
-                  title={pushEnabled ? 'Desactivar notificaciones de goles (solo partidos favoritos)' : 'Activar notificaciones de goles (solo partidos favoritos)'}
-                >
-                  {pushEnabled ? '🔔' : '🔕'}
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <button
+                    className={`btn-bell${pushEnabled ? ' btn-bell--on' : ''}`}
+                    onClick={handlePushToggle}
+                    title={pushEnabled ? 'Desactivar notificaciones' : 'Activar notificaciones de goles (favoritos)'}
+                  >
+                    {pushEnabled ? '🔔' : '🔕'}
+                  </button>
+                  {pushEnabled && (
+                    <button
+                      onClick={handlePushTest}
+                      title="Enviar push de prueba a tus dispositivos"
+                      style={{
+                        background: 'rgba(34,211,238,0.1)',
+                        border: '1px solid rgba(34,211,238,0.3)',
+                        color: '#22d3ee',
+                        borderRadius: 8,
+                        padding: '4px 8px',
+                        fontSize: 11,
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                      }}
+                    >
+                      🧪 probar
+                    </button>
+                  )}
+                </div>
                 {pushError && (
-                  <span style={{ fontSize: 11, color: '#ef4444', maxWidth: 180, textAlign: 'right' }}>{pushError}</span>
+                  <span style={{ fontSize: 11, color: '#ef4444', maxWidth: 220, textAlign: 'right' }}>{pushError}</span>
                 )}
               </div>
             )}
@@ -1550,90 +1590,116 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
   const markets = useMemo(() => {
     if (!data?.calculatedProbabilities) return [];
     const p = data.calculatedProbabilities;
-    const o = data.odds;
+    const o = data.odds || {};
     const ph = data.playerHighlights;
     const hn = match.teams.home.name;
     const an = match.teams.away.name;
     const m = [];
 
-    // Ganador
-    if (p.winner?.home >= 30) m.push({ id: 'w-h', name: `Gana ${hn}`, probability: p.winner.home, odd: o?.matchWinner?.home || null, cat: 'Ganador' });
-    if (p.winner?.draw >= 20) m.push({ id: 'w-d', name: 'Empate', probability: p.winner.draw, odd: o?.matchWinner?.draw || null, cat: 'Ganador' });
-    if (p.winner?.away >= 30) m.push({ id: 'w-a', name: `Gana ${an}`, probability: p.winner.away, odd: o?.matchWinner?.away || null, cat: 'Ganador' });
+    // Acordeón: solo mostrar opciones que tengan cuota real (odd > 1).
+    // Si no hay cuota, no se muestra. El análisis completo sí muestra todo
+    // — esto es solo para "Selecciona para tu combinada".
+    const add = (entry, oddVal) => {
+      const odd = parseFloat(oddVal);
+      if (!isFinite(odd) || odd <= 1) return;
+      m.push({ ...entry, odd });
+    };
 
-    // BTTS
-    if (p.btts >= 50) m.push({ id: 'btts-yes', name: 'Ambos marcan SI', probability: p.btts, odd: o?.btts?.yes || null, cat: 'BTTS' });
-    if (p.bttsNo >= 50) m.push({ id: 'btts-no', name: 'Ambos marcan NO', probability: p.bttsNo, odd: o?.btts?.no || null, cat: 'BTTS' });
+    // ── Ganador ──
+    add({ id: 'w-h', name: `Ganador — ${hn}`, probability: p.winner?.home, cat: 'Ganador' }, o.matchWinner?.home);
+    add({ id: 'w-d', name: 'Empate',          probability: p.winner?.draw, cat: 'Ganador' }, o.matchWinner?.draw);
+    add({ id: 'w-a', name: `Ganador — ${an}`, probability: p.winner?.away, cat: 'Ganador' }, o.matchWinner?.away);
 
-    // Goles totales
+    // ── BTTS ──
+    add({ id: 'btts-yes', name: 'Total partido — Ambos marcan SÍ', probability: p.btts,   cat: 'BTTS' }, o.btts?.yes);
+    add({ id: 'btts-no',  name: 'Total partido — Ambos marcan NO', probability: p.bttsNo, cat: 'BTTS' }, o.btts?.no);
+
+    // ── Goles totales del partido ──
     if (p.overUnder) {
-      m.push({ id: 'o15', name: 'Más de 1.5 goles', probability: p.overUnder.over15, odd: o?.overUnder?.['Over_1_5'] || null, cat: 'Goles' });
-      m.push({ id: 'o25', name: 'Más de 2.5 goles', probability: p.overUnder.over25, odd: o?.overUnder?.['Over_2_5'] || null, cat: 'Goles' });
-      m.push({ id: 'o35', name: 'Más de 3.5 goles', probability: p.overUnder.over35, odd: o?.overUnder?.['Over_3_5'] || null, cat: 'Goles' });
-      m.push({ id: 'u25', name: 'Menos de 2.5 goles', probability: p.overUnder.under25, odd: o?.overUnder?.['Under_2_5'] || null, cat: 'Goles' });
+      add({ id: 'o15', name: 'Total partido — Más de 1.5 goles',  probability: p.overUnder.over15,  cat: 'Goles totales' }, o.overUnder?.Over_1_5);
+      add({ id: 'o25', name: 'Total partido — Más de 2.5 goles',  probability: p.overUnder.over25,  cat: 'Goles totales' }, o.overUnder?.Over_2_5);
+      add({ id: 'o35', name: 'Total partido — Más de 3.5 goles',  probability: p.overUnder.over35,  cat: 'Goles totales' }, o.overUnder?.Over_3_5);
+      add({ id: 'u25', name: 'Total partido — Menos de 2.5 goles', probability: p.overUnder.under25, cat: 'Goles totales' }, o.overUnder?.Under_2_5);
+      add({ id: 'u35', name: 'Total partido — Menos de 3.5 goles', probability: p.overUnder.under35, cat: 'Goles totales' }, o.overUnder?.Under_3_5);
     }
 
-    // Goles por equipo
+    // ── Goles por equipo ──
     if (p.perTeam?.home?.goals) {
-      m.push({ id: 'hg05', name: `${hn} marca`, probability: p.perTeam.home.goals.over05, odd: null, cat: `Goles ${hn}` });
-      m.push({ id: 'hg15', name: `${hn} — más de 1.5`, probability: p.perTeam.home.goals.over15, odd: null, cat: `Goles ${hn}` });
+      add({ id: 'hg05', name: `Local (${hn}) — Más de 0.5 goles`, probability: p.perTeam.home.goals.over05, cat: `Goles · ${hn}` }, o.homeGoals?.Over_0_5);
+      add({ id: 'hg15', name: `Local (${hn}) — Más de 1.5 goles`, probability: p.perTeam.home.goals.over15, cat: `Goles · ${hn}` }, o.homeGoals?.Over_1_5);
+      add({ id: 'hg25', name: `Local (${hn}) — Más de 2.5 goles`, probability: p.perTeam.home.goals.over25, cat: `Goles · ${hn}` }, o.homeGoals?.Over_2_5);
     }
     if (p.perTeam?.away?.goals) {
-      m.push({ id: 'ag05', name: `${an} marca`, probability: p.perTeam.away.goals.over05, odd: null, cat: `Goles ${an}` });
-      m.push({ id: 'ag15', name: `${an} — más de 1.5`, probability: p.perTeam.away.goals.over15, odd: null, cat: `Goles ${an}` });
+      add({ id: 'ag05', name: `Visitante (${an}) — Más de 0.5 goles`, probability: p.perTeam.away.goals.over05, cat: `Goles · ${an}` }, o.awayGoals?.Over_0_5);
+      add({ id: 'ag15', name: `Visitante (${an}) — Más de 1.5 goles`, probability: p.perTeam.away.goals.over15, cat: `Goles · ${an}` }, o.awayGoals?.Over_1_5);
+      add({ id: 'ag25', name: `Visitante (${an}) — Más de 2.5 goles`, probability: p.perTeam.away.goals.over25, cat: `Goles · ${an}` }, o.awayGoals?.Over_2_5);
     }
 
-    // Córners totales
+    // ── Córners totales ──
     if (p.corners) {
-      m.push({ id: 'c85', name: 'Más de 8.5 córners', probability: p.corners.over85, odd: null, cat: 'Córners' });
-      m.push({ id: 'c95', name: 'Más de 9.5 córners', probability: p.corners.over95, odd: null, cat: 'Córners' });
-      m.push({ id: 'c105', name: 'Más de 10.5 córners', probability: p.corners.over105, odd: null, cat: 'Córners' });
+      add({ id: 'c85',  name: 'Total partido — Más de 8.5 córners',  probability: p.corners.over85,  cat: 'Córners totales' }, o.corners?.Over_8_5);
+      add({ id: 'c95',  name: 'Total partido — Más de 9.5 córners',  probability: p.corners.over95,  cat: 'Córners totales' }, o.corners?.Over_9_5);
+      add({ id: 'c105', name: 'Total partido — Más de 10.5 córners', probability: p.corners.over105, cat: 'Córners totales' }, o.corners?.Over_10_5);
     }
 
-    // Córners por equipo
+    // ── Córners por equipo ──
     if (p.perTeam?.home?.corners) {
       const hc = p.perTeam.home.corners;
-      m.push({ id: 'hc35', name: `${hn} — más de 3.5 córners`, probability: hc.over35, odd: null, cat: `Córners ${hn}` });
-      m.push({ id: 'hc45', name: `${hn} — más de 4.5 córners`, probability: hc.over45, odd: null, cat: `Córners ${hn}` });
+      add({ id: 'hc35', name: `Local (${hn}) — Más de 3.5 córners`, probability: hc.over35, cat: `Córners · ${hn}` }, o.homeCorners?.Over_3_5);
+      add({ id: 'hc45', name: `Local (${hn}) — Más de 4.5 córners`, probability: hc.over45, cat: `Córners · ${hn}` }, o.homeCorners?.Over_4_5);
+      add({ id: 'hc55', name: `Local (${hn}) — Más de 5.5 córners`, probability: hc.over55, cat: `Córners · ${hn}` }, o.homeCorners?.Over_5_5);
     }
     if (p.perTeam?.away?.corners) {
       const ac = p.perTeam.away.corners;
-      m.push({ id: 'ac35', name: `${an} — más de 3.5 córners`, probability: ac.over35, odd: null, cat: `Córners ${an}` });
-      m.push({ id: 'ac45', name: `${an} — más de 4.5 córners`, probability: ac.over45, odd: null, cat: `Córners ${an}` });
+      add({ id: 'ac35', name: `Visitante (${an}) — Más de 3.5 córners`, probability: ac.over35, cat: `Córners · ${an}` }, o.awayCorners?.Over_3_5);
+      add({ id: 'ac45', name: `Visitante (${an}) — Más de 4.5 córners`, probability: ac.over45, cat: `Córners · ${an}` }, o.awayCorners?.Over_4_5);
+      add({ id: 'ac55', name: `Visitante (${an}) — Más de 5.5 córners`, probability: ac.over55, cat: `Córners · ${an}` }, o.awayCorners?.Over_5_5);
     }
 
-    // Tarjetas totales
+    // ── Tarjetas totales ──
     if (p.cards) {
-      m.push({ id: 'k25', name: 'Más de 2.5 tarjetas', probability: p.cards.over25, odd: null, cat: 'Tarjetas' });
-      m.push({ id: 'k35', name: 'Más de 3.5 tarjetas', probability: p.cards.over35, odd: null, cat: 'Tarjetas' });
+      add({ id: 'k25', name: 'Total partido — Más de 2.5 tarjetas', probability: p.cards.over25, cat: 'Tarjetas totales' }, o.cards?.Over_2_5);
+      add({ id: 'k35', name: 'Total partido — Más de 3.5 tarjetas', probability: p.cards.over35, cat: 'Tarjetas totales' }, o.cards?.Over_3_5);
+      add({ id: 'k45', name: 'Total partido — Más de 4.5 tarjetas', probability: p.cards.over45, cat: 'Tarjetas totales' }, o.cards?.Over_4_5);
     }
 
-    // Tarjetas por equipo
-    if (p.perTeam?.home?.cards) m.push({ id: 'hk15', name: `${hn} — más de 1.5 tarjetas`, probability: p.perTeam.home.cards.over15, odd: null, cat: `Tarjetas ${hn}` });
-    if (p.perTeam?.away?.cards) m.push({ id: 'ak15', name: `${an} — más de 1.5 tarjetas`, probability: p.perTeam.away.cards.over15, odd: null, cat: `Tarjetas ${an}` });
-
-    // Periodos de gol
-    if (p.goalTiming?.combined) {
-      p.goalTiming.combined.forEach(t => {
-        m.push({ id: `timing-${t.period}`, name: `Gol en ${t.period} min`, probability: t.probability, odd: null, cat: 'Periodos' });
-      });
+    // ── Tarjetas por equipo ──
+    if (p.perTeam?.home?.cards) {
+      add({ id: 'hk05', name: `Local (${hn}) — Más de 0.5 tarjetas`, probability: p.perTeam.home.cards.over05, cat: `Tarjetas · ${hn}` }, o.homeCards?.Over_0_5);
+      add({ id: 'hk15', name: `Local (${hn}) — Más de 1.5 tarjetas`, probability: p.perTeam.home.cards.over15, cat: `Tarjetas · ${hn}` }, o.homeCards?.Over_1_5);
+      add({ id: 'hk25', name: `Local (${hn}) — Más de 2.5 tarjetas`, probability: p.perTeam.home.cards.over25, cat: `Tarjetas · ${hn}` }, o.homeCards?.Over_2_5);
+    }
+    if (p.perTeam?.away?.cards) {
+      add({ id: 'ak05', name: `Visitante (${an}) — Más de 0.5 tarjetas`, probability: p.perTeam.away.cards.over05, cat: `Tarjetas · ${an}` }, o.awayCards?.Over_0_5);
+      add({ id: 'ak15', name: `Visitante (${an}) — Más de 1.5 tarjetas`, probability: p.perTeam.away.cards.over15, cat: `Tarjetas · ${an}` }, o.awayCards?.Over_1_5);
+      add({ id: 'ak25', name: `Visitante (${an}) — Más de 2.5 tarjetas`, probability: p.perTeam.away.cards.over25, cat: `Tarjetas · ${an}` }, o.awayCards?.Over_2_5);
     }
 
-    // Goleadores
-    if (ph?.scorers) {
-      ph.scorers.slice(0, 3).forEach(s => {
-        const prob = Math.round(s.goals.filter(g => g >= 1).length / (s.goals.length || 5) * 100);
-        m.push({ id: `scorer-${s.id}`, name: `Goleador — ${s.name}`, probability: prob, odd: null, cat: 'Goleadores' });
-      });
-    }
-
-    // Remates al arco
-    if (ph?.shooters) {
-      ph.shooters.slice(0, 3).forEach(s => {
-        const prob = Math.round(s.shotsOnGoal.filter(sh => sh >= 1).length / (s.shotsOnGoal.length || 5) * 100);
-        m.push({ id: `shooter-${s.id}`, name: `Remates — ${s.name}`, probability: prob, odd: null, cat: 'Remates' });
-      });
-    }
+    // ── Player markets (solo si hay cuota real para el jugador) ──
+    const normName = (n) => (n || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    const playerOdd = (family, name) => {
+      const norm = normName(name);
+      if (!norm) return null;
+      const bucket = o.players?.[family];
+      if (!bucket) return null;
+      if (bucket[norm]) return bucket[norm];
+      const last = norm.split(' ').pop();
+      if (last && last.length >= 3) {
+        for (const [k, v] of Object.entries(bucket)) {
+          if (k.endsWith(' ' + last) || k === last) return v;
+        }
+      }
+      return null;
+    };
+    const playerFreq = (events) => {
+      if (!Array.isArray(events) || events.length === 0) return 0;
+      const hits = events.filter(e => (e || 0) >= 1).length;
+      return Math.round((hits / events.length) * 100);
+    };
+    (ph?.scorers || []).forEach(s => add({ id: `scorer-${s.id}`,  name: `${s.name} — Anotar un gol`,         probability: playerFreq(s.goals),       cat: `Goleadores` },  playerOdd('scorer', s.name)));
+    (ph?.shooters || []).forEach(s => add({ id: `shots-${s.id}`,  name: `${s.name} — Remate al arco`,        probability: playerFreq(s.shotsOnGoal), cat: `Remates al arco` }, playerOdd('shots',  s.name)));
+    (ph?.foulers  || []).forEach(s => add({ id: `fouls-${s.id}`,  name: `${s.name} — Cometer una falta`,     probability: playerFreq(s.fouls),       cat: `Faltas` },      playerOdd('fouls',  s.name)));
+    (ph?.bookers  || []).forEach(s => add({ id: `booked-${s.id}`, name: `${s.name} — Recibir tarjeta amarilla`, probability: playerFreq(s.yellows),     cat: `Tarjetas jugador` }, playerOdd('booked', s.name)));
 
     return m
       .filter(x => x.probability >= 70 && x.probability <= 95)
