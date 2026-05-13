@@ -6,6 +6,25 @@ on:
       - main
     paths:
       - 'apps/cfanalisis-worker/**'
+      # El worker importa dinámicamente lib/*.js (ver apps/cfanalisis-worker/src/shared.ts).
+      # Si cambia api-football.js, combinada.js, calculations.js, etc. — el worker
+      # también debe redeployarse, si no produce análisis con la lógica vieja.
+      - 'lib/api-football.js'
+      - 'lib/api-baseball.js'
+      - 'lib/combinada.js'
+      - 'lib/calculations.js'
+      - 'lib/calibration.js'
+      - 'lib/baseball-model.js'
+      - 'lib/baseball-calibration.js'
+      - 'lib/odds-api.js'
+      - 'lib/redis.js'
+      - 'lib/sanity-cache.js'
+      - 'lib/supabase.js'
+      - 'lib/supabase-cache.js'
+      - 'lib/webpush.js'
+      - 'lib/pusher.js'
+      - 'lib/leagues.js'
+  workflow_dispatch:
 
 jobs:
   deploy:
