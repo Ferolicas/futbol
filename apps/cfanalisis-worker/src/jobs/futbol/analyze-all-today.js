@@ -88,7 +88,10 @@ export async function runAnalyzeAllToday(payload = {}, job = null) {
 
   const results = await mapPool(toAnalyze, ANALYZE_CONCURRENCY, async (fixture) => {
     const fid = Number(fixture.fixture.id);
-    const result = await analyzeMatch(fixture, { date });
+    // Pasar force a analyzeMatch — si no, analyzeMatch devuelve el análisis
+    // cacheado en Supabase/Redis y la re-analizacion no hace nada (termina
+    // en 1 seg porque solo lee de cache).
+    const result = await analyzeMatch(fixture, { date, force: forceAll });
     if (!result || result.dataQuality === 'insufficient') {
       processed++;
       await reportProgress({
