@@ -421,17 +421,21 @@ export default function Dashboard() {
     }
   }, [date, applyLiveUpdate]);
 
-  // On mount: detect user timezone, correct date to local, refresh live first, then load fixtures
+  // On mount ONLY: detect user timezone, set date to local today, load fixtures.
+  // Empty deps on purpose — loadFixtures/refreshLiveData are callbacks that get
+  // recreated whenever `date` changes. Including them here triggered the
+  // "shows next day for 1s then reverts to today" bug because clicking the
+  // arrow re-fired this effect which reset the date.
   useEffect(() => {
     const tz = getUserTz();
     setUserTz(tz);
     const localDate = todayInTz(tz);
     setDate(localDate);
-    // Sequential: refresh live data (fixes stale statuses in Redis) before loading fixtures
     refreshLiveData(localDate).finally(() => {
       loadFixtures(localDate, { silent: !!_dashCache, tz });
     });
-  }, [loadFixtures, refreshLiveData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Live polling fallback (30s) when there are live matches — supplements Pusher
   useEffect(() => {
