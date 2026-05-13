@@ -1972,6 +1972,77 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 );
               })()}
 
+              {/* ── Estadísticas calculadas (extraído del análisis completo) ── */}
+              {data.calculatedProbabilities && (() => {
+                const p = data.calculatedProbabilities;
+                const ccd = p.cornerCardData || {};
+                const hn = match.teams.home.name;
+                const an = match.teams.away.name;
+                const fmt = (v) => (v == null || Number.isNaN(v) ? '—' : (typeof v === 'number' ? v.toFixed(2) : v));
+                const Cell = ({ label, value, color }) => (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                    <span style={{ fontSize: '.72rem', color: 'var(--t3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8 }}>{label}</span>
+                    <span style={{ fontSize: '.85rem', fontWeight: 700, color: color || 'var(--t1)', fontFamily: 'JetBrains Mono, monospace', fontVariantNumeric: 'tabular-nums' }}>{fmt(value)}</span>
+                  </div>
+                );
+                const Card = ({ title, accent, children }) => (
+                  <div style={{
+                    background: 'var(--bg-2)',
+                    border: `1px solid ${accent || 'var(--brd)'}`,
+                    borderRadius: 10,
+                    padding: '10px 12px',
+                    flex: '1 1 220px',
+                    minWidth: 0,
+                  }}>
+                    <div style={{ fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--t2)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
+                    {children}
+                  </div>
+                );
+                return (
+                  <div style={{ marginTop: 14 }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontSize: '.75rem',
+                      fontWeight: 700,
+                      color: '#f97316',
+                      textTransform: 'uppercase',
+                      letterSpacing: '.05em',
+                      marginBottom: 10,
+                    }}>
+                      <span>📊</span> Estadísticas calculadas
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                      <Card title={`Goles — ${hn}`} accent="rgba(0,212,255,.25)">
+                        <Cell label="Prom. anotados"      value={p.homeGoals?.avgScored}   color="#4ade80" />
+                        <Cell label="Prom. recibidos"     value={p.homeGoals?.avgConceded} color="#f87171" />
+                        <Cell label="Prom. vs rival H2H"  value={p.h2hGoals?.homeAvg}      color="#67e8f9" />
+                      </Card>
+                      <Card title={`Goles — ${an}`} accent="rgba(236,72,153,.25)">
+                        <Cell label="Prom. anotados"      value={p.awayGoals?.avgScored}   color="#4ade80" />
+                        <Cell label="Prom. recibidos"     value={p.awayGoals?.avgConceded} color="#f87171" />
+                        <Cell label="Prom. vs rival H2H"  value={p.h2hGoals?.awayAvg}      color="#f472b6" />
+                      </Card>
+                      <Card title="Córners (últimos 5)" accent="rgba(34,197,94,.25)">
+                        <Cell label={`${hn} a favor`}    value={ccd.homeCornersAvg} />
+                        <Cell label={`${hn} en contra`}  value={ccd.homeCornersAgainstAvg} />
+                        <Cell label={`${an} a favor`}    value={ccd.awayCornersAvg} />
+                        <Cell label={`${an} en contra`}  value={ccd.awayCornersAgainstAvg} />
+                        <Cell label="Total combinado"    value={p.cornerAvg} color="#4ade80" />
+                      </Card>
+                      <Card title="Tarjetas (últimos 5)" accent="rgba(245,158,11,.25)">
+                        <Cell label={`${hn} amarillas`} value={ccd.homeYellowsAvg} />
+                        <Cell label={`${hn} rojas`}     value={ccd.homeRedsAvg} />
+                        <Cell label={`${an} amarillas`} value={ccd.awayYellowsAvg} />
+                        <Cell label={`${an} rojas`}     value={ccd.awayRedsAvg} />
+                        <Cell label="Total amarillas prom." value={p.cardAvg} color="#fbbf24" />
+                      </Card>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Últimos 5 partidos por equipo */}
               <Last5Block
                 homeLastFive={data.homeLastFive}
