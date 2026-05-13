@@ -14,11 +14,13 @@ export async function GET(request) {
   const url = new URL(request.url);
   const date = url.searchParams.get('date') || new Date().toISOString().split('T')[0];
 
+  // Fetch by date only (no status filter in DB — avoids type coercion issues)
   const { data, error } = await supabaseAdmin
     .from('combinada_dia')
     .select('id, fecha, selections, combined_odd, combined_probability, status, created_at')
     .eq('fecha', date)
-    .eq('status', 'published')
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) {
@@ -27,6 +29,10 @@ export async function GET(request) {
 
   if (!data) {
     return Response.json({ ok: false, reason: 'not found', date }, { status: 404 });
+  }
+
+  if (data.status !== 'published') {
+    return Response.json({ ok: false, reason: 'not published', status: data.status, date }, { status: 404 });
   }
 
   return Response.json({ ok: true, data });
