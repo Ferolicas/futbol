@@ -247,6 +247,11 @@ export default function FerneyDashboard({ user }) {
           background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.3); color: #f59e0b;
         }
         .fw-action-btn.yellow:hover:not(:disabled) { background: rgba(245,158,11,0.14); }
+        .fw-action-btn.purple {
+          background: rgba(167,139,250,0.08); border-color: rgba(167,139,250,0.3); color: #a78bfa;
+          text-decoration: none;
+        }
+        .fw-action-btn.purple:hover { background: rgba(167,139,250,0.14); }
         .fw-action-msg {
           font-size: 0.8rem; padding: 7px 14px; border-radius: 8px; border: 1px solid;
         }
@@ -504,6 +509,10 @@ export default function FerneyDashboard({ user }) {
               <span>{actionBusy === 'calibrate-baseball' ? '⏳' : '⚾'}</span>
               <span>{actionBusy === 'calibrate-baseball' ? 'Calibrando baseball…' : 'Recalibrar baseball'}</span>
             </button>
+            <a href="http://87.106.236.248:19999" target="_blank" rel="noopener noreferrer" className="fw-action-btn purple">
+              <span>📊</span>
+              <span>Uso</span>
+            </a>
             {actionMsg && (
               <div className={`fw-action-msg ${actionMsg.kind}`}>
                 {actionMsg.kind === 'ok' ? '✓' : '✗'} {actionMsg.text}
