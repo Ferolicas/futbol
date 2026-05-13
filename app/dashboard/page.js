@@ -9,6 +9,7 @@ import { usePusherEvent } from '../../lib/use-pusher';
 import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
 import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/timezone';
 import { buildCombinada } from '../../lib/combinada';
+import { setAnalysisCache } from '../../lib/analysis-cache';
 import { useLiveStats } from './live-stats-context';
 import { useSelectedMarkets } from './selected-markets-context';
 
@@ -617,6 +618,47 @@ export default function Dashboard() {
   // Live updates come exclusively from Pusher (cron/live pushes every minute).
   // No more client-side polling — saves API quota and reduces latency.
 
+  // Hand-off navigation: pre-populate the analysis cache with the data
+  // the dashboard already has so /dashboard/analisis/[id] renders instantly.
+  const goToAnalysis = useCallback((fixtureId, match) => {
+    try {
+      const fid = String(fixtureId);
+      const cached = analyzedData[fid];
+      if (cached && match) {
+        setAnalysisCache(fid, {
+          analysis: {
+            ...cached,
+            fixtureId: Number(fid),
+            homeTeam: match.teams?.home?.name || cached.homeTeam,
+            awayTeam: match.teams?.away?.name || cached.awayTeam,
+            homeLogo: match.teams?.home?.logo || cached.homeLogo,
+            awayLogo: match.teams?.away?.logo || cached.awayLogo,
+            homeId:   match.teams?.home?.id   || cached.homeId,
+            awayId:   match.teams?.away?.id   || cached.awayId,
+            kickoff:  match.fixture?.date     || cached.kickoff,
+            status:   match.fixture?.status   || cached.status,
+            goals:    match.goals             || cached.goals,
+            league:   match.league?.name      || cached.league,
+            leagueId: match.league?.id        || cached.leagueId,
+            leagueLogo: match.league?.logo    || cached.leagueLogo,
+          },
+        });
+      }
+    } catch {}
+    router.push(`/dashboard/analisis/${fixtureId}`);
+  }, [analyzedData, router]);
+
+  // Prefetch analisis bundle + sibling routes after first paint so click is instant.
+  useEffect(() => {
+    if (!router?.prefetch) return;
+    try {
+      router.prefetch('/dashboard/baseball');
+      // Prefetch first 12 analyzed fixtures' detail routes
+      const ids = Object.keys(analyzedData).slice(0, 12);
+      ids.forEach(fid => router.prefetch(`/dashboard/analisis/${fid}`));
+    } catch {}
+  }, [router, analyzedData]);
+
   const changeDate = (offset) => {
     // Parse components directly to avoid UTC-vs-local timezone shift:
     // new Date("2025-03-25") parses as UTC midnight, so getDate() returns the
@@ -1007,12 +1049,86 @@ export default function Dashboard() {
 
         {/* CONTROLS: Date + Filters */}
         <div className="controls-row">
-          <div className="date-nav">
-            <button onClick={() => changeDate(-1)}>&#9664;</button>
-            <span className="date-display">
-              {fmtDateDisplay(date, userTz)}
-            </span>
-            <button onClick={() => changeDate(1)}>&#9654;</button>
+          <div className="date-nav" style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: 'var(--bg-2)', border: '1px solid var(--brd)',
+            borderRadius: 10, padding: 4,
+          }}>
+            <button
+              onClick={() => changeDate(-1)}
+              aria-label="Día anterior"
+              style={{
+                background: 'var(--bg-3)', border: 'none', borderRadius: 8,
+                color: 'var(--t1)', cursor: 'pointer',
+                width: 36, height: 36, fontSize: '1.05rem',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontWeight: 700, transition: 'background .15s',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-4)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-3)'}
+            >‹</button>
+
+            <label style={{ position: 'relative', cursor: 'pointer' }}>
+              <span className="date-display" style={{
+                display: 'inline-block', minWidth: 100, textAlign: 'center',
+                padding: '0 10px', fontWeight: 700, fontSize: '.9rem',
+                color: date === today(userTz) ? 'var(--accent-cyan)' : 'var(--t1)',
+              }}>
+                {date === today(userTz) ? 'Hoy' : fmtDateDisplay(date, userTz)}
+              </span>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => {
+                  const nd = e.target.value;
+                  if (!nd || nd === date) return;
+                  setDate(nd);
+                  setSelected(new Set());
+                  setSelectedMarkets({});
+                  setExpandedMatch(null);
+                  pusherLastUpdate.current = 0;
+                  loadFixtures(nd, { tz: userTz, clearLiveStats: true });
+                }}
+                style={{
+                  position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer',
+                  width: '100%', height: '100%',
+                }}
+              />
+            </label>
+
+            <button
+              onClick={() => changeDate(1)}
+              aria-label="Día siguiente"
+              style={{
+                background: 'var(--bg-3)', border: 'none', borderRadius: 8,
+                color: 'var(--t1)', cursor: 'pointer',
+                width: 36, height: 36, fontSize: '1.05rem',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontWeight: 700, transition: 'background .15s',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-4)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-3)'}
+            >›</button>
+
+            {date !== today(userTz) && (
+              <button
+                onClick={() => {
+                  const nd = today(userTz);
+                  setDate(nd);
+                  setSelected(new Set());
+                  setSelectedMarkets({});
+                  setExpandedMatch(null);
+                  pusherLastUpdate.current = 0;
+                  loadFixtures(nd, { tz: userTz, clearLiveStats: true });
+                }}
+                style={{
+                  background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.3)',
+                  color: 'var(--accent-cyan)', cursor: 'pointer',
+                  height: 28, padding: '0 10px', borderRadius: 6,
+                  fontSize: '.72rem', fontWeight: 700, marginLeft: 4,
+                }}
+              >Hoy</button>
+            )}
           </div>
           <div className="filters-row">
             <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="filter-sel">
@@ -1167,7 +1283,7 @@ export default function Dashboard() {
                         onToggle={() => setExpandedMatch(expandedMatch === m.fixture.id ? null : m.fixture.id)}
                         selMarkets={selectedMarkets[m.fixture.id] || {}}
                         onToggleMarket={(mkt) => toggleMarket(m.fixture.id, mkt, `${m.teams.home.name} vs ${m.teams.away.name}`)}
-                        onViewFull={() => router.push(`/dashboard/analisis/${m.fixture.id}`)}
+                        onViewFull={() => goToAnalysis(m.fixture.id, m)}
                         onRemove={(e) => dismissMatch(e, m.fixture.id)}
                         isFavorite={favorites.includes(m.fixture.id)}
                         onFavorite={(e) => toggleFavorite(e, m.fixture.id)}
@@ -1190,7 +1306,7 @@ export default function Dashboard() {
                       onSelect={() => toggleSelect(m.fixture.id)}
                       onHide={(e) => doHide(e, m.fixture.id)}
                       onFavorite={(e) => toggleFavorite(e, m.fixture.id)}
-                      onView={() => router.push(`/dashboard/analisis/${m.fixture.id}`)}
+                      onView={() => goToAnalysis(m.fixture.id, m)}
                       idx={i}
                       userTz={userTz}
                     />
@@ -1224,7 +1340,7 @@ export default function Dashboard() {
                     onToggle={() => setExpandedMatch(expandedMatch === m.fixture.id ? null : m.fixture.id)}
                     selMarkets={selectedMarkets[m.fixture.id] || {}}
                     onToggleMarket={(mkt) => toggleMarket(m.fixture.id, mkt, `${m.teams.home.name} vs ${m.teams.away.name}`)}
-                    onViewFull={() => router.push(`/dashboard/analisis/${m.fixture.id}`)}
+                    onViewFull={() => goToAnalysis(m.fixture.id, m)}
                     onRemove={(e) => removeFromAnalyzed(e, m.fixture.id)}
                     isFavorite={favorites.includes(m.fixture.id)}
                     onFavorite={(e) => toggleFavorite(e, m.fixture.id)}

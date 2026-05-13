@@ -11,6 +11,7 @@ import {
 import { computeAllProbabilities } from '../../../../lib/calculations';
 import { buildCombinada } from '../../../../lib/combinada';
 import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../../../lib/bookmakers';
+import { getAnalysisCache, setAnalysisCache } from '../../../../lib/analysis-cache';
 import { useLiveStats } from '../../live-stats-context';
 import { useSelectedMarkets } from '../../selected-markets-context';
 import { getUserTz, fmtTimeInTz, todayInTz } from '../../../../lib/timezone';
@@ -45,12 +46,23 @@ export default function AnalisisPage() {
   const router = useRouter();
   const fixtureId = params.id;
 
-  const [analysis, setAnalysis] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Hydrate from hand-off cache so the page renders instantly when arriving
+  // from the dashboard — then revalidate in background via fetch.
+  const initialCached = typeof window !== 'undefined' ? getAnalysisCache(fixtureId) : null;
+  const initialAnalysis = initialCached?.analysis || null;
+  const initialProbs    = initialAnalysis?.calculatedProbabilities
+    ? initialAnalysis.calculatedProbabilities
+    : (initialAnalysis ? computeAllProbabilities(initialAnalysis) : null);
+  const initialCombinada = initialAnalysis
+    ? (initialAnalysis.combinada || (initialProbs ? buildCombinada(initialProbs, initialAnalysis.odds, initialAnalysis.playerHighlights, { home: initialAnalysis.homeTeam, away: initialAnalysis.awayTeam }) : null))
+    : null;
+
+  const [analysis, setAnalysis] = useState(initialAnalysis);
+  const [loading, setLoading] = useState(!initialAnalysis);
   const [error, setError] = useState('');
   const [quota, setQuota] = useState(null);
-  const [probabilities, setProbabilities] = useState(null);
-  const [combinada, setCombinada] = useState(null);
+  const [probabilities, setProbabilities] = useState(initialProbs);
+  const [combinada, setCombinada] = useState(initialCombinada);
   const { selectedMarkets, toggleMarket } = useSelectedMarkets();
   const [collapsed, setCollapsed] = useState({});
   const [notAnalyzed, setNotAnalyzed] = useState(false);
@@ -101,8 +113,8 @@ export default function AnalisisPage() {
     }
   };
 
-  const loadAnalysis = useCallback(async () => {
-    setLoading(true);
+  const loadAnalysis = useCallback(async ({ silent } = {}) => {
+    if (!silent) setLoading(true);
     setError('');
     setNotAnalyzed(false);
     try {
@@ -118,14 +130,20 @@ export default function AnalisisPage() {
       const teamNames = { home: data.analysis.homeTeam, away: data.analysis.awayTeam };
       const combo = data.analysis.combinada || buildCombinada(probs, data.analysis.odds, data.analysis.playerHighlights, teamNames);
       setCombinada(combo);
+      // Refresh the hand-off cache so a quick back-and-forth uses the fresher data
+      setAnalysisCache(fixtureId, { analysis: data.analysis });
     } catch (e) {
-      setError(e.message || 'Error loading analysis');
+      if (!silent) setError(e.message || 'Error loading analysis');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [fixtureId]);
 
-  useEffect(() => { loadAnalysis(); }, [loadAnalysis]);
+  // On mount: if we hydrated from the hand-off cache, fetch silently in the
+  // background so the user sees instant content. Otherwise fetch with spinner.
+  useEffect(() => {
+    loadAnalysis({ silent: !!initialAnalysis });
+  }, [loadAnalysis]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!analysis) return;
