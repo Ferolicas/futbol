@@ -40,6 +40,8 @@ export default function FerneyDashboard({ user }) {
   const [actionBusy, setActionBusy]       = useState(null);
   const [actionMsg, setActionMsg]         = useState(null);
   const [calibrationResult, setCalibrationResult] = useState(null);
+  const [vpsStats, setVpsStats]   = useState(null);
+  const [vpsError, setVpsError]   = useState(null);
 
   const fetchOnce = useCallback(async () => {
     try {
@@ -62,6 +64,24 @@ export default function FerneyDashboard({ user }) {
     const id = setInterval(fetchOnce, POLL_MS);
     return () => clearInterval(id);
   }, [fetchOnce, paused]);
+
+  // VPS stats — polling independiente cada 10s
+  useEffect(() => {
+    const fetchVps = async () => {
+      try {
+        const res = await fetch('/api/admin/vps-stats', { cache: 'no-store' });
+        const body = await res.json();
+        if (!res.ok) { setVpsError(body.error || `HTTP ${res.status}`); return; }
+        setVpsStats(body);
+        setVpsError(null);
+      } catch (e) {
+        setVpsError(e.message);
+      }
+    };
+    fetchVps();
+    const id = setInterval(fetchVps, 10_000);
+    return () => clearInterval(id);
+  }, []);
 
   const onRetry = async (queue, jobId) => {
     setRetryBusy(`${queue}/${jobId || 'new'}`);
@@ -247,11 +267,6 @@ export default function FerneyDashboard({ user }) {
           background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.3); color: #f59e0b;
         }
         .fw-action-btn.yellow:hover:not(:disabled) { background: rgba(245,158,11,0.14); }
-        .fw-action-btn.purple {
-          background: rgba(167,139,250,0.08); border-color: rgba(167,139,250,0.3); color: #a78bfa;
-          text-decoration: none;
-        }
-        .fw-action-btn.purple:hover { background: rgba(167,139,250,0.14); }
         .fw-action-msg {
           font-size: 0.8rem; padding: 7px 14px; border-radius: 8px; border: 1px solid;
         }
@@ -413,6 +428,49 @@ export default function FerneyDashboard({ user }) {
           color: #6ee7b7; font-size: 0.85rem;
         }
 
+        /* ── vps stats ── */
+        .fw-vps-section {
+          background: var(--bg-2); border: 1px solid var(--brd);
+          border-radius: 14px; padding: 20px 24px; margin-top: 8px;
+        }
+        .fw-vps-title {
+          font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+          letter-spacing: .08em; color: var(--t3); margin-bottom: 16px;
+          display: flex; align-items: center; gap: 8px;
+        }
+        .fw-vps-dot {
+          width: 7px; height: 7px; border-radius: 50%; background: #10b981;
+          box-shadow: 0 0 6px #10b981; animation: vpsPulse 2s ease-in-out infinite;
+        }
+        @keyframes vpsPulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+        .fw-vps-grid {
+          display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;
+        }
+        .fw-vps-metric { display: flex; flex-direction: column; gap: 6px; }
+        .fw-vps-label {
+          font-size: 0.75rem; color: var(--t3); display: flex;
+          justify-content: space-between; align-items: baseline;
+        }
+        .fw-vps-label span:last-child { font-size: 0.82rem; font-weight: 700; color: var(--t1); }
+        .fw-vps-bar-track {
+          height: 6px; border-radius: 99px;
+          background: rgba(255,255,255,0.07); overflow: hidden;
+        }
+        .fw-vps-bar-fill {
+          height: 100%; border-radius: 99px;
+          transition: width .6s ease;
+        }
+        .fw-vps-sub { font-size: 0.72rem; color: var(--t3); }
+        .fw-vps-procs {
+          display: flex; align-items: center; gap: 10px;
+          background: var(--bg-1); border: 1px solid var(--brd);
+          border-radius: 10px; padding: 12px 16px; margin-top: 16px;
+        }
+        .fw-vps-procs-icon { font-size: 1.1rem; }
+        .fw-vps-procs-val { font-size: 1.1rem; font-weight: 700; color: var(--t1); }
+        .fw-vps-procs-lbl { font-size: 0.78rem; color: var(--t3); }
+        .fw-vps-error { color: #fca5a5; font-size: 0.8rem; }
+
         /* ── footer ── */
         .fw-footer {
           display: flex; justify-content: space-between;
@@ -509,10 +567,6 @@ export default function FerneyDashboard({ user }) {
               <span>{actionBusy === 'calibrate-baseball' ? '⏳' : '⚾'}</span>
               <span>{actionBusy === 'calibrate-baseball' ? 'Calibrando baseball…' : 'Recalibrar baseball'}</span>
             </button>
-            <a href="http://87.106.236.248:19999" target="_blank" rel="noopener noreferrer" className="fw-action-btn purple">
-              <span>📊</span>
-              <span>Uso</span>
-            </a>
             {actionMsg && (
               <div className={`fw-action-msg ${actionMsg.kind}`}>
                 {actionMsg.kind === 'ok' ? '✓' : '✗'} {actionMsg.text}
@@ -825,6 +879,9 @@ export default function FerneyDashboard({ user }) {
             </div>
           )}
 
+          {/* ── VPS Stats ── */}
+          <VpsStats stats={vpsStats} error={vpsError} />
+
           {/* Footer */}
           <div className="fw-footer">
             <span>uptime worker: {status ? fmtMs(status.uptimeSec * 1000) : '—'}</span>
@@ -904,6 +961,105 @@ export default function FerneyDashboard({ user }) {
         )}
       </div>
     </>
+  );
+}
+
+// ── VPS Stats section ─────────────────────────────────────────────────────────
+
+const fmtBytes = (b) => {
+  if (!b) return '0 B';
+  const gb = b / 1024 / 1024 / 1024;
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  const mb = b / 1024 / 1024;
+  return `${mb.toFixed(0)} MB`;
+};
+
+function VpsBar({ pct, color }) {
+  return (
+    <div className="fw-vps-bar-track">
+      <div className="fw-vps-bar-fill" style={{ width: `${Math.min(100, pct || 0)}%`, background: color }} />
+    </div>
+  );
+}
+
+function VpsStats({ stats, error }) {
+  if (error) {
+    return (
+      <div className="fw-vps-section">
+        <div className="fw-vps-title">VPS · Sistema</div>
+        <span className="fw-vps-error">⚠ {error}</span>
+      </div>
+    );
+  }
+  if (!stats) {
+    return (
+      <div className="fw-vps-section">
+        <div className="fw-vps-title">VPS · Sistema</div>
+        <span style={{ color: 'var(--t3)', fontSize: '0.8rem' }}>Cargando…</span>
+      </div>
+    );
+  }
+
+  const ramColor  = stats.ram.percent  > 85 ? '#ef4444' : stats.ram.percent  > 65 ? '#f59e0b' : '#10b981';
+  const cpuColor  = stats.cpu.percent  > 85 ? '#ef4444' : stats.cpu.percent  > 65 ? '#f59e0b' : '#22d3ee';
+  const diskColor = stats.disk.percent > 85 ? '#ef4444' : stats.disk.percent > 65 ? '#f59e0b' : '#a78bfa';
+
+  return (
+    <div className="fw-vps-section">
+      <div className="fw-vps-title">
+        <span className="fw-vps-dot" />
+        VPS · Sistema — polling 10s
+      </div>
+      <div className="fw-vps-grid">
+
+        {/* RAM */}
+        <div className="fw-vps-metric">
+          <div className="fw-vps-label">
+            <span>RAM</span>
+            <span style={{ color: ramColor }}>{stats.ram.percent}%</span>
+          </div>
+          <VpsBar pct={stats.ram.percent} color={ramColor} />
+          <div className="fw-vps-sub">
+            {fmtBytes(stats.ram.used)} usada · {fmtBytes(stats.ram.free)} libre · {fmtBytes(stats.ram.total)} total
+          </div>
+        </div>
+
+        {/* CPU */}
+        <div className="fw-vps-metric">
+          <div className="fw-vps-label">
+            <span>CPU · {stats.cpu.cores} cores</span>
+            <span style={{ color: cpuColor }}>{stats.cpu.percent}%</span>
+          </div>
+          <VpsBar pct={stats.cpu.percent} color={cpuColor} />
+          <div className="fw-vps-sub">
+            load avg 1m: {stats.cpu.loadAvg1} · 5m: {stats.cpu.loadAvg5} · 15m: {stats.cpu.loadAvg15}
+          </div>
+        </div>
+
+        {/* Disco */}
+        <div className="fw-vps-metric">
+          <div className="fw-vps-label">
+            <span>Disco /</span>
+            <span style={{ color: diskColor }}>{stats.disk.percent}%</span>
+          </div>
+          <VpsBar pct={stats.disk.percent} color={diskColor} />
+          <div className="fw-vps-sub">
+            {fmtBytes(stats.disk.used)} usado · {fmtBytes(stats.disk.free)} libre · {fmtBytes(stats.disk.total)} total
+          </div>
+        </div>
+
+      </div>
+
+      {/* Procesos + uptime */}
+      <div className="fw-vps-procs">
+        <span className="fw-vps-procs-icon">⚙</span>
+        <span className="fw-vps-procs-val">{stats.processes}</span>
+        <span className="fw-vps-procs-lbl">procesos activos</span>
+        <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: 'var(--t3)' }}>
+          uptime OS: {fmtMs(stats.uptimeSec * 1000)}
+        </span>
+      </div>
+    </div>
   );
 }
 

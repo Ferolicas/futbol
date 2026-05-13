@@ -1,5 +1,7 @@
 // @ts-nocheck
 import Fastify from 'fastify';
+import os from 'os';
+import { execSync } from 'child_process';
 import { isValidQueue, queues, QUEUE_NAMES, type QueueName } from './queues.js';
 import { getErrors } from './errors-log.js';
 import { redisGet } from './shared.js';
@@ -141,8 +143,59 @@ async function collectAnalysisStatus(date: string) {
   };
 }
 
+function getVpsStats() {
+  const totalMem = os.totalmem();
+  const freeMem  = os.freemem();
+  const usedMem  = totalMem - freeMem;
+  const loadAvg  = os.loadavg();
+  const cores    = os.cpus().length;
+  const cpuPct   = Math.min(100, Math.round((loadAvg[0] / cores) * 100));
+
+  let diskTotal = 0, diskUsed = 0;
+  try {
+    const df = execSync('df -B1 / 2>/dev/null | tail -1', { timeout: 2000 }).toString().trim();
+    const parts = df.split(/\s+/);
+    diskTotal = parseInt(parts[1]) || 0;
+    diskUsed  = parseInt(parts[2]) || 0;
+  } catch { /* ignore */ }
+
+  let processes = 0;
+  try {
+    processes = parseInt(execSync("ps aux | tail -n +2 | wc -l", { timeout: 2000 }).toString().trim()) || 0;
+  } catch { /* ignore */ }
+
+  return {
+    ram: {
+      total:   totalMem,
+      used:    usedMem,
+      free:    freeMem,
+      percent: Math.round((usedMem / totalMem) * 100),
+    },
+    cpu: {
+      loadAvg1:  Math.round(loadAvg[0] * 100) / 100,
+      loadAvg5:  Math.round(loadAvg[1] * 100) / 100,
+      loadAvg15: Math.round(loadAvg[2] * 100) / 100,
+      cores,
+      percent: cpuPct,
+    },
+    disk: {
+      total:   diskTotal,
+      used:    diskUsed,
+      free:    diskTotal - diskUsed,
+      percent: diskTotal > 0 ? Math.round((diskUsed / diskTotal) * 100) : 0,
+    },
+    processes,
+    uptimeSec: Math.round(os.uptime()),
+  };
+}
+
 export function buildServer() {
   const app = Fastify({ logger: { level: 'info' } });
+
+  app.get('/stats', async (req, reply) => {
+    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+    return { ok: true, ts: new Date().toISOString(), ...getVpsStats() };
+  });
 
   app.get('/health', async () => ({
     ok: true,
