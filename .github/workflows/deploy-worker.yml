@@ -21,6 +21,7 @@ on:
       - 'lib/sanity-cache.js'
       - 'lib/supabase.js'
       - 'lib/supabase-cache.js'
+      - 'lib/db.js'
       - 'lib/webpush.js'
       - 'lib/pusher.js'
       - 'lib/leagues.js'
@@ -39,4 +40,6 @@ jobs:
           script: |
             cd /apps/futbol
             git pull
+            npm install --omit=dev --no-audit --no-fund
+            cd apps/cfanalisis-worker && npm install --omit=dev --no-audit --no-fund && cd -
             pm2 restart cfanalisis-worker
