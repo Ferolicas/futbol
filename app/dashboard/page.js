@@ -871,7 +871,8 @@ export default function Dashboard() {
     //  - Solo selecciones con probabilidad ≥ 90% Y cuota real ≥ 1.20
     //  - SIN límite por partido: si un partido tiene 10 opciones que cumplen,
     //    se muestran las 10
-    //  - Orden: NS > en vivo > finalizado, dentro de cada grupo prob desc
+    //  - Solo partidos próximos (NS) o en vivo — los finalizados desaparecen
+    //  - Orden: NS > en vivo, dentro de cada grupo prob desc
     //  - Cap visual 95% (nunca se muestra 100% para no dar falsa certeza)
     const MIN_PROB = 90;
     const MIN_ODD  = 1.20;
@@ -883,6 +884,8 @@ export default function Dashboard() {
       let priority = 0;
       if (status === 'NS') priority = 2;
       else if (isLive(status)) priority = 1;
+      // Filtrar finalizados (priority 0 = FT/AET/PEN/etc o fixture no presente).
+      if (priority === 0) return;
       const mn = fx ? `${fx.teams.home.name} vs ${fx.teams.away.name}` : `${data.homeTeam || '?'} vs ${data.awayTeam || '?'}`;
       const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
