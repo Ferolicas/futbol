@@ -1177,7 +1177,7 @@ export default function Dashboard() {
           {[
             { key: 'partidos', label: 'Partidos', count: visible.length },
             { key: 'analizados', label: 'Analizados', count: analyzed.length },
-            { key: 'combinada', label: 'Combinada', count: totalSel },
+            { key: 'combinada', label: 'Combinada', count: totalSel + savedCombinadas.length },
           ].map(t => (
             <button key={t.key} className={`tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
               {t.label}
