@@ -23,6 +23,7 @@ export const maxDuration = 60;
 const MIN_PROB = 90;
 const MIN_ODD  = 1.20;
 const VISUAL_PROB_CAP = 95; // no mostrar nunca 100% para no dar falsa certeza
+const FINISHED_STATUSES = new Set(['FT', 'AET', 'PEN', 'AWD', 'WO', 'CANC', 'PST', 'ABD', 'SUSP']);
 
 async function handle(request) {
   const url = new URL(request.url);
@@ -46,9 +47,17 @@ async function handle(request) {
   const { analyzedData } = await getAnalyzedMatchesFull(fixtureIds).catch(() => ({ analyzedData: {} }));
 
   // 3. Construir combinada por partido y juntar selecciones que cumplan thresholds
+  const nowMs = Date.now();
   const all = [];
   for (const [fid, data] of Object.entries(analyzedData || {})) {
     if (!data?.calculatedProbabilities) continue;
+    // Excluir partidos ya jugados o cancelados — la combinada del dia solo
+    // debe contener selecciones que el usuario todavia puede apostar.
+    const statusShort = data.status?.short || data.status;
+    if (statusShort && FINISHED_STATUSES.has(statusShort)) continue;
+    // Backup defensivo por si el status venia stale: kickoff + 110min de margen.
+    const kickoffMs = data.kickoff ? new Date(data.kickoff).getTime() : 0;
+    if (kickoffMs > 0 && (nowMs - kickoffMs) > 110 * 60 * 1000) continue;
     let comb;
     try {
       comb = buildCombinada(

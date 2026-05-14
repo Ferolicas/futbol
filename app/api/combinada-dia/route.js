@@ -35,5 +35,19 @@ export async function GET(request) {
     return Response.json({ ok: false, reason: 'not published', status: data.status, date }, { status: 404 });
   }
 
+  // Filtro defensivo: descartar selecciones cuyo partido ya empezo hace >110min.
+  // El cron publish-combinada ya las filtra al crear el snapshot, pero esto
+  // protege contra snapshots viejos del dia (el cron solo se re-corre 1x cada
+  // pocas horas y entre ejecuciones partidos cambian de NS a FT).
+  if (Array.isArray(data.selections)) {
+    const nowMs = Date.now();
+    data.selections = data.selections.filter(sel => {
+      if (!sel?.kickoff) return true;
+      const kMs = new Date(sel.kickoff).getTime();
+      if (!Number.isFinite(kMs)) return true;
+      return (nowMs - kMs) <= 110 * 60 * 1000;
+    });
+  }
+
   return Response.json({ ok: true, data });
 }
