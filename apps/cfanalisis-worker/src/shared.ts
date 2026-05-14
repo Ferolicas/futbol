@@ -33,6 +33,7 @@ const [
   _baseballModel,
   _baseballCalibration,
   _oddsApi,
+  _db,
 ] = await Promise.all([
   import('../../../lib/redis.js'),
   import('../../../lib/api-football.js'),
@@ -48,6 +49,7 @@ const [
   import('../../../lib/baseball-model.js'),
   import('../../../lib/baseball-calibration.js'),
   import('../../../lib/odds-api.js'),
+  import('../../../lib/db.js'),
 ]);
 
 // lib/redis.js
@@ -113,3 +115,6 @@ export const flattenProbabilitiesForStorage = _baseballCalibration.flattenProbab
 
 // lib/odds-api.js
 export const fetchOddsForFixtures = _oddsApi.fetchOddsForFixtures;
+
+// lib/db.js — acceso raw pg para casos que pgAdmin no cubre (RPC, raw SQL)
+export const pgQuery = _db.pgQuery;

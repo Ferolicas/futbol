@@ -10,8 +10,12 @@
 --
 -- Las columnas avg_* son GENERATED → siempre coherentes con los acumuladores.
 --
--- Ejecutar UNA SOLA VEZ desde el SQL editor:
---   https://supabase.com/dashboard/project/fdgxpznafsmhnuxjmcgd/sql/new
+-- ATENCION: Esta tabla vive en el Postgres del VPS, NO en Supabase.
+--           supabaseAdmin.from() ya esta rerutado a pgAdmin (lib/db.js)
+--           y match_results tambien fue migrada al VPS (commit b89c9b1).
+--
+-- Ejecutar UNA SOLA VEZ contra el VPS Postgres:
+--   psql "$DATABASE_URL" -f scripts/migrate-referee-stats.sql
 -- ============================================================================
 
 create table if not exists public.referee_stats (

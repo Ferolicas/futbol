@@ -8,7 +8,7 @@
  *
  * Payload: {} (none)
  */
-import { redisGet, KEYS, supabaseAdmin } from '../../shared.js';
+import { redisGet, KEYS, supabaseAdmin, pgQuery } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 
 const FINALIZE_CONCURRENCY = 10;
@@ -107,13 +107,12 @@ async function upsertRefereeStats(match, r, dateStr) {
   // para el arbitro — preferimos perder una muestra antes que sesgar con ceros.
   if ([yh, ya, rh, ra].every(v => v === 0) && !r.totalCards) return;
 
-  const { error } = await supabaseAdmin.rpc('increment_referee_stats', {
-    p_name: refName,
-    p_yellows: yh + ya,
-    p_reds: rh + ra,
-    p_match_date: dateStr,
-  });
-  if (error) throw new Error(`rpc increment_referee_stats: ${error.message || error}`);
+  // pgQuery va al VPS Postgres (donde vive referee_stats). NO usar
+  // supabaseAdmin.rpc — su .rpc apunta al Supabase real, no a pgAdmin.
+  await pgQuery(
+    'SELECT increment_referee_stats($1, $2, $3, $4::date)',
+    [refName, yh + ya, rh + ra, dateStr]
+  );
 }
 
 async function upsertMatchResult(fid, date, match, r) {

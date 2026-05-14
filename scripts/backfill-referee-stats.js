@@ -10,20 +10,30 @@
  *   node scripts/backfill-referee-stats.js --force      # borra y recalcula desde cero
  *   node scripts/backfill-referee-stats.js --dry-run    # imprime resumen sin escribir
  *
- * Pre-requisito: haber corrido scripts/migrate-referee-stats.sql en Supabase.
+ * Conexion:
+ *   Lee DATABASE_URL (Postgres del VPS) igual que lib/db.js. NO usa
+ *   Supabase — referee_stats y match_results viven en el VPS.
+ *
+ * Pre-requisito: haber corrido scripts/migrate-referee-stats.sql en el VPS.
  */
 
 require('dotenv').config({ path: '.env.local' });
-const { createClient } = require('@supabase/supabase-js');
+const { Pool } = require('pg');
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY;
-if (!SUPABASE_URL || !SERVICE_KEY) {
-  console.error('[backfill-referee-stats] faltan NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY en .env.local');
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  console.error('[backfill-referee-stats] falta DATABASE_URL en .env.local');
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+// Misma configuracion SSL que lib/db.js: SSL on por defecto con
+// rejectUnauthorized=false (cert auto-firmado del VPS). DATABASE_SSL=false lo desactiva.
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
+  max: 5,
+  connectionTimeoutMillis: 10_000,
+});
 
 const FORCE   = process.argv.includes('--force');
 const DRY_RUN = process.argv.includes('--dry-run');
@@ -36,39 +46,39 @@ function normalizeRefereeName(raw) {
 }
 
 async function checkPreconditions() {
-  const { count, error } = await supabase
-    .from('referee_stats')
-    .select('id', { count: 'exact', head: true });
-  if (error) {
-    console.error('[backfill-referee-stats] no se pudo leer referee_stats (corrio la migracion?):', error.message);
-    process.exit(1);
-  }
-  if (count > 0 && !FORCE && !DRY_RUN) {
-    console.error(`[backfill-referee-stats] referee_stats ya tiene ${count} filas.`);
-    console.error('  Re-corre con --force para borrarlas y recalcular desde cero,');
-    console.error('  o con --dry-run para ver que escribiria sin tocar nada.');
+  try {
+    const { rows } = await pool.query('SELECT count(*)::int AS c FROM referee_stats');
+    const count = rows[0]?.c ?? 0;
+    if (count > 0 && !FORCE && !DRY_RUN) {
+      console.error(`[backfill-referee-stats] referee_stats ya tiene ${count} filas.`);
+      console.error('  Re-corre con --force para borrarlas y recalcular desde cero,');
+      console.error('  o con --dry-run para ver que escribiria sin tocar nada.');
+      process.exit(1);
+    }
+  } catch (e) {
+    console.error('[backfill-referee-stats] no se pudo leer referee_stats (corrio la migracion?):', e.message);
     process.exit(1);
   }
 }
 
 async function aggregateFromMatchResults() {
   const aggregator = new Map(); // name -> { matches, yellows, reds, lastDate }
-  let from = 0;
+  let offset = 0;
   let scanned = 0;
   let skippedNoReferee = 0;
   let skippedNoCards = 0;
 
   while (true) {
-    const { data, error } = await supabase
-      .from('match_results')
-      .select('date, yellow_cards, red_cards, full_data')
-      .order('date', { ascending: true })
-      .range(from, from + PAGE_SIZE - 1);
+    const { rows } = await pool.query(
+      `SELECT date, yellow_cards, red_cards, full_data
+       FROM match_results
+       ORDER BY date ASC
+       LIMIT $1 OFFSET $2`,
+      [PAGE_SIZE, offset]
+    );
+    if (!rows || rows.length === 0) break;
 
-    if (error) throw new Error(`match_results query: ${error.message}`);
-    if (!data || data.length === 0) break;
-
-    for (const row of data) {
+    for (const row of rows) {
       scanned++;
       const refRaw = row.full_data?.fixture?.referee;
       const name = normalizeRefereeName(refRaw);
@@ -94,8 +104,8 @@ async function aggregateFromMatchResults() {
       aggregator.set(name, acc);
     }
 
-    if (data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
+    if (rows.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
     process.stdout.write(`\r[backfill] escaneados ${scanned}…`);
   }
   process.stdout.write('\n');
@@ -104,33 +114,53 @@ async function aggregateFromMatchResults() {
 }
 
 async function writeAggregates(aggregator) {
-  if (FORCE) {
-    console.log('[backfill] --force: borrando referee_stats…');
-    const { error } = await supabase.from('referee_stats').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    if (error) throw new Error(`delete: ${error.message}`);
-  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  const rows = Array.from(aggregator.entries()).map(([name, acc]) => ({
-    name,
-    matches:        acc.matches,
-    total_yellows:  acc.yellows,
-    total_reds:     acc.reds,
-    total_cards:    acc.yellows + acc.reds,
-    last_match_date: acc.lastDate,
-  }));
+    if (FORCE) {
+      console.log('[backfill] --force: borrando referee_stats…');
+      await client.query('DELETE FROM referee_stats');
+    }
 
-  // Insertar en chunks de 500 para no exceder limites de payload
-  const CHUNK = 500;
-  let written = 0;
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    const chunk = rows.slice(i, i + CHUNK);
-    const { error } = await supabase.from('referee_stats').insert(chunk);
-    if (error) throw new Error(`insert chunk @${i}: ${error.message}`);
-    written += chunk.length;
-    process.stdout.write(`\r[backfill] insertados ${written}/${rows.length}…`);
+    const rows = Array.from(aggregator.entries());
+    const CHUNK = 500;
+    let written = 0;
+
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
+      const values = [];
+      const params = [];
+      let p = 1;
+      for (const [name, acc] of chunk) {
+        values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+        params.push(
+          name,
+          acc.matches,
+          acc.yellows,
+          acc.reds,
+          acc.yellows + acc.reds,
+          acc.lastDate
+        );
+      }
+      // INSERT puro: --force ya borro, sin --force la tabla estaba vacia.
+      const sql = `INSERT INTO referee_stats
+        (name, matches, total_yellows, total_reds, total_cards, last_match_date)
+        VALUES ${values.join(', ')}`;
+      await client.query(sql, params);
+      written += chunk.length;
+      process.stdout.write(`\r[backfill] insertados ${written}/${rows.length}…`);
+    }
+    process.stdout.write('\n');
+
+    await client.query('COMMIT');
+    return written;
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
   }
-  process.stdout.write('\n');
-  return written;
 }
 
 (async () => {
@@ -158,13 +188,16 @@ async function writeAggregates(aggregator) {
 
   if (DRY_RUN) {
     console.log(`[backfill] DRY-RUN: nada escrito. (${((t1 - t0) / 1000).toFixed(1)}s)`);
+    await pool.end();
     return;
   }
 
   const written = await writeAggregates(aggregator);
   const t2 = Date.now();
   console.log(`[backfill] OK — ${written} arbitros escritos en ${((t2 - t1) / 1000).toFixed(1)}s (scan ${((t1 - t0) / 1000).toFixed(1)}s)`);
-})().catch(e => {
+  await pool.end();
+})().catch(async (e) => {
   console.error('[backfill-referee-stats] FATAL:', e.message);
+  try { await pool.end(); } catch {}
   process.exit(1);
 });
