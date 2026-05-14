@@ -1429,30 +1429,35 @@ export default function Dashboard() {
                   <button className="btn-clear" onClick={() => setSelectedMarkets({})}>Limpiar</button>
                 </div>
 
-                {/* Saved combinadas */}
-                {savedCombinadas.length > 0 && (
-                  <div className="saved-combs">
-                    <h4 className="saved-combs-title">Combinadas guardadas</h4>
-                    {savedCombinadas.map(comb => (
-                      <div key={comb.id} className="saved-comb">
-                        <div className="saved-comb-head">
-                          <span className="saved-comb-name">{comb.name}</span>
-                          <button className="saved-comb-del" onClick={() => deleteSavedCombinada(comb.id)}>&#10005;</button>
-                        </div>
-                        <div className="saved-comb-info">
-                          <span>{comb.selections.length} sel.</span>
-                          <span className="saved-comb-odd">{comb.combinedOdd}x</span>
-                          <span className={comb.combinedProbability >= 60 ? 'safe' : 'danger'}>{cap(comb.combinedProbability)}%</span>
-                        </div>
-                        <div className="saved-comb-sels">
-                          {comb.selections.map((s, i) => (
-                            <span key={i} className="saved-sel-chip">{s.name || s.market} {s.odd ? `(${s.odd.toFixed(2)})` : ''}</span>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
+              </div>
+            )}
+
+            {/* Saved combinadas — visibles siempre que haya guardadas, con o sin combinada en construcción */}
+            {savedCombinadas.length > 0 && (
+              <div className="saved-combs">
+                <h4 className="saved-combs-title">Combinadas guardadas</h4>
+                {savedCombinadas.map(comb => (
+                  <div key={comb.id} className="saved-comb">
+                    <div className="saved-comb-head">
+                      <span className="saved-comb-name">{comb.name}</span>
+                      <button className="saved-comb-del" onClick={() => deleteSavedCombinada(comb.id)}>&#10005;</button>
+                    </div>
+                    <div className="saved-comb-info">
+                      <span>{(comb.selections || []).length} sel.</span>
+                      <span className="saved-comb-odd">{comb.combined_odd ?? comb.combinedOdd}x</span>
+                      <span className={(comb.combined_probability ?? comb.combinedProbability) >= 60 ? 'safe' : 'danger'}>
+                        {cap(comb.combined_probability ?? comb.combinedProbability)}%
+                      </span>
+                    </div>
+                    <div className="saved-comb-sels">
+                      {(comb.selections || []).map((s, i) => (
+                        <span key={i} className="saved-sel-chip">
+                          {s.name || s.market} {s.odd ? `(${Number(s.odd).toFixed(2)})` : ''}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                )}
+                ))}
               </div>
             )}
           </>
