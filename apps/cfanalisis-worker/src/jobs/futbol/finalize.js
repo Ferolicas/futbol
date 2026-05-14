@@ -85,6 +85,37 @@ function extractResult(match) {
   };
 }
 
+// Normaliza el string de API-Football: "M. Oliver, England" -> "M. Oliver".
+// Algunos partidos llegan sin pais, otros con; sin normalizar se crean dos
+// filas distintas en referee_stats. Tomamos el segmento antes de la coma.
+function normalizeRefereeName(raw) {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.split(',')[0]?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : null;
+}
+
+async function upsertRefereeStats(match, r, dateStr) {
+  const refName = normalizeRefereeName(match?.fixture?.referee);
+  if (!refName) return;
+
+  const yh = getStat(r.homeStats, 'Yellow Cards') || 0;
+  const ya = getStat(r.awayStats, 'Yellow Cards') || 0;
+  const rh = getStat(r.homeStats, 'Red Cards') || 0;
+  const ra = getStat(r.awayStats, 'Red Cards') || 0;
+
+  // Si no hay datos de tarjetas en statistics, no contabilizamos el partido
+  // para el arbitro — preferimos perder una muestra antes que sesgar con ceros.
+  if ([yh, ya, rh, ra].every(v => v === 0) && !r.totalCards) return;
+
+  const { error } = await supabaseAdmin.rpc('increment_referee_stats', {
+    p_name: refName,
+    p_yellows: yh + ya,
+    p_reds: rh + ra,
+    p_match_date: dateStr,
+  });
+  if (error) throw new Error(`rpc increment_referee_stats: ${error.message || error}`);
+}
+
 async function upsertMatchResult(fid, date, match, r) {
   return supabaseAdmin.from('match_results').upsert({
     fixture_id:  fid,
@@ -164,6 +195,10 @@ export async function runFinalize(_payload = {}) {
           // updatePrediction returns a Promise (async function) — safe to await
           try { await updatePrediction(fid, r); } catch (e) {
             console.warn(`[finalize P1] updatePrediction ${fid}:`, e.message);
+          }
+          // Acumular tarjetas al arbitro — fallo aqui NO debe romper el finalize
+          try { await upsertRefereeStats(match, r, today); } catch (e) {
+            console.warn(`[finalize P1] upsertRefereeStats ${fid}:`, e.message);
           }
           return { fid, status: 'finalized' };
         });
@@ -248,6 +283,9 @@ export async function runFinalize(_payload = {}) {
         if (error) throw new Error(`upsert: ${error.message || error}`);
         try { await updatePrediction(fid, r); } catch (e) {
           console.warn(`[finalize P2] updatePrediction ${fid}:`, e.message);
+        }
+        try { await upsertRefereeStats(match, r, date); } catch (e) {
+          console.warn(`[finalize P2] upsertRefereeStats ${fid}:`, e.message);
         }
         return { fid, status: 'finalized-from-api' };
       });
