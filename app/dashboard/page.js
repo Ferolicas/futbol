@@ -802,34 +802,57 @@ export default function Dashboard() {
   const doHide = dismissMatch;
   const removeFromAnalyzed = dismissMatch;
 
-  // Save current combinada
+  // Save current combinada (optimistic con rollback si falla en backend)
   const saveCombinada = async () => {
     if (!customCombinada || customCombinada.selections.length === 0) return;
     setSavingComb(true);
+    const name = `Combinada ${savedCombinadas.length + 1} - ${new Date().toLocaleDateString('es')}`;
+    const tempId = `tmp-${Date.now()}`;
+    const optimistic = { name, ...customCombinada, id: tempId };
+    setSavedCombinadas(prev => [...prev, optimistic]);
     try {
-      const name = `Combinada ${savedCombinadas.length + 1} - ${new Date().toLocaleDateString('es')}`;
-      setSavedCombinadas(prev => [...prev, { name, ...customCombinada, id: Date.now() }]);
-      // Save to backend if user is logged in
-      await fetch('/api/user', {
+      const res = await fetch('/api/user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'save-combinada', data: { name, ...customCombinada } }),
-      }).catch(() => {});
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body?.success) {
+        // Rollback + mostrar error
+        setSavedCombinadas(prev => prev.filter(c => c.id !== tempId));
+        setError(body?.error || `No se pudo guardar la combinada (HTTP ${res.status})`);
+        return;
+      }
+      // Reemplazar id temporal por el id real del servidor
+      if (body.id) {
+        setSavedCombinadas(prev => prev.map(c => (c.id === tempId ? { ...c, id: body.id } : c)));
+      }
+    } catch (e) {
+      setSavedCombinadas(prev => prev.filter(c => c.id !== tempId));
+      setError(e.message || 'Error de red al guardar la combinada');
     } finally {
       setSavingComb(false);
     }
   };
 
   const deleteSavedCombinada = async (combId) => {
+    const prevList = savedCombinadas;
     setSavedCombinadas(prev => prev.filter(c => c.id !== combId));
-    // Persist deletion per-user
     try {
-      await fetch('/api/user', {
+      const res = await fetch('/api/user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'delete-combinada', data: { combinadaId: String(combId) } }),
       });
-    } catch {}
+      if (!res.ok) {
+        setSavedCombinadas(prevList); // rollback
+        const body = await res.json().catch(() => ({}));
+        setError(body?.error || `No se pudo eliminar la combinada (HTTP ${res.status})`);
+      }
+    } catch (e) {
+      setSavedCombinadas(prevList);
+      setError(e.message || 'Error de red al eliminar la combinada');
+    }
   };
 
   const liveCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && isLive(f.fixture.status.short)).length;
