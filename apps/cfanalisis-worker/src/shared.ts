@@ -74,6 +74,8 @@ export const getBaseballTeamStats = _apiBaseball.getBaseballTeamStats;
 export const getBaseballH2H = _apiBaseball.getBaseballH2H;
 export const getBaseballQuota = _apiBaseball.getBaseballQuota;
 export const getBaseballLiveGames = _apiBaseball.getBaseballLiveGames;
+export const getBaseballFixturePlayers = _apiBaseball.getBaseballFixturePlayers;
+export const getBaseballPlayerStats = _apiBaseball.getBaseballPlayerStats;
 
 // lib/supabase.js
 export const supabaseAdmin = _supabase.supabaseAdmin;
@@ -110,6 +112,8 @@ export const computeBaseballProbabilities = _baseballModel.computeBaseballProbab
 export const buildBaseballCombinada = _baseballModel.buildBaseballCombinada;
 export const scoreBaseballDataQuality = _baseballModel.scoreBaseballDataQuality;
 export const extractBestOdds = _baseballModel.extractBestOdds;
+export const extractBaseballPitcherMatchup = _baseballModel.extractBaseballPitcherMatchup;
+export const extractBaseballPlayerHighlights = _baseballModel.extractBaseballPlayerHighlights;
 
 // lib/baseball-calibration.js
 export const calibrateBaseballProbabilities = _baseballCalibration.calibrateBaseballProbabilities;

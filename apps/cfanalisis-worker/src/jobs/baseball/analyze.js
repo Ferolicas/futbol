@@ -8,10 +8,18 @@
  */
 import {
   getBaseballFixturesByDate, getBaseballOddsByGame, getBaseballTeamStats, getBaseballH2H, getBaseballQuota,
+  getBaseballFixturePlayers, getBaseballPlayerStats,
   computeBaseballProbabilities, buildBaseballCombinada, scoreBaseballDataQuality, extractBestOdds,
   calibrateBaseballProbabilities, flattenProbabilitiesForStorage,
+  extractBaseballPlayerHighlights, extractBaseballPitcherMatchup,
   supabaseAdmin,
 } from '../../shared.js';
+
+// cache_version semantica:
+//   1 = legacy (lo que habia antes del rework de baseball)
+//   2 = post-rework: nuevo schema de probabilities con players + adaptive lines
+const BASEBALL_CACHE_VERSION = 2;
+const BASEBALL_MIN_CACHE_VERSION = 2;
 
 export async function runBaseballAnalyze(payload = {}) {
   const date = payload.date || new Date().toISOString().split('T')[0];
@@ -29,11 +37,14 @@ export async function runBaseballAnalyze(payload = {}) {
     try {
       const { data: existing } = await supabaseAdmin
         .from('baseball_match_analysis')
-        .select('fixture_id, updated_at')
+        .select('fixture_id, updated_at, cache_version')
         .eq('fixture_id', fixtureId)
         .maybeSingle();
       const ageMs = existing ? (Date.now() - new Date(existing.updated_at).getTime()) : Infinity;
-      if (existing && ageMs < 6 * 3600 * 1000) {
+      // Re-analizar si: 1) no existe, 2) age > 6h, 3) cache_version obsoleta.
+      // El check de version permite invalidar masivamente subiendo BASEBALL_MIN_CACHE_VERSION.
+      const versionOk = (existing?.cache_version || 0) >= BASEBALL_MIN_CACHE_VERSION;
+      if (existing && ageMs < 6 * 3600 * 1000 && versionOk) {
         skipped++;
         continue;
       }
@@ -48,27 +59,53 @@ export async function runBaseballAnalyze(payload = {}) {
       const awayId = game.teams?.away?.id;
       const leagueId = game.league?.id;
 
-      const [oddsRes, h2hRes, homeStatsRes, awayStatsRes] = await Promise.allSettled([
+      const homeName = game.teams?.home?.name;
+      const awayName = game.teams?.away?.name;
+
+      // Llamadas paralelas. fixturePlayersRes = /fixtures/players (bloque E),
+      // necesario para extraer starting pitcher + roster con stats.
+      const [oddsRes, h2hRes, homeStatsRes, awayStatsRes, fixturePlayersRes] = await Promise.allSettled([
         getBaseballOddsByGame(fixtureId),
         getBaseballH2H(homeId, awayId),
         getBaseballTeamStats(homeId, leagueId),
         getBaseballTeamStats(awayId, leagueId),
+        getBaseballFixturePlayers(fixtureId),  // bloque E
       ]);
 
       const odds = oddsRes.status === 'fulfilled' ? oddsRes.value.odds : [];
       const h2h = h2hRes.status === 'fulfilled' ? h2hRes.value.h2h : [];
       const homeStats = homeStatsRes.status === 'fulfilled' ? homeStatsRes.value.stats : null;
       const awayStats = awayStatsRes.status === 'fulfilled' ? awayStatsRes.value.stats : null;
+      const fixturePlayers = fixturePlayersRes.status === 'fulfilled' ? fixturePlayersRes.value : null;
+
+      // Bloque E — extraer starting pitchers + sus stats. Si falla, el modelo
+      // sigue funcionando sin pitcher matchup (vuelve al estimado por team stats).
+      let pitcherMatchup = null;
+      try {
+        pitcherMatchup = await extractBaseballPitcherMatchup(fixturePlayers, homeId, awayId, leagueId, game.season);
+      } catch (e) {
+        console.warn(`[baseball-analyze] pitcherMatchup ${fixtureId}: ${e.message}`);
+      }
+
+      // Bloque F — extraer player highlights (top batters por ofensive output).
+      let playerHighlights = null;
+      try {
+        playerHighlights = await extractBaseballPlayerHighlights(fixturePlayers, homeId, awayId, homeName, awayName, leagueId, game.season);
+      } catch (e) {
+        console.warn(`[baseball-analyze] playerHighlights ${fixtureId}: ${e.message}`);
+      }
 
       const rawProbs = computeBaseballProbabilities({
         homeStats, awayStats, homeId, awayId, h2h,
         marketOdds: odds,
+        pitcherMatchup,         // bloque E
+        playerHighlights,       // bloque F (alimenta probabilities.players)
       });
       const probs = await calibrateBaseballProbabilities(rawProbs);
 
       const bestOdds = extractBestOdds(odds);
-      const combinada = buildBaseballCombinada(probs, bestOdds);
-      const dq = scoreBaseballDataQuality({ homeStats, awayStats, h2h, odds });
+      const combinada = buildBaseballCombinada(probs, bestOdds, { home: homeName, away: awayName });
+      const dq = scoreBaseballDataQuality({ homeStats, awayStats, h2h, odds, pitcherMatchup, playerHighlights });
 
       await supabaseAdmin.from('baseball_match_analysis').upsert({
         fixture_id: fixtureId,
@@ -78,16 +115,17 @@ export async function runBaseballAnalyze(payload = {}) {
         country: game.country?.name,
         home_team_id: homeId,
         away_team_id: awayId,
-        home_team: game.teams?.home?.name,
-        away_team: game.teams?.away?.name,
+        home_team: homeName,
+        away_team: awayName,
         status: game.status?.short || game.status?.long || 'NS',
         start_time: game.date,
-        analysis: { homeStats, awayStats, h2h: h2h.slice(0, 10) },
+        analysis: { homeStats, awayStats, h2h: h2h.slice(0, 10), pitcherMatchup, playerHighlights },
         odds,
         best_odds: bestOdds,
         probabilities: probs,
         combinada,
         data_quality: dq,
+        cache_version: BASEBALL_CACHE_VERSION,
         updated_at: new Date().toISOString(),
       });
 
