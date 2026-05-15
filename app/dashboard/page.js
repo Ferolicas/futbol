@@ -938,7 +938,13 @@ export default function Dashboard() {
 
   const liveCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && isLive(f.fixture.status.short)).length;
   const upcomingCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && f.fixture.status.short === 'NS').length;
-  const favoriteCount = favorites.length;
+  // Bug previo: `favorites.length` contaba TODOS los favoritos del usuario
+  // (incluidos partidos pasados). El filtro "Favoritos" solo cruza con
+  // `fixtures` del dia visible → contador mostraba "14" pero al hacer click
+  // la lista quedaba vacia porque ningun favorito guardado correspondia a
+  // los fixtures del dia. Ahora contamos solo los favoritos que existen
+  // hoy y no estan ocultos — coherente con el filtro `visible`.
+  const favoriteCount = fixtures.filter(f => favorites.includes(f.fixture.id) && !hidden.includes(f.fixture.id)).length;
 
   const leagues = {};
   fixtures.filter(f => !hidden.includes(f.fixture.id)).forEach(f => {
@@ -2195,21 +2201,21 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 );
               })()}
 
-              {/* Últimos 5 partidos por equipo */}
-              <Last5Block
-                homeLastFive={data.homeLastFive}
-                awayLastFive={data.awayLastFive}
-                homeName={match.teams.home.name}
-                awayName={match.teams.away.name}
-                homeLogo={match.teams.home.logo}
-                awayLogo={match.teams.away.logo}
+              {/* ── % Probabilidades calculadas (todas las categorias con cuota real) ── */}
+              <AccordionProbBlock
+                probabilities={data.calculatedProbabilities}
+                odds={data.odds}
+                homeTeam={match.teams.home.name}
+                awayTeam={match.teams.away.name}
               />
 
-              {/* StatsBlock (Cornes/Tarjetas/Goles avg-max-min + periodos de gol)
-                  fue eliminado: esos datos son base para los analisis, no para
-                  recomendaciones de combinada. El usuario ve los mismos partidos
-                  procesados como mercados accionables en "Selecciona para tu
-                  combinada" arriba. Para detalles raw hay "Ver analisis completo". */}
+              {/* ── Jugadores destacados ── */}
+              <AccordionPlayersBlock highlights={data.playerHighlights} />
+
+              {/* Last5Block y StatsBlock se quitaron del acordeon: son datos
+                  base de input al modelo, no recomendaciones accionables. El
+                  detalle completo (last5 partidos, goal-timing, etc.) sigue
+                  disponible en "Ver analisis completo". */}
 
               <button className="btn-full" onClick={(e) => { e.stopPropagation(); onViewFull(); }}>
                 Ver analisis completo &#8594;
@@ -2291,6 +2297,231 @@ function LiveStatsBar({ stats }) {
           {redCards.home}-{redCards.away}
         </span>
       )}
+    </div>
+  );
+}
+
+// ===================== ACCORDION PROBABILITIES BLOCK =====================
+// Replica el bloque "% Probabilidades calculadas" del analisis completo
+// (app/dashboard/analisis/[id]/page.js → SECCION 8). Misma data, render
+// compacto sin animaciones pesadas — el acordeon es vista resumida.
+
+function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
+  if (!p) return null;
+  const o = odds || {};
+  const hasOdd = (v) => isFinite(parseFloat(v)) && parseFloat(v) > 1;
+
+  // Helper: construye una linea de probs adaptativas (shots/fouls/sot)
+  const adaptiveCat = (probObj, oddObj, namePrefix) => {
+    if (!probObj || !oddObj) return [];
+    return (probObj._lines || []).map(line => {
+      const key = `over${String(line).replace('.', '_')}`;
+      const oddKey = `Over_${String(line).replace('.', '_')}`;
+      if (!hasOdd(oddObj[oddKey]) || probObj[key] == null) return null;
+      return { label: `${namePrefix} ${line}`, value: probObj[key] };
+    }).filter(Boolean);
+  };
+
+  const cats = [
+    { title: 'Ambos marcan',  items: [
+      hasOdd(o.btts?.yes) && { label: 'Sí', value: p.btts },
+      hasOdd(o.btts?.no)  && { label: 'No', value: p.bttsNo },
+    ].filter(Boolean) },
+    { title: 'Ganador', items: [
+      hasOdd(o.matchWinner?.home) && { label: homeTeam, value: p.winner?.home },
+      hasOdd(o.matchWinner?.draw) && { label: 'Empate',  value: p.winner?.draw },
+      hasOdd(o.matchWinner?.away) && { label: awayTeam, value: p.winner?.away },
+    ].filter(Boolean) },
+    { title: 'Goles totales', subtitle: p.overUnder?.expectedTotal != null ? `Esperado: ${p.overUnder.expectedTotal} goles` : null, items: [
+      hasOdd(o.overUnder?.Over_1_5) && { label: 'Más de 1.5', value: p.overUnder?.over15 },
+      hasOdd(o.overUnder?.Over_2_5) && { label: 'Más de 2.5', value: p.overUnder?.over25 },
+      hasOdd(o.overUnder?.Over_3_5) && { label: 'Más de 3.5', value: p.overUnder?.over35 },
+    ].filter(Boolean) },
+    { title: 'Goles 1ª parte', subtitle: p.halfGoals?.firstHalf?.expected != null ? `Esperado: ${p.halfGoals.firstHalf.expected}` : null, items: [
+      hasOdd(o.goals1H?.Over_0_5) && p.halfGoals?.firstHalf && { label: 'Más de 0.5', value: p.halfGoals.firstHalf.over05 },
+      hasOdd(o.goals1H?.Over_1_5) && p.halfGoals?.firstHalf && { label: 'Más de 1.5', value: p.halfGoals.firstHalf.over15 },
+      hasOdd(o.goals1H?.Over_2_5) && p.halfGoals?.firstHalf && { label: 'Más de 2.5', value: p.halfGoals.firstHalf.over25 },
+    ].filter(Boolean) },
+    { title: 'Goles 2ª parte', subtitle: p.halfGoals?.secondHalf?.expected != null ? `Esperado: ${p.halfGoals.secondHalf.expected}` : null, items: [
+      hasOdd(o.goals2H?.Over_0_5) && p.halfGoals?.secondHalf && { label: 'Más de 0.5', value: p.halfGoals.secondHalf.over05 },
+      hasOdd(o.goals2H?.Over_1_5) && p.halfGoals?.secondHalf && { label: 'Más de 1.5', value: p.halfGoals.secondHalf.over15 },
+      hasOdd(o.goals2H?.Over_2_5) && p.halfGoals?.secondHalf && { label: 'Más de 2.5', value: p.halfGoals.secondHalf.over25 },
+    ].filter(Boolean) },
+    { title: 'Ganador 1ª parte', items: [
+      hasOdd(o.winner1H?.home) && p.halfWinner?.firstHalf && { label: homeTeam, value: p.halfWinner.firstHalf.home },
+      hasOdd(o.winner1H?.draw) && p.halfWinner?.firstHalf && { label: 'Empate', value: p.halfWinner.firstHalf.draw },
+      hasOdd(o.winner1H?.away) && p.halfWinner?.firstHalf && { label: awayTeam, value: p.halfWinner.firstHalf.away },
+    ].filter(Boolean) },
+    { title: 'Ganador 2ª parte', items: [
+      hasOdd(o.winner2H?.home) && p.halfWinner?.secondHalf && { label: homeTeam, value: p.halfWinner.secondHalf.home },
+      hasOdd(o.winner2H?.draw) && p.halfWinner?.secondHalf && { label: 'Empate', value: p.halfWinner.secondHalf.draw },
+      hasOdd(o.winner2H?.away) && p.halfWinner?.secondHalf && { label: awayTeam, value: p.halfWinner.secondHalf.away },
+    ].filter(Boolean) },
+    { title: `Goles — ${homeTeam}`, items: [
+      hasOdd(o.homeGoals?.Over_0_5) && p.perTeam?.home?.goals && { label: 'Más de 0.5', value: p.perTeam.home.goals.over05 },
+      hasOdd(o.homeGoals?.Over_1_5) && p.perTeam?.home?.goals && { label: 'Más de 1.5', value: p.perTeam.home.goals.over15 },
+      hasOdd(o.homeGoals?.Over_2_5) && p.perTeam?.home?.goals && { label: 'Más de 2.5', value: p.perTeam.home.goals.over25 },
+    ].filter(Boolean) },
+    { title: `Goles — ${awayTeam}`, items: [
+      hasOdd(o.awayGoals?.Over_0_5) && p.perTeam?.away?.goals && { label: 'Más de 0.5', value: p.perTeam.away.goals.over05 },
+      hasOdd(o.awayGoals?.Over_1_5) && p.perTeam?.away?.goals && { label: 'Más de 1.5', value: p.perTeam.away.goals.over15 },
+      hasOdd(o.awayGoals?.Over_2_5) && p.perTeam?.away?.goals && { label: 'Más de 2.5', value: p.perTeam.away.goals.over25 },
+    ].filter(Boolean) },
+    { title: 'Córners totales', items: [
+      hasOdd(o.corners?.Over_8_5)  && { label: 'Más de 8.5',  value: p.corners?.over85 },
+      hasOdd(o.corners?.Over_9_5)  && { label: 'Más de 9.5',  value: p.corners?.over95 },
+      hasOdd(o.corners?.Over_10_5) && { label: 'Más de 10.5', value: p.corners?.over105 },
+    ].filter(Boolean) },
+    { title: `Córners — ${homeTeam}`, items: [
+      hasOdd(o.homeCorners?.Over_3_5) && p.perTeam?.home?.corners && { label: 'Más de 3.5', value: p.perTeam.home.corners.over35 },
+      hasOdd(o.homeCorners?.Over_4_5) && p.perTeam?.home?.corners && { label: 'Más de 4.5', value: p.perTeam.home.corners.over45 },
+      hasOdd(o.homeCorners?.Over_5_5) && p.perTeam?.home?.corners && { label: 'Más de 5.5', value: p.perTeam.home.corners.over55 },
+    ].filter(Boolean) },
+    { title: `Córners — ${awayTeam}`, items: [
+      hasOdd(o.awayCorners?.Over_3_5) && p.perTeam?.away?.corners && { label: 'Más de 3.5', value: p.perTeam.away.corners.over35 },
+      hasOdd(o.awayCorners?.Over_4_5) && p.perTeam?.away?.corners && { label: 'Más de 4.5', value: p.perTeam.away.corners.over45 },
+      hasOdd(o.awayCorners?.Over_5_5) && p.perTeam?.away?.corners && { label: 'Más de 5.5', value: p.perTeam.away.corners.over55 },
+    ].filter(Boolean) },
+    { title: 'Tarjetas totales', items: [
+      hasOdd(o.cards?.Over_2_5) && { label: 'Más de 2.5', value: p.cards?.over25 },
+      hasOdd(o.cards?.Over_3_5) && { label: 'Más de 3.5', value: p.cards?.over35 },
+      hasOdd(o.cards?.Over_4_5) && { label: 'Más de 4.5', value: p.cards?.over45 },
+    ].filter(Boolean) },
+    { title: `Tarjetas — ${homeTeam}`, items: [
+      hasOdd(o.homeCards?.Over_0_5) && p.perTeam?.home?.cards && { label: 'Más de 0.5', value: p.perTeam.home.cards.over05 },
+      hasOdd(o.homeCards?.Over_1_5) && p.perTeam?.home?.cards && { label: 'Más de 1.5', value: p.perTeam.home.cards.over15 },
+      hasOdd(o.homeCards?.Over_2_5) && p.perTeam?.home?.cards && { label: 'Más de 2.5', value: p.perTeam.home.cards.over25 },
+    ].filter(Boolean) },
+    { title: `Tarjetas — ${awayTeam}`, items: [
+      hasOdd(o.awayCards?.Over_0_5) && p.perTeam?.away?.cards && { label: 'Más de 0.5', value: p.perTeam.away.cards.over05 },
+      hasOdd(o.awayCards?.Over_1_5) && p.perTeam?.away?.cards && { label: 'Más de 1.5', value: p.perTeam.away.cards.over15 },
+      hasOdd(o.awayCards?.Over_2_5) && p.perTeam?.away?.cards && { label: 'Más de 2.5', value: p.perTeam.away.cards.over25 },
+    ].filter(Boolean) },
+    // ── Mercados nuevos cache_version 9 ──
+    p.shots && { title: 'Tiros totales', subtitle: p.shots._mean ? `Esperado: ${p.shots._mean}` : null,
+      items: adaptiveCat(p.shots, o.shots, 'Más de') },
+    p.sot && { title: 'Tiros a puerta', subtitle: p.sot._mean ? `Esperado: ${p.sot._mean}` : null,
+      items: adaptiveCat(p.sot, o.sot, 'Más de') },
+    p.perTeamShots?.home && { title: `Tiros — ${homeTeam}`, items: adaptiveCat(p.perTeamShots.home, o.homeShots, 'Más de') },
+    p.perTeamShots?.away && { title: `Tiros — ${awayTeam}`, items: adaptiveCat(p.perTeamShots.away, o.awayShots, 'Más de') },
+    p.fouls && { title: 'Faltas totales', subtitle: p.fouls._mean ? `Esperado: ${p.fouls._mean}` : null,
+      items: adaptiveCat(p.fouls, o.fouls, 'Más de') },
+    p.perTeamFouls?.home && { title: `Faltas — ${homeTeam}`, items: adaptiveCat(p.perTeamFouls.home, o.homeFouls, 'Más de') },
+    p.perTeamFouls?.away && { title: `Faltas — ${awayTeam}`, items: adaptiveCat(p.perTeamFouls.away, o.awayFouls, 'Más de') },
+    p.mostCorners && { title: 'Más córners (full)', items: [
+      hasOdd(o.corners1x2?.home) && p.mostCorners.fullMatch && { label: homeTeam, value: p.mostCorners.fullMatch.home },
+      hasOdd(o.corners1x2?.draw) && p.mostCorners.fullMatch && { label: 'Empate', value: p.mostCorners.fullMatch.draw },
+      hasOdd(o.corners1x2?.away) && p.mostCorners.fullMatch && { label: awayTeam, value: p.mostCorners.fullMatch.away },
+    ].filter(Boolean) },
+    p.asianHandicap && o.asianHandicap && { title: 'Hándicap asiático',
+      items: Object.keys(o.asianHandicap).map(oddKey => {
+        if (!hasOdd(o.asianHandicap[oddKey])) return null;
+        const m = oddKey.match(/^(home|away)_([mp])(\d+(?:_\d+)?)$/);
+        if (!m) return null;
+        const side = m[1];
+        const sign = m[2] === 'm' ? -1 : 1;
+        const lineNum = sign * parseFloat(m[3].replace('_', '.'));
+        const probKey = `h${oddKey.slice(oddKey.indexOf('_') + 1)}`;
+        const prob = p.asianHandicap[side]?.[probKey];
+        if (prob == null) return null;
+        const teamName = side === 'home' ? homeTeam : awayTeam;
+        return { label: `${teamName} ${lineNum > 0 ? '+' : ''}${lineNum}`, value: prob };
+      }).filter(Boolean) },
+  ].filter(Boolean).filter(c => c.items && c.items.length > 0);
+
+  if (cats.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#2dd4bf', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 10 }}>
+        <span>📊</span> % Probabilidades calculadas
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+        {cats.map((cat, ci) => (
+          <div key={ci} style={{ background: 'var(--bg-2)', border: '1px solid rgba(45,212,191,0.2)', borderRadius: 10, padding: '10px 12px', flex: '1 1 220px', minWidth: 0 }}>
+            <div style={{ fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--t2)', marginBottom: cat.subtitle ? 2 : 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.title}</div>
+            {cat.subtitle && <div style={{ fontSize: '.65rem', color: 'var(--t3)', marginBottom: 8 }}>{cat.subtitle}</div>}
+            {cat.items.map((it, i) => {
+              const v = Math.round(it.value ?? 0);
+              const color = v >= 80 ? '#4ade80' : v >= 65 ? '#fbbf24' : v >= 50 ? '#f97316' : '#94a3b8';
+              return (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', gap: 8 }}>
+                  <span style={{ fontSize: '.72rem', color: 'var(--t3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
+                  <span style={{ fontSize: '.85rem', fontWeight: 700, color, fontFamily: 'JetBrains Mono, monospace', fontVariantNumeric: 'tabular-nums' }}>{v}%</span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ===================== ACCORDION PLAYERS BLOCK =====================
+// Version compacta de PlayerHighlights del analisis completo. Muestra
+// scorers/shooters/assisters/foulers/bookers con su histograma (10 dots,
+// uno por partido). Sin las animaciones motion del analisis — el acordeon
+// se abre/cierra muchas veces durante la sesion, animar todo seria pesado.
+
+function AccordionPlayersBlock({ highlights }) {
+  if (!highlights) return null;
+  const { scorers, shooters, shotsTotalists, assisters, foulers, bookers } = highlights;
+  const groups = [
+    { key: 'scorers',         data: scorers,         label: 'Goleadores en racha',         emoji: '⚽', dotColor: '#22c55e', metric: 'goals',       unit: 'goles' },
+    { key: 'shooters',        data: shooters,        label: 'Rematadores consistentes',    emoji: '🎯', dotColor: '#3b82f6', metric: 'shotsOnGoal', unit: 'remates' },
+    { key: 'shotsTotalists',  data: shotsTotalists,  label: 'Tiros totales (≥2/partido)',  emoji: '🥅', dotColor: '#60a5fa', metric: 'shotsTotal',  unit: 'tiros' },
+    { key: 'assisters',       data: assisters,       label: 'Asistentes',                  emoji: '🅰️', dotColor: '#a78bfa', metric: 'assists',     unit: 'asistencias' },
+    { key: 'foulers',         data: foulers,         label: 'Faltas frecuentes',           emoji: '⚠️', dotColor: '#f59e0b', metric: 'fouls',       unit: 'faltas' },
+    { key: 'bookers',         data: bookers,         label: 'Tarjetas frecuentes',         emoji: '🟨', dotColor: '#facc15', metric: 'yellows',     unit: 'amarillas' },
+  ].filter(g => Array.isArray(g.data) && g.data.length > 0);
+
+  if (groups.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 10 }}>
+        <span>⭐</span> Jugadores destacados
+      </div>
+      {groups.map(g => (
+        <div key={g.key} style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: '.75rem', color: 'var(--t2)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>{g.emoji}</span><b>{g.label}</b>
+            <span style={{ fontSize: '.65rem', color: 'var(--t3)' }}>(en 8+ de últimos 10)</span>
+          </div>
+          {g.data.slice(0, 5).map((pl, i) => {
+            const hist = pl[g.metric] || [];
+            const total = g.metric === 'goals' ? pl.totalGoals
+                        : g.metric === 'shotsOnGoal' ? pl.totalShotsOn
+                        : g.metric === 'shotsTotal' ? pl.totalShotsAll
+                        : g.metric === 'assists' ? pl.totalAssists
+                        : g.metric === 'fouls' ? pl.totalFouls
+                        : pl.totalYellows;
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', background: 'var(--bg-2)', border: '1px solid var(--brd)', borderRadius: 8, marginBottom: 4 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: '.82rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t1)' }}>{pl.name}</div>
+                  <div style={{ fontSize: '.65rem', color: 'var(--t3)' }}>{pl.teamName}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 2 }}>
+                  {hist.slice(0, 10).map((n, j) => (
+                    <span key={j} style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 18, height: 18, borderRadius: 4,
+                      fontSize: '.62rem', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace',
+                      background: n > 0 ? g.dotColor : 'rgba(255,255,255,0.06)',
+                      color: n > 0 ? '#0f172a' : 'var(--t3)',
+                    }}>{n > 0 ? n : '—'}</span>
+                  ))}
+                </div>
+                <div style={{ fontSize: '.7rem', color: g.dotColor, fontWeight: 700, whiteSpace: 'nowrap', minWidth: 60, textAlign: 'right' }}>
+                  {total} {g.unit}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
