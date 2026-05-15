@@ -32,7 +32,7 @@ export default function DashboardLoading() {
         ))}
       </div>
 
-      <style jsx>{`
+      <style dangerouslySetInnerHTML={{ __html: `
         .dashboard-skel { padding: 16px; }
         .dashboard-skel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
         .dashboard-skel-tabs { display: flex; margin-bottom: 16px; }
@@ -40,7 +40,7 @@ export default function DashboardLoading() {
         .dashboard-skel-list { display: flex; flex-direction: column; gap: 8px; }
         .dashboard-skel-card { display: flex; align-items: center; gap: 12px; padding: 12px; background: #0f0f17; border: 1px solid #1c1c2a; border-radius: 12px; }
         .dashboard-skel-cardbody { flex: 1; }
-        :global(.skel-block) {
+        .skel-block {
           display: inline-block;
           background: linear-gradient(90deg, #1a1a26 0%, #232336 50%, #1a1a26 100%);
           background-size: 200% 100%;
@@ -51,7 +51,7 @@ export default function DashboardLoading() {
           0% { background-position: 200% 0; }
           100% { background-position: -200% 0; }
         }
-      `}</style>
+      ` }} />
     </div>
   );
 }
