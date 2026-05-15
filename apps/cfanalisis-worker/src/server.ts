@@ -392,6 +392,21 @@ export function buildServer() {
     }
   });
 
+  // Test de la pipeline de alertas (logger + notifier + Telegram).
+  // Dispara un notifyError fake — NO contamina la cola BullMQ. Si tienes
+  // configurado TELEGRAM_BOT_TOKEN y TELEGRAM_ALERT_CHAT_ID, recibes el
+  // mensaje en ~2s. Sujeto al mismo dedup 1/min que las alertas reales,
+  // asi que llamar 10 veces seguidas solo dispara la primera.
+  app.post('/admin/test-alert', async (req, reply) => {
+    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+    const note = (req.body as { note?: string } | undefined)?.note || 'test alert';
+    await notifyError(
+      { source: 'fastify', name: 'POST /admin/test-alert', extra: { note } },
+      new Error(`TEST: ${note}`),
+    );
+    return { ok: true, ts: new Date().toISOString() };
+  });
+
   // Broadcast desde Vercel — sustituye la llamada directa a Pusher
   // que hacian las API routes del frontend (ej. /api/chat).
   app.post('/broadcast', async (req, reply) => {

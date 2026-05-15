@@ -18,6 +18,7 @@
  *
  * Payload: { date: 'YYYY-MM-DD' }
  */
+import { UnrecoverableError } from 'bullmq';
 import { analyzeMatch, getCachedFixturesRaw, redisGet, redisSet, triggerEvent } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
@@ -71,7 +72,10 @@ async function markComplete(date, fixtureCount) {
 /** @param {any} payload @param {any} [job] */
 export async function runAnalyzeBatch(payload = {}, job = null) {
   const { date } = payload;
-  if (!date) throw new Error('analyze-batch: date is required');
+  // UnrecoverableError → BullMQ marca el job como failed inmediatamente sin
+  // consumir los 5 attempts configurados en analyzeJobOpts. Reintentar un
+  // payload invalido nunca lo arregla: es bug del caller, no fallo transitorio.
+  if (!date) throw new UnrecoverableError('analyze-batch: date is required');
   const startedAt = Date.now();
   const reportProgress = async (extra) => {
     if (!job?.updateProgress) return;

@@ -277,19 +277,40 @@ sudo tail -f /var/log/cfanalisis/worker.log
 
 ### Probar la alerta Telegram
 
-Forzar un error en cualquier job para validar el envío. Ejemplo: enqueue un
-job con payload inválido (date faltante) en analyze-batch:
+Endpoint dedicado que dispara `notifyError` sin pasar por la cola BullMQ —
+así no contaminas la queue con jobs fallidos:
 
 ```bash
-curl -X POST https://worker.cfanalisis.com/enqueue/futbol-analyze-batch \
+curl -X POST https://worker.cfanalisis.com/admin/test-alert \
   -H "Authorization: Bearer $WORKER_SECRET" \
   -H "Content-Type: application/json" \
-  -d '{"payload":{}}'
+  -d '{"note":"primer test"}'
 ```
 
-El job fallará con `analyze-batch: date is required` y debes recibir un
-mensaje en Telegram con el nombre del job, el error y el timestamp. Si
-disparas el mismo error varias veces seguidas, solo verás el primero (dedup).
+Debes recibir un mensaje en Telegram con el endpoint, el error sintético y
+el timestamp. Si disparas el mismo `note` varias veces seguidas, solo verás
+el primero (dedup de 1/min).
+
+### Limpiar jobs fallidos antiguos (si los hay)
+
+Si ya ejecutaste un test inválido antes de este endpoint, habrá jobs
+`futbol-analyze-batch` con payload `{}` en la lista de failed. Para
+limpiarlos:
+
+```bash
+# Opción 1: desde el panel /ferney (botón "Limpiar fallidos" si existe)
+# Opción 2: via bullmq + redis-cli local del VPS
+redis-cli <<'EOF'
+ZRANGE bull:futbol-analyze-batch:failed 0 -1
+EOF
+# Anota los jobIds y bórralos:
+redis-cli ZREM bull:futbol-analyze-batch:failed <jobId>
+redis-cli DEL bull:futbol-analyze-batch:<jobId>
+```
+
+Los nuevos jobs con payload inválido ya no se reintentan (usan
+`UnrecoverableError`), así que con el deploy actual no se vuelve a
+acumular el problema.
 
 ---
 
