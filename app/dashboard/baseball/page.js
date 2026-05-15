@@ -116,6 +116,7 @@ export default function BaseballDashboard() {
     const toAnalyze = games.filter(g => selected.has(g.id));
     if (toAnalyze.length === 0) return;
     setAnalyzing(true);
+    setError('');
     try {
       const res = await fetch('/api/baseball/analisis', {
         method: 'POST',
@@ -123,7 +124,21 @@ export default function BaseballDashboard() {
         body: JSON.stringify({ fixtures: toAnalyze, date }),
       });
       const data = await res.json();
-      if (data.error) setError(data.error);
+
+      // El endpoint devuelve un array `analyses` con success/error por
+      // fixture. Antes solo se leia `data.error` top-level, ahora tambien
+      // mostramos errores individuales para que el usuario sepa POR QUE
+      // no se analizo (cuota, fixture incompleto, fallo de DB, etc.).
+      if (data.error) {
+        setError(data.error);
+      } else if (data.failedCount > 0 && data.analyzedCount === 0) {
+        const firstErr = (data.analyses || []).find(a => !a.success)?.error || 'desconocido';
+        setError(`No se analizó ningún partido (${data.failedCount} fallos). Primero: ${firstErr}`);
+      } else if (data.failedCount > 0) {
+        const firstErr = (data.analyses || []).find(a => !a.success)?.error || 'desconocido';
+        setError(`Analizados ${data.analyzedCount}/${toAnalyze.length}. ${data.failedCount} fallaron: ${firstErr}`);
+      }
+
       setSelected(new Set());
       await fixturesMutate();
       globalMutate('/api/baseball/quota');
