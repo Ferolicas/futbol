@@ -21,16 +21,30 @@ import {
 const BASEBALL_CACHE_VERSION = 2;
 const BASEBALL_MIN_CACHE_VERSION = 2;
 
-export async function runBaseballAnalyze(payload = {}) {
+export async function runBaseballAnalyze(payload = {}, job = null) {
   const date = payload.date || new Date().toISOString().split('T')[0];
+  const startedAt = Date.now();
+
+  // Reporter de progreso para que /ferney muestre "processed/total" en vez
+  // de "Sin datos de progreso". Mismo patron que futbol-analyze-batch.
+  const reportProgress = async (extra) => {
+    if (!job?.updateProgress) return;
+    try { await job.updateProgress(extra); } catch {}
+  };
 
   const { fixtures } = await getBaseballFixturesByDate(date);
   if (!fixtures || fixtures.length === 0) {
+    await reportProgress({ phase: 'complete', processed: 0, total: 0, analyzed: 0, skipped: 0, failed: 0, startedAt });
     return { ok: true, analyzed: 0, message: 'no fixtures', date };
   }
 
-  let analyzed = 0, skipped = 0, failed = 0;
+  let analyzed = 0, skipped = 0, failed = 0, processed = 0;
   const errors = [];
+
+  await reportProgress({
+    phase: 'analyzing', processed: 0, total: fixtures.length,
+    analyzed: 0, skipped: 0, failed: 0, startedAt,
+  });
 
   for (const game of fixtures) {
     const fixtureId = game.id;
@@ -146,8 +160,22 @@ export async function runBaseballAnalyze(payload = {}) {
       errors.push({ fixtureId, error: e.message });
       if (e.message?.startsWith('BASEBALL_QUOTA_EXHAUSTED')) break;
     }
+    processed++;
+    // Reportar tras cada partido para que /ferney refleje progreso en vivo.
+    await reportProgress({
+      phase: 'analyzing', processed, total: fixtures.length,
+      analyzed, skipped, failed, startedAt,
+    });
   }
 
   const quota = await getBaseballQuota();
-  return { ok: true, date, total: fixtures.length, analyzed, skipped, failed, quota, errors: errors.slice(0, 5) };
+  const durationSec = ((Date.now() - startedAt) / 1000).toFixed(1);
+  await reportProgress({
+    phase: failed > 0 ? 'failed' : 'complete',
+    processed: fixtures.length, total: fixtures.length,
+    analyzed, skipped, failed, startedAt,
+    durationSec: Number(durationSec),
+  });
+
+  return { ok: true, date, total: fixtures.length, analyzed, skipped, failed, durationSec: Number(durationSec), quota, errors: errors.slice(0, 5) };
 }
