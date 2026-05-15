@@ -35,19 +35,28 @@ export async function GET(request) {
         : Promise.resolve({ data: [] }),
     ]);
 
-    const analysisMap = new Map((analysesRes.data || []).map(a => [a.fixture_id, a]));
-    const resultsMap = new Map((resultsRes.data || []).map(r => [r.fixture_id, r]));
-    const hiddenSet = new Set((hiddenRes.data || []).map(h => h.fixture_id));
-    const favoritesSet = new Set((favoritesRes.data || []).map(f => f.fixture_id));
+    // Defensa contra type mismatch BIGINT/Number: aunque lib/db.js ya
+    // registra parser global INT8 → Number, normalizamos aqui tambien.
+    // Si por cualquier razon (driver futuro, RPC distinta, override) un
+    // fixture_id llega como string, este Number() lo coerciona y los
+    // Map/Set keys quedan numericos como f.id.
+    const toNum = (v) => Number(v);
+    const analysisMap = new Map((analysesRes.data || []).map(a => [toNum(a.fixture_id), a]));
+    const resultsMap = new Map((resultsRes.data || []).map(r => [toNum(r.fixture_id), r]));
+    const hiddenSet = new Set((hiddenRes.data || []).map(h => toNum(h.fixture_id)));
+    const favoritesSet = new Set((favoritesRes.data || []).map(f => toNum(f.fixture_id)));
 
-    const enriched = (fixturesRes.fixtures || []).map(f => ({
-      ...f,
-      analysis: analysisMap.get(f.id) || null,
-      liveResult: resultsMap.get(f.id) || null,
-      isAnalyzed: analysisMap.has(f.id),
-      isHidden: hiddenSet.has(f.id),
-      isFavorite: favoritesSet.has(f.id),
-    }));
+    const enriched = (fixturesRes.fixtures || []).map(f => {
+      const fid = toNum(f.id);
+      return {
+        ...f,
+        analysis: analysisMap.get(fid) || null,
+        liveResult: resultsMap.get(fid) || null,
+        isAnalyzed: analysisMap.has(fid),
+        isHidden: hiddenSet.has(fid),
+        isFavorite: favoritesSet.has(fid),
+      };
+    });
 
     return Response.json({
       success: true,
