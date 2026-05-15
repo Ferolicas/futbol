@@ -116,6 +116,27 @@ export default function FerneyDashboard({ user }) {
     } finally { setActionBusy(null); }
   };
 
+  const onAnalyzeBaseball = async () => {
+    if (!confirm(`¿Analizar TODOS los partidos de baseball del ${date}?`)) return;
+    setActionBusy('analyze-baseball'); setActionMsg(null);
+    try {
+      const res = await fetch('/api/admin/ferney', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'enqueue', queue: 'baseball-analyze', payload: { date } }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setActionMsg({ kind: 'ok', text: `Análisis baseball encolado (job #${data.enqueued || data.jobId || '?'}).` });
+        await fetchOnce();
+      } else {
+        setActionMsg({ kind: 'bad', text: `Error: ${data.error || `HTTP ${res.status}`}` });
+      }
+    } catch (e) {
+      setActionMsg({ kind: 'bad', text: `Error: ${e.message}` });
+    } finally { setActionBusy(null); }
+  };
+
   const onCalibrate = async (sport) => {
     if (!confirm(`¿Recalibrar modelo ${sport}?`)) return;
     setActionBusy(`calibrate-${sport}`); setActionMsg(null); setCalibrationResult(null);
@@ -557,7 +578,11 @@ export default function FerneyDashboard({ user }) {
           <div className="fw-actions">
             <button onClick={onReanalyze} disabled={!!actionBusy} className="fw-action-btn green">
               <span>{actionBusy === 'reanalyze' ? '⏳' : '↻'}</span>
-              <span>{actionBusy === 'reanalyze' ? 'Encolando…' : `Re-analizar ${date}`}</span>
+              <span>{actionBusy === 'reanalyze' ? 'Encolando…' : `Re-analizar fútbol ${date}`}</span>
+            </button>
+            <button onClick={onAnalyzeBaseball} disabled={!!actionBusy} className="fw-action-btn yellow">
+              <span>{actionBusy === 'analyze-baseball' ? '⏳' : '⚾'}</span>
+              <span>{actionBusy === 'analyze-baseball' ? 'Encolando…' : `Analizar baseball ${date}`}</span>
             </button>
             <button onClick={() => onCalibrate('futbol')} disabled={!!actionBusy} className="fw-action-btn cyan">
               <span>{actionBusy === 'calibrate-futbol' ? '⏳' : '⚙'}</span>
