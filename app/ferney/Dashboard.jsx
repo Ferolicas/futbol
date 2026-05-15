@@ -117,17 +117,22 @@ export default function FerneyDashboard({ user }) {
   };
 
   const onAnalyzeBaseball = async () => {
-    if (!confirm(`¿Analizar TODOS los partidos de baseball del ${date}?`)) return;
+    if (!confirm(`¿Re-analizar TODOS los partidos de baseball del ${date}? (fuerza re-análisis aunque ya estén procesados)`)) return;
     setActionBusy('analyze-baseball'); setActionMsg(null);
     try {
       const res = await fetch('/api/admin/ferney', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'enqueue', queue: 'baseball-analyze', payload: { date } }),
+        // force: true → ignora el check de cache reciente. Sin esto, el
+        // job termina en segundos analizando 0 partidos (todos cacheados).
+        body: JSON.stringify({ action: 'enqueue', queue: 'baseball-analyze', payload: { date, force: true } }),
       });
       const data = await res.json();
       if (res.ok && data.ok) {
-        setActionMsg({ kind: 'ok', text: `Análisis baseball encolado (job #${data.enqueued || data.jobId || '?'}).` });
+        setActionMsg({
+          kind: 'ok',
+          text: `Análisis baseball encolado con force=true (job #${data.enqueued || data.jobId || '?'}). Mira "Jobs activos" para ver progreso.`,
+        });
         await fetchOnce();
       } else {
         setActionMsg({ kind: 'bad', text: `Error: ${data.error || `HTTP ${res.status}`}` });

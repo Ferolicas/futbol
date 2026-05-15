@@ -23,6 +23,10 @@ const BASEBALL_MIN_CACHE_VERSION = 2;
 
 export async function runBaseballAnalyze(payload = {}, job = null) {
   const date = payload.date || new Date().toISOString().split('T')[0];
+  // force=true → ignora el check de cache_version + age, re-analiza todo.
+  // Lo usa el boton "Analizar baseball" en /ferney para garantizar que
+  // se vea trabajo aunque el cron diario ya haya procesado los partidos.
+  const force = payload.force === true;
   const startedAt = Date.now();
 
   // Reporter de progreso para que /ferney muestre "processed/total" en vez
@@ -49,18 +53,22 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
   for (const game of fixtures) {
     const fixtureId = game.id;
     try {
-      const { data: existing } = await supabaseAdmin
-        .from('baseball_match_analysis')
-        .select('fixture_id, updated_at, cache_version')
-        .eq('fixture_id', fixtureId)
-        .maybeSingle();
-      const ageMs = existing ? (Date.now() - new Date(existing.updated_at).getTime()) : Infinity;
-      // Re-analizar si: 1) no existe, 2) age > 6h, 3) cache_version obsoleta.
-      // El check de version permite invalidar masivamente subiendo BASEBALL_MIN_CACHE_VERSION.
-      const versionOk = (existing?.cache_version || 0) >= BASEBALL_MIN_CACHE_VERSION;
-      if (existing && ageMs < 6 * 3600 * 1000 && versionOk) {
-        skipped++;
-        continue;
+      // Skip si ya esta analizado recientemente con la version correcta.
+      // force=true salta el check — re-analiza todo (botón manual /ferney).
+      if (!force) {
+        const { data: existing } = await supabaseAdmin
+          .from('baseball_match_analysis')
+          .select('fixture_id, updated_at, cache_version')
+          .eq('fixture_id', fixtureId)
+          .maybeSingle();
+        const ageMs = existing ? (Date.now() - new Date(existing.updated_at).getTime()) : Infinity;
+        const versionOk = (existing?.cache_version || 0) >= BASEBALL_MIN_CACHE_VERSION;
+        if (existing && ageMs < 6 * 3600 * 1000 && versionOk) {
+          skipped++;
+          processed++;
+          await reportProgress({ phase: 'analyzing', processed, total: fixtures.length, analyzed, skipped, failed, startedAt });
+          continue;
+        }
       }
 
       const quota = await getBaseballQuota();
