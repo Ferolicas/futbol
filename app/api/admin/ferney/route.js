@@ -9,6 +9,7 @@
  */
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../../lib/supabase';
+import { logAction } from '../../../../lib/audit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // calibration can take 20-30s on large prediction tables
@@ -19,11 +20,11 @@ async function requireAdmin() {
   if (!user) return null;
   const { data: profile } = await supabaseAdmin
     .from('user_profiles')
-    .select('role')
+    .select('role, email')
     .eq('id', user.id)
     .maybeSingle();
   if (!profile || !['admin', 'owner'].includes(profile.role)) return null;
-  return user;
+  return { ...user, email: profile.email || user.email };
 }
 
 function workerConfig() {
@@ -121,6 +122,26 @@ export async function POST(request) {
       cache: 'no-store',
     });
     const text = await res.text();
+
+    // Audit log fire-and-forget — solo si la accion fue aceptada por el worker.
+    if (res.ok) {
+      const auditAction = isCalibrate ? 'calibrate'
+                        : action === 'retry' ? 'retry-job'
+                        : action === 'enqueue' ? 'enqueue-job'
+                        : 'retry-job';
+      logAction({
+        userId: user.id,
+        userEmail: user.email,
+        action: auditAction,
+        entity: isCalibrate ? 'calibration' : 'queue',
+        entityId: isCalibrate ? body.sport : body.queue,
+        payload: isCalibrate
+          ? { sport: body.sport || 'futbol' }
+          : { queue: body.queue, jobId: body.jobId, payload: body.payload },
+        request,
+      }).catch(() => {});
+    }
+
     return new Response(text, { status: res.status, headers: { 'Content-Type': 'application/json' } });
   } catch (e) {
     return Response.json({ error: e.message }, { status: 502 });

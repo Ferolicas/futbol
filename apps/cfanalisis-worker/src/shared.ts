@@ -25,7 +25,6 @@ const [
   _supabase,
   _supabaseCache,
   _sanityCache,
-  _pusher,
   _webpush,
   _leagues,
   _calculations,
@@ -41,7 +40,6 @@ const [
   import('../../../lib/supabase.js'),
   import('../../../lib/supabase-cache.js'),
   import('../../../lib/sanity-cache.js'),
-  import('../../../lib/pusher.js'),
   import('../../../lib/webpush.js'),
   import('../../../lib/leagues.js'),
   import('../../../lib/calculations.js'),
@@ -51,6 +49,10 @@ const [
   import('../../../lib/odds-api.js'),
   import('../../../lib/db.js'),
 ]);
+
+// triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
+// en vez de Pusher. Mismo contrato: triggerEvent(channel, event, data).
+import { triggerEvent as wsTriggerEvent } from './ws/wsManager.js';
 
 // lib/redis.js
 export const redisGet = _redis.redisGet;
@@ -88,8 +90,8 @@ export const getCachedFixturesRaw = _sanityCache.getCachedFixturesRaw;
 export const getAnalyzedFixtureIds = _sanityCache.getAnalyzedFixtureIds;
 export const incrementApiCallCount = _sanityCache.incrementApiCallCount;
 
-// lib/pusher.js
-export const triggerEvent = _pusher.triggerEvent;
+// triggerEvent — antes Pusher, ahora WebSocket nativo (mismo contrato).
+export const triggerEvent = wsTriggerEvent;
 
 // lib/webpush.js
 export const sendPushNotification = _webpush.sendPushNotification;

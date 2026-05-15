@@ -4,7 +4,10 @@ import os from 'os';
 import { execSync } from 'child_process';
 import { isValidQueue, queues, QUEUE_NAMES, type QueueName } from './queues.js';
 import { getErrors } from './errors-log.js';
-import { redisGet } from './shared.js';
+import { redisGet, pgQuery } from './shared.js';
+import { bullConnection } from './redis.js';
+import { Sentry } from './sentry.js';
+import { wsManager } from './ws/wsManager.js';
 import { runFutbolCalibration } from './jobs/calibration/futbol.js';
 import { runBaseballCalibration } from './jobs/calibration/baseball.js';
 
@@ -189,20 +192,110 @@ function getVpsStats() {
   };
 }
 
+async function pingPostgres(): Promise<'ok' | 'error'> {
+  try {
+    const { rows } = await pgQuery('SELECT 1 AS one');
+    return rows[0]?.one === 1 ? 'ok' : 'error';
+  } catch {
+    return 'error';
+  }
+}
+
+async function pingRedis(): Promise<'ok' | 'error'> {
+  try {
+    const pong = await bullConnection.ping();
+    return pong === 'PONG' ? 'ok' : 'error';
+  } catch {
+    return 'error';
+  }
+}
+
+async function collectHealthQueues() {
+  const out: Record<string, { waiting: number; active: number; failed: number; completed: number }> = {};
+  await Promise.all(QUEUE_NAMES.map(async (name) => {
+    const q = queues[name];
+    const [waiting, active, failed, completed] = await Promise.all([
+      q.getWaitingCount(),
+      q.getActiveCount(),
+      q.getFailedCount(),
+      q.getCompletedCount(),
+    ]);
+    out[name] = { waiting, active, failed, completed };
+  }));
+  return out;
+}
+
 export function buildServer() {
   const app = Fastify({ logger: { level: 'info' } });
+
+  // Capturar excepciones de Fastify a Sentry.
+  app.setErrorHandler((err, req, reply) => {
+    req.log.error({ err: err.message, url: req.url }, 'fastify error');
+    try {
+      Sentry.withScope((scope) => {
+        scope.setTag('route', req.url);
+        scope.setTag('method', req.method);
+        Sentry.captureException(err);
+      });
+    } catch {}
+    reply.code(err.statusCode || 500).send({ ok: false, error: err.message });
+  });
+
+  // WebSocket plugin — registrado de forma sincrona dentro del ready chain.
+  // `@fastify/websocket` se carga via dynamic import para que el server pueda
+  // construirse aun si la dep no esta instalada (degradacion controlada).
+  app.register(async (instance) => {
+    try {
+      const ws = await import('@fastify/websocket');
+      await instance.register(ws.default ?? ws);
+      instance.get('/ws', { websocket: true }, (conn, req) => {
+        const query = req.query as { secret?: string; topics?: string };
+        if (!SECRET || query.secret !== SECRET) {
+          conn.socket.send(JSON.stringify({ type: 'error', code: 'unauthorized' }));
+          conn.socket.close(4401, 'unauthorized');
+          return;
+        }
+        wsManager.attach(conn.socket, query.topics);
+      });
+      console.log('[server] /ws registered');
+    } catch (e) {
+      console.warn('[server] @fastify/websocket no disponible — /ws desactivado:', (e as Error).message);
+    }
+  });
 
   app.get('/stats', async (req, reply) => {
     if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
     return { ok: true, ts: new Date().toISOString(), ...getVpsStats() };
   });
 
-  app.get('/health', async () => ({
-    ok: true,
-    uptime: process.uptime(),
-    queues: QUEUE_NAMES,
-    timestamp: new Date().toISOString(),
-  }));
+  // /health — sin auth (lo usan BetterUptime, scripts locales, Caddy).
+  app.get('/health', async (_req, reply) => {
+    const startedAt = Date.now();
+    const [db, redis, queuesSummary] = await Promise.all([
+      pingPostgres(),
+      pingRedis(),
+      collectHealthQueues().catch(() => ({})),
+    ]);
+    const totalMem = os.totalmem();
+    const freeMem  = os.freemem();
+    const usedMem  = totalMem - freeMem;
+    const status = (db === 'ok' && redis === 'ok') ? 'ok' : 'degraded';
+    const body = {
+      status,
+      uptime: Math.round(process.uptime()),
+      db, redis,
+      queues: queuesSummary,
+      memory: {
+        used_mb:  Math.round(usedMem  / 1024 / 1024),
+        total_mb: Math.round(totalMem / 1024 / 1024),
+      },
+      ws_clients: wsManager.size(),
+      check_ms: Date.now() - startedAt,
+      timestamp: new Date().toISOString(),
+    };
+    // Devuelve 200 incluso degraded — BetterUptime decide su umbral.
+    return reply.code(200).send(body);
+  });
 
   app.get('/queues/:name/status', async (req, reply) => {
     const name = (req.params as { name: string }).name;
@@ -294,6 +387,18 @@ export function buildServer() {
       req.log.error({ err: msg }, `/admin/calibrate ${sport} failed`);
       return reply.code(500).send({ ok: false, error: msg });
     }
+  });
+
+  // Broadcast desde Vercel — sustituye la llamada directa a Pusher
+  // que hacian las API routes del frontend (ej. /api/chat).
+  app.post('/broadcast', async (req, reply) => {
+    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+    const body = (req.body || {}) as { channel?: string; event?: string; data?: unknown };
+    if (!body.channel || !body.event) {
+      return reply.code(400).send({ error: 'channel y event son obligatorios' });
+    }
+    const delivered = wsManager.broadcast(body.channel, body.event, body.data ?? null);
+    return { ok: true, channel: body.channel, event: body.event, delivered };
   });
 
   app.post('/enqueue/:queue', async (req, reply) => {

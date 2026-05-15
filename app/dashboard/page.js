@@ -747,12 +747,20 @@ export default function Dashboard() {
     }
   };
 
-  // Unified dismiss: removes from both Partidos AND Analizados tabs
+  // Unified dismiss: removes from both Partidos AND Analizados tabs.
+  // Optimistic con rollback — si la persistencia falla, devolvemos la UI al
+  // estado previo en vez de mentir al usuario (mismo patron que saveCombinada).
   const dismissMatch = async (e, fixtureId) => {
     e.stopPropagation();
+    // Snapshot ANTES de mutar para poder hacer rollback exacto
+    const prevHidden = hidden;
+    const prevAnalyzed = analyzed;
+    const prevSelectedMarkets = selectedMarkets;
+    const prevCacheHidden = _dashCache?.hidden;
+
     setHidden(prev => {
       const next = prev.includes(fixtureId) ? prev : [...prev, fixtureId];
-      if (_dashCache) _dashCache.hidden = next; // keep SPA back-navigation in sync
+      if (_dashCache) _dashCache.hidden = next;
       return next;
     });
     setAnalyzed(prev => prev.filter(id => id !== fixtureId));
@@ -761,40 +769,54 @@ export default function Dashboard() {
       delete n[fixtureId];
       return n;
     });
-    // Persist: hide from Partidos + remove from Analizados
+
     try {
-      await fetch('/api/hidden', {
+      const res = await fetch('/api/hidden', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fixtureId, date }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (e) {
-      console.error('[dismissMatch]', e.message);
+      console.error('[dismissMatch] rollback:', e.message);
+      setHidden(prevHidden);
+      setAnalyzed(prevAnalyzed);
+      setSelectedMarkets(prevSelectedMarkets);
+      if (_dashCache) _dashCache.hidden = prevCacheHidden;
+      setError('No se pudo ocultar el partido — restaurado.');
     }
   };
 
-  // Toggle favorite — optimistic update + Supabase persist
-  // When ADDING a favorite, auto-enable push notifications so goals always arrive
+  // Toggle favorite — optimistic update + persist + rollback si falla.
+  // Si se ANADE favorito, intentar subscribirse a push (no prompt si denied).
   const toggleFavorite = async (e, fixtureId) => {
     e.stopPropagation();
     const isFav = favorites.includes(fixtureId);
+    const prevFavorites = favorites;
+    const prevCacheFavorites = _dashCache?.favorites;
+
     setFavorites(prev => isFav ? prev.filter(id => id !== fixtureId) : [...prev, fixtureId]);
-    if (_dashCache) _dashCache.favorites = isFav
-      ? (_dashCache.favorites || []).filter(id => id !== fixtureId)
-      : [...(_dashCache.favorites || []), fixtureId];
+    if (_dashCache) {
+      _dashCache.favorites = isFav
+        ? (_dashCache.favorites || []).filter(id => id !== fixtureId)
+        : [...(_dashCache.favorites || []), fixtureId];
+    }
+
     try {
-      await fetch('/api/favorites', {
+      const res = await fetch('/api/favorites', {
         method: isFav ? 'DELETE' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fixtureId }),
       });
-      // Auto-subscribe to push when adding a favorite — only if permission already granted
-      // (don't prompt the permission dialog as a side-effect of starring a match)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       if (!isFav && !pushEnabled && pushSupported && Notification.permission === 'granted') {
         subscribePush();
       }
     } catch (e) {
-      console.error('[toggleFavorite]', e.message);
+      console.error('[toggleFavorite] rollback:', e.message);
+      setFavorites(prevFavorites);
+      if (_dashCache) _dashCache.favorites = prevCacheFavorites;
+      setError('No se pudo guardar el favorito — restaurado.');
     }
   };
 

@@ -1,0 +1,154 @@
+# Instalación en el VPS (Arsys Ubuntu 24.04)
+
+Todos los archivos de `scripts/vps/` deben subirse al VPS. Esta guía agrupa los pasos manuales de los bloques 1, 2, 3 y 5.
+
+---
+
+## Bloque 1 — Backups automáticos
+
+```bash
+# 1. Crear directorio y copiar scripts
+sudo mkdir -p /apps/backup
+sudo cp pg_backup.sh restore.sh /apps/backup/
+sudo cp backup.env.example /apps/backup/.env
+sudo chown -R root:root /apps/backup
+sudo chmod +x /apps/backup/{pg_backup,restore}.sh
+sudo chmod 600 /apps/backup/.env
+sudo $EDITOR /apps/backup/.env   # rellenar credenciales
+
+# 2. Instalar rclone si no está
+which rclone || curl https://rclone.org/install.sh | sudo bash
+
+# 3. Configurar remote "b2" (interactivo, solo una vez)
+sudo -E rclone config
+# → n (new remote)
+# → name: b2
+# → storage: backblaze (opción "b2")
+# → application key id: <obtener de https://secure.backblaze.com/app_keys.htm>
+# → application key: <idem>
+# → resto: defaults
+# Crear bucket "cfanalisis-backups" en la consola de B2 antes de ejecutar.
+
+# 4. Ejecutar manualmente la primera vez para validar
+sudo -E /apps/backup/pg_backup.sh
+tail -50 /apps/backup/backup.log
+
+# 5. Cron diario 3:00 AM Madrid
+sudo crontab -e
+# Añadir:
+# 0 3 * * * /apps/backup/pg_backup.sh >> /apps/backup/backup.log 2>&1
+```
+
+**Probar restore (en una base de pruebas, NO en producción):**
+
+```bash
+sudo -E /apps/backup/restore.sh latest --dry-run
+```
+
+---
+
+## Bloque 2 — PgBouncer
+
+```bash
+sudo apt update && sudo apt install -y pgbouncer
+
+# Copiar config
+sudo cp scripts/vps/pgbouncer.ini /etc/pgbouncer/pgbouncer.ini
+sudo chown postgres:postgres /etc/pgbouncer/pgbouncer.ini
+sudo chmod 640 /etc/pgbouncer/pgbouncer.ini
+
+# Generar userlist.txt con el hash md5 actual del usuario cfanalisis
+sudo -u postgres psql -d cfanalisis -tAc \
+  "SELECT '\"' || rolname || '\" \"' || rolpassword || '\"' \
+   FROM pg_authid WHERE rolname = 'cfanalisis';" \
+  | sudo tee /etc/pgbouncer/userlist.txt
+sudo chown postgres:postgres /etc/pgbouncer/userlist.txt
+sudo chmod 640 /etc/pgbouncer/userlist.txt
+
+# Habilitar y arrancar
+sudo systemctl enable pgbouncer
+sudo systemctl restart pgbouncer
+sudo systemctl status pgbouncer
+
+# Verificar
+psql -h 127.0.0.1 -p 6432 -U cfanalisis cfanalisis -c 'SELECT 1;'
+```
+
+**Cambio coordinado del DATABASE_URL** (sólo después de validar la conexión por 6432):
+
+```bash
+# Worker en VPS
+sudo -E $EDITOR /apps/futbol/apps/cfanalisis-worker/.env
+# Cambiar el puerto de 5432 → 6432 en DATABASE_URL
+
+pm2 restart cfanalisis-worker --update-env
+pm2 logs cfanalisis-worker --lines 50
+```
+
+**Vercel** (panel o CLI):
+- Editar `DATABASE_URL` y cambiar `:5432/` → `:6432/`.
+- Redeploy.
+
+---
+
+## Bloque 3 — Caddy HTTPS
+
+```bash
+# 1. Instalar Caddy (método oficial)
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+
+# 2. Copiar Caddyfile
+sudo cp scripts/vps/Caddyfile /etc/caddy/Caddyfile
+sudo mkdir -p /var/log/caddy
+sudo chown caddy:caddy /var/log/caddy
+
+# 3. Abrir 443 (y 80 para validación ACME)
+sudo ufw allow 80
+sudo ufw allow 443
+
+# 4. Habilitar y arrancar
+sudo systemctl enable caddy
+sudo systemctl restart caddy
+sudo systemctl status caddy
+
+# 5. Verificar HTTPS (Let's Encrypt tarda ~30s la primera vez)
+curl -I https://worker.cfanalisis.com/health
+```
+
+**Pre-requisito DNS**: `worker.cfanalisis.com` debe apuntar a la IP del VPS antes de arrancar Caddy. Si el DNS no resuelve, Caddy fallará el challenge HTTP-01.
+
+**Acción manual en panel de Arsys**: confirmar que el puerto 443 está abierto en el firewall del proveedor (no solo en UFW). Si no lo está, abrirlo desde el panel.
+
+**No registres Caddy en PM2** — Caddy se gestiona via systemd con restart automático (`Restart=on-failure` ya viene en su service unit).
+
+---
+
+## Bloque 5 — Health check externo
+
+```bash
+sudo mkdir -p /apps/scripts
+sudo cp scripts/vps/health_check.sh /apps/scripts/
+sudo cp scripts/vps/health.env.example /apps/scripts/health.env
+sudo chown root:root /apps/scripts/health_check.sh /apps/scripts/health.env
+sudo chmod +x /apps/scripts/health_check.sh
+sudo chmod 600 /apps/scripts/health.env
+sudo $EDITOR /apps/scripts/health.env  # rellenar token y chat id
+
+# Cron cada 5 minutos
+sudo crontab -e
+# Añadir:
+# */5 * * * * /apps/scripts/health_check.sh >> /apps/scripts/health.log 2>&1
+```
+
+**Para BetterUptime / UptimeRobot**:
+- URL: `https://worker.cfanalisis.com/health`
+- Método: GET
+- Expected status: `200`
+- Expected body contains: `"status":"ok"` ó `"status":"degraded"` (la app considera degraded como funcional)
+- Frecuencia recomendada: 1 minuto
+- Webhook de alerta al bot Telegram `@cfanalisis_bot` (chat ID se incluye en `health.env`).

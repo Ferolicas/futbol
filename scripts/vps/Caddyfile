@@ -1,0 +1,49 @@
+# /etc/caddy/Caddyfile — cfanalisis worker
+#
+# Caddy maneja Let's Encrypt automaticamente. Pre-requisito: que
+# worker.cfanalisis.com apunte ya por DNS a la IP del VPS antes de
+# arrancar el servicio.
+
+worker.cfanalisis.com {
+    # Logs en formato JSON, rotacion automatica por Caddy.
+    log {
+        output file /var/log/caddy/worker.log {
+            roll_size 10MB
+            roll_keep 10
+        }
+        format json
+    }
+
+    # Compresion para respuestas JSON grandes (analisis, fixtures).
+    encode gzip zstd
+
+    # Reverse proxy al worker Fastify en localhost:8080.
+    # Caddy detecta automaticamente Upgrade/Connection y proxya
+    # WebSocket sin configuracion adicional. Lo dejamos explicito
+    # para que sea evidente al leer el archivo.
+    reverse_proxy localhost:8080 {
+        # Headers para que Fastify reciba la IP real del cliente
+        # (lo necesita Sentry y los logs estructurados).
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+
+        # Timeouts generosos para WebSocket de larga duracion.
+        # 24h es el maximo razonable; los clientes reconectan
+        # automaticamente si la sesion se cae.
+        transport http {
+            read_timeout  24h
+            write_timeout 24h
+            dial_timeout  5s
+        }
+    }
+
+    # HSTS — fuerza HTTPS los proximos 6 meses. No incluimos preload
+    # hasta confirmar que todos los subdominios estan en HTTPS.
+    header {
+        Strict-Transport-Security "max-age=15552000; includeSubDomains"
+        X-Content-Type-Options    "nosniff"
+        X-Frame-Options           "DENY"
+        Referrer-Policy           "strict-origin-when-cross-origin"
+    }
+}

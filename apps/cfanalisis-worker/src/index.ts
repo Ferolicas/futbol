@@ -1,4 +1,8 @@
 import 'dotenv/config';
+// Sentry primero — captura errores de cualquier import posterior (DATABASE_URL
+// ausente, ioredis no conecta, etc.). No-op si SENTRY_DSN no esta en el env.
+import './sentry.js';
+import { Sentry } from './sentry.js';
 import { buildServer } from './server.js';
 import { startWorkers } from './workers.js';
 import { bullConnection } from './redis.js';
@@ -35,5 +39,16 @@ async function main() {
 
 main().catch((err) => {
   console.error('[worker] fatal:', err);
+  try { Sentry.captureException(err); } catch {}
   process.exit(1);
+});
+
+// Errores no manejados a nivel proceso — los reporta Sentry y se loguean.
+process.on('uncaughtException', (err) => {
+  console.error('[worker] uncaughtException:', err);
+  try { Sentry.captureException(err); } catch {}
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[worker] unhandledRejection:', reason);
+  try { Sentry.captureException(reason); } catch {}
 });

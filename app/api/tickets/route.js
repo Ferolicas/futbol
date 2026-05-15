@@ -4,6 +4,7 @@
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { sendTicketNotification } from '../../../lib/resend-email';
+import { logAction } from '../../../lib/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +49,15 @@ export async function POST(request) {
         .update({ reply, status: 'replied', replied_at: new Date().toISOString() })
         .eq('ticket_id', targetTicketId);
       if (error) throw error;
+      logAction({
+        userId: user.id,
+        userEmail: profile?.email || user.email,
+        action: 'reply-ticket',
+        entity: 'ticket',
+        entityId: targetTicketId,
+        payload: { reply_length: reply.length },
+        request,
+      }).catch(() => {});
       return Response.json({ success: true });
     }
 

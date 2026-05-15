@@ -1,5 +1,6 @@
 import { Worker, type Processor } from 'bullmq';
 import { bullConnection } from './redis.js';
+import { captureJobException } from './sentry.js';
 import type { QueueName } from './queues.js';
 
 // Futbol jobs
@@ -73,9 +74,11 @@ export function startWorkers(): Worker[] {
     });
     w.on('failed', (job, err) => {
       console.error(`[worker:${name}] job ${job?.id} failed:`, err.message);
+      captureJobException(err, { queue: name, jobId: job?.id, data: job?.data });
     });
     w.on('error', (err) => {
       console.error(`[worker:${name}] error:`, err.message);
+      captureJobException(err, { queue: name });
     });
     workers.push(w);
   }
