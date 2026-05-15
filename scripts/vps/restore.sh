@@ -3,8 +3,8 @@
 # restore.sh — Restaurar la base cfanalisis desde un backup .dump
 #
 # USO:
-#   ./restore.sh latest                       # descarga el mas reciente de B2
-#   ./restore.sh backup_cfanalisis_2026-05-14_03.dump   # archivo concreto
+#   ./restore.sh latest                       # descarga el mas reciente del remote
+#   ./restore.sh backup_cfanalisis_2026-05-14_03.dump   # archivo concreto en remote
 #   ./restore.sh /apps/backup/backup_xxx.dump            # archivo local
 #
 # ATENCION:

@@ -8,12 +8,13 @@
 #
 # Variables de entorno requeridas (en /apps/backup/.env, source-ed por el script):
 #   PGUSER, PGPASSWORD, PGDATABASE, PGHOST, PGPORT
-#   RCLONE_REMOTE      (ej. b2:cfanalisis-backups/pg)
+#   RCLONE_REMOTE      (ej. gdrive:cfanalisis-backups)
 #   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 #
 # Retencion:
 #   Local: 2 dias (el resto se borra).
-#   Remoto (B2): 30 dias (rclone delete antiguo).
+#   Remoto (Google Drive): 30 dias. Se borra con --drive-use-trash=false
+#   para que la eliminacion sea inmediata y no consuma cuota en la papelera.
 # ============================================================================
 
 set -uo pipefail
@@ -82,7 +83,7 @@ fi
 DUMP_SIZE="$(du -h "${DUMP_FILE}" | cut -f1)"
 log "dump OK (${DUMP_SIZE})"
 
-# ── 2. Subir a Backblaze B2 via rclone ─────────────────────────────────────
+# ── 2. Subir a Google Drive via rclone ─────────────────────────────────────
 if [ -z "${RCLONE_REMOTE:-}" ]; then
   fail "RCLONE_REMOTE no configurado en ${ENV_FILE}"
 fi
@@ -91,8 +92,11 @@ if ! command -v rclone >/dev/null 2>&1; then
   fail "rclone no instalado"
 fi
 
+# --drive-chunk-size 64M acelera uploads para .dump >100MB sin pasarse de RAM.
+# Si la base crece a varios GB, considerar 128M.
 if ! rclone copy "${DUMP_FILE}" "${RCLONE_REMOTE}/" \
-      --transfers=1 --checkers=1 --retries=3 --low-level-retries=5; then
+      --transfers=1 --checkers=1 --retries=3 --low-level-retries=5 \
+      --drive-chunk-size=64M; then
   fail "rclone upload fallo a ${RCLONE_REMOTE}"
 fi
 
@@ -103,10 +107,13 @@ LOCAL_DELETED="$(find "${BACKUP_DIR}" -maxdepth 1 -name 'backup_cfanalisis_*.dum
                   -type f -mtime "+${LOCAL_RETENTION_DAYS}" -print -delete | wc -l)"
 log "local cleanup: ${LOCAL_DELETED} archivos > ${LOCAL_RETENTION_DAYS}d eliminados"
 
-# ── 4. Limpiar remotos > N dias en B2 ──────────────────────────────────────
+# ── 4. Limpiar remotos > N dias en Google Drive ────────────────────────────
+# --drive-use-trash=false hace que la eliminacion sea permanente; sin esto
+# los archivos van a la papelera y siguen contando contra la cuota.
 if ! rclone delete "${RCLONE_REMOTE}/" \
       --min-age "${REMOTE_RETENTION_DAYS}d" \
-      --include 'backup_cfanalisis_*.dump' 2>&1 | tee -a "${LOG_FILE}"; then
+      --include 'backup_cfanalisis_*.dump' \
+      --drive-use-trash=false 2>&1 | tee -a "${LOG_FILE}"; then
   log "WARN: rclone delete fallo (no-fatal)"
 fi
 

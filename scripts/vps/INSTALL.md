@@ -18,22 +18,94 @@ sudo $EDITOR /apps/backup/.env   # rellenar credenciales
 
 # 2. Instalar rclone si no está
 which rclone || curl https://rclone.org/install.sh | sudo bash
+```
 
-# 3. Configurar remote "b2" (interactivo, solo una vez)
+### 2a. Preparar la carpeta en Google Drive
+
+Antes de configurar rclone, crea **manualmente** la carpeta destino:
+
+1. Abre https://drive.google.com con la cuenta que usarás para los backups.
+   Recomendado: una cuenta dedicada (ej. `backups-cfanalisis@gmail.com`) con
+   2FA activado, no la cuenta personal del día a día.
+2. Botón "Nueva" → "Nueva carpeta" → nombre: `cfanalisis-backups` (en la
+   raíz de Mi Unidad, sin anidar).
+3. Click derecho → "Configuración para compartir" → asegúrate de que NO
+   está compartida con nadie más.
+
+### 2b. Configurar rclone con OAuth (paso interactivo)
+
+El VPS no tiene navegador, así que el flujo OAuth se hace en **dos
+máquinas**: VPS para la config + tu portátil para la autenticación.
+
+**En tu portátil** (necesita rclone instalado):
+
+```bash
+# En Windows: descarga rclone.exe de https://rclone.org/downloads/
+# En Mac/Linux: brew install rclone   o   curl https://rclone.org/install.sh | sudo bash
+
+# Genera el token OAuth. Abre el navegador automáticamente.
+rclone authorize "drive"
+```
+
+Te pedirá:
+- `Use auto config?` → **y** (abre el navegador local)
+- Login a Google con la cuenta de backups
+- Aceptar permisos para rclone (acceso a Drive)
+- Volverá al terminal con un bloque que empieza por `{"access_token":"..."}`
+- **Copia ese bloque JSON completo** (incluyendo las llaves) — lo pegarás en el VPS
+
+**En el VPS** (sesión ssh):
+
+```bash
 sudo -E rclone config
-# → n (new remote)
-# → name: b2
-# → storage: backblaze (opción "b2")
-# → application key id: <obtener de https://secure.backblaze.com/app_keys.htm>
-# → application key: <idem>
-# → resto: defaults
-# Crear bucket "cfanalisis-backups" en la consola de B2 antes de ejecutar.
+```
 
-# 4. Ejecutar manualmente la primera vez para validar
+Responde así:
+
+| Pregunta | Respuesta |
+|---|---|
+| `e) Edit existing remote / n) New remote / ...` | `n` |
+| `name>` | `gdrive` |
+| `Storage>` | `drive` (escribe `drive` o el número que aparezca) |
+| `client_id>` | déjalo vacío (Enter) † |
+| `client_secret>` | vacío |
+| `scope>` | `1` (Full access all files) |
+| `service_account_file>` | vacío |
+| `Edit advanced config?` | `n` |
+| `Use auto config?` | **`n`** ← clave: el VPS no tiene navegador |
+| `Enter verification code>` | **pega aquí el JSON que generaste en el portátil** |
+| `Configure this as a Shared Drive?` | `n` |
+| `Yes this is OK / Edit this remote / Delete` | `y` |
+| menú principal | `q` (quit) |
+
+† **Nota sobre el client_id**: Si lo dejas vacío, rclone usa su cliente OAuth
+compartido — funciona pero está rate-limited globalmente (todos los usuarios de
+rclone compiten). Para un único backup diario es **suficiente**. Si llegaras a
+ver `rate limit exceeded`, crea el tuyo: https://rclone.org/drive/#making-your-own-client-id
+
+### 2c. Validar la configuración
+
+```bash
+# Lista carpetas en tu Drive — debes ver "cfanalisis-backups"
+rclone lsd gdrive:
+
+# Lista contenido (vacío al principio)
+rclone ls gdrive:cfanalisis-backups
+```
+
+Si algo falla, edita el remote con `rclone config` → `e` → `gdrive` y revisa.
+
+### 2d. Primer backup y cron
+
+```bash
+# Ejecutar manualmente la primera vez para validar
 sudo -E /apps/backup/pg_backup.sh
 tail -50 /apps/backup/backup.log
 
-# 5. Cron diario 3:00 AM Madrid
+# Verificar que llegó al Drive
+rclone ls gdrive:cfanalisis-backups
+
+# Cron diario 3:00 AM Madrid
 sudo crontab -e
 # Añadir:
 # 0 3 * * * /apps/backup/pg_backup.sh >> /apps/backup/backup.log 2>&1
@@ -44,6 +116,14 @@ sudo crontab -e
 ```bash
 sudo -E /apps/backup/restore.sh latest --dry-run
 ```
+
+### 2e. Si la cuenta es de Google Workspace (opcional)
+
+Si en vez de una cuenta Gmail normal usas una cuenta de Workspace de tu
+organización, considera crear un **service account** en Google Cloud Console
+con acceso solo a la carpeta `cfanalisis-backups`. Es más limpio que OAuth de
+usuario (no expira, no hay riesgo de revocación si cambias la contraseña).
+Pasos: https://rclone.org/drive/#service-account-support
 
 ---
 
