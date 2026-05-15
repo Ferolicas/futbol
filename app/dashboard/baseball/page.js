@@ -553,14 +553,38 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
         )}
 
         <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {totals?.bestLine && totals.lines?.[totals.bestLine] && (
-            <span style={miniChip('#22d3ee')}>
-              O/U {totals.bestLine}: {Math.max(totals.lines[totals.bestLine].over, totals.lines[totals.bestLine].under)}%
-            </span>
-          )}
+          {/* Moneyline — favorito + porcentaje. Ej: "Dodgers gana — 67%" */}
+          {ml && (() => {
+            const homePct = cap(ml.home);
+            const awayPct = cap(ml.away);
+            const favHome = homePct >= awayPct;
+            const favName = favHome ? (home?.name || 'Local') : (away?.name || 'Visitante');
+            const favPct = Math.round(favHome ? homePct : awayPct);
+            return (
+              <span style={miniChip(favPct >= 65 ? '#10b981' : '#22d3ee')}>
+                🏆 {favName} {favPct}%
+              </span>
+            );
+          })()}
+
+          {/* Total carreras — Over/Under con el lado más probable */}
+          {totals?.bestLine && totals.lines?.[totals.bestLine] && (() => {
+            const t = totals.lines[totals.bestLine];
+            const overWins = (t.over || 0) >= (t.under || 0);
+            const side = overWins ? 'Over' : 'Under';
+            const pct = overWins ? t.over : t.under;
+            return (
+              <span style={miniChip(pct >= 65 ? '#10b981' : '#22d3ee')}>
+                {side} {totals.bestLine} carreras — {pct}%
+              </span>
+            );
+          })()}
+
+          {/* Combinada sugerida — N picks + prob combinada */}
           {combinada && combinada.combinedProbability >= 60 && (
-            <span style={miniChip('#10b981')}>
-              🎯 {combinada.combinedProbability}%{combinada.combinedOdd ? ` @${combinada.combinedOdd}` : ''}
+            <span style={miniChip('#f59e0b')}>
+              🎯 Combinada {combinada.selections?.length || 0} picks · {combinada.combinedProbability}%
+              {combinada.combinedOdd ? ` @${combinada.combinedOdd}` : ''}
             </span>
           )}
           {isAnalyzed && (
