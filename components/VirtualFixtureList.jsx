@@ -1,78 +1,76 @@
 'use client';
 
 import { useRef } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
 
 /**
- * Lista virtualizada de fixtures.
+ * Lista virtualizada de fixtures basada en useWindowVirtualizer.
  *
- * Renderiza solo los partidos visibles + un buffer (overscan). Para listas
- * largas (200+ matches en dias de Champions/finales) reduce el DOM de
- * miles de nodos a ~30, recuperando 60fps en mobile gama baja.
+ * Por que window-scroll y no container-scroll:
+ *   En cfanalisis el scroll es page-level (mobile-first, no hay un panel
+ *   con overflow). useWindowVirtualizer escucha el scroll del documento
+ *   y mide el offsetTop del contenedor para calcular el viewport relativo
+ *   — sin necesidad de fijar height al wrapper. Drop-in para un `.map()`.
  *
- * Uso minimo:
- *   <VirtualFixtureList items={fixtures} renderItem={(f) => <MatchCard ... />} />
- *
- * Asume altura aproximada `estimateSize` (96px por card por defecto). Si las
- * cards son muy variables, react-virtual mide y reajusta solo.
+ * Uso:
+ *   <VirtualFixtureList
+ *     items={sorted}
+ *     getItemKey={(m) => m.fixture.id}
+ *     estimateSize={110}
+ *     renderItem={(m, i) => <MatchCard match={m} idx={i} ... />}
+ *   />
  */
 export default function VirtualFixtureList({
   items,
   renderItem,
-  estimateSize = 96,
+  estimateSize = 110,
   overscan = 6,
   className = '',
-  style,
   getItemKey,
 }) {
-  const parentRef = useRef(null);
+  const listRef = useRef(null);
 
-  const rowVirtualizer = useVirtualizer({
+  const virtualizer = useWindowVirtualizer({
     count: items.length,
-    getScrollElement: () => parentRef.current,
     estimateSize: () => estimateSize,
     overscan,
+    // scrollMargin compensa el espacio entre el viewport y el contenedor
+    // (header, tabs, banner). Sin esto los items aparecerian desplazados.
+    scrollMargin: listRef.current?.offsetTop ?? 0,
     getItemKey: getItemKey
       ? (index) => getItemKey(items[index], index)
       : undefined,
   });
 
+  const totalSize = virtualizer.getTotalSize();
+  const offsetTop = listRef.current?.offsetTop ?? 0;
+
   return (
     <div
-      ref={parentRef}
+      ref={listRef}
       className={className}
       style={{
-        overflowY: 'auto',
-        // contain:strict permite que el browser ignore reflow/repaint fuera del
-        // contenedor — mejora aun mas el render.
-        contain: 'strict',
-        ...style,
+        position: 'relative',
+        height: `${totalSize}px`,
+        width: '100%',
       }}
     >
-      <div
-        style={{
-          height: `${rowVirtualizer.getTotalSize()}px`,
-          width: '100%',
-          position: 'relative',
-        }}
-      >
-        {rowVirtualizer.getVirtualItems().map((virtualRow) => (
-          <div
-            key={virtualRow.key}
-            data-index={virtualRow.index}
-            ref={rowVirtualizer.measureElement}
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              transform: `translateY(${virtualRow.start}px)`,
-            }}
-          >
-            {renderItem(items[virtualRow.index], virtualRow.index)}
-          </div>
-        ))}
-      </div>
+      {virtualizer.getVirtualItems().map((virtualRow) => (
+        <div
+          key={virtualRow.key}
+          data-index={virtualRow.index}
+          ref={virtualizer.measureElement}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            transform: `translateY(${virtualRow.start - offsetTop}px)`,
+          }}
+        >
+          {renderItem(items[virtualRow.index], virtualRow.index)}
+        </div>
+      ))}
     </div>
   );
 }

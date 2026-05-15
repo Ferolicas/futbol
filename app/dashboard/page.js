@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import useSWR from 'swr';
 import { useAuth } from '../../components/providers';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FLAGS } from '../../lib/leagues';
@@ -10,6 +11,8 @@ import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../..
 import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/timezone';
 import { buildCombinada } from '../../lib/combinada';
 import { setAnalysisCache } from '../../lib/analysis-cache';
+import { fetcher } from '../../lib/fetcher';
+import VirtualFixtureList from '../../components/VirtualFixtureList';
 import { useLiveStats } from './live-stats-context';
 import { useSelectedMarkets } from './selected-markets-context';
 
@@ -35,10 +38,15 @@ const statusText = (s) => ({
 // Display cap: internally probabilities can be 100%, but we show max 95% to the user
 const cap = (v) => Math.min(95, v);
 
-// Module-level cache — survives component remounts during SPA navigation
-// (e.g., going to match detail and back). Reset only on full page reload.
-let _dashCache = null;
+// Splash-once-per-tab: el splash de bienvenida solo se muestra en la
+// primera carga del tab. Las subsiguientes navegaciones (back desde
+// detalle, cambio de fecha) lo saltan.
 let _splashDone = false;
+
+// _dashCache fue eliminado en favor de SWR. SWR mantiene su propia cache
+// global por key — al volver desde /dashboard/analisis/[id] el cache hit
+// instantaneo + revalidacion en background es lo mismo que daba _dashCache,
+// sin tener que sincronizar a mano hidden/favorites/fixtures cada vez.
 
 export default function Dashboard() {
   const router = useRouter();
@@ -48,17 +56,17 @@ export default function Dashboard() {
   const [userTz, setUserTz] = useState('UTC'); // corrected on mount to user's real timezone
   const [tab, setTab] = useState('partidos');
   const [date, setDate] = useState(today());
-  const [fixtures, setFixtures] = useState(_dashCache?.fixtures || []);
-  const [loading, setLoading] = useState(!_dashCache);
+  const [fixtures, setFixtures] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [fromCache, setFromCache] = useState(_dashCache?.fromCache || false);
-  const [quota, setQuota] = useState(_dashCache?.quota || { used: 0 });
-  const [hidden, setHidden] = useState(_dashCache?.hidden || []);
-  const [favorites, setFavorites] = useState(_dashCache?.favorites || []);
-  const [analyzed, setAnalyzed] = useState(_dashCache?.analyzed || []);
-  const [analyzedOdds, setAnalyzedOdds] = useState(_dashCache?.analyzedOdds || {});
-  const [analyzedData, setAnalyzedData] = useState(_dashCache?.analyzedData || {});
-  const [standings, setStandings] = useState(_dashCache?.standings || {});
+  const [fromCache, setFromCache] = useState(false);
+  const [quota, setQuota] = useState({ used: 0 });
+  const [hidden, setHidden] = useState([]);
+  const [favorites, setFavorites] = useState([]);
+  const [analyzed, setAnalyzed] = useState([]);
+  const [analyzedOdds, setAnalyzedOdds] = useState({});
+  const [analyzedData, setAnalyzedData] = useState({});
+  const [standings, setStandings] = useState({});
   const [sortBy, setSortBy] = useState('time');
   const [statusFilter, setStatusFilter] = useState('all');
   const [leagueFilter, setLeagueFilter] = useState('');
@@ -88,17 +96,12 @@ export default function Dashboard() {
   const [pushSupported, setPushSupported] = useState(false);
   const [pushError, setPushError] = useState(null);
 
-  // Seed context from navigation cache when layout remounts (e.g. user navigated outside /dashboard and back)
-  useEffect(() => {
-    if (!isPopulated && _dashCache?.liveStats && Object.keys(_dashCache.liveStats).length > 0) {
-      setLiveStats(prev => ({ ...prev, ..._dashCache.liveStats }));
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // liveStats persiste a traves de SPA-navigation via su Context propio
+  // (live-stats-context.js), no requiere reseed manual aqui.
 
   // Keep liveStatsRef in sync (used in loadFixtures to avoid stale closure)
   useEffect(() => {
     liveStatsRef.current = liveStats;
-    if (_dashCache) _dashCache.liveStats = liveStats;
   }, [liveStats]);
 
   // Apply live data to fixtures — NEVER downgrade a finished match or go backwards in time
@@ -133,7 +136,6 @@ export default function Dashboard() {
         score: fresh.score || f.score,
       };
     });
-    if (_dashCache) _dashCache.fixtures = updated;
     return updated;
   }, []);
 
@@ -201,6 +203,57 @@ export default function Dashboard() {
       setReanalyzing(false);
     }
   };
+
+  // ─── SWR: cache de /api/fixtures por (date, tz) ─────────────────────────
+  // - Revalida cada 60s en background mientras la pestaña tenga foco.
+  // - Revalida al volver al foco (usuario cambia de tab y vuelve).
+  // - Dedup 5s para que varias llamadas a mutate() simultaneas no spameen.
+  // - keepPreviousData=true para que al cambiar de fecha NO se vea vacio
+  //   antes de cargar; loadFixtures sigue controlando setLoading explicito
+  //   cuando hace falta UX (cambio de fecha con clearLiveStats).
+  const fixturesKey = useMemo(
+    () => date ? `/api/fixtures?date=${date}&tz=${encodeURIComponent(userTz)}` : null,
+    [date, userTz],
+  );
+  const { mutate: fixturesMutate } = useSWR(
+    fixturesKey,
+    fetcher,
+    {
+      refreshInterval: 60_000,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      dedupingInterval: 5000,
+      keepPreviousData: true,
+      // Cuando SWR trae datos frescos (poll o focus), reproducimos la misma
+      // logica de hidratacion que hace loadFixtures — sin tocar setLoading
+      // (no es UI-blocking, es revalidate silencioso).
+      onSuccess: (data) => {
+        if (!data || data.error) return;
+        const fx = data.fixtures || [];
+        const currentLive = liveStatsRef.current;
+        const FT_SET = new Set(['FT', 'AET', 'PEN']);
+        const fxWithLiveOverride = Object.keys(currentLive).length > 0
+          ? fx.map(f => {
+              const live = currentLive[f.fixture?.id];
+              if (!live) return f;
+              if (FT_SET.has(live.status?.short) && !FT_SET.has(f.fixture?.status?.short)) {
+                return { ...f, fixture: { ...f.fixture, status: live.status }, goals: live.goals || f.goals, score: live.score || f.score };
+              }
+              return f;
+            })
+          : fx;
+        setFixtures(fxWithLiveOverride);
+        setHidden(data.hidden || []);
+        setFavorites(data.favorites || []);
+        setAnalyzed(data.analyzed || []);
+        setAnalyzedOdds(data.analyzedOdds || {});
+        setAnalyzedData(data.analyzedData || {});
+        setStandings(data.standings || {});
+        setFromCache(data.fromCache || false);
+        if (data.quota) setQuota(data.quota);
+      },
+    },
+  );
 
   // Fetch missing stats for finished matches immediately (don't wait for cron).
   // Called on page load and after reanalyze — uses Redis cache, API only when truly missing.
@@ -333,15 +386,10 @@ export default function Dashboard() {
       // Background: fetch missing stats for finished matches (only if truly missing)
       refreshFinishedStats(fx, data.initialLiveStats || {});
 
-      // Persist to module cache for instant back-navigation
-      _dashCache = {
-        fixtures: fx, analyzed: data.analyzed || [], analyzedOdds: data.analyzedOdds || {},
-        analyzedData: data.analyzedData || {}, standings: data.standings || {},
-        hidden: data.hidden || [], favorites: data.favorites || [],
-        fromCache: data.fromCache || false,
-        quota: data.quota || { used: 0 },
-        liveStats: data.initialLiveStats || {},
-      };
+      // Sembrar la cache de SWR para que el revalidate de focus/poll de 60s
+      // tenga el mismo payload que acabamos de procesar — evita doble
+      // fetch al volver de /analisis/[id].
+      try { fixturesMutate(data, { revalidate: false }); } catch {}
     } catch (e) {
       setError(e.message || 'Error de conexion');
     } finally {
@@ -432,7 +480,9 @@ export default function Dashboard() {
     const localDate = todayInTz(tz);
     setDate(localDate);
     refreshLiveData(localDate).finally(() => {
-      loadFixtures(localDate, { silent: !!_dashCache, tz });
+      // SWR puede tener cache de una sesion previa; loadFixtures lo respeta.
+      // silent=false en el primer mount → enseña el skeleton si no hay cache.
+      loadFixtures(localDate, { silent: false, tz });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -752,23 +802,29 @@ export default function Dashboard() {
   // estado previo en vez de mentir al usuario (mismo patron que saveCombinada).
   const dismissMatch = async (e, fixtureId) => {
     e.stopPropagation();
-    // Snapshot ANTES de mutar para poder hacer rollback exacto
+    // Snapshot ANTES de mutar para poder hacer rollback exacto.
+    // SWR mantiene su propia cache: ademas del rollback local mutamos la
+    // entry de fixtures con revalidate=false (no relanza fetch — confiamos
+    // en la respuesta del POST) y, si POST falla, revalidamos para
+    // resincronizar con el servidor.
     const prevHidden = hidden;
     const prevAnalyzed = analyzed;
     const prevSelectedMarkets = selectedMarkets;
-    const prevCacheHidden = _dashCache?.hidden;
 
-    setHidden(prev => {
-      const next = prev.includes(fixtureId) ? prev : [...prev, fixtureId];
-      if (_dashCache) _dashCache.hidden = next;
-      return next;
-    });
+    setHidden(prev => prev.includes(fixtureId) ? prev : [...prev, fixtureId]);
     setAnalyzed(prev => prev.filter(id => id !== fixtureId));
     setSelectedMarkets(prev => {
       const n = { ...prev };
       delete n[fixtureId];
       return n;
     });
+    try {
+      fixturesMutate(prev => prev && ({
+        ...prev,
+        hidden: [...(prev.hidden || []).filter(id => id !== fixtureId), fixtureId],
+        analyzed: (prev.analyzed || []).filter(id => id !== fixtureId),
+      }), { revalidate: false });
+    } catch {}
 
     try {
       const res = await fetch('/api/hidden', {
@@ -782,7 +838,8 @@ export default function Dashboard() {
       setHidden(prevHidden);
       setAnalyzed(prevAnalyzed);
       setSelectedMarkets(prevSelectedMarkets);
-      if (_dashCache) _dashCache.hidden = prevCacheHidden;
+      // Forzar revalidacion para que SWR sincronice el rollback con el servidor.
+      try { fixturesMutate(); } catch {}
       setError('No se pudo ocultar el partido — restaurado.');
     }
   };
@@ -793,14 +850,16 @@ export default function Dashboard() {
     e.stopPropagation();
     const isFav = favorites.includes(fixtureId);
     const prevFavorites = favorites;
-    const prevCacheFavorites = _dashCache?.favorites;
 
     setFavorites(prev => isFav ? prev.filter(id => id !== fixtureId) : [...prev, fixtureId]);
-    if (_dashCache) {
-      _dashCache.favorites = isFav
-        ? (_dashCache.favorites || []).filter(id => id !== fixtureId)
-        : [...(_dashCache.favorites || []), fixtureId];
-    }
+    try {
+      fixturesMutate(prev => prev && ({
+        ...prev,
+        favorites: isFav
+          ? (prev.favorites || []).filter(id => id !== fixtureId)
+          : [...(prev.favorites || []), fixtureId],
+      }), { revalidate: false });
+    } catch {}
 
     try {
       const res = await fetch('/api/favorites', {
@@ -815,7 +874,7 @@ export default function Dashboard() {
     } catch (e) {
       console.error('[toggleFavorite] rollback:', e.message);
       setFavorites(prevFavorites);
-      if (_dashCache) _dashCache.favorites = prevCacheFavorites;
+      try { fixturesMutate(); } catch {}
       setError('No se pudo guardar el favorito — restaurado.');
     }
   };
@@ -1319,13 +1378,21 @@ export default function Dashboard() {
               </div>
             )}
             {sorted.length > 0 && (
-              <div className="match-list">
-                {sorted.map((m, i) => {
+              <VirtualFixtureList
+                className="match-list"
+                items={sorted}
+                getItemKey={(m) => m.fixture.id}
+                // Acordeon expandido o card simple → altura distinta. El
+                // virtualizer mide cada fila tras render (measureElement)
+                // asi que estimateSize solo controla el primer paint y
+                // overscan; medidas reales sobreescriben pronto.
+                estimateSize={expandedMatch ? 320 : 130}
+                overscan={8}
+                renderItem={(m, i) => {
                   const isMatchAnalyzed = analyzed.includes(m.fixture.id);
                   if (isMatchAnalyzed) {
                     return (
                       <AccordionCard
-                        key={m.fixture.id}
                         match={m}
                         data={analyzedData[m.fixture.id]}
                         odds={analyzedOdds[m.fixture.id]}
@@ -1346,7 +1413,6 @@ export default function Dashboard() {
                   }
                   return (
                     <MatchCard
-                      key={m.fixture.id}
                       match={m}
                       isAnalyzed={false}
                       isSelected={selected.has(m.fixture.id)}
@@ -1363,8 +1429,8 @@ export default function Dashboard() {
                       userTz={userTz}
                     />
                   );
-                })}
-              </div>
+                }}
+              />
             )}
           </>
         )}
