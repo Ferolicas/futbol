@@ -129,7 +129,11 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
       const combinada = buildBaseballCombinada(probs, bestOdds, { home: homeName, away: awayName });
       const dq = scoreBaseballDataQuality({ homeStats, awayStats, h2h, odds, pitcherMatchup, playerHighlights });
 
-      await supabaseAdmin.from('baseball_match_analysis').upsert({
+      // Upsert principal — capturar el error de DB explicitamente para
+      // que aparezca en el array `errors` y se vea en /ferney. Si la
+      // columna cache_version o cualquier otra falta, el upsert lanza
+      // PG error 42703 "column X does not exist".
+      const { error: upsertErr } = await supabaseAdmin.from('baseball_match_analysis').upsert({
         fixture_id: fixtureId,
         date,
         league_id: leagueId,
@@ -150,8 +154,11 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
         cache_version: BASEBALL_CACHE_VERSION,
         updated_at: new Date().toISOString(),
       });
+      if (upsertErr) {
+        throw new Error(`DB upsert match_analysis: ${upsertErr.message || upsertErr.code || upsertErr}`);
+      }
 
-      await supabaseAdmin.from('baseball_match_predictions').upsert({
+      const { error: predErr } = await supabaseAdmin.from('baseball_match_predictions').upsert({
         fixture_id: fixtureId,
         date,
         league_id: leagueId,
@@ -160,19 +167,26 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
         ...flattenProbabilitiesForStorage(probs),
         updated_at: new Date().toISOString(),
       });
+      if (predErr) {
+        console.warn(`[baseball-analyze] predictions fail (no critico) ${fixtureId}: ${predErr.message}`);
+      }
 
       analyzed++;
     } catch (e) {
-      console.error(`[job:baseball-analyze] fixture ${fixtureId}:`, e.message);
+      const msg = e?.message || String(e);
+      console.error(`[job:baseball-analyze] fixture ${fixtureId}: ${msg}`);
       failed++;
-      errors.push({ fixtureId, error: e.message });
-      if (e.message?.startsWith('BASEBALL_QUOTA_EXHAUSTED')) break;
+      errors.push({ fixtureId, error: msg });
+      if (msg.startsWith('BASEBALL_QUOTA_EXHAUSTED')) break;
     }
     processed++;
     // Reportar tras cada partido para que /ferney refleje progreso en vivo.
+    // Incluye `firstError` para que el panel muestre la razon concreta del
+    // fallo sin tener que ir a logs del worker.
     await reportProgress({
       phase: 'analyzing', processed, total: fixtures.length,
       analyzed, skipped, failed, startedAt,
+      firstError: errors[0]?.error || null,
     });
   }
 
@@ -183,6 +197,7 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
     processed: fixtures.length, total: fixtures.length,
     analyzed, skipped, failed, startedAt,
     durationSec: Number(durationSec),
+    firstError: errors[0]?.error || null,
   });
 
   return { ok: true, date, total: fixtures.length, analyzed, skipped, failed, durationSec: Number(durationSec), quota, errors: errors.slice(0, 5) };
