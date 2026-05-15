@@ -14,6 +14,7 @@ import {
   extractBaseballPlayerHighlights, extractBaseballPitcherMatchup,
   supabaseAdmin,
 } from '../../shared.js';
+import { logger } from '../../logger.js';
 
 // cache_version semantica:
 //   1 = legacy (lo que habia antes del rework de baseball)
@@ -174,9 +175,21 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
       analyzed++;
     } catch (e) {
       const msg = e?.message || String(e);
-      console.error(`[job:baseball-analyze] fixture ${fixtureId}: ${msg}`);
+      const stack = e?.stack || null;
+      // Pino structured log con campos para filtrar facilmente con jq
+      // sobre /var/log/cfanalisis/worker.log:
+      //   grep '"job":"baseball-analyze"' worker.log | jq '.fixtureId, .err'
+      logger.error({
+        job: 'baseball-analyze',
+        fixtureId,
+        homeTeam: game.teams?.home?.name,
+        awayTeam: game.teams?.away?.name,
+        league: game.league?.name,
+        err: msg,
+        stack: stack?.split('\n').slice(0, 5).join('\n'),
+      }, `fixture ${fixtureId} failed: ${msg}`);
       failed++;
-      errors.push({ fixtureId, error: msg });
+      errors.push({ fixtureId, error: msg, stack: stack?.split('\n')[0] });
       if (msg.startsWith('BASEBALL_QUOTA_EXHAUSTED')) break;
     }
     processed++;
@@ -199,6 +212,16 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
     durationSec: Number(durationSec),
     firstError: errors[0]?.error || null,
   });
+
+  // Summary log al final del job — buscar en logs con:
+  //   grep '"summary":"baseball-analyze"' /var/log/cfanalisis/worker.log
+  const errorSummary = errors.slice(0, 5).map(e => `fid=${e.fixtureId}: ${e.error}`).join(' | ');
+  logger.info({
+    summary: 'baseball-analyze',
+    date, total: fixtures.length, analyzed, skipped, failed,
+    durationSec: Number(durationSec),
+    firstErrors: errors.slice(0, 5),
+  }, `baseball-analyze done — ${analyzed} ok, ${skipped} skipped, ${failed} failed in ${durationSec}s${errors.length > 0 ? ` | ${errorSummary}` : ''}`);
 
   return { ok: true, date, total: fixtures.length, analyzed, skipped, failed, durationSec: Number(durationSec), quota, errors: errors.slice(0, 5) };
 }
