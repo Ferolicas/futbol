@@ -36,14 +36,22 @@ const EXECUTE = args.includes('--execute');
 const emailFilter = args.find(a => a.startsWith('--email='))?.slice(8);
 
 async function main() {
-  const params = ['past_due', 'inactive'];
+  // pg `text[]` espera UN parametro JS array, no varios strings sueltos.
+  // Bug anterior: params = ['past_due', 'inactive'] → pg los contaba como 2
+  // parametros separados ($1, $2), pero la query referenciaba solo $1.
+  // Al añadir emailFilter, params crecia a 3 strings con query expecting 2.
+  // Fix: array como un solo elemento, e indices contiguos.
+  const params = [['past_due', 'inactive']];
   let q = `
     SELECT id, email, name, plan, stripe_customer_id
     FROM user_profiles
     WHERE subscription_status = ANY($1::text[])
       AND stripe_customer_id IS NOT NULL
   `;
-  if (emailFilter) { q += ` AND lower(email) = lower($2)`; params.push(emailFilter); }
+  if (emailFilter) {
+    params.push(emailFilter);
+    q += ` AND lower(email) = lower($${params.length})`;
+  }
   q += ' ORDER BY updated_at DESC';
 
   const { rows: users } = await pool.query(q, params);
