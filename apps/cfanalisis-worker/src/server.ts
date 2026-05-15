@@ -235,6 +235,20 @@ export function buildServer() {
   // si no lanza "logger options only accepts a configuration object".
   const app = Fastify({ loggerInstance: logger });
 
+  // Diagnostico: loguear el path EXACTO de cada request entrante.
+  // Util cuando aparecen 404 "fantasma" (proxies que recortan URL, env
+  // vars con typos, etc). Una linea por request — bajo costo, logger
+  // ya filtra por LOG_LEVEL.
+  app.addHook('onRequest', async (req) => {
+    req.log.info({
+      method: req.method,
+      url: req.url,
+      raw: req.raw.url,
+      ip: req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || req.ip,
+      upgrade: req.headers['upgrade'] || null,
+    }, 'incoming');
+  });
+
   // Errores en handlers Fastify → loguear + alerta Telegram (con dedup).
   app.setErrorHandler((err, req, reply) => {
     notifyError(
