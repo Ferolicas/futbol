@@ -860,7 +860,154 @@ export default function AnalisisPage() {
                   hasOdd(o.awayCards?.['Over_2_5']) && p.perTeam?.away?.cards && { label: `Visitante (${a.awayTeam}) — Más de 2.5`, value: p.perTeam.away.cards.over25 },
                 ].filter(Boolean),
               },
-            ].filter(c => c.items.length > 0);
+
+              // ──────── Mercados NUEVOS (cache_version 9) ────────
+              // Goles por mitad
+              {
+                title: 'Goles 1ª parte',
+                subtitle: p.halfGoals?.firstHalf?.expected != null ? `Esperado: ${p.halfGoals.firstHalf.expected} goles` : null,
+                items: [
+                  hasOdd(o.goals1H?.['Over_0_5']) && p.halfGoals?.firstHalf && { label: '1ª Parte — Más de 0.5', value: p.halfGoals.firstHalf.over05 },
+                  hasOdd(o.goals1H?.['Over_1_5']) && p.halfGoals?.firstHalf && { label: '1ª Parte — Más de 1.5', value: p.halfGoals.firstHalf.over15 },
+                  hasOdd(o.goals1H?.['Over_2_5']) && p.halfGoals?.firstHalf && { label: '1ª Parte — Más de 2.5', value: p.halfGoals.firstHalf.over25 },
+                ].filter(Boolean),
+              },
+              {
+                title: 'Goles 2ª parte',
+                subtitle: p.halfGoals?.secondHalf?.expected != null ? `Esperado: ${p.halfGoals.secondHalf.expected} goles` : null,
+                items: [
+                  hasOdd(o.goals2H?.['Over_0_5']) && p.halfGoals?.secondHalf && { label: '2ª Parte — Más de 0.5', value: p.halfGoals.secondHalf.over05 },
+                  hasOdd(o.goals2H?.['Over_1_5']) && p.halfGoals?.secondHalf && { label: '2ª Parte — Más de 1.5', value: p.halfGoals.secondHalf.over15 },
+                  hasOdd(o.goals2H?.['Over_2_5']) && p.halfGoals?.secondHalf && { label: '2ª Parte — Más de 2.5', value: p.halfGoals.secondHalf.over25 },
+                ].filter(Boolean),
+              },
+              // 1X2 por mitad
+              {
+                title: 'Ganador 1ª parte',
+                items: [
+                  hasOdd(o.winner1H?.home) && p.halfWinner?.firstHalf && { label: a.homeTeam, value: p.halfWinner.firstHalf.home },
+                  hasOdd(o.winner1H?.draw) && p.halfWinner?.firstHalf && { label: 'Empate',   value: p.halfWinner.firstHalf.draw },
+                  hasOdd(o.winner1H?.away) && p.halfWinner?.firstHalf && { label: a.awayTeam, value: p.halfWinner.firstHalf.away },
+                ].filter(Boolean),
+              },
+              {
+                title: 'Ganador 2ª parte',
+                items: [
+                  hasOdd(o.winner2H?.home) && p.halfWinner?.secondHalf && { label: a.homeTeam, value: p.halfWinner.secondHalf.home },
+                  hasOdd(o.winner2H?.draw) && p.halfWinner?.secondHalf && { label: 'Empate',   value: p.halfWinner.secondHalf.draw },
+                  hasOdd(o.winner2H?.away) && p.halfWinner?.secondHalf && { label: a.awayTeam, value: p.halfWinner.secondHalf.away },
+                ].filter(Boolean),
+              },
+              // Goles equipo por mitad
+              {
+                title: 'Goles equipo por mitad',
+                items: [
+                  hasOdd(o.homeGoals1H?.['Over_0_5']) && p.perTeamHalfGoals?.home?.firstHalf  && { label: `${a.homeTeam} marca 1ª Parte`, value: p.perTeamHalfGoals.home.firstHalf.over05 },
+                  hasOdd(o.awayGoals1H?.['Over_0_5']) && p.perTeamHalfGoals?.away?.firstHalf  && { label: `${a.awayTeam} marca 1ª Parte`, value: p.perTeamHalfGoals.away.firstHalf.over05 },
+                  hasOdd(o.homeGoals2H?.['Over_0_5']) && p.perTeamHalfGoals?.home?.secondHalf && { label: `${a.homeTeam} marca 2ª Parte`, value: p.perTeamHalfGoals.home.secondHalf.over05 },
+                  hasOdd(o.awayGoals2H?.['Over_0_5']) && p.perTeamHalfGoals?.away?.secondHalf && { label: `${a.awayTeam} marca 2ª Parte`, value: p.perTeamHalfGoals.away.secondHalf.over05 },
+                ].filter(Boolean),
+              },
+              // Tiros totales y on target
+              p.shots && {
+                title: 'Tiros totales del partido',
+                subtitle: p.shots._mean ? `Esperado: ${p.shots._mean} tiros` : null,
+                items: (p.shots._lines || []).map(line => {
+                  const key = `over${String(line).replace('.', '_')}`;
+                  const oddKey = `Over_${String(line).replace('.', '_')}`;
+                  if (!hasOdd(o.shots?.[oddKey]) || p.shots[key] == null) return null;
+                  return { label: `Total partido — Más de ${line}`, value: p.shots[key] };
+                }).filter(Boolean),
+              },
+              p.sot && {
+                title: 'Tiros a puerta del partido',
+                subtitle: p.sot._mean ? `Esperado: ${p.sot._mean} tiros a puerta` : null,
+                items: (p.sot._lines || []).map(line => {
+                  const key = `over${String(line).replace('.', '_')}`;
+                  const oddKey = `Over_${String(line).replace('.', '_')}`;
+                  if (!hasOdd(o.sot?.[oddKey]) || p.sot[key] == null) return null;
+                  return { label: `Total partido — Más de ${line} a puerta`, value: p.sot[key] };
+                }).filter(Boolean),
+              },
+              // Tiros por equipo
+              p.perTeamShots?.home && {
+                title: `Tiros — ${a.homeTeam}`,
+                items: (p.perTeamShots.home._lines || []).map(line => {
+                  const key = `over${String(line).replace('.', '_')}`;
+                  const oddKey = `Over_${String(line).replace('.', '_')}`;
+                  if (!hasOdd(o.homeShots?.[oddKey]) || p.perTeamShots.home[key] == null) return null;
+                  return { label: `Local (${a.homeTeam}) — Más de ${line}`, value: p.perTeamShots.home[key] };
+                }).filter(Boolean),
+              },
+              p.perTeamShots?.away && {
+                title: `Tiros — ${a.awayTeam}`,
+                items: (p.perTeamShots.away._lines || []).map(line => {
+                  const key = `over${String(line).replace('.', '_')}`;
+                  const oddKey = `Over_${String(line).replace('.', '_')}`;
+                  if (!hasOdd(o.awayShots?.[oddKey]) || p.perTeamShots.away[key] == null) return null;
+                  return { label: `Visitante (${a.awayTeam}) — Más de ${line}`, value: p.perTeamShots.away[key] };
+                }).filter(Boolean),
+              },
+              // Faltas totales
+              p.fouls && {
+                title: 'Faltas totales del partido',
+                subtitle: p.fouls._mean ? `Esperado: ${p.fouls._mean} faltas` : null,
+                items: (p.fouls._lines || []).map(line => {
+                  const key = `over${String(line).replace('.', '_')}`;
+                  const oddKey = `Over_${String(line).replace('.', '_')}`;
+                  if (!hasOdd(o.fouls?.[oddKey]) || p.fouls[key] == null) return null;
+                  return { label: `Total partido — Más de ${line} faltas`, value: p.fouls[key] };
+                }).filter(Boolean),
+              },
+              p.perTeamFouls?.home && {
+                title: `Faltas — ${a.homeTeam}`,
+                items: (p.perTeamFouls.home._lines || []).map(line => {
+                  const key = `over${String(line).replace('.', '_')}`;
+                  const oddKey = `Over_${String(line).replace('.', '_')}`;
+                  if (!hasOdd(o.homeFouls?.[oddKey]) || p.perTeamFouls.home[key] == null) return null;
+                  return { label: `Local (${a.homeTeam}) — Más de ${line} faltas`, value: p.perTeamFouls.home[key] };
+                }).filter(Boolean),
+              },
+              p.perTeamFouls?.away && {
+                title: `Faltas — ${a.awayTeam}`,
+                items: (p.perTeamFouls.away._lines || []).map(line => {
+                  const key = `over${String(line).replace('.', '_')}`;
+                  const oddKey = `Over_${String(line).replace('.', '_')}`;
+                  if (!hasOdd(o.awayFouls?.[oddKey]) || p.perTeamFouls.away[key] == null) return null;
+                  return { label: `Visitante (${a.awayTeam}) — Más de ${line} faltas`, value: p.perTeamFouls.away[key] };
+                }).filter(Boolean),
+              },
+              // Equipo con más córners (full / 1H / 2H)
+              p.mostCorners && {
+                title: 'Equipo con más córners',
+                items: [
+                  hasOdd(o.corners1x2?.home) && p.mostCorners.fullMatch && { label: a.homeTeam, value: p.mostCorners.fullMatch.home },
+                  hasOdd(o.corners1x2?.draw) && p.mostCorners.fullMatch && { label: 'Empate', value: p.mostCorners.fullMatch.draw },
+                  hasOdd(o.corners1x2?.away) && p.mostCorners.fullMatch && { label: a.awayTeam, value: p.mostCorners.fullMatch.away },
+                  hasOdd(o.corners1x21H?.home) && p.mostCorners.firstHalf && { label: `1ª Parte — ${a.homeTeam}`, value: p.mostCorners.firstHalf.home },
+                  hasOdd(o.corners1x21H?.away) && p.mostCorners.firstHalf && { label: `1ª Parte — ${a.awayTeam}`, value: p.mostCorners.firstHalf.away },
+                  hasOdd(o.corners1x22H?.home) && p.mostCorners.secondHalf && { label: `2ª Parte — ${a.homeTeam}`, value: p.mostCorners.secondHalf.home },
+                  hasOdd(o.corners1x22H?.away) && p.mostCorners.secondHalf && { label: `2ª Parte — ${a.awayTeam}`, value: p.mostCorners.secondHalf.away },
+                ].filter(Boolean),
+              },
+              // Asian Handicap — itera por las claves disponibles en odds
+              p.asianHandicap && o.asianHandicap && {
+                title: 'Hándicap Asiático',
+                items: Object.keys(o.asianHandicap).map(oddKey => {
+                  if (!hasOdd(o.asianHandicap[oddKey])) return null;
+                  const m = oddKey.match(/^(home|away)_([mp])(\d+(?:_\d+)?)$/);
+                  if (!m) return null;
+                  const side = m[1];
+                  const sign = m[2] === 'm' ? -1 : 1;
+                  const lineNum = sign * parseFloat(m[3].replace('_', '.'));
+                  const probKey = `h${oddKey.slice(oddKey.indexOf('_') + 1)}`;
+                  const prob = p.asianHandicap[side]?.[probKey];
+                  if (prob == null) return null;
+                  const teamName = side === 'home' ? a.homeTeam : a.awayTeam;
+                  return { label: `${teamName} ${lineNum > 0 ? '+' : ''}${lineNum}`, value: prob };
+                }).filter(Boolean),
+              },
+            ].filter(Boolean).filter(c => c.items.length > 0);
 
             if (cats.length === 0) return null;
 
