@@ -286,12 +286,13 @@ export default function BaseballAnalysisPage() {
         </Section>
       )}
 
-      {/* Refresh button */}
+      {/* Re-analizar quitado — el re-analisis manual va por /ferney
+          'Analizar baseball' (admin), y el cron diario re-analiza solo
+          cuando age>6h o cache_version<MIN. El boton aqui invitaba a
+          consumir API gratuita sin necesidad. Refresh sigue para releer
+          BD por si el cron actualizo en segundo plano. */}
       <div style={{ display: 'flex', gap: 8, marginTop: 24 }}>
         <button onClick={fetchData} style={primaryBtn}>↻ Refrescar</button>
-        <button onClick={handleAnalyze} disabled={analyzing} style={{ ...secondaryBtn }}>
-          {analyzing ? 'Re-analizando...' : '🔄 Re-analizar (consume API)'}
-        </button>
       </div>
     </div>
   );
