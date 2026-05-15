@@ -941,23 +941,51 @@ function ApuestaDelDiaBlock({ apuesta, show, onToggle }) {
             <div style={{ padding: '0 14px 14px' }}>
               {apuesta.selections.map((s, i) => (
                 <div key={i} style={{
-                  display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 8, alignItems: 'center',
-                  padding: '8px 10px', borderRadius: 8, marginBottom: 4,
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 12px', borderRadius: 8, marginBottom: 4,
                   background: 'rgba(255,255,255,0.03)',
                 }}>
-                  <div style={{ fontSize: '.78rem', color: '#cbd5e1' }}>
-                    <span style={{
-                      fontSize: '.65rem', fontWeight: 800, padding: '1px 6px', borderRadius: 4, marginRight: 6,
-                      background: s.priority === 2 ? 'rgba(34,211,238,0.15)' : s.priority === 1 ? 'rgba(239,68,68,0.15)' : 'rgba(148,163,184,0.15)',
-                      color: s.priority === 2 ? '#22d3ee' : s.priority === 1 ? '#ef4444' : '#94a3b8',
+                  {/* Badge de estado (NS / LIVE / FIN) */}
+                  <span style={{
+                    fontSize: '.65rem', fontWeight: 800, padding: '2px 7px', borderRadius: 4,
+                    background: s.priority === 2 ? 'rgba(34,211,238,0.15)' : s.priority === 1 ? 'rgba(239,68,68,0.15)' : 'rgba(148,163,184,0.15)',
+                    color: s.priority === 2 ? '#22d3ee' : s.priority === 1 ? '#ef4444' : '#94a3b8',
+                    flexShrink: 0,
+                  }}>
+                    {s.priority === 2 ? '●' : s.priority === 1 ? 'LIVE' : 'FIN'}
+                  </span>
+
+                  {/* 2 lineas: partido (arriba) + recomendacion (abajo).
+                      Antes el "name" estaba en columna grid que en mobile
+                      se aplastaba y solo se veia el matchName + 98% sin
+                      saber de QUE es el porcentaje. */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: '.7rem', color: '#94a3b8', marginBottom: 2,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }}>
-                      {s.priority === 2 ? '●' : s.priority === 1 ? 'LIVE' : 'FIN'}
-                    </span>
-                    {s.matchName}
+                      {s.matchName}
+                    </div>
+                    <div style={{
+                      fontSize: '.85rem', color: '#f1f5f9', fontWeight: 600,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {s.name || s.market || 'Pick'}
+                    </div>
                   </div>
-                  <span style={{ fontSize: '.78rem', color: '#94a3b8' }}>{s.name}</span>
-                  <span style={{ fontWeight: 800, color: s.probability >= 80 ? '#10b981' : '#f59e0b' }}>{s.probability}%</span>
-                  {s.odd && <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#22d3ee' }}>@{s.odd}</span>}
+
+                  {/* Probabilidad + cuota */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
+                    <span style={{
+                      fontWeight: 800, fontSize: '.95rem',
+                      color: s.probability >= 80 ? '#10b981' : '#f59e0b',
+                    }}>{s.probability}%</span>
+                    {s.odd && (
+                      <span style={{
+                        fontFamily: 'JetBrains Mono, monospace', fontSize: '.72rem', color: '#22d3ee',
+                      }}>@{s.odd}</span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
