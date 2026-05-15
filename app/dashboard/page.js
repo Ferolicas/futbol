@@ -2487,7 +2487,7 @@ function AccordionPlayersBlock({ highlights }) {
         <div key={g.key} style={{ marginBottom: 12 }}>
           <div style={{ fontSize: '.75rem', color: 'var(--t2)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
             <span>{g.emoji}</span><b>{g.label}</b>
-            <span style={{ fontSize: '.65rem', color: 'var(--t3)' }}>(en 8+ de últimos 10)</span>
+            <span style={{ fontSize: '.65rem', color: 'var(--t3)' }}>(en 5+ de últimos 10)</span>
           </div>
           {g.data.slice(0, 5).map((pl, i) => {
             const hist = pl[g.metric] || [];
