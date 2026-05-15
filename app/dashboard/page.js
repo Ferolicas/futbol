@@ -1826,122 +1826,35 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
   const cardDate = new Date(match.fixture.date).toLocaleDateString('es', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long' });
   const sLabel = { NS: 'PRÓXIMO', '1H': 'EN VIVO — 1T', '2H': 'EN VIVO — 2T', HT: 'ENTRETIEMPO', FT: 'FINALIZADO', ET: 'EN VIVO — Extra', P: 'EN VIVO — Penales', AET: 'FINALIZADO', PEN: 'FINALIZADO', SUSP: 'SUSPENDIDO', PST: 'POSPUESTO', CANC: 'CANCELADO' }[match.fixture.status.short] || match.fixture.status.short;
 
+  // "Selecciona para tu combinada" → fuente unica: buildCombinada().
+  // Antes habia un constructor manual paralelo (~120 lineas) que faltaba
+  // los mercados nuevos (faltas, mitades, AH, asistencias, tiros por linea
+  // optima, etc.) y mostraba cuotas planas para player markets. Ahora reusa
+  // exactamente la misma selecciones que la "Combinada Auto" — un unico
+  // sitio donde mantener el catalogo de mercados.
   const markets = useMemo(() => {
     if (!data?.calculatedProbabilities) return [];
-    const p = data.calculatedProbabilities;
-    const o = data.odds || {};
-    const ph = data.playerHighlights;
-    const hn = match.teams.home.name;
-    const an = match.teams.away.name;
-    const m = [];
-
-    // Acordeón: solo mostrar opciones que tengan cuota real (odd > 1).
-    // Si no hay cuota, no se muestra. El análisis completo sí muestra todo
-    // — esto es solo para "Selecciona para tu combinada".
-    const add = (entry, oddVal) => {
-      const odd = parseFloat(oddVal);
-      if (!isFinite(odd) || odd <= 1) return;
-      m.push({ ...entry, odd });
-    };
-
-    // ── Ganador ──
-    add({ id: 'w-h', name: `Ganador — ${hn}`, probability: p.winner?.home, cat: 'Ganador' }, o.matchWinner?.home);
-    add({ id: 'w-d', name: 'Empate',          probability: p.winner?.draw, cat: 'Ganador' }, o.matchWinner?.draw);
-    add({ id: 'w-a', name: `Ganador — ${an}`, probability: p.winner?.away, cat: 'Ganador' }, o.matchWinner?.away);
-
-    // ── BTTS ──
-    add({ id: 'btts-yes', name: 'Total partido — Ambos marcan SÍ', probability: p.btts,   cat: 'BTTS' }, o.btts?.yes);
-    add({ id: 'btts-no',  name: 'Total partido — Ambos marcan NO', probability: p.bttsNo, cat: 'BTTS' }, o.btts?.no);
-
-    // ── Goles totales del partido ──
-    if (p.overUnder) {
-      add({ id: 'o15', name: 'Total partido — Más de 1.5 goles',  probability: p.overUnder.over15,  cat: 'Goles totales' }, o.overUnder?.Over_1_5);
-      add({ id: 'o25', name: 'Total partido — Más de 2.5 goles',  probability: p.overUnder.over25,  cat: 'Goles totales' }, o.overUnder?.Over_2_5);
-      add({ id: 'o35', name: 'Total partido — Más de 3.5 goles',  probability: p.overUnder.over35,  cat: 'Goles totales' }, o.overUnder?.Over_3_5);
-      add({ id: 'u25', name: 'Total partido — Menos de 2.5 goles', probability: p.overUnder.under25, cat: 'Goles totales' }, o.overUnder?.Under_2_5);
-      add({ id: 'u35', name: 'Total partido — Menos de 3.5 goles', probability: p.overUnder.under35, cat: 'Goles totales' }, o.overUnder?.Under_3_5);
-    }
-
-    // ── Goles por equipo ──
-    if (p.perTeam?.home?.goals) {
-      add({ id: 'hg05', name: `Local (${hn}) — Más de 0.5 goles`, probability: p.perTeam.home.goals.over05, cat: `Goles · ${hn}` }, o.homeGoals?.Over_0_5);
-      add({ id: 'hg15', name: `Local (${hn}) — Más de 1.5 goles`, probability: p.perTeam.home.goals.over15, cat: `Goles · ${hn}` }, o.homeGoals?.Over_1_5);
-      add({ id: 'hg25', name: `Local (${hn}) — Más de 2.5 goles`, probability: p.perTeam.home.goals.over25, cat: `Goles · ${hn}` }, o.homeGoals?.Over_2_5);
-    }
-    if (p.perTeam?.away?.goals) {
-      add({ id: 'ag05', name: `Visitante (${an}) — Más de 0.5 goles`, probability: p.perTeam.away.goals.over05, cat: `Goles · ${an}` }, o.awayGoals?.Over_0_5);
-      add({ id: 'ag15', name: `Visitante (${an}) — Más de 1.5 goles`, probability: p.perTeam.away.goals.over15, cat: `Goles · ${an}` }, o.awayGoals?.Over_1_5);
-      add({ id: 'ag25', name: `Visitante (${an}) — Más de 2.5 goles`, probability: p.perTeam.away.goals.over25, cat: `Goles · ${an}` }, o.awayGoals?.Over_2_5);
-    }
-
-    // ── Córners totales ──
-    if (p.corners) {
-      add({ id: 'c85',  name: 'Total partido — Más de 8.5 córners',  probability: p.corners.over85,  cat: 'Córners totales' }, o.corners?.Over_8_5);
-      add({ id: 'c95',  name: 'Total partido — Más de 9.5 córners',  probability: p.corners.over95,  cat: 'Córners totales' }, o.corners?.Over_9_5);
-      add({ id: 'c105', name: 'Total partido — Más de 10.5 córners', probability: p.corners.over105, cat: 'Córners totales' }, o.corners?.Over_10_5);
-    }
-
-    // ── Córners por equipo ──
-    if (p.perTeam?.home?.corners) {
-      const hc = p.perTeam.home.corners;
-      add({ id: 'hc35', name: `Local (${hn}) — Más de 3.5 córners`, probability: hc.over35, cat: `Córners · ${hn}` }, o.homeCorners?.Over_3_5);
-      add({ id: 'hc45', name: `Local (${hn}) — Más de 4.5 córners`, probability: hc.over45, cat: `Córners · ${hn}` }, o.homeCorners?.Over_4_5);
-      add({ id: 'hc55', name: `Local (${hn}) — Más de 5.5 córners`, probability: hc.over55, cat: `Córners · ${hn}` }, o.homeCorners?.Over_5_5);
-    }
-    if (p.perTeam?.away?.corners) {
-      const ac = p.perTeam.away.corners;
-      add({ id: 'ac35', name: `Visitante (${an}) — Más de 3.5 córners`, probability: ac.over35, cat: `Córners · ${an}` }, o.awayCorners?.Over_3_5);
-      add({ id: 'ac45', name: `Visitante (${an}) — Más de 4.5 córners`, probability: ac.over45, cat: `Córners · ${an}` }, o.awayCorners?.Over_4_5);
-      add({ id: 'ac55', name: `Visitante (${an}) — Más de 5.5 córners`, probability: ac.over55, cat: `Córners · ${an}` }, o.awayCorners?.Over_5_5);
-    }
-
-    // ── Tarjetas totales ──
-    if (p.cards) {
-      add({ id: 'k25', name: 'Total partido — Más de 2.5 tarjetas', probability: p.cards.over25, cat: 'Tarjetas totales' }, o.cards?.Over_2_5);
-      add({ id: 'k35', name: 'Total partido — Más de 3.5 tarjetas', probability: p.cards.over35, cat: 'Tarjetas totales' }, o.cards?.Over_3_5);
-      add({ id: 'k45', name: 'Total partido — Más de 4.5 tarjetas', probability: p.cards.over45, cat: 'Tarjetas totales' }, o.cards?.Over_4_5);
-    }
-
-    // ── Tarjetas por equipo ──
-    if (p.perTeam?.home?.cards) {
-      add({ id: 'hk05', name: `Local (${hn}) — Más de 0.5 tarjetas`, probability: p.perTeam.home.cards.over05, cat: `Tarjetas · ${hn}` }, o.homeCards?.Over_0_5);
-      add({ id: 'hk15', name: `Local (${hn}) — Más de 1.5 tarjetas`, probability: p.perTeam.home.cards.over15, cat: `Tarjetas · ${hn}` }, o.homeCards?.Over_1_5);
-      add({ id: 'hk25', name: `Local (${hn}) — Más de 2.5 tarjetas`, probability: p.perTeam.home.cards.over25, cat: `Tarjetas · ${hn}` }, o.homeCards?.Over_2_5);
-    }
-    if (p.perTeam?.away?.cards) {
-      add({ id: 'ak05', name: `Visitante (${an}) — Más de 0.5 tarjetas`, probability: p.perTeam.away.cards.over05, cat: `Tarjetas · ${an}` }, o.awayCards?.Over_0_5);
-      add({ id: 'ak15', name: `Visitante (${an}) — Más de 1.5 tarjetas`, probability: p.perTeam.away.cards.over15, cat: `Tarjetas · ${an}` }, o.awayCards?.Over_1_5);
-      add({ id: 'ak25', name: `Visitante (${an}) — Más de 2.5 tarjetas`, probability: p.perTeam.away.cards.over25, cat: `Tarjetas · ${an}` }, o.awayCards?.Over_2_5);
-    }
-
-    // ── Player markets (solo si hay cuota real para el jugador) ──
-    const normName = (n) => (n || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
-    const playerOdd = (family, name) => {
-      const norm = normName(name);
-      if (!norm) return null;
-      const bucket = o.players?.[family];
-      if (!bucket) return null;
-      if (bucket[norm]) return bucket[norm];
-      const last = norm.split(' ').pop();
-      if (last && last.length >= 3) {
-        for (const [k, v] of Object.entries(bucket)) {
-          if (k.endsWith(' ' + last) || k === last) return v;
-        }
-      }
-      return null;
-    };
-    const playerFreq = (events) => {
-      if (!Array.isArray(events) || events.length === 0) return 0;
-      const hits = events.filter(e => (e || 0) >= 1).length;
-      return Math.round((hits / events.length) * 100);
-    };
-    (ph?.scorers || []).forEach(s => add({ id: `scorer-${s.id}`,  name: `${s.name} — Anotar un gol`,         probability: playerFreq(s.goals),       cat: `Goleadores` },  playerOdd('scorer', s.name)));
-    (ph?.shooters || []).forEach(s => add({ id: `shots-${s.id}`,  name: `${s.name} — Remate al arco`,        probability: playerFreq(s.shotsOnGoal), cat: `Remates al arco` }, playerOdd('shots',  s.name)));
-    (ph?.foulers  || []).forEach(s => add({ id: `fouls-${s.id}`,  name: `${s.name} — Cometer una falta`,     probability: playerFreq(s.fouls),       cat: `Faltas` },      playerOdd('fouls',  s.name)));
-    (ph?.bookers  || []).forEach(s => add({ id: `booked-${s.id}`, name: `${s.name} — Recibir tarjeta amarilla`, probability: playerFreq(s.yellows),     cat: `Tarjetas jugador` }, playerOdd('booked', s.name)));
-
-    return m
-      .filter(x => x.probability >= 70 && x.probability <= 95)
+    const comb = buildCombinada(
+      data.calculatedProbabilities,
+      data.odds,
+      data.playerHighlights,
+      { home: match.teams.home.name, away: match.teams.away.name },
+    );
+    const sels = comb?.selections || [];
+    return sels
+      .filter(s => s.odd && s.odd > 1 && s.probability >= 70 && s.probability <= 95)
+      .map((s, i) => ({
+        id: s.id || `mkt-${i}`,
+        name: s.name,
+        probability: s.probability,
+        odd: s.odd,
+        // cat se mantiene para los logos del bookmaker (catMap mas abajo)
+        cat: s.scope === 'player' ? 'Player'
+           : s.category?.includes('corners') ? 'Corners'
+           : s.category?.includes('cards')   ? 'Tarjetas'
+           : s.category?.includes('goals') || s.category === 'winner' || s.category === 'btts' ? 'Goles'
+           : s.category || 'Otros',
+      }))
       .sort((a, b) => b.probability - a.probability);
   }, [data, match]);
 
@@ -2292,15 +2205,11 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 awayLogo={match.teams.away.logo}
               />
 
-              {/* Estadísticas de los últimos 5: avg/max/min */}
-              <StatsBlock
-                homeLastFive={data.homeLastFive}
-                awayLastFive={data.awayLastFive}
-                homeName={match.teams.home.name}
-                awayName={match.teams.away.name}
-                goalTiming={data.calculatedProbabilities?.goalTiming}
-                playerHighlights={data.playerHighlights}
-              />
+              {/* StatsBlock (Cornes/Tarjetas/Goles avg-max-min + periodos de gol)
+                  fue eliminado: esos datos son base para los analisis, no para
+                  recomendaciones de combinada. El usuario ve los mismos partidos
+                  procesados como mercados accionables en "Selecciona para tu
+                  combinada" arriba. Para detalles raw hay "Ver analisis completo". */}
 
               <button className="btn-full" onClick={(e) => { e.stopPropagation(); onViewFull(); }}>
                 Ver analisis completo &#8594;
