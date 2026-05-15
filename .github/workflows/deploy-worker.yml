@@ -23,7 +23,6 @@ on:
       - 'lib/supabase-cache.js'
       - 'lib/db.js'
       - 'lib/webpush.js'
-      - 'lib/pusher.js'
       - 'lib/leagues.js'
   workflow_dispatch:
 
@@ -38,8 +37,12 @@ jobs:
           username: root
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+            set -e
             cd /apps/futbol
             git pull
+            # Deps del frontend (lib/* compartidas con el worker via shared.ts)
             npm install --omit=dev --no-audit --no-fund
-            cd apps/cfanalisis-worker && npm install --omit=dev --no-audit --no-fund && cd -
-            pm2 restart cfanalisis-worker
+            # Deps del worker — install ANTES del restart para que pm2 vea
+            # node_modules actualizados (pino, @fastify/websocket, etc.).
+            npm install --prefix apps/cfanalisis-worker --omit=dev --no-audit --no-fund
+            pm2 restart cfanalisis-worker --update-env

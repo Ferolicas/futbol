@@ -6,7 +6,8 @@ import { isValidQueue, queues, QUEUE_NAMES, type QueueName } from './queues.js';
 import { getErrors } from './errors-log.js';
 import { redisGet, pgQuery } from './shared.js';
 import { bullConnection } from './redis.js';
-import { Sentry } from './sentry.js';
+import { logger } from './logger.js';
+import { notifyError } from './notifier.js';
 import { wsManager } from './ws/wsManager.js';
 import { runFutbolCalibration } from './jobs/calibration/futbol.js';
 import { runBaseballCalibration } from './jobs/calibration/baseball.js';
@@ -226,18 +227,16 @@ async function collectHealthQueues() {
 }
 
 export function buildServer() {
-  const app = Fastify({ logger: { level: 'info' } });
+  // Pino integrado como logger interno de Fastify — los req.log heredan el
+  // mismo transport (stdout + LOG_FILE) que el resto del worker.
+  const app = Fastify({ logger });
 
-  // Capturar excepciones de Fastify a Sentry.
+  // Errores en handlers Fastify → loguear + alerta Telegram (con dedup).
   app.setErrorHandler((err, req, reply) => {
-    req.log.error({ err: err.message, url: req.url }, 'fastify error');
-    try {
-      Sentry.withScope((scope) => {
-        scope.setTag('route', req.url);
-        scope.setTag('method', req.method);
-        Sentry.captureException(err);
-      });
-    } catch {}
+    notifyError(
+      { source: 'fastify', name: `${req.method} ${req.routerPath || req.url}`, extra: { url: req.url } },
+      err,
+    ).catch(() => {});
     reply.code(err.statusCode || 500).send({ ok: false, error: err.message });
   });
 
@@ -257,9 +256,9 @@ export function buildServer() {
         }
         wsManager.attach(conn.socket, query.topics);
       });
-      console.log('[server] /ws registered');
+      logger.info('/ws registered');
     } catch (e) {
-      console.warn('[server] @fastify/websocket no disponible — /ws desactivado:', (e as Error).message);
+      logger.warn({ err: (e as Error).message }, '@fastify/websocket no disponible — /ws desactivado');
     }
   });
 

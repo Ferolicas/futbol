@@ -1,8 +1,7 @@
 import 'dotenv/config';
-// Sentry primero — captura errores de cualquier import posterior (DATABASE_URL
-// ausente, ioredis no conecta, etc.). No-op si SENTRY_DSN no esta en el env.
-import './sentry.js';
-import { Sentry } from './sentry.js';
+// logger primero — los modulos siguientes pueden usarlo en su top-level.
+import { logger } from './logger.js';
+import { notifyError } from './notifier.js';
 import { buildServer } from './server.js';
 import { startWorkers } from './workers.js';
 import { bullConnection } from './redis.js';
@@ -14,21 +13,21 @@ async function main() {
   // Start HTTP enqueue server
   const app = buildServer();
   await app.listen({ port: PORT, host: '0.0.0.0' });
-  console.log(`[worker] HTTP server listening on :${PORT}`);
+  logger.info({ port: PORT }, 'HTTP server listening');
 
   // Start all BullMQ workers
   const workers = startWorkers();
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
-    console.log(`[worker] received ${signal}, shutting down…`);
+    logger.info({ signal }, 'received signal, shutting down…');
     try {
       await app.close();
       await Promise.all(workers.map((w) => w.close()));
       await Promise.all(Object.values(queues).map((q) => q.close()));
       await bullConnection.quit();
     } catch (e) {
-      console.error('[worker] shutdown error:', e);
+      logger.error({ err: (e as Error).message }, 'shutdown error');
     }
     process.exit(0);
   };
@@ -38,17 +37,15 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('[worker] fatal:', err);
-  try { Sentry.captureException(err); } catch {}
-  process.exit(1);
+  notifyError({ source: 'process', name: 'main' }, err)
+    .finally(() => process.exit(1));
 });
 
-// Errores no manejados a nivel proceso — los reporta Sentry y se loguean.
+// Errores no manejados a nivel proceso — se loguean Y se mandan a Telegram
+// (con dedup para no spamear si algo entra en loop).
 process.on('uncaughtException', (err) => {
-  console.error('[worker] uncaughtException:', err);
-  try { Sentry.captureException(err); } catch {}
+  notifyError({ source: 'process', name: 'uncaughtException' }, err).catch(() => {});
 });
 process.on('unhandledRejection', (reason) => {
-  console.error('[worker] unhandledRejection:', reason);
-  try { Sentry.captureException(reason); } catch {}
+  notifyError({ source: 'process', name: 'unhandledRejection' }, reason).catch(() => {});
 });

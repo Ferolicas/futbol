@@ -208,6 +208,91 @@ curl -I https://worker.cfanalisis.com/health
 
 ---
 
+## Bloque 4 — Pino + Telegram alerts
+
+El worker loguea en JSON estructurado (Pino) a **stdout** (captado por PM2)
+y opcionalmente a un archivo en `/var/log/cfanalisis/worker.log`. Cuando
+un job BullMQ falla, Fastify devuelve 5xx, o el proceso captura un
+`uncaughtException`, además se manda una alerta a tu Telegram personal
+con dedup de 1 mensaje/minuto por error.
+
+```bash
+# 1. Directorio de logs con permisos para el user que corre PM2
+sudo mkdir -p /var/log/cfanalisis
+# Ajustar al user que ejecuta `pm2 start`. Si PM2 corre como root:
+sudo chown -R root:root /var/log/cfanalisis
+# Si PM2 corre como otro user (ej. "deploy"):
+# sudo chown -R deploy:deploy /var/log/cfanalisis
+sudo chmod 755 /var/log/cfanalisis
+
+# 2. Rotación con logrotate (impide que worker.log crezca sin límite)
+sudo tee /etc/logrotate.d/cfanalisis-worker > /dev/null <<'EOF'
+/var/log/cfanalisis/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+
+# Validar logrotate sin esperar al cron
+sudo logrotate -d /etc/logrotate.d/cfanalisis-worker  # dry-run
+```
+
+`copytruncate` es importante: Pino mantiene el file descriptor abierto, así
+que `rotate` puro perdería los logs hasta el siguiente restart de PM2. Con
+`copytruncate`, logrotate copia el archivo y luego lo trunca al tamaño 0
+manteniendo el mismo inode — Pino sigue escribiendo en el archivo (ahora
+vacío) sin interrupción.
+
+### Variables de entorno del worker
+
+Añadir/actualizar en `/apps/futbol/apps/cfanalisis-worker/.env`:
+
+```bash
+LOG_LEVEL=info
+LOG_FILE=/var/log/cfanalisis/worker.log
+TELEGRAM_BOT_TOKEN=<<token de @cfanalisis_bot>>
+TELEGRAM_ALERT_CHAT_ID=<<tu chat ID personal (NO el canal -1003910091350)>>
+```
+
+**Cómo obtener tu chat ID personal**: abre Telegram, escribe a
+[@userinfobot](https://t.me/userinfobot) o
+[@RawDataBot](https://t.me/RawDataBot), te devuelve tu ID (un entero
+positivo). El chat ID del canal público es negativo (`-100…`) y se usa para
+las alertas de backup/uptime; las alertas de errores del worker deben ir a
+tu chat personal para no spamear el canal.
+
+```bash
+# Aplicar
+pm2 restart cfanalisis-worker --update-env
+
+# Verificar que el archivo se está escribiendo
+sudo tail -f /var/log/cfanalisis/worker.log
+# Debe verse JSON: {"level":30,"time":...,"svc":"cfanalisis-worker","msg":"HTTP server listening"}
+```
+
+### Probar la alerta Telegram
+
+Forzar un error en cualquier job para validar el envío. Ejemplo: enqueue un
+job con payload inválido (date faltante) en analyze-batch:
+
+```bash
+curl -X POST https://worker.cfanalisis.com/enqueue/futbol-analyze-batch \
+  -H "Authorization: Bearer $WORKER_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"payload":{}}'
+```
+
+El job fallará con `analyze-batch: date is required` y debes recibir un
+mensaje en Telegram con el nombre del job, el error y el timestamp. Si
+disparas el mismo error varias veces seguidas, solo verás el primero (dedup).
+
+---
+
 ## Bloque 5 — Health check externo
 
 ```bash

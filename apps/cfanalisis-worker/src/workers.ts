@@ -1,6 +1,7 @@
 import { Worker, type Processor } from 'bullmq';
 import { bullConnection } from './redis.js';
-import { captureJobException } from './sentry.js';
+import { logger } from './logger.js';
+import { notifyError } from './notifier.js';
 import type { QueueName } from './queues.js';
 
 // Futbol jobs
@@ -70,18 +71,19 @@ export function startWorkers(): Worker[] {
       concurrency: concurrency[name],
     });
     w.on('completed', (job) => {
-      console.log(`[worker:${name}] job ${job.id} completed`);
+      logger.info({ queue: name, jobId: job.id }, 'job completed');
     });
     w.on('failed', (job, err) => {
-      console.error(`[worker:${name}] job ${job?.id} failed:`, err.message);
-      captureJobException(err, { queue: name, jobId: job?.id, data: job?.data });
+      notifyError(
+        { source: 'job', name, jobId: job?.id, extra: { attempts: job?.attemptsMade } },
+        err,
+      ).catch(() => {});
     });
     w.on('error', (err) => {
-      console.error(`[worker:${name}] error:`, err.message);
-      captureJobException(err, { queue: name });
+      notifyError({ source: 'job', name, extra: { kind: 'worker-error' } }, err).catch(() => {});
     });
     workers.push(w);
   }
-  console.log(`[workers] started ${workers.length} workers`);
+  logger.info({ count: workers.length }, 'workers started');
   return workers;
 }

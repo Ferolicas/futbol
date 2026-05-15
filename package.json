@@ -12,7 +12,6 @@
     "@clerk/localizations": "^4.2.2",
     "@clerk/nextjs": "^6.39.0",
     "@sanity/client": "^6.24.1",
-    "@sentry/nextjs": "^8.45.0",
     "@stripe/react-stripe-js": "^5.6.1",
     "@stripe/stripe-js": "^8.10.0",
     "@supabase/ssr": "^0.10.0",
