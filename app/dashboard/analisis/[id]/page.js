@@ -1578,8 +1578,8 @@ function BajasSection({ filteredInjuries, allInjuries, homeTeam, awayTeam, onRef
 function PlayerHighlights({ highlights }) {
   if (!highlights) return <div style={{  color: 'white', padding: 16 }}>Sin datos de jugadores</div>;
 
-  const { shooters, scorers } = highlights;
-  if (!scorers?.length && !shooters?.length) {
+  const { shooters, scorers, shotsTotalists, assisters, foulers, bookers } = highlights;
+  if (!scorers?.length && !shooters?.length && !shotsTotalists?.length && !assisters?.length && !foulers?.length && !bookers?.length) {
     return <div style={{  color: 'white', padding: 16 }}>Sin jugadores destacados identificados</div>;
   }
 
@@ -1637,7 +1637,7 @@ function PlayerHighlights({ highlights }) {
         <div>
           <div style={{ fontSize: '.85rem',  color: 'white', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Crosshair size={16} style={{ color: '#60a5fa' }} />
-            🎯 Rematadores consistentes <small style={{  color: 'white' }}>(remate en 5+ de últimos 10)</small>
+            🎯 Tiros a puerta <small style={{  color: 'white' }}>(remate al arco en 5+ de últimos 10)</small>
           </div>
           {shooters.map((pl, i) => (
             <motion.div
@@ -1680,6 +1680,121 @@ function PlayerHighlights({ highlights }) {
           ))}
         </div>
       )}
+
+      {/* ── Tiros totales (a puerta + fuera + bloqueados) ── */}
+      {shotsTotalists?.length > 0 && (
+        <PlayerGroupList
+          title="💥 Tiros totales"
+          hint="(a puerta + fuera + bloqueados, ≥2 en 5+ de últimos 10)"
+          players={shotsTotalists}
+          metric="shotsTotal"
+          totalKey="totalShotsAll"
+          unit="tiros totales"
+          accentBg="linear-gradient(to right, rgba(96,165,250,.2), rgba(34,211,238,.15))"
+          accentBorder="rgba(96,165,250,.3)"
+          chipBg="linear-gradient(135deg, #60a5fa, #22d3ee)"
+          dotColor="#60a5fa"
+        />
+      )}
+
+      {/* ── Asistentes ── */}
+      {assisters?.length > 0 && (
+        <PlayerGroupList
+          title="🅰️ Asistentes"
+          hint="(asistencia en 5+ de últimos 10)"
+          players={assisters}
+          metric="assists"
+          totalKey="totalAssists"
+          unit="asistencias"
+          accentBg="linear-gradient(to right, rgba(167,139,250,.2), rgba(192,132,252,.15))"
+          accentBorder="rgba(167,139,250,.3)"
+          chipBg="linear-gradient(135deg, #a78bfa, #c084fc)"
+          dotColor="#a78bfa"
+        />
+      )}
+
+      {/* ── Faltas frecuentes ── */}
+      {foulers?.length > 0 && (
+        <PlayerGroupList
+          title="⚠️ Faltas frecuentes"
+          hint="(falta cometida en 5+ de últimos 10)"
+          players={foulers}
+          metric="fouls"
+          totalKey="totalFouls"
+          unit="faltas"
+          accentBg="linear-gradient(to right, rgba(245,158,11,.2), rgba(251,146,60,.15))"
+          accentBorder="rgba(245,158,11,.3)"
+          chipBg="linear-gradient(135deg, #f59e0b, #fb923c)"
+          dotColor="#f59e0b"
+        />
+      )}
+
+      {/* ── Tarjetas frecuentes ── */}
+      {bookers?.length > 0 && (
+        <PlayerGroupList
+          title="🟨 Tarjetas frecuentes"
+          hint="(amarilla en 5+ de últimos 10)"
+          players={bookers}
+          metric="yellows"
+          totalKey="totalYellows"
+          unit="amarillas"
+          accentBg="linear-gradient(to right, rgba(250,204,21,.2), rgba(252,211,77,.15))"
+          accentBorder="rgba(250,204,21,.3)"
+          chipBg="linear-gradient(135deg, #facc15, #fcd34d)"
+          dotColor="#facc15"
+        />
+      )}
+    </div>
+  );
+}
+
+// Sub-componente reutilizable para grupos de jugadores (shotsTotalists,
+// assisters, foulers, bookers). Sigue el mismo patron visual que los
+// bloques inline de scorers/shooters de arriba — mas compacto en codigo
+// y consistente en estilo.
+function PlayerGroupList({ title, hint, players, metric, totalKey, unit, accentBg, accentBorder, chipBg, dotColor }) {
+  return (
+    <div>
+      <div style={{ fontSize: '.85rem', color: 'white', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span>{title}</span>
+        <small style={{ color: 'white' }}>{hint}</small>
+      </div>
+      {players.map((pl, i) => {
+        const hist = pl[metric] || [];
+        const total = pl[totalKey] || 0;
+        return (
+          <motion.div
+            key={i}
+            style={{ padding: '18px 20px', borderRadius: 20, background: accentBg, border: `1px solid ${accentBorder}`, marginBottom: 12 }}
+            initial={{ opacity: 0, x: -16 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: .1 + i * .08 }}
+            whileHover={{ scale: 1.02 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12, gap: 12 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pl.name}</div>
+                <div style={{ fontSize: '.78rem', color: 'white', opacity: .8 }}>{pl.teamName}</div>
+              </div>
+              <div style={{ padding: '8px 14px', borderRadius: 12, background: chipBg, fontWeight: 700, fontSize: '1.1rem', whiteSpace: 'nowrap' }}>
+                {total} {unit}
+              </div>
+            </div>
+            <div className="ap2-hp-dots">
+              {hist.map((n, j) => (
+                <div
+                  key={j}
+                  className={`ap2-hp-dot ${n > 0 ? 'scored' : 'miss'}`}
+                  style={n > 0 ? { background: `${dotColor}30`, color: dotColor } : undefined}
+                  title={n > 0 ? `${n}` : 'Sin registro'}
+                >
+                  {n > 0 ? n : '—'}
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        );
+      })}
     </div>
   );
 }

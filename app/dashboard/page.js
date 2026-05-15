@@ -2468,12 +2468,12 @@ function AccordionPlayersBlock({ highlights }) {
   if (!highlights) return null;
   const { scorers, shooters, shotsTotalists, assisters, foulers, bookers } = highlights;
   const groups = [
-    { key: 'scorers',         data: scorers,         label: 'Goleadores en racha',         emoji: '⚽', dotColor: '#22c55e', metric: 'goals',       unit: 'goles' },
-    { key: 'shooters',        data: shooters,        label: 'Rematadores consistentes',    emoji: '🎯', dotColor: '#3b82f6', metric: 'shotsOnGoal', unit: 'remates' },
-    { key: 'shotsTotalists',  data: shotsTotalists,  label: 'Tiros totales (≥2/partido)',  emoji: '🥅', dotColor: '#60a5fa', metric: 'shotsTotal',  unit: 'tiros' },
-    { key: 'assisters',       data: assisters,       label: 'Asistentes',                  emoji: '🅰️', dotColor: '#a78bfa', metric: 'assists',     unit: 'asistencias' },
-    { key: 'foulers',         data: foulers,         label: 'Faltas frecuentes',           emoji: '⚠️', dotColor: '#f59e0b', metric: 'fouls',       unit: 'faltas' },
-    { key: 'bookers',         data: bookers,         label: 'Tarjetas frecuentes',         emoji: '🟨', dotColor: '#facc15', metric: 'yellows',     unit: 'amarillas' },
+    { key: 'scorers',         data: scorers,         label: 'Goleadores en racha',                  hint: '(gol en 5+ de últimos 10)',                                emoji: '⚽',  dotColor: '#22c55e', metric: 'goals',       unit: 'goles' },
+    { key: 'shooters',        data: shooters,        label: 'Tiros a puerta',                       hint: '(remate al arco — 5+ de últimos 10)',                       emoji: '🎯',  dotColor: '#3b82f6', metric: 'shotsOnGoal', unit: 'a puerta' },
+    { key: 'shotsTotalists',  data: shotsTotalists,  label: 'Tiros totales',                        hint: '(a puerta + fuera + bloqueados, ≥2 en 5+ de últimos 10)',  emoji: '💥', dotColor: '#60a5fa', metric: 'shotsTotal',  unit: 'tiros totales' },
+    { key: 'assisters',       data: assisters,       label: 'Asistentes',                           hint: '(asistencia en 5+ de últimos 10)',                          emoji: '🅰️',  dotColor: '#a78bfa', metric: 'assists',     unit: 'asistencias' },
+    { key: 'foulers',         data: foulers,         label: 'Faltas frecuentes',                    hint: '(falta cometida en 5+ de últimos 10)',                      emoji: '⚠️',  dotColor: '#f59e0b', metric: 'fouls',       unit: 'faltas' },
+    { key: 'bookers',         data: bookers,         label: 'Tarjetas frecuentes',                  hint: '(amarilla en 5+ de últimos 10)',                            emoji: '🟨',  dotColor: '#facc15', metric: 'yellows',     unit: 'amarillas' },
   ].filter(g => Array.isArray(g.data) && g.data.length > 0);
 
   if (groups.length === 0) return null;
@@ -2485,9 +2485,9 @@ function AccordionPlayersBlock({ highlights }) {
       </div>
       {groups.map(g => (
         <div key={g.key} style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: '.75rem', color: 'var(--t2)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ fontSize: '.75rem', color: 'var(--t2)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <span>{g.emoji}</span><b>{g.label}</b>
-            <span style={{ fontSize: '.65rem', color: 'var(--t3)' }}>(en 5+ de últimos 10)</span>
+            <span style={{ fontSize: '.65rem', color: 'var(--t3)' }}>{g.hint}</span>
           </div>
           {g.data.slice(0, 5).map((pl, i) => {
             const hist = pl[g.metric] || [];
