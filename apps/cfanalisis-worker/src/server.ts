@@ -229,7 +229,11 @@ async function collectHealthQueues() {
 export function buildServer() {
   // Pino integrado como logger interno de Fastify — los req.log heredan el
   // mismo transport (stdout + LOG_FILE) que el resto del worker.
-  const app = Fastify({ logger });
+  //
+  // Fastify v5: la opcion `logger` solo acepta boolean | LoggerConfiguration.
+  // Para pasar una instancia Pino ya creada hay que usar `loggerInstance`,
+  // si no lanza "logger options only accepts a configuration object".
+  const app = Fastify({ loggerInstance: logger });
 
   // Errores en handlers Fastify → loguear + alerta Telegram (con dedup).
   app.setErrorHandler((err, req, reply) => {
