@@ -115,9 +115,14 @@ export default function BaseballAnalysisPage() {
             {dq.hasOdds && <Badge label="Odds" color="#22d3ee" />}
             {dq.hasH2H && <Badge label="H2H" color="#8b5cf6" />}
             {dq.hasHomeStats && dq.hasAwayStats && <Badge label="Stats" color="#10b981" />}
+            {dq.hasPitcherMatchup && <Badge label="Pitcher" color="#f59e0b" />}
+            {dq.hasPlayerHighlights && <Badge label="Players" color="#a78bfa" />}
           </div>
         )}
       </motion.div>
+
+      {/* Player markets — bloque F. Si players==null, sección oculta. */}
+      {probs?.players && <PlayerMarketsSection players={probs.players} />}
 
       {/* Combinada highlight */}
       {combinada && combinada.combinedProbability >= 60 && (
@@ -373,6 +378,60 @@ function Badge({ label, color }) {
       padding: '3px 9px', borderRadius: 999, fontSize: '.7rem', fontWeight: 700,
       background: `${color}1a`, border: `1px solid ${color}55`, color,
     }}>{label}</span>
+  );
+}
+
+// ── Player markets section — bloque F ──
+// Se renderiza solo si probs.players != null (cuando se conecte MLB Stats API).
+function PlayerMarketsSection({ players }) {
+  const groups = [
+    { key: 'strikeouts', title: '🎯 Ponches por pitcher',     emoji: 'K', color: '#a78bfa', unit: 'K' },
+    { key: 'hits',       title: '💥 Hits por bateador',        emoji: 'H', color: '#f59e0b', unit: 'hits' },
+    { key: 'totalBases', title: '🏃 Bases totales',            emoji: 'TB', color: '#22d3ee', unit: 'bases' },
+    { key: 'rbis',       title: '⚾ Carreras impulsadas (RBI)', emoji: 'R', color: '#10b981', unit: 'RBI' },
+    { key: 'homeRuns',   title: '🚀 Home runs',                emoji: 'HR', color: '#ef4444', unit: 'HR' },
+  ].filter(g => Array.isArray(players[g.key]) && players[g.key].length > 0);
+
+  if (groups.length === 0) return null;
+
+  return (
+    <Section title="🌟 Mercados de jugador" accent="#a78bfa">
+      {groups.map(g => (
+        <div key={g.key} style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: '.85rem', color: g.color, fontWeight: 700, marginBottom: 8 }}>{g.title}</div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {players[g.key].slice(0, 6).map((pl, i) => (
+              <div key={pl.id || i} style={{
+                padding: '10px 12px', borderRadius: 8,
+                background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                  <span style={{ fontWeight: 700, fontSize: '.9rem', flex: 1 }}>{pl.name}</span>
+                  <span style={{ fontSize: '.7rem', color: '#94a3b8' }}>{pl.teamName}</span>
+                  <span style={{
+                    fontSize: '.75rem', color: g.color, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700,
+                  }}>{pl.total ?? 0} {g.unit} hist.</span>
+                </div>
+                {pl.lineProbs && Object.keys(pl.lineProbs).length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {Object.entries(pl.lineProbs).map(([line, prob]) => (
+                      <span key={line} style={{
+                        padding: '3px 8px', borderRadius: 6, fontSize: '.72rem', fontWeight: 700,
+                        background: prob >= 70 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.1)',
+                        border: `1px solid ${prob >= 70 ? '#10b981' : 'rgba(245,158,11,0.25)'}`,
+                        color: prob >= 70 ? '#10b981' : '#f59e0b',
+                      }}>
+                        Más de {line}: {prob}%
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </Section>
   );
 }
 
