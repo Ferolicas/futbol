@@ -265,14 +265,18 @@ export function buildServer() {
     try {
       const ws = await import('@fastify/websocket');
       await instance.register(ws.default ?? ws);
-      instance.get('/ws', { websocket: true }, (conn, req) => {
+      // @fastify/websocket v11 cambio la API: el handler recibe el WebSocket
+      // directo como primer argumento (antes era { socket } envuelto). Si
+      // se intenta usar conn.socket aqui, conn.socket === undefined y el
+      // attach() peta con "Cannot read properties of undefined (reading 'on')".
+      instance.get('/ws', { websocket: true }, (socket, req) => {
         const query = req.query as { secret?: string; topics?: string };
         if (!SECRET || query.secret !== SECRET) {
-          conn.socket.send(JSON.stringify({ type: 'error', code: 'unauthorized' }));
-          conn.socket.close(4401, 'unauthorized');
+          try { socket.send(JSON.stringify({ type: 'error', code: 'unauthorized' })); } catch {}
+          try { socket.close(4401, 'unauthorized'); } catch {}
           return;
         }
-        wsManager.attach(conn.socket, query.topics);
+        wsManager.attach(socket, query.topics);
       });
       logger.info('/ws registered');
     } catch (e) {
