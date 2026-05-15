@@ -9,8 +9,23 @@
  *   - 'draft'     = creada/calculada pero NO lista para publicar
  *   - 'published' = lista para mostrar al usuario (default cuando el cron termina ok)
  *
- * IMPORTANTE: este endpoint es puramente aditivo. No modifica el dashboard,
- * ni el useMemo apuestaDelDia, ni el comportamiento existente.
+ * ⚠️ ARQUITECTURA — DOS TABLAS DISTINTAS, NO CONFUNDIR:
+ *
+ *   combinada_dia   ← ESTA tabla (escrita por este cron, leida solo por n8n)
+ *     - Una fila por fecha (UNIQUE constraint en `fecha`).
+ *     - Consumida exclusivamente por la automatizacion de n8n para
+ *       publicar la apuesta del dia en Telegram.
+ *     - El frontend NO la lee. /api/combinada-dia existe como lector,
+ *       pero solo lo usa n8n.
+ *
+ *   combinadas      ← OTRA tabla (combinadas guardadas por usuario)
+ *     - Multiples filas por usuario.
+ *     - Escrita por /api/user (type=save-combinada).
+ *     - Leida por el dashboard via hooks/useSavedCombinadas.
+ *
+ * El widget "Apuesta del Dia" del dashboard se calcula client-side en
+ * app/dashboard/page.js (useMemo apuestaDelDia) iterando analyzedData,
+ * no lee ninguna de las dos tablas. Cambios aqui NO afectan al frontend.
  */
 
 import { supabaseAdmin } from '../../../../lib/supabase';

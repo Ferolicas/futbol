@@ -4,8 +4,15 @@
 -- /api/cron/publish-combinada. Es independiente del calculo en vivo que
 -- hace el dashboard (useMemo apuestaDelDia) — el dashboard sigue tal cual.
 --
--- Ejecutar UNA SOLA VEZ desde el SQL editor:
---   https://supabase.com/dashboard/project/fdgxpznafsmhnuxjmcgd/sql/new
+-- ⚠️ USO EXCLUSIVO DE n8n.
+--   Esta tabla la lee SOLO la automatizacion de n8n (publicacion de la
+--   apuesta del dia en Telegram). El frontend NO la consulta nunca:
+--   el widget "Apuesta del Dia" se calcula client-side desde analyzedData.
+--   No confundir con la tabla `combinadas` (combinadas guardadas por
+--   usuario, escritas desde /api/user type=save-combinada).
+--
+-- Ejecutar UNA SOLA VEZ contra el VPS Postgres:
+--   psql "$DATABASE_URL" -f scripts/migrate-combinada-dia.sql
 -- ============================================================================
 
 create table if not exists public.combinada_dia (

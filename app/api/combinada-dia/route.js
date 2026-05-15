@@ -4,6 +4,18 @@
  * Lee la combinada del día guardada por el cron /api/cron/publish-combinada.
  * Si no se pasa date, usa la fecha de hoy.
  * Solo devuelve filas con status = 'published'.
+ *
+ * ⚠️ USO EXCLUSIVO DE n8n — NO LO LLAMA EL FRONTEND.
+ *
+ * El widget "Apuesta del Dia" del dashboard se calcula client-side en
+ * app/dashboard/page.js (useMemo apuestaDelDia) sobre analyzedData, sin
+ * pasar por esta tabla. Este endpoint existe unicamente como fuente para
+ * la automatizacion de n8n que publica la apuesta del dia en Telegram.
+ *
+ * Tabla consultada: combinada_dia (una fila por fecha, escrita por el
+ * cron publish-combinada). NO confundir con la tabla `combinadas`, que
+ * almacena las combinadas que cada usuario guarda manualmente y se lee
+ * desde /api/user?type=combinadas.
  */
 
 import { supabaseAdmin } from '../../../lib/supabase';
