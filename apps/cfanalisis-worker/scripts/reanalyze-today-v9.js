@@ -1,4 +1,4 @@
-// scripts/reanalyze-today-v8.js — operacion del worker (NO HTTP).
+// scripts/reanalyze-today-v9.js — operacion del worker (NO HTTP).
 //
 // Encola directamente un job `futbol-analyze-all-today` en la cola BullMQ
 // local del VPS. Asi el script no depende de variables de Vercel
@@ -7,12 +7,12 @@
 // con la concurrencia normal (analyze-all-today, concurrency=1, attempts=5).
 //
 // USO (desde el VPS, en /apps/futbol/apps/cfanalisis-worker):
-//   node scripts/reanalyze-today-v8.js                # hoy (UTC)
-//   node scripts/reanalyze-today-v8.js 2026-05-15     # fecha concreta
-//   node scripts/reanalyze-today-v8.js --no-force     # sin force (skipea analyzed)
+//   node scripts/reanalyze-today-v9.js                # hoy (UTC)
+//   node scripts/reanalyze-today-v9.js 2026-05-15     # fecha concreta
+//   node scripts/reanalyze-today-v9.js --no-force     # sin force (skipea analyzed)
 //
 // El job futbol-analyze-all-today por defecto se queda con force=true para
-// invalidar los cache_version=7 anteriores. Con --no-force solo re-analiza
+// invalidar los cache_version<9 anteriores. Con --no-force solo re-analiza
 // los que faltan.
 //
 // Conexion Redis:
@@ -44,14 +44,14 @@ const connection = new IORedis({
 });
 
 connection.on('error', (err) => {
-  console.error(`[reanalyze-v8] redis error: ${err.message}`);
+  console.error(`[reanalyze-v9] redis error: ${err.message}`);
 });
 
 // ── Encolar el job ────────────────────────────────────────────────────────
 const QUEUE_NAME = 'futbol-analyze-all-today';
 
 async function main() {
-  console.log(`[reanalyze-v8] connecting to redis ${host}:${port}…`);
+  console.log(`[reanalyze-v9] connecting to redis ${host}:${port}…`);
   const queue = new Queue(QUEUE_NAME, {
     connection,
     // Hereda las opciones por defecto que define src/queues.ts cuando el
@@ -64,26 +64,26 @@ async function main() {
     const job = await queue.add('analyze-all-today', payload, {
       // Si por error se intenta encolar dos veces seguidas con el mismo
       // (date, force), evitamos duplicados.
-      jobId: `manual-reanalyze-v8-${date}-${force ? 'force' : 'soft'}`,
+      jobId: `manual-reanalyze-v9-${date}-${force ? 'force' : 'soft'}`,
       removeOnComplete: { count: 50, age: 24 * 3600 },
       removeOnFail: { count: 100, age: 7 * 24 * 3600 },
     });
 
-    console.log(`[reanalyze-v8] enqueued OK`);
+    console.log(`[reanalyze-v9] enqueued OK`);
     console.log(`  queue:   ${QUEUE_NAME}`);
     console.log(`  jobId:   ${job.id}`);
     console.log(`  payload: ${JSON.stringify(payload)}`);
     console.log('');
-    console.log('[reanalyze-v8] follow progress:');
+    console.log('[reanalyze-v9] follow progress:');
     console.log('  pm2 logs cfanalisis-worker --lines 200');
     console.log('  o en /ferney (panel admin)');
   } catch (e) {
     if (e?.message?.includes('Job') && e?.message?.includes('already exists')) {
-      console.warn(`[reanalyze-v8] job ya existe para date=${date} force=${force}.`);
+      console.warn(`[reanalyze-v9] job ya existe para date=${date} force=${force}.`);
       console.warn('  Espera a que termine o usa: --no-force para soft-reanalyze,');
-      console.warn('  o borra el job manualmente: redis-cli DEL bull:futbol-analyze-all-today:manual-reanalyze-v8-…');
+      console.warn('  o borra el job manualmente: redis-cli DEL bull:futbol-analyze-all-today:manual-reanalyze-v9-…');
     } else {
-      console.error('[reanalyze-v8] enqueue failed:', e?.message || e);
+      console.error('[reanalyze-v9] enqueue failed:', e?.message || e);
       process.exitCode = 1;
     }
   } finally {
@@ -93,7 +93,7 @@ async function main() {
 }
 
 main().catch(async (e) => {
-  console.error('[reanalyze-v8] FATAL:', e?.message || e);
+  console.error('[reanalyze-v9] FATAL:', e?.message || e);
   try { await connection.quit(); } catch {}
   process.exit(1);
 });
