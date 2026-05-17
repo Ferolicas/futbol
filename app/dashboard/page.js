@@ -542,32 +542,53 @@ export default function Dashboard() {
   const subscribePush = useCallback(async () => {
     if (!pushSupported) return false;
     try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+        setPushError('Permisos de notificación bloqueados. Habilítalos en los ajustes del navegador para este sitio.');
+        return false;
+      }
       const reg = await navigator.serviceWorker.ready;
       const existing = await reg.pushManager.getSubscription();
-      if (existing) { setPushEnabled(true); setPushError(null); return true; } // already subscribed
+      if (existing) {
+        await fetch('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(existing),
+        }).catch(() => {});
+        setPushEnabled(true); setPushError(null); return true;
+      }
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
         setPushError('Activa los permisos de notificación en tu navegador');
         return false;
       }
-      const vapidKey = process.env.NEXT_PUBLIC_VAPID_KEY;
-      if (!vapidKey) return false;
+      const keyRes = await fetch('/api/push/subscribe', { method: 'GET' });
+      const keyJson = await keyRes.json().catch(() => ({}));
+      const vapidKey = keyJson.vapidPublicKey;
+      if (!vapidKey) {
+        setPushError('Servidor sin VAPID configurado. Contacta al administrador.');
+        return false;
+      }
       const padding = '='.repeat((4 - vapidKey.length % 4) % 4);
       const base64 = (vapidKey + padding).replace(/-/g, '+').replace(/_/g, '/');
       const raw = window.atob(base64);
       const appServerKey = new Uint8Array([...raw].map(c => c.charCodeAt(0)));
       const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appServerKey });
-      await fetch('/api/push/subscribe', {
+      const saveRes = await fetch('/api/push/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sub),
       });
+      if (!saveRes.ok) {
+        const msg = await saveRes.json().catch(() => ({}));
+        setPushError(msg.error || 'No se pudo guardar la suscripción en el servidor');
+        return false;
+      }
       setPushEnabled(true);
       setPushError(null);
       return true;
     } catch (e) {
       console.error('[PUSH]', e);
-      setPushError('No se pudo activar las notificaciones');
+      setPushError(e?.message ? `No se pudo activar: ${e.message}` : 'No se pudo activar las notificaciones');
       return false;
     }
   }, [pushSupported]);
