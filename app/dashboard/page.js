@@ -87,6 +87,8 @@ export default function Dashboard() {
   const [reanalyzing, setReanalyzing] = useState(false);
   const [reanalyzeDone, setReanalyzeDone] = useState(false);
   const [reanalyzeProgress, setReanalyzeProgress] = useState(null);
+  // Modal: ver análisis completo sin navegar
+  const [analysisModalId, setAnalysisModalId] = useState(null);
   // Track Pusher activity (for debugging/diagnostics)
   const pusherLastUpdate = useRef(0);
   // Ref to always have the latest liveStats without adding it as a loadFixtures dependency
@@ -722,6 +724,34 @@ export default function Dashboard() {
     } catch {}
     router.push(`/dashboard/analisis/${fixtureId}`);
   }, [analyzedData, router]);
+
+  const openAnalysisModal = useCallback((fixtureId, match) => {
+    try {
+      const fid = String(fixtureId);
+      const cached = analyzedData[fid];
+      if (cached && match) {
+        setAnalysisCache(fid, {
+          analysis: {
+            ...cached,
+            fixtureId: Number(fid),
+            homeTeam: match.teams?.home?.name || cached.homeTeam,
+            awayTeam: match.teams?.away?.name || cached.awayTeam,
+            homeLogo: match.teams?.home?.logo || cached.homeLogo,
+            awayLogo: match.teams?.away?.logo || cached.awayLogo,
+            homeId:   match.teams?.home?.id   || cached.homeId,
+            awayId:   match.teams?.away?.id   || cached.awayId,
+            kickoff:  match.fixture?.date     || cached.kickoff,
+            status:   match.fixture?.status   || cached.status,
+            goals:    match.goals             || cached.goals,
+            league:   match.league?.name      || cached.league,
+            leagueId: match.league?.id        || cached.leagueId,
+            leagueLogo: match.league?.logo    || cached.leagueLogo,
+          },
+        });
+      }
+    } catch {}
+    setAnalysisModalId(fixtureId);
+  }, [analyzedData]);
 
   // Prefetch analisis bundle + sibling routes after first paint so click is instant.
   useEffect(() => {
@@ -1429,7 +1459,7 @@ export default function Dashboard() {
                         onToggle={() => setExpandedMatch(expandedMatch === m.fixture.id ? null : m.fixture.id)}
                         selMarkets={selectedMarkets[m.fixture.id] || {}}
                         onToggleMarket={(mkt) => toggleMarket(m.fixture.id, mkt, `${m.teams.home.name} vs ${m.teams.away.name}`)}
-                        onViewFull={() => goToAnalysis(m.fixture.id, m)}
+                        onViewFull={() => openAnalysisModal(m.fixture.id, m)}
                         onRemove={(e) => dismissMatch(e, m.fixture.id)}
                         isFavorite={favorites.includes(m.fixture.id)}
                         onFavorite={(e) => toggleFavorite(e, m.fixture.id)}
@@ -1485,7 +1515,7 @@ export default function Dashboard() {
                     onToggle={() => setExpandedMatch(expandedMatch === m.fixture.id ? null : m.fixture.id)}
                     selMarkets={selectedMarkets[m.fixture.id] || {}}
                     onToggleMarket={(mkt) => toggleMarket(m.fixture.id, mkt, `${m.teams.home.name} vs ${m.teams.away.name}`)}
-                    onViewFull={() => goToAnalysis(m.fixture.id, m)}
+                    onViewFull={() => openAnalysisModal(m.fixture.id, m)}
                     onRemove={(e) => removeFromAnalyzed(e, m.fixture.id)}
                     isFavorite={favorites.includes(m.fixture.id)}
                     onFavorite={(e) => toggleFavorite(e, m.fixture.id)}
@@ -1591,7 +1621,7 @@ export default function Dashboard() {
         )}
 
         {/* FLOATING: Combinada counter */}
-        {totalSel > 0 && tab === 'analizados' && (
+        {totalSel > 0 && (tab === 'analizados' || tab === 'partidos') && (
           <div className="float-bar slide-up">
             <button className="btn-comb-float" onClick={() => setTab('combinada')}>
               &#127920; Ver Combinada ({totalSel})
@@ -1620,6 +1650,26 @@ export default function Dashboard() {
         </div>
       </div>
     </motion.div>
+
+    {/* MODAL: Análisis completo */}
+    {analysisModalId && (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.8)', backdropFilter: 'blur(4px)' }} onClick={() => setAnalysisModalId(null)} />
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', width: '100%', height: '100%', maxWidth: 860, margin: '0 auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '10px 12px', background: 'var(--bg-1)', borderBottom: '1px solid var(--brd)', flexShrink: 0 }}>
+            <button
+              onClick={() => setAnalysisModalId(null)}
+              style={{ background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.15)', borderRadius: 8, padding: '5px 14px', color: '#fff', fontSize: '1rem', cursor: 'pointer', fontWeight: 700, lineHeight: 1 }}
+            >&#10005;</button>
+          </div>
+          <iframe
+            src={`/dashboard/analisis/${analysisModalId}`}
+            style={{ flex: 1, border: 'none', width: '100%' }}
+            title="Análisis completo"
+          />
+        </div>
+      </div>
+    )}
   );
 }
 
@@ -1837,6 +1887,22 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
 }
 
 /* ======================== ACCORDION CARD ======================== */
+
+function SubAccordion({ title, color, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0, gap: 8, textAlign: 'left' }}
+      >
+        <span style={{ fontSize: '.75rem', fontWeight: 700, color: color || 'var(--t2)', textTransform: 'uppercase', letterSpacing: '.05em' }}>{title}</span>
+        <span style={{ color: color || 'var(--t2)', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>&#9662;</span>
+      </button>
+      {open && <div style={{ marginTop: 10 }}>{children}</div>}
+    </div>
+  );
+}
 
 function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, onRemove, isFavorite, onFavorite, idx, userTz }) {
   const live = isLive(match.fixture.status.short);
@@ -2121,36 +2187,6 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 </div>
               </div>}
 
-              {/* Auto combinada — rebuilt client-side so it always reflects current logic */}
-              {(() => {
-                const liveComb = data.calculatedProbabilities
-                  ? buildCombinada(data.calculatedProbabilities, data.odds, data.playerHighlights, { home: match.teams.home.name, away: match.teams.away.name })
-                  : null;
-                const allSels = liveComb?.selections || data.combinada?.selections || [];
-                if (allSels.length === 0) return null;
-                const withOdds = allSels.filter(s => s.odd && s.odd > 1);
-                const cOdd = withOdds.length >= 2 ? withOdds.reduce((a, s) => a * s.odd, 1) : null;
-                const cProb = Math.round(allSels.reduce((a, s) => a + s.probability, 0) / allSels.length);
-                return (
-                  <div className="auto-comb">
-                    <div className="auto-comb-head">
-                      <span>&#127942; Combinada Auto</span>
-                      <span className={`auto-comb-val ${cProb < 70 ? 'danger' : 'safe'}`}>
-                        {cap(cProb)}%{cOdd ? ` · ${cOdd.toFixed(2)}x` : ''}
-                      </span>
-                    </div>
-                    <div className="auto-comb-chips">
-                      {allSels.map((s, i) => (
-                        <span key={i} className="auto-chip">
-                          {s.name} <b>{cap(s.probability)}%</b>
-                          {s.odd && s.odd > 1 ? ` (${s.odd.toFixed(2)})` : ''}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-
               {/* ── Estadísticas calculadas (extraído del análisis completo) ── */}
               {data.calculatedProbabilities && (() => {
                 const p = data.calculatedProbabilities;
@@ -2164,61 +2200,41 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                     <span style={{ fontSize: '.85rem', fontWeight: 700, color: color || 'var(--t1)', fontFamily: 'JetBrains Mono, monospace', fontVariantNumeric: 'tabular-nums' }}>{fmt(value)}</span>
                   </div>
                 );
-                const Card = ({ title, accent, children }) => (
-                  <div style={{
-                    background: 'var(--bg-2)',
-                    border: `1px solid ${accent || 'var(--brd)'}`,
-                    borderRadius: 10,
-                    padding: '10px 12px',
-                    flex: '1 1 220px',
-                    minWidth: 0,
-                  }}>
+                const StatCard = ({ title, accent, children }) => (
+                  <div style={{ background: 'var(--bg-2)', border: `1px solid ${accent || 'var(--brd)'}`, borderRadius: 10, padding: '10px 12px', flex: '1 1 220px', minWidth: 0 }}>
                     <div style={{ fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--t2)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
                     {children}
                   </div>
                 );
                 return (
-                  <div style={{ marginTop: 14 }}>
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      fontSize: '.75rem',
-                      fontWeight: 700,
-                      color: '#f97316',
-                      textTransform: 'uppercase',
-                      letterSpacing: '.05em',
-                      marginBottom: 10,
-                    }}>
-                      <span>📊</span> Estadísticas calculadas
-                    </div>
+                  <SubAccordion title="📊 Estadísticas calculadas" color="#f97316">
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                      <Card title={`Goles — ${hn}`} accent="rgba(0,212,255,.25)">
+                      <StatCard title={`Goles — ${hn}`} accent="rgba(0,212,255,.25)">
                         <Cell label="Prom. anotados"      value={p.homeGoals?.avgScored}   color="#4ade80" />
                         <Cell label="Prom. recibidos"     value={p.homeGoals?.avgConceded} color="#f87171" />
                         <Cell label="Prom. vs rival H2H"  value={p.h2hGoals?.homeAvg}      color="#67e8f9" />
-                      </Card>
-                      <Card title={`Goles — ${an}`} accent="rgba(236,72,153,.25)">
+                      </StatCard>
+                      <StatCard title={`Goles — ${an}`} accent="rgba(236,72,153,.25)">
                         <Cell label="Prom. anotados"      value={p.awayGoals?.avgScored}   color="#4ade80" />
                         <Cell label="Prom. recibidos"     value={p.awayGoals?.avgConceded} color="#f87171" />
                         <Cell label="Prom. vs rival H2H"  value={p.h2hGoals?.awayAvg}      color="#f472b6" />
-                      </Card>
-                      <Card title="Córners (últimos 5)" accent="rgba(34,197,94,.25)">
+                      </StatCard>
+                      <StatCard title="Córners (últimos 5)" accent="rgba(34,197,94,.25)">
                         <Cell label={`${hn} a favor`}    value={ccd.homeCornersAvg} />
                         <Cell label={`${hn} en contra`}  value={ccd.homeCornersAgainstAvg} />
                         <Cell label={`${an} a favor`}    value={ccd.awayCornersAvg} />
                         <Cell label={`${an} en contra`}  value={ccd.awayCornersAgainstAvg} />
                         <Cell label="Total combinado"    value={p.cornerAvg} color="#4ade80" />
-                      </Card>
-                      <Card title="Tarjetas (últimos 5)" accent="rgba(245,158,11,.25)">
+                      </StatCard>
+                      <StatCard title="Tarjetas (últimos 5)" accent="rgba(245,158,11,.25)">
                         <Cell label={`${hn} amarillas`} value={ccd.homeYellowsAvg} />
                         <Cell label={`${hn} rojas`}     value={ccd.homeRedsAvg} />
                         <Cell label={`${an} amarillas`} value={ccd.awayYellowsAvg} />
                         <Cell label={`${an} rojas`}     value={ccd.awayRedsAvg} />
                         <Cell label="Total amarillas prom." value={p.cardAvg} color="#fbbf24" />
-                      </Card>
+                      </StatCard>
                     </div>
-                  </div>
+                  </SubAccordion>
                 );
               })()}
 
@@ -2328,11 +2344,13 @@ function LiveStatsBar({ stats }) {
 // compacto sin animaciones pesadas — el acordeon es vista resumida.
 
 function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
+  const [open, setOpen] = useState(false);
+  const [catOpen, setCatOpen] = useState({});
+
   if (!p) return null;
   const o = odds || {};
   const hasOdd = (v) => isFinite(parseFloat(v)) && parseFloat(v) > 1;
 
-  // Helper: construye una linea de probs adaptativas (shots/fouls/sot)
   const adaptiveCat = (probObj, oddObj, namePrefix) => {
     if (!probObj || !oddObj) return [];
     return (probObj._lines || []).map(line => {
@@ -2343,98 +2361,97 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
     }).filter(Boolean);
   };
 
-  const cats = [
-    { title: 'Ambos marcan',  items: [
+  const allCats = [
+    { title: 'Ambos marcan', group: 'goles', items: [
       hasOdd(o.btts?.yes) && { label: 'Sí', value: p.btts },
       hasOdd(o.btts?.no)  && { label: 'No', value: p.bttsNo },
     ].filter(Boolean) },
-    { title: 'Ganador', items: [
+    { title: 'Ganador', group: 'goles', items: [
       hasOdd(o.matchWinner?.home) && { label: homeTeam, value: p.winner?.home },
       hasOdd(o.matchWinner?.draw) && { label: 'Empate',  value: p.winner?.draw },
       hasOdd(o.matchWinner?.away) && { label: awayTeam, value: p.winner?.away },
     ].filter(Boolean) },
-    { title: 'Goles totales', subtitle: p.overUnder?.expectedTotal != null ? `Esperado: ${p.overUnder.expectedTotal} goles` : null, items: [
+    { title: 'Goles totales', group: 'goles', subtitle: p.overUnder?.expectedTotal != null ? `Esperado: ${p.overUnder.expectedTotal} goles` : null, items: [
       hasOdd(o.overUnder?.Over_1_5) && { label: 'Más de 1.5', value: p.overUnder?.over15 },
       hasOdd(o.overUnder?.Over_2_5) && { label: 'Más de 2.5', value: p.overUnder?.over25 },
       hasOdd(o.overUnder?.Over_3_5) && { label: 'Más de 3.5', value: p.overUnder?.over35 },
     ].filter(Boolean) },
-    { title: 'Goles 1ª parte', subtitle: p.halfGoals?.firstHalf?.expected != null ? `Esperado: ${p.halfGoals.firstHalf.expected}` : null, items: [
+    { title: 'Goles 1ª parte', group: 'goles', subtitle: p.halfGoals?.firstHalf?.expected != null ? `Esperado: ${p.halfGoals.firstHalf.expected}` : null, items: [
       hasOdd(o.goals1H?.Over_0_5) && p.halfGoals?.firstHalf && { label: 'Más de 0.5', value: p.halfGoals.firstHalf.over05 },
       hasOdd(o.goals1H?.Over_1_5) && p.halfGoals?.firstHalf && { label: 'Más de 1.5', value: p.halfGoals.firstHalf.over15 },
       hasOdd(o.goals1H?.Over_2_5) && p.halfGoals?.firstHalf && { label: 'Más de 2.5', value: p.halfGoals.firstHalf.over25 },
     ].filter(Boolean) },
-    { title: 'Goles 2ª parte', subtitle: p.halfGoals?.secondHalf?.expected != null ? `Esperado: ${p.halfGoals.secondHalf.expected}` : null, items: [
+    { title: 'Goles 2ª parte', group: 'goles', subtitle: p.halfGoals?.secondHalf?.expected != null ? `Esperado: ${p.halfGoals.secondHalf.expected}` : null, items: [
       hasOdd(o.goals2H?.Over_0_5) && p.halfGoals?.secondHalf && { label: 'Más de 0.5', value: p.halfGoals.secondHalf.over05 },
       hasOdd(o.goals2H?.Over_1_5) && p.halfGoals?.secondHalf && { label: 'Más de 1.5', value: p.halfGoals.secondHalf.over15 },
       hasOdd(o.goals2H?.Over_2_5) && p.halfGoals?.secondHalf && { label: 'Más de 2.5', value: p.halfGoals.secondHalf.over25 },
     ].filter(Boolean) },
-    { title: 'Ganador 1ª parte', items: [
+    { title: 'Ganador 1ª parte', group: 'goles', items: [
       hasOdd(o.winner1H?.home) && p.halfWinner?.firstHalf && { label: homeTeam, value: p.halfWinner.firstHalf.home },
       hasOdd(o.winner1H?.draw) && p.halfWinner?.firstHalf && { label: 'Empate', value: p.halfWinner.firstHalf.draw },
       hasOdd(o.winner1H?.away) && p.halfWinner?.firstHalf && { label: awayTeam, value: p.halfWinner.firstHalf.away },
     ].filter(Boolean) },
-    { title: 'Ganador 2ª parte', items: [
+    { title: 'Ganador 2ª parte', group: 'goles', items: [
       hasOdd(o.winner2H?.home) && p.halfWinner?.secondHalf && { label: homeTeam, value: p.halfWinner.secondHalf.home },
       hasOdd(o.winner2H?.draw) && p.halfWinner?.secondHalf && { label: 'Empate', value: p.halfWinner.secondHalf.draw },
       hasOdd(o.winner2H?.away) && p.halfWinner?.secondHalf && { label: awayTeam, value: p.halfWinner.secondHalf.away },
     ].filter(Boolean) },
-    { title: `Goles — ${homeTeam}`, items: [
+    { title: `Goles — ${homeTeam}`, group: 'goles', items: [
       hasOdd(o.homeGoals?.Over_0_5) && p.perTeam?.home?.goals && { label: 'Más de 0.5', value: p.perTeam.home.goals.over05 },
       hasOdd(o.homeGoals?.Over_1_5) && p.perTeam?.home?.goals && { label: 'Más de 1.5', value: p.perTeam.home.goals.over15 },
       hasOdd(o.homeGoals?.Over_2_5) && p.perTeam?.home?.goals && { label: 'Más de 2.5', value: p.perTeam.home.goals.over25 },
     ].filter(Boolean) },
-    { title: `Goles — ${awayTeam}`, items: [
+    { title: `Goles — ${awayTeam}`, group: 'goles', items: [
       hasOdd(o.awayGoals?.Over_0_5) && p.perTeam?.away?.goals && { label: 'Más de 0.5', value: p.perTeam.away.goals.over05 },
       hasOdd(o.awayGoals?.Over_1_5) && p.perTeam?.away?.goals && { label: 'Más de 1.5', value: p.perTeam.away.goals.over15 },
       hasOdd(o.awayGoals?.Over_2_5) && p.perTeam?.away?.goals && { label: 'Más de 2.5', value: p.perTeam.away.goals.over25 },
     ].filter(Boolean) },
-    { title: 'Córners totales', items: [
+    { title: 'Córners totales', group: 'corners', items: [
       hasOdd(o.corners?.Over_8_5)  && { label: 'Más de 8.5',  value: p.corners?.over85 },
       hasOdd(o.corners?.Over_9_5)  && { label: 'Más de 9.5',  value: p.corners?.over95 },
       hasOdd(o.corners?.Over_10_5) && { label: 'Más de 10.5', value: p.corners?.over105 },
     ].filter(Boolean) },
-    { title: `Córners — ${homeTeam}`, items: [
+    { title: `Córners — ${homeTeam}`, group: 'corners', items: [
       hasOdd(o.homeCorners?.Over_3_5) && p.perTeam?.home?.corners && { label: 'Más de 3.5', value: p.perTeam.home.corners.over35 },
       hasOdd(o.homeCorners?.Over_4_5) && p.perTeam?.home?.corners && { label: 'Más de 4.5', value: p.perTeam.home.corners.over45 },
       hasOdd(o.homeCorners?.Over_5_5) && p.perTeam?.home?.corners && { label: 'Más de 5.5', value: p.perTeam.home.corners.over55 },
     ].filter(Boolean) },
-    { title: `Córners — ${awayTeam}`, items: [
+    { title: `Córners — ${awayTeam}`, group: 'corners', items: [
       hasOdd(o.awayCorners?.Over_3_5) && p.perTeam?.away?.corners && { label: 'Más de 3.5', value: p.perTeam.away.corners.over35 },
       hasOdd(o.awayCorners?.Over_4_5) && p.perTeam?.away?.corners && { label: 'Más de 4.5', value: p.perTeam.away.corners.over45 },
       hasOdd(o.awayCorners?.Over_5_5) && p.perTeam?.away?.corners && { label: 'Más de 5.5', value: p.perTeam.away.corners.over55 },
     ].filter(Boolean) },
-    { title: 'Tarjetas totales', items: [
+    { title: 'Tarjetas totales', group: 'tarjetas', items: [
       hasOdd(o.cards?.Over_2_5) && { label: 'Más de 2.5', value: p.cards?.over25 },
       hasOdd(o.cards?.Over_3_5) && { label: 'Más de 3.5', value: p.cards?.over35 },
       hasOdd(o.cards?.Over_4_5) && { label: 'Más de 4.5', value: p.cards?.over45 },
     ].filter(Boolean) },
-    { title: `Tarjetas — ${homeTeam}`, items: [
+    { title: `Tarjetas — ${homeTeam}`, group: 'tarjetas', items: [
       hasOdd(o.homeCards?.Over_0_5) && p.perTeam?.home?.cards && { label: 'Más de 0.5', value: p.perTeam.home.cards.over05 },
       hasOdd(o.homeCards?.Over_1_5) && p.perTeam?.home?.cards && { label: 'Más de 1.5', value: p.perTeam.home.cards.over15 },
       hasOdd(o.homeCards?.Over_2_5) && p.perTeam?.home?.cards && { label: 'Más de 2.5', value: p.perTeam.home.cards.over25 },
     ].filter(Boolean) },
-    { title: `Tarjetas — ${awayTeam}`, items: [
+    { title: `Tarjetas — ${awayTeam}`, group: 'tarjetas', items: [
       hasOdd(o.awayCards?.Over_0_5) && p.perTeam?.away?.cards && { label: 'Más de 0.5', value: p.perTeam.away.cards.over05 },
       hasOdd(o.awayCards?.Over_1_5) && p.perTeam?.away?.cards && { label: 'Más de 1.5', value: p.perTeam.away.cards.over15 },
       hasOdd(o.awayCards?.Over_2_5) && p.perTeam?.away?.cards && { label: 'Más de 2.5', value: p.perTeam.away.cards.over25 },
     ].filter(Boolean) },
-    // ── Mercados nuevos cache_version 9 ──
-    p.shots && { title: 'Tiros totales', subtitle: p.shots._mean ? `Esperado: ${p.shots._mean}` : null,
+    p.shots && { title: 'Tiros totales', group: 'tiros', subtitle: p.shots._mean ? `Esperado: ${p.shots._mean}` : null,
       items: adaptiveCat(p.shots, o.shots, 'Más de') },
-    p.sot && { title: 'Tiros a puerta', subtitle: p.sot._mean ? `Esperado: ${p.sot._mean}` : null,
+    p.sot && { title: 'Tiros a puerta', group: 'tiros', subtitle: p.sot._mean ? `Esperado: ${p.sot._mean}` : null,
       items: adaptiveCat(p.sot, o.sot, 'Más de') },
-    p.perTeamShots?.home && { title: `Tiros — ${homeTeam}`, items: adaptiveCat(p.perTeamShots.home, o.homeShots, 'Más de') },
-    p.perTeamShots?.away && { title: `Tiros — ${awayTeam}`, items: adaptiveCat(p.perTeamShots.away, o.awayShots, 'Más de') },
-    p.fouls && { title: 'Faltas totales', subtitle: p.fouls._mean ? `Esperado: ${p.fouls._mean}` : null,
+    p.perTeamShots?.home && { title: `Tiros — ${homeTeam}`, group: 'tiros', items: adaptiveCat(p.perTeamShots.home, o.homeShots, 'Más de') },
+    p.perTeamShots?.away && { title: `Tiros — ${awayTeam}`, group: 'tiros', items: adaptiveCat(p.perTeamShots.away, o.awayShots, 'Más de') },
+    p.fouls && { title: 'Faltas totales', group: 'faltas', subtitle: p.fouls._mean ? `Esperado: ${p.fouls._mean}` : null,
       items: adaptiveCat(p.fouls, o.fouls, 'Más de') },
-    p.perTeamFouls?.home && { title: `Faltas — ${homeTeam}`, items: adaptiveCat(p.perTeamFouls.home, o.homeFouls, 'Más de') },
-    p.perTeamFouls?.away && { title: `Faltas — ${awayTeam}`, items: adaptiveCat(p.perTeamFouls.away, o.awayFouls, 'Más de') },
-    p.mostCorners && { title: 'Más córners (full)', items: [
+    p.perTeamFouls?.home && { title: `Faltas — ${homeTeam}`, group: 'faltas', items: adaptiveCat(p.perTeamFouls.home, o.homeFouls, 'Más de') },
+    p.perTeamFouls?.away && { title: `Faltas — ${awayTeam}`, group: 'faltas', items: adaptiveCat(p.perTeamFouls.away, o.awayFouls, 'Más de') },
+    p.mostCorners && { title: 'Más córners (full)', group: 'corners', items: [
       hasOdd(o.corners1x2?.home) && p.mostCorners.fullMatch && { label: homeTeam, value: p.mostCorners.fullMatch.home },
       hasOdd(o.corners1x2?.draw) && p.mostCorners.fullMatch && { label: 'Empate', value: p.mostCorners.fullMatch.draw },
       hasOdd(o.corners1x2?.away) && p.mostCorners.fullMatch && { label: awayTeam, value: p.mostCorners.fullMatch.away },
     ].filter(Boolean) },
-    p.asianHandicap && o.asianHandicap && { title: 'Hándicap asiático',
+    p.asianHandicap && o.asianHandicap && { title: 'Hándicap asiático', group: 'handicap',
       items: Object.keys(o.asianHandicap).map(oddKey => {
         if (!hasOdd(o.asianHandicap[oddKey])) return null;
         const m = oddKey.match(/^(home|away)_([mp])(\d+(?:_\d+)?)$/);
@@ -2450,31 +2467,66 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
       }).filter(Boolean) },
   ].filter(Boolean).filter(c => c.items && c.items.length > 0);
 
-  if (cats.length === 0) return null;
+  const groupDefs = [
+    { key: 'goles',    label: '⚽ Goles',            color: '#4ade80' },
+    { key: 'corners',  label: '🚩 Córners',           color: '#fbbf24' },
+    { key: 'tarjetas', label: '🟨 Tarjetas',          color: '#f59e0b' },
+    { key: 'tiros',    label: '🎯 Tiros',             color: '#3b82f6' },
+    { key: 'faltas',   label: '⚠️ Faltas',            color: '#fb923c' },
+    { key: 'handicap', label: '🎰 Hándicap asiático', color: '#a78bfa' },
+  ].map(g => ({ ...g, cats: allCats.filter(c => c.group === g.key) }))
+   .filter(g => g.cats.length > 0);
+
+  if (groupDefs.length === 0) return null;
+
+  const ProbItem = ({ it }) => {
+    const v = Math.round(it.value ?? 0);
+    const color = v >= 80 ? '#4ade80' : v >= 65 ? '#fbbf24' : v >= 50 ? '#f97316' : '#94a3b8';
+    return (
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', gap: 8 }}>
+        <span style={{ fontSize: '.72rem', color: 'var(--t3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
+        <span style={{ fontSize: '.85rem', fontWeight: 700, color, fontFamily: 'JetBrains Mono, monospace', fontVariantNumeric: 'tabular-nums' }}>{v}%</span>
+      </div>
+    );
+  };
 
   return (
-    <div style={{ marginTop: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#2dd4bf', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 10 }}>
-        <span>📊</span> % Probabilidades calculadas
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-        {cats.map((cat, ci) => (
-          <div key={ci} style={{ background: 'var(--bg-2)', border: '1px solid rgba(45,212,191,0.2)', borderRadius: 10, padding: '10px 12px', flex: '1 1 220px', minWidth: 0 }}>
-            <div style={{ fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--t2)', marginBottom: cat.subtitle ? 2 : 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.title}</div>
-            {cat.subtitle && <div style={{ fontSize: '.65rem', color: 'var(--t3)', marginBottom: 8 }}>{cat.subtitle}</div>}
-            {cat.items.map((it, i) => {
-              const v = Math.round(it.value ?? 0);
-              const color = v >= 80 ? '#4ade80' : v >= 65 ? '#fbbf24' : v >= 50 ? '#f97316' : '#94a3b8';
-              return (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', gap: 8 }}>
-                  <span style={{ fontSize: '.72rem', color: 'var(--t3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
-                  <span style={{ fontSize: '.85rem', fontWeight: 700, color, fontFamily: 'JetBrains Mono, monospace', fontVariantNumeric: 'tabular-nums' }}>{v}%</span>
+    <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0, gap: 8, textAlign: 'left' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#2dd4bf', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+          <span>📊</span> % Probabilidades calculadas
+        </div>
+        <span style={{ color: '#2dd4bf', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>&#9662;</span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          {groupDefs.map(g => (
+            <div key={g.key} style={{ marginBottom: 8, background: 'var(--bg-2)', border: '1px solid rgba(45,212,191,0.12)', borderRadius: 10, overflow: 'hidden' }}>
+              <button
+                onClick={(e) => { e.stopPropagation(); setCatOpen(prev => ({ ...prev, [g.key]: !prev[g.key] })); }}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left' }}
+              >
+                <span style={{ fontSize: '.75rem', fontWeight: 700, color: g.color }}>{g.label}</span>
+                <span style={{ color: g.color, fontSize: '.8rem', display: 'inline-block', transform: catOpen[g.key] ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>&#9662;</span>
+              </button>
+              {catOpen[g.key] && (
+                <div style={{ padding: '0 12px 12px', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {g.cats.map((cat, ci) => (
+                    <div key={ci} style={{ background: 'var(--bg-1)', border: '1px solid rgba(45,212,191,0.08)', borderRadius: 8, padding: '8px 10px', flex: '1 1 180px', minWidth: 0 }}>
+                      <div style={{ fontSize: '.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--t2)', marginBottom: cat.subtitle ? 2 : 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.title}</div>
+                      {cat.subtitle && <div style={{ fontSize: '.65rem', color: 'var(--t3)', marginBottom: 6 }}>{cat.subtitle}</div>}
+                      {cat.items.map((it, i) => <ProbItem key={i} it={it} />)}
+                    </div>
+                  ))}
                 </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2486,63 +2538,88 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
 // se abre/cierra muchas veces durante la sesion, animar todo seria pesado.
 
 function AccordionPlayersBlock({ highlights }) {
+  const [open, setOpen] = useState(false);
+  const [grpOpen, setGrpOpen] = useState({});
+
   if (!highlights) return null;
   const { scorers, shooters, shotsTotalists, assisters, foulers, bookers } = highlights;
   const groups = [
-    { key: 'scorers',         data: scorers,         label: 'Goleadores en racha',                  hint: '(gol en 5+ de últimos 10)',                                emoji: '⚽',  dotColor: '#22c55e', metric: 'goals',       unit: 'goles' },
-    { key: 'shooters',        data: shooters,        label: 'Tiros a puerta',                       hint: '(remate al arco — 5+ de últimos 10)',                       emoji: '🎯',  dotColor: '#3b82f6', metric: 'shotsOnGoal', unit: 'a puerta' },
-    { key: 'shotsTotalists',  data: shotsTotalists,  label: 'Tiros totales',                        hint: '(a puerta + fuera + bloqueados, ≥2 en 5+ de últimos 10)',  emoji: '💥', dotColor: '#60a5fa', metric: 'shotsTotal',  unit: 'tiros totales' },
-    { key: 'assisters',       data: assisters,       label: 'Asistentes',                           hint: '(asistencia en 5+ de últimos 10)',                          emoji: '🅰️',  dotColor: '#a78bfa', metric: 'assists',     unit: 'asistencias' },
-    { key: 'foulers',         data: foulers,         label: 'Faltas frecuentes',                    hint: '(falta cometida en 5+ de últimos 10)',                      emoji: '⚠️',  dotColor: '#f59e0b', metric: 'fouls',       unit: 'faltas' },
-    { key: 'bookers',         data: bookers,         label: 'Tarjetas frecuentes',                  hint: '(amarilla en 5+ de últimos 10)',                            emoji: '🟨',  dotColor: '#facc15', metric: 'yellows',     unit: 'amarillas' },
+    { key: 'scorers',        data: scorers,        label: 'Goleadores en racha',  hint: '(gol en 5+ de últimos 10)',                               emoji: '⚽',  dotColor: '#22c55e', metric: 'goals',       unit: 'goles' },
+    { key: 'shooters',       data: shooters,       label: 'Tiros a puerta',        hint: '(remate al arco — 5+ de últimos 10)',                      emoji: '🎯',  dotColor: '#3b82f6', metric: 'shotsOnGoal', unit: 'a puerta' },
+    { key: 'shotsTotalists', data: shotsTotalists, label: 'Tiros totales',         hint: '(≥2 en 5+ de últimos 10)',                                 emoji: '💥', dotColor: '#60a5fa', metric: 'shotsTotal',  unit: 'tiros totales' },
+    { key: 'assisters',      data: assisters,      label: 'Asistentes',            hint: '(asistencia en 5+ de últimos 10)',                          emoji: '🅰️',  dotColor: '#a78bfa', metric: 'assists',     unit: 'asistencias' },
+    { key: 'foulers',        data: foulers,        label: 'Faltas frecuentes',     hint: '(falta cometida en 5+ de últimos 10)',                      emoji: '⚠️',  dotColor: '#f59e0b', metric: 'fouls',       unit: 'faltas' },
+    { key: 'bookers',        data: bookers,        label: 'Tarjetas frecuentes',   hint: '(amarilla en 5+ de últimos 10)',                            emoji: '🟨',  dotColor: '#facc15', metric: 'yellows',     unit: 'amarillas' },
   ].filter(g => Array.isArray(g.data) && g.data.length > 0);
 
   if (groups.length === 0) return null;
 
-  return (
-    <div style={{ marginTop: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 10 }}>
-        <span>⭐</span> Jugadores destacados
-      </div>
-      {groups.map(g => (
-        <div key={g.key} style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: '.75rem', color: 'var(--t2)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span>{g.emoji}</span><b>{g.label}</b>
-            <span style={{ fontSize: '.65rem', color: 'var(--t3)' }}>{g.hint}</span>
-          </div>
-          {g.data.slice(0, 5).map((pl, i) => {
-            const hist = pl[g.metric] || [];
-            const total = g.metric === 'goals' ? pl.totalGoals
-                        : g.metric === 'shotsOnGoal' ? pl.totalShotsOn
-                        : g.metric === 'shotsTotal' ? pl.totalShotsAll
-                        : g.metric === 'assists' ? pl.totalAssists
-                        : g.metric === 'fouls' ? pl.totalFouls
-                        : pl.totalYellows;
-            return (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', background: 'var(--bg-2)', border: '1px solid var(--brd)', borderRadius: 8, marginBottom: 4 }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: '.82rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t1)' }}>{pl.name}</div>
-                  <div style={{ fontSize: '.65rem', color: 'var(--t3)' }}>{pl.teamName}</div>
-                </div>
-                <div style={{ display: 'flex', gap: 2 }}>
-                  {hist.slice(0, 10).map((n, j) => (
-                    <span key={j} style={{
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      width: 18, height: 18, borderRadius: 4,
-                      fontSize: '.62rem', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace',
-                      background: n > 0 ? g.dotColor : 'rgba(255,255,255,0.06)',
-                      color: n > 0 ? '#0f172a' : 'var(--t3)',
-                    }}>{n > 0 ? n : '—'}</span>
-                  ))}
-                </div>
-                <div style={{ fontSize: '.7rem', color: g.dotColor, fontWeight: 700, whiteSpace: 'nowrap', minWidth: 60, textAlign: 'right' }}>
-                  {total} {g.unit}
-                </div>
-              </div>
-            );
-          })}
+  const PlayerRow = ({ pl, g }) => {
+    const hist = pl[g.metric] || [];
+    const total = g.metric === 'goals' ? pl.totalGoals
+                : g.metric === 'shotsOnGoal' ? pl.totalShotsOn
+                : g.metric === 'shotsTotal' ? pl.totalShotsAll
+                : g.metric === 'assists' ? pl.totalAssists
+                : g.metric === 'fouls' ? pl.totalFouls
+                : pl.totalYellows;
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', background: 'var(--bg-1)', border: '1px solid var(--brd)', borderRadius: 8, marginBottom: 4 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: '.82rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t1)' }}>{pl.name}</div>
+          <div style={{ fontSize: '.65rem', color: 'var(--t3)' }}>{pl.teamName}</div>
         </div>
-      ))}
+        <div style={{ display: 'flex', gap: 2 }}>
+          {hist.slice(0, 10).map((n, j) => (
+            <span key={j} style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 18, height: 18, borderRadius: 4,
+              fontSize: '.62rem', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace',
+              background: n > 0 ? g.dotColor : 'rgba(255,255,255,0.06)',
+              color: n > 0 ? '#0f172a' : 'var(--t3)',
+            }}>{n > 0 ? n : '—'}</span>
+          ))}
+        </div>
+        <div style={{ fontSize: '.7rem', color: g.dotColor, fontWeight: 700, whiteSpace: 'nowrap', minWidth: 60, textAlign: 'right' }}>
+          {total} {g.unit}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0, gap: 8, textAlign: 'left' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+          <span>⭐</span> Jugadores destacados
+        </div>
+        <span style={{ color: '#fbbf24', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>&#9662;</span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          {groups.map(g => (
+            <div key={g.key} style={{ marginBottom: 8, background: 'var(--bg-2)', border: '1px solid rgba(251,191,36,0.12)', borderRadius: 10, overflow: 'hidden' }}>
+              <button
+                onClick={(e) => { e.stopPropagation(); setGrpOpen(prev => ({ ...prev, [g.key]: !prev[g.key] })); }}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left' }}
+              >
+                <span style={{ fontSize: '.75rem', fontWeight: 700, color: g.dotColor }}>
+                  {g.emoji} {g.label}
+                  <span style={{ fontSize: '.65rem', color: 'var(--t3)', fontWeight: 400, marginLeft: 6 }}>{g.hint}</span>
+                </span>
+                <span style={{ color: g.dotColor, fontSize: '.8rem', display: 'inline-block', transform: grpOpen[g.key] ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>&#9662;</span>
+              </button>
+              {grpOpen[g.key] && (
+                <div style={{ padding: '0 12px 12px' }}>
+                  {g.data.slice(0, 5).map((pl, i) => <PlayerRow key={i} pl={pl} g={g} />)}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
