@@ -1128,6 +1128,7 @@ export default function Dashboard() {
   }
 
   return (
+    <>
     <motion.div
       className="app"
       initial={{ opacity: 0 }}
@@ -1670,6 +1671,7 @@ export default function Dashboard() {
         </div>
       </div>
     )}
+    </>
   );
 }
 
