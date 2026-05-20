@@ -75,6 +75,8 @@ export async function POST(request) {
                 return { r: en.result, s: en.score, gF: en.goalsFor, gA: en.goalsAgainst, op: en.opponentName, oL: en.opponentLogo, c: en.corners, y: en.yellowCards, rd: en.redCards };
               }),
               playerHighlights:       e.playerHighlights || null,
+              referee:                e.referee || null,
+              refereeStats:           e.refereeStats || null,
             };
           }
         }

@@ -1920,14 +1920,14 @@ function SubAccordion({ title, color, children }) {
   const [open, setOpen] = useState(false);
   return (
     <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
-      <button
-        onMouseDown={(e) => e.preventDefault()}
+      <div
+        role="button"
         onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0, gap: 8, textAlign: 'left' }}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
       >
         <span style={{ fontSize: '.75rem', fontWeight: 700, color: color || 'var(--t2)', textTransform: 'uppercase', letterSpacing: '.05em' }}>{title}</span>
         <span style={{ color: color || 'var(--t2)', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
-      </button>
+      </div>
       <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
         <div style={{ overflow: 'hidden' }}>
           <div style={{ paddingTop: 10 }}>{children}</div>
@@ -2539,29 +2539,29 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
 
   return (
     <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
-      <button
-        onMouseDown={(e) => e.preventDefault()}
+      <div
+        role="button"
         onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0, gap: 8, textAlign: 'left' }}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#2dd4bf', textTransform: 'uppercase', letterSpacing: '.05em' }}>
           <span>📊</span> % Probabilidades calculadas
         </div>
         <span style={{ color: '#2dd4bf', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
-      </button>
+      </div>
       <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
         <div style={{ overflow: 'hidden' }}>
           <div style={{ paddingTop: 10 }}>
             {groupDefs.map(g => (
               <div key={g.key} style={{ marginBottom: 8, background: 'var(--bg-2)', border: '1px solid rgba(45,212,191,0.12)', borderRadius: 10, overflow: 'hidden' }}>
-                <button
-                  onMouseDown={(e) => e.preventDefault()}
+                <div
+                  role="button"
                   onClick={(e) => { e.stopPropagation(); setCatOpen(prev => ({ ...prev, [g.key]: !prev[g.key] })); }}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left' }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
                 >
                   <span style={{ fontSize: '.75rem', fontWeight: 700, color: g.color }}>{g.label}</span>
                   <span style={{ color: g.color, fontSize: '.8rem', display: 'inline-block', transform: catOpen[g.key] ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
-                </button>
+                </div>
                 <div style={{ display: 'grid', gridTemplateRows: catOpen[g.key] ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
                   <div style={{ overflow: 'hidden' }}>
                     <div style={{ padding: '0 12px 12px', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -2641,32 +2641,32 @@ function AccordionPlayersBlock({ highlights }) {
 
   return (
     <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
-      <button
-        onMouseDown={(e) => e.preventDefault()}
+      <div
+        role="button"
         onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0, gap: 8, textAlign: 'left' }}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '.05em' }}>
           <span>⭐</span> Jugadores destacados
         </div>
         <span style={{ color: '#fbbf24', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
-      </button>
+      </div>
       <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
         <div style={{ overflow: 'hidden' }}>
           <div style={{ paddingTop: 10 }}>
             {groups.map(g => (
               <div key={g.key} style={{ marginBottom: 8, background: 'var(--bg-2)', border: '1px solid rgba(251,191,36,0.12)', borderRadius: 10, overflow: 'hidden' }}>
-                <button
-                  onMouseDown={(e) => e.preventDefault()}
+                <div
+                  role="button"
                   onClick={(e) => { e.stopPropagation(); setGrpOpen(prev => ({ ...prev, [g.key]: !prev[g.key] })); }}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left' }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
                 >
                   <span style={{ fontSize: '.75rem', fontWeight: 700, color: g.dotColor }}>
                     {g.emoji} {g.label}
                     <span style={{ fontSize: '.65rem', color: 'var(--t3)', fontWeight: 400, marginLeft: 6 }}>{g.hint}</span>
                   </span>
                   <span style={{ color: g.dotColor, fontSize: '.8rem', display: 'inline-block', transform: grpOpen[g.key] ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
-                </button>
+                </div>
                 <div style={{ display: 'grid', gridTemplateRows: grpOpen[g.key] ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
                   <div style={{ overflow: 'hidden' }}>
                     <div style={{ padding: '0 12px 12px' }}>

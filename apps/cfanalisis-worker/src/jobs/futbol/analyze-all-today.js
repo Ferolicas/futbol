@@ -44,6 +44,8 @@ function buildSummary(a) {
     homeLastFive: compactLastFive(a.homeLastFive),
     awayLastFive: compactLastFive(a.awayLastFive),
     playerHighlights: a.playerHighlights || null,
+    referee: a.referee || null,
+    refereeStats: a.refereeStats || null,
   };
 }
 
