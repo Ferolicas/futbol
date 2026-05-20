@@ -1654,22 +1654,7 @@ export default function Dashboard() {
 
     {/* MODAL: Análisis completo */}
     {analysisModalId && (
-      <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.8)', backdropFilter: 'blur(4px)' }} onClick={() => setAnalysisModalId(null)} />
-        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', width: '100%', height: '100%', maxWidth: 860, margin: '0 auto' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '10px 12px', background: 'var(--bg-1)', borderBottom: '1px solid var(--brd)', flexShrink: 0 }}>
-            <button
-              onClick={() => setAnalysisModalId(null)}
-              style={{ background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.15)', borderRadius: 8, padding: '5px 14px', color: '#fff', fontSize: '1rem', cursor: 'pointer', fontWeight: 700, lineHeight: 1 }}
-            >&#10005;</button>
-          </div>
-          <iframe
-            src={`/dashboard/analisis/${analysisModalId}`}
-            style={{ flex: 1, border: 'none', width: '100%' }}
-            title="Análisis completo"
-          />
-        </div>
-      </div>
+      <AnalysisModal id={analysisModalId} onClose={() => setAnalysisModalId(null)} />
     )}
     </>
   );
@@ -1888,6 +1873,45 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
   );
 }
 
+/* ======================== ANALYSIS MODAL ======================== */
+
+function AnalysisModal({ id, onClose }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.8)', backdropFilter: 'blur(4px)' }} onClick={onClose} />
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', width: '100%', height: '100%', maxWidth: 860, margin: '0 auto' }}>
+        {/* Barra superior con X */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '10px 12px', background: 'var(--bg-1)', borderBottom: '1px solid var(--brd)', flexShrink: 0 }}>
+          <button
+            onClick={onClose}
+            style={{ background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.15)', borderRadius: 8, padding: '5px 14px', color: '#fff', fontSize: '1rem', cursor: 'pointer', fontWeight: 700, lineHeight: 1 }}
+          >&#10005;</button>
+        </div>
+        {/* Spinner mientras carga el iframe */}
+        {!loaded && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, background: 'var(--bg-1)' }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: '50%',
+              border: '3px solid rgba(255,255,255,.1)',
+              borderTopColor: '#2dd4bf',
+              animation: 'spin 0.8s linear infinite',
+            }} />
+            <span style={{ fontSize: '.8rem', color: 'var(--t3)' }}>Cargando análisis…</span>
+          </div>
+        )}
+        <iframe
+          key={id}
+          src={`/dashboard/analisis/${id}`}
+          onLoad={() => setLoaded(true)}
+          style={{ flex: 1, border: 'none', width: '100%', opacity: loaded ? 1 : 0, transition: 'opacity .4s ease' }}
+          title="Análisis completo"
+        />
+      </div>
+    </div>
+  );
+}
+
 /* ======================== ACCORDION CARD ======================== */
 
 function SubAccordion({ title, color, children }) {
@@ -1899,9 +1923,13 @@ function SubAccordion({ title, color, children }) {
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0, gap: 8, textAlign: 'left' }}
       >
         <span style={{ fontSize: '.75rem', fontWeight: 700, color: color || 'var(--t2)', textTransform: 'uppercase', letterSpacing: '.05em' }}>{title}</span>
-        <span style={{ color: color || 'var(--t2)', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>&#9662;</span>
+        <span style={{ color: color || 'var(--t2)', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
       </button>
-      {open && <div style={{ marginTop: 10 }}>{children}</div>}
+      <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
+        <div style={{ overflow: 'hidden' }}>
+          <div style={{ paddingTop: 10 }}>{children}</div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2501,34 +2529,38 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#2dd4bf', textTransform: 'uppercase', letterSpacing: '.05em' }}>
           <span>📊</span> % Probabilidades calculadas
         </div>
-        <span style={{ color: '#2dd4bf', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>&#9662;</span>
+        <span style={{ color: '#2dd4bf', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
       </button>
-      {open && (
-        <div style={{ marginTop: 10 }}>
-          {groupDefs.map(g => (
-            <div key={g.key} style={{ marginBottom: 8, background: 'var(--bg-2)', border: '1px solid rgba(45,212,191,0.12)', borderRadius: 10, overflow: 'hidden' }}>
-              <button
-                onClick={(e) => { e.stopPropagation(); setCatOpen(prev => ({ ...prev, [g.key]: !prev[g.key] })); }}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left' }}
-              >
-                <span style={{ fontSize: '.75rem', fontWeight: 700, color: g.color }}>{g.label}</span>
-                <span style={{ color: g.color, fontSize: '.8rem', display: 'inline-block', transform: catOpen[g.key] ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>&#9662;</span>
-              </button>
-              {catOpen[g.key] && (
-                <div style={{ padding: '0 12px 12px', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {g.cats.map((cat, ci) => (
-                    <div key={ci} style={{ background: 'var(--bg-1)', border: '1px solid rgba(45,212,191,0.08)', borderRadius: 8, padding: '8px 10px', flex: '1 1 180px', minWidth: 0 }}>
-                      <div style={{ fontSize: '.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--t2)', marginBottom: cat.subtitle ? 2 : 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.title}</div>
-                      {cat.subtitle && <div style={{ fontSize: '.65rem', color: 'var(--t3)', marginBottom: 6 }}>{cat.subtitle}</div>}
-                      {cat.items.map((it, i) => <ProbItem key={i} it={it} />)}
+      <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
+        <div style={{ overflow: 'hidden' }}>
+          <div style={{ paddingTop: 10 }}>
+            {groupDefs.map(g => (
+              <div key={g.key} style={{ marginBottom: 8, background: 'var(--bg-2)', border: '1px solid rgba(45,212,191,0.12)', borderRadius: 10, overflow: 'hidden' }}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setCatOpen(prev => ({ ...prev, [g.key]: !prev[g.key] })); }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left' }}
+                >
+                  <span style={{ fontSize: '.75rem', fontWeight: 700, color: g.color }}>{g.label}</span>
+                  <span style={{ color: g.color, fontSize: '.8rem', display: 'inline-block', transform: catOpen[g.key] ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
+                </button>
+                <div style={{ display: 'grid', gridTemplateRows: catOpen[g.key] ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
+                  <div style={{ overflow: 'hidden' }}>
+                    <div style={{ padding: '0 12px 12px', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      {g.cats.map((cat, ci) => (
+                        <div key={ci} style={{ background: 'var(--bg-1)', border: '1px solid rgba(45,212,191,0.08)', borderRadius: 8, padding: '8px 10px', flex: '1 1 180px', minWidth: 0 }}>
+                          <div style={{ fontSize: '.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--t2)', marginBottom: cat.subtitle ? 2 : 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.title}</div>
+                          {cat.subtitle && <div style={{ fontSize: '.65rem', color: 'var(--t3)', marginBottom: 6 }}>{cat.subtitle}</div>}
+                          {cat.items.map((it, i) => <ProbItem key={i} it={it} />)}
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
                 </div>
-              )}
-            </div>
-          ))}
+              </div>
+            ))}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -2597,31 +2629,35 @@ function AccordionPlayersBlock({ highlights }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '.05em' }}>
           <span>⭐</span> Jugadores destacados
         </div>
-        <span style={{ color: '#fbbf24', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>&#9662;</span>
+        <span style={{ color: '#fbbf24', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
       </button>
-      {open && (
-        <div style={{ marginTop: 10 }}>
-          {groups.map(g => (
-            <div key={g.key} style={{ marginBottom: 8, background: 'var(--bg-2)', border: '1px solid rgba(251,191,36,0.12)', borderRadius: 10, overflow: 'hidden' }}>
-              <button
-                onClick={(e) => { e.stopPropagation(); setGrpOpen(prev => ({ ...prev, [g.key]: !prev[g.key] })); }}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left' }}
-              >
-                <span style={{ fontSize: '.75rem', fontWeight: 700, color: g.dotColor }}>
-                  {g.emoji} {g.label}
-                  <span style={{ fontSize: '.65rem', color: 'var(--t3)', fontWeight: 400, marginLeft: 6 }}>{g.hint}</span>
-                </span>
-                <span style={{ color: g.dotColor, fontSize: '.8rem', display: 'inline-block', transform: grpOpen[g.key] ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>&#9662;</span>
-              </button>
-              {grpOpen[g.key] && (
-                <div style={{ padding: '0 12px 12px' }}>
-                  {g.data.slice(0, 5).map((pl, i) => <PlayerRow key={i} pl={pl} g={g} />)}
+      <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
+        <div style={{ overflow: 'hidden' }}>
+          <div style={{ paddingTop: 10 }}>
+            {groups.map(g => (
+              <div key={g.key} style={{ marginBottom: 8, background: 'var(--bg-2)', border: '1px solid rgba(251,191,36,0.12)', borderRadius: 10, overflow: 'hidden' }}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setGrpOpen(prev => ({ ...prev, [g.key]: !prev[g.key] })); }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left' }}
+                >
+                  <span style={{ fontSize: '.75rem', fontWeight: 700, color: g.dotColor }}>
+                    {g.emoji} {g.label}
+                    <span style={{ fontSize: '.65rem', color: 'var(--t3)', fontWeight: 400, marginLeft: 6 }}>{g.hint}</span>
+                  </span>
+                  <span style={{ color: g.dotColor, fontSize: '.8rem', display: 'inline-block', transform: grpOpen[g.key] ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
+                </button>
+                <div style={{ display: 'grid', gridTemplateRows: grpOpen[g.key] ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
+                  <div style={{ overflow: 'hidden' }}>
+                    <div style={{ padding: '0 12px 12px' }}>
+                      {g.data.slice(0, 5).map((pl, i) => <PlayerRow key={i} pl={pl} g={g} />)}
+                    </div>
+                  </div>
                 </div>
-              )}
-            </div>
-          ))}
+              </div>
+            ))}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
