@@ -4,6 +4,7 @@ import { logger } from './logger.js';
 import { notifyError } from './notifier.js';
 import { buildServer } from './server.js';
 import { startWorkers } from './workers.js';
+import { registerSchedulers } from './schedulers.js';
 import { bullConnection } from './redis.js';
 import { queues } from './queues.js';
 
@@ -17,6 +18,9 @@ async function main() {
 
   // Start all BullMQ workers
   const workers = startWorkers();
+
+  // Register native cron schedulers (replaces cron-job.org triggering)
+  await registerSchedulers();
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
