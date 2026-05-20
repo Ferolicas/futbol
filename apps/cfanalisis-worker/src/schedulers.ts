@@ -31,7 +31,11 @@ const SCHEDULES: Sched[] = [
   { queue: 'baseball-analyze',  id: 'baseball-analyze-daily',  pattern: '30 1 * * *', tz: TZ }, // 1:30
   { queue: 'baseball-finalize', id: 'baseball-finalize-daily', pattern: '0 5 * * *',  tz: TZ }, // 5:00
   { queue: 'baseball-cleanup',  id: 'baseball-cleanup-weekly', pattern: '0 3 * * 0',  tz: TZ }, // dom 3:00
-  // baseball-live: pausado a propósito (último fallo 2026-05-07). NO se registra.
+  // ── Baseball — live (cada 5 min) ──
+  // El handler hace smart-skip: solo gasta API dentro de la ventana de juego,
+  // con presupuesto de 30 llamadas/día y throttle dinámico 4-30 min. Fuera de
+  // partidos en vivo no consume nada.
+  { queue: 'baseball-live', id: 'baseball-live-5m', pattern: '*/5 * * * *' },
 ];
 
 export async function registerSchedulers(): Promise<void> {

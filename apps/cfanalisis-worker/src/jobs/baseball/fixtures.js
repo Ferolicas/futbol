@@ -8,11 +8,10 @@
 import { getBaseballFixturesByDate, getBaseballQuota, supabaseAdmin } from '../../shared.js';
 
 export async function runBaseballFixtures(payload = {}) {
-  const now = new Date();
-  const utcHour = now.getUTCHours();
-  const todayUTC = now.toISOString().split('T')[0];
-  const tomorrowUTC = new Date(now.getTime() + 86400000).toISOString().split('T')[0];
-  const targetDate = payload.date || (utcHour >= 22 ? tomorrowUTC : todayUTC);
+  // Fecha en hora Colombia (igual que baseball-analyze y futbol). A la hora
+  // del cron (~18h Colombia) "hoy" = los partidos MLB de esta noche, y el
+  // horario queda bajo la misma fecha que luego consulta baseball-live.
+  const targetDate = payload.date || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
 
   const result = await getBaseballFixturesByDate(targetDate, { forceApi: true });
   const fixtures = result.fixtures || [];

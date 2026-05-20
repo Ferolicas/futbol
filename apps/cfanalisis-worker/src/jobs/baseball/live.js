@@ -16,12 +16,14 @@ const MIN_INTERVAL_MIN = 4;
 const MAX_INTERVAL_MIN = 30;
 const PRE_KICKOFF_BUFFER_MIN = 5;
 
-const todayISO = () => new Date().toISOString().split('T')[0];
+// Fecha en hora Colombia — debe coincidir con la fecha bajo la que
+// baseball-fixtures guarda el horario, si no live nunca lo encuentra.
+const bogotaDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
 const callsKey = (d) => `baseball:live:calls:${d}`;
 const lastCallKey = 'baseball:live:last_call_at';
 
-export async function runBaseballLive(_payload = {}) {
-  const today = todayISO();
+export async function runBaseballLive(payload = {}) {
+  const today = payload.date || bogotaDate();
   const now = Date.now();
 
   const { data: scheduleRow } = await supabaseAdmin
