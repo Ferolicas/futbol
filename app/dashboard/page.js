@@ -1921,6 +1921,7 @@ function SubAccordion({ title, color, children }) {
   return (
     <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
       <button
+        onMouseDown={(e) => e.preventDefault()}
         onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0, gap: 8, textAlign: 'left' }}
       >
@@ -2539,6 +2540,7 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
   return (
     <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
       <button
+        onMouseDown={(e) => e.preventDefault()}
         onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0, gap: 8, textAlign: 'left' }}
       >
@@ -2553,6 +2555,7 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
             {groupDefs.map(g => (
               <div key={g.key} style={{ marginBottom: 8, background: 'var(--bg-2)', border: '1px solid rgba(45,212,191,0.12)', borderRadius: 10, overflow: 'hidden' }}>
                 <button
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={(e) => { e.stopPropagation(); setCatOpen(prev => ({ ...prev, [g.key]: !prev[g.key] })); }}
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left' }}
                 >
@@ -2639,6 +2642,7 @@ function AccordionPlayersBlock({ highlights }) {
   return (
     <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
       <button
+        onMouseDown={(e) => e.preventDefault()}
         onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0, gap: 8, textAlign: 'left' }}
       >
@@ -2653,6 +2657,7 @@ function AccordionPlayersBlock({ highlights }) {
             {groups.map(g => (
               <div key={g.key} style={{ marginBottom: 8, background: 'var(--bg-2)', border: '1px solid rgba(251,191,36,0.12)', borderRadius: 10, overflow: 'hidden' }}>
                 <button
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={(e) => { e.stopPropagation(); setGrpOpen(prev => ({ ...prev, [g.key]: !prev[g.key] })); }}
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left' }}
                 >
