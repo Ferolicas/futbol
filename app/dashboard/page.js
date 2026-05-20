@@ -1081,7 +1081,9 @@ export default function Dashboard() {
   }, [selectedMarkets]);
 
   const totalSel = Object.values(selectedMarkets).reduce((a, m) => a + Object.keys(m).length, 0);
-  const analyzedFixtures = fixtures.filter(f => analyzed.includes(f.fixture.id));
+  const analyzedFixtures = fixtures
+    .filter(f => analyzed.includes(f.fixture.id))
+    .sort((a, b) => new Date(a.fixture.date) - new Date(b.fixture.date));
 
   if (splash) {
     return (
@@ -2025,6 +2027,20 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
               );
             })()}
 
+            {/* Árbitro */}
+            {data?.referee && (
+              <div style={{ order: 4, width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, fontSize: '.7rem', color: 'rgba(255,255,255,.45)', marginTop: -4 }}>
+                <span>⚖️</span>
+                <span style={{ fontWeight: 500 }}>{data.referee}</span>
+                {data.refereeStats?.avgYellows != null && (
+                  <span>🟨{Number(data.refereeStats.avgYellows).toFixed(1)}</span>
+                )}
+                {data.refereeStats?.avgReds != null && (
+                  <span>🟥{Number(data.refereeStats.avgReds).toFixed(2)}</span>
+                )}
+              </div>
+            )}
+
             {/* Visitante */}
             <div style={{ order: 2, flex: 1, minWidth: 0, textAlign: 'right' }}>
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -2284,7 +2300,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                   detalle completo (last5 partidos, goal-timing, etc.) sigue
                   disponible en "Ver analisis completo". */}
 
-              <button className="btn-full" onClick={(e) => { e.stopPropagation(); onViewFull(); }}>
+              <button className="btn-full" style={{ marginTop: 20 }} onClick={(e) => { e.stopPropagation(); onViewFull(); }}>
                 Ver analisis completo &#8594;
               </button>
             </>

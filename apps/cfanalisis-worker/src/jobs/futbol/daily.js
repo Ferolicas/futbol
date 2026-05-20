@@ -11,7 +11,7 @@ import { getFixtures, redisGet, redisSet } from '../../shared.js';
 import { queues } from '../../queues.js';
 
 export async function runDaily(payload = {}) {
-  const today = payload.date || new Date().toISOString().split('T')[0];
+  const today = payload.date || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
   const force = payload.force === true;
 
   if (!force) {

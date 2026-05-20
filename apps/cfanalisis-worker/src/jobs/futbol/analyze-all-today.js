@@ -49,7 +49,7 @@ function buildSummary(a) {
 
 /** @param {any} payload @param {any} [job] */
 export async function runAnalyzeAllToday(payload = {}, job = null) {
-  const date = payload.date || new Date().toISOString().split('T')[0];
+  const date = payload.date || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
   const forceAll = payload.force === true;
   const startTime = Date.now();
   const reportProgress = async (extra) => {
