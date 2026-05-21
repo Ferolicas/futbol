@@ -75,7 +75,15 @@ export async function runBaseballLive(payload = {}) {
     };
   }
 
-  const liveGames = await getBaseballLiveGames();
+  // getBaseballLiveGames usa apiCall, que lanza ante cuota agotada (429) o
+  // error de API. Lo tratamos como skip — igual que los demás smart-skips de
+  // este handler — para no disparar alerta de Telegram cada 5 min.
+  let liveGames;
+  try {
+    liveGames = await getBaseballLiveGames();
+  } catch (e) {
+    return { ok: true, skipped: true, reason: `API sin datos (${e.message})` };
+  }
 
   const upsertResults = await mapPool(liveGames, 8, async (g) => {
     const fid = g.id;

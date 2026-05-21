@@ -210,9 +210,11 @@ export async function runLive(_payload = {}) {
   const allLive = await apiFetch('/fixtures?live=all');
   let apiCalls = 1;
   if (!allLive) {
-    // Throw so the failure is visible in BullMQ metrics. attempts:1 in
-    // queues.ts means we don't retry — the next minute's cron will fire fresh.
-    throw new Error('API fetch failed (/fixtures?live=all returned null)');
+    // null = cuota agotada, error de la API o red caída. apiFetch ya lo logueó
+    // a stdout (visible en pm2 logs). NO lanzamos: con attempts:1 el cron del
+    // minuto siguiente reintenta solo, y un throw aquí dispararía alerta de
+    // Telegram cada minuto mientras dure la cuota agotada.
+    return { ok: true, skipped: true, reason: 'API sin datos (cuota agotada / error API / red)' };
   }
 
   const YOUTH_RE = /\bU-?1[2-9]\b|\bU-?2[0-3]\b|\bunder[ -]?(1[2-9]|2[0-3])\b|\byouth\b|\bjunior\b|\bsub-?(1[2-9]|2[0-3])\b/i;
