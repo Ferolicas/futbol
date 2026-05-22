@@ -1712,7 +1712,7 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
 
           {/* Cuotas — order 3, fila propia en móvil */}
           {odds && (() => {
-            const bkName = data?.odds?.bookmaker;
+            const bkName = matchData?.odds?.bookmaker;
             const bkLogo = bkName ? (BOOKMAKER_LOGOS[bkName.toLowerCase()] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => bkName.toLowerCase().includes(k))?.[1]) : null;
             return (
               <div style={{ order: 3, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
