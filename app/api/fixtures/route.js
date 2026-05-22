@@ -377,14 +377,31 @@ export async function GET(request) {
     // ===== PHASE 5: User data (auth resolved above) =====
     const [analysisResult, oddsResult, standingsResult] = await Promise.all([
 
-      // Analysis: use Redis cache only if it has actual data — empty object means
-      // analysis is still running; fall through to Supabase to show partial progress.
+      // Analysis: use Redis cache when present, then merge in IDs from adjacent
+      // days that the cache does not cover. The cache is keyed by `date`
+      // (typically Colombia date used by the cron) but the user can be in
+      // Madrid/anywhere, so fixtures spanning local midnight may live in
+      // match_analysis under prev/next day. Without this merge, those fixtures
+      // appear in the visible list but get marked as "not analyzed".
       (async () => {
-        if (cachedAnalysisData?.globallyAnalyzed?.length > 0) return cachedAnalysisData;
         if (fixtureIds.length === 0) return { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
+        const fixtureIdSet = new Set(fixtureIds);
 
-        // Get analyzed fixture IDs — also check adjacent dates for cross-midnight fixtures
-        const datesToCheck = [date];
+        // Start with whatever the cache has (filtered to current fixtures)
+        let globallyAnalyzed = [];
+        let analyzedOdds = {};
+        let analyzedData = {};
+        if (cachedAnalysisData?.globallyAnalyzed?.length > 0) {
+          globallyAnalyzed = cachedAnalysisData.globallyAnalyzed.filter(id => fixtureIdSet.has(id));
+          analyzedOdds = { ...(cachedAnalysisData.analyzedOdds || {}) };
+          analyzedData = { ...(cachedAnalysisData.analyzedData || {}) };
+        }
+
+        // Always check adjacent dates for cross-midnight fixtures (the cache
+        // for `date` does not contain them because the cron analyzed them
+        // under a different date key).
+        const datesToCheck = [];
+        if (globallyAnalyzed.length === 0) datesToCheck.push(date);
         if (userTimezone !== 'UTC') {
           const d = new Date(date + 'T12:00:00Z');
           const prevDay = new Date(d.getTime() - 86400000).toISOString().split('T')[0];
@@ -392,14 +409,18 @@ export async function GET(request) {
           if (prevDay !== date) datesToCheck.push(prevDay);
           if (nextDay !== date) datesToCheck.push(nextDay);
         }
-        const allIds = await Promise.all(datesToCheck.map(d => getAnalyzedFixtureIds(d)));
-        // Merge and keep only IDs that are in the current fixture list
-        const fixtureIdSet = new Set(fixtureIds);
-        const globallyAnalyzed = [...new Set(allIds.flat())].filter(id => fixtureIdSet.has(id));
 
-        const { analyzedOdds, analyzedData } = globallyAnalyzed.length > 0
-          ? await getAnalyzedMatchesFull(globallyAnalyzed)
-          : { analyzedOdds: {}, analyzedData: {} };
+        if (datesToCheck.length > 0) {
+          const allIds = await Promise.all(datesToCheck.map(d => getAnalyzedFixtureIds(d)));
+          const haveSet = new Set(globallyAnalyzed);
+          const extraIds = [...new Set(allIds.flat())].filter(id => fixtureIdSet.has(id) && !haveSet.has(id));
+          if (extraIds.length > 0) {
+            const { analyzedOdds: extraOdds, analyzedData: extraData } = await getAnalyzedMatchesFull(extraIds);
+            globallyAnalyzed = [...globallyAnalyzed, ...extraIds];
+            analyzedOdds = { ...analyzedOdds, ...extraOdds };
+            analyzedData = { ...analyzedData, ...extraData };
+          }
+        }
 
         const result = { globallyAnalyzed, analyzedOdds, analyzedData };
         redisSet(analysisRedisKey, result, ANALYSIS_CACHE_TTL).catch(() => {});
