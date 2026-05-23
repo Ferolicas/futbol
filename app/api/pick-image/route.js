@@ -1,11 +1,14 @@
 /**
  * GET /api/pick-image
  *
- * Genera dinamicamente una imagen PNG 800x460 (o 800x580 si incluye
- * analysis IA) del "pick del dia" usando satori + sharp.
+ * Genera dinamicamente una imagen PNG VERTICAL 800x1422 (ratio 9:16) del
+ * "pick del dia". Formato ideal para Instagram/TikTok Stories, Reels,
+ * WhatsApp Status. Layout:
+ *   - 60% top (853px): logo CF + escudos equipos + tarjeta cuota/prob + pick
+ *   - 40% bottom (569px): panel ANALYSIS IA + footer
  *
  * Query params:
- *   ?match=Equipo A vs Equipo B           (legacy, opcional si pasas home+away)
+ *   ?match=Equipo A vs Equipo B        (legacy, opcional si pasas home+away)
  *   &home=Equipo Local
  *   &away=Equipo Visitante
  *   &homeLogo=https://media.api-sports.io/football/teams/541.png
@@ -17,14 +20,11 @@
  *   &odd=1.85
  *   &fecha=23 Mayo 2026
  *   &hora=14:30
- *   &analysis=Texto del analisis IA (opcional, expande la card a 580px)
- *
- * Logos se descargan en paralelo (timeout 4s) y se embeben como base64.
- * Si la descarga falla, fallback a circulo con iniciales del equipo.
+ *   &analysis=Texto del analisis IA (siempre se muestra el panel; si vacio,
+ *             aparece "Analisis no disponible")
  *
  * Pre-requisito: public/fonts/Inter-Bold.ttf en disco.
- *
- * Runtime: nodejs (sharp + satori requieren bindings nativos).
+ * Runtime: nodejs (sharp + satori).
  */
 
 import satori from 'satori';
@@ -33,28 +33,55 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
 export const runtime = 'nodejs';
-// Cache 1h en CDN — la imagen es deterministica por params; n8n y Telegram
-// pueden hacer reusar la misma URL durante el dia.
+// Cache 1h — la imagen es deterministica por params, n8n/Telegram pueden
+// reusar la misma URL durante el dia sin re-generar.
 export const revalidate = 3600;
 
-function initials(name) {
-  if (!name) return '??';
-  const w = name.trim().split(/\s+/);
-  if (w.length === 1) return w[0].substring(0, 2).toUpperCase();
-  return (w[0][0] + w[w.length - 1][0]).toUpperCase();
-}
+const W = 800;
+const H = 1422; // ratio 9:16 — stories/reels
 
-// Descarga un asset y lo embebe como data URL. Timeout 4s para evitar que
-// la imagen tarde demasiado si el CDN externo va lento. Si falla devuelve
-// null → el badge cae a fallback con iniciales.
 async function toBase64(url) {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
     const buf = await res.arrayBuffer();
     const mime = res.headers.get('content-type') || 'image/png';
     return `data:${mime};base64,${Buffer.from(buf).toString('base64')}`;
   } catch { return null; }
+}
+
+function initials(name) {
+  if (!name) return '?';
+  const w = name.trim().split(/\s+/);
+  if (w.length === 1) return w[0].substring(0, 2).toUpperCase();
+  return (w[0][0] + w[w.length - 1][0]).toUpperCase();
+}
+
+function badge(logoB64, name, accentColor, bgColor) {
+  if (logoB64) {
+    return {
+      type: 'div', props: {
+        style: {
+          width: '120px', height: '120px', borderRadius: '24px',
+          background: bgColor,
+          border: `2px solid ${accentColor}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          overflow: 'hidden',
+        },
+        children: [{ type: 'img', props: { src: logoB64, width: 90, height: 90, style: { objectFit: 'contain' } } }],
+      },
+    };
+  }
+  return {
+    type: 'div', props: {
+      style: {
+        width: '120px', height: '120px', borderRadius: '24px',
+        background: bgColor, border: `2px solid ${accentColor}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      },
+      children: [{ type: 'span', props: { style: { color: accentColor, fontSize: '36px', fontWeight: 'bold' }, children: initials(name) } }],
+    },
+  };
 }
 
 export async function GET(req) {
@@ -87,196 +114,241 @@ export async function GET(req) {
 
     // CF Logo — embebido como base64 directo desde public/
     let cfLogo = null;
-    for (const p of [join(process.cwd(), 'public/vflogo.png'), join(process.cwd(), '../public/vflogo.png')]) {
-      if (existsSync(p)) { cfLogo = `data:image/png;base64,${readFileSync(p).toString('base64')}`; break; }
+    for (const p of [
+      join(process.cwd(), 'public/vflogo.png'),
+      join(process.cwd(), '../public/vflogo.png'),
+    ]) {
+      if (existsSync(p)) {
+        cfLogo = `data:image/png;base64,${readFileSync(p).toString('base64')}`;
+        break;
+      }
     }
 
     // Logos de equipos + liga descargados en paralelo desde api-sports CDN.
-    const [homeLogoB64, awayLogoB64, leagueLogoB64] = await Promise.all([
+    const [homeB64, awayB64, leagueB64] = await Promise.all([
       homeLogo   ? toBase64(homeLogo)   : Promise.resolve(null),
       awayLogo   ? toBase64(awayLogo)   : Promise.resolve(null),
       leagueLogo ? toBase64(leagueLogo) : Promise.resolve(null),
     ]);
 
     const filled = Math.min(10, Math.round(Number(prob) / 10));
-    const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
-    const HEIGHT = analysis ? 580 : 460;
+    const probBar = '█'.repeat(filled) + '░'.repeat(10 - filled);
 
-    // Helper: logo image (si tenemos base64) o circulo con iniciales
-    function teamBadge(logoB64, name, color, borderColor) {
-      if (logoB64) {
-        return {
-          type: 'div', props: {
-            style: { width: '64px', height: '64px', borderRadius: '50%', background: '#0d1830', border: `2px solid ${borderColor}`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-            children: [{ type: 'img', props: { src: logoB64, width: 48, height: 48, style: { objectFit: 'contain' } } }],
-          },
-        };
-      }
-      return {
-        type: 'div', props: {
-          style: { width: '64px', height: '64px', borderRadius: '50%', background: 'linear-gradient(135deg, #1a2a4e, #0d1428)', border: `2px solid ${borderColor}`, display: 'flex', alignItems: 'center', justifyContent: 'center' },
-          children: [{ type: 'span', props: { style: { color, fontSize: '20px', fontWeight: 'bold' }, children: initials(name) } }],
-        },
-      };
-    }
+    // 60% top zone = 853px, 40% bottom = 569px
+    const TOP_H = 853;
+    const BOT_H = 569;
 
     const svg = await satori(
       {
         type: 'div',
         props: {
           style: {
-            width: '800px', height: `${HEIGHT}px`,
-            background: 'linear-gradient(160deg, #05050f 0%, #0b1830 55%, #05050f 100%)',
+            width: `${W}px`, height: `${H}px`,
+            background: 'linear-gradient(180deg, #04040e 0%, #080f22 45%, #04040e 100%)',
             display: 'flex', flexDirection: 'column',
-            padding: '30px 36px', fontFamily: 'Inter',
+            fontFamily: 'Inter', overflow: 'hidden',
           },
           children: [
 
-            // ── HEADER ──
+            // ═══════════════════════════════════════════
+            // TOP 60% — logo + escudos + tarjeta + pick
+            // ═══════════════════════════════════════════
             {
               type: 'div', props: {
-                style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' },
+                style: {
+                  height: `${TOP_H}px`, width: '100%',
+                  display: 'flex', flexDirection: 'column',
+                  alignItems: 'center',
+                  padding: '0 40px',
+                  position: 'relative',
+                },
                 children: [
+
+                  // ── CF LOGO ──
                   {
                     type: 'div', props: {
-                      style: { display: 'flex', alignItems: 'center', gap: '12px' },
+                      style: {
+                        display: 'flex', flexDirection: 'column',
+                        alignItems: 'center', justifyContent: 'center',
+                        height: '180px', width: '100%',
+                        paddingTop: '36px',
+                      },
                       children: [
-                        cfLogo
-                          ? { type: 'img', props: { src: cfLogo, width: 40, height: 40, style: { borderRadius: '10px', border: '1px solid #00d4ff30' } } }
-                          : { type: 'span', props: { style: { fontSize: '30px' }, children: '🔥' } },
-                        {
+                        cfLogo ? {
+                          type: 'img', props: {
+                            src: cfLogo, width: 300, height: 150,
+                            style: { objectFit: 'contain' },
+                          },
+                        } : {
                           type: 'div', props: {
-                            style: { display: 'flex', flexDirection: 'column', gap: '2px' },
+                            style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' },
                             children: [
-                              { type: 'span', props: { style: { color: '#00d4ff', fontSize: '17px', fontWeight: 'bold', letterSpacing: '4px' }, children: 'CF ANÁLISIS' } },
-                              { type: 'span', props: { style: { color: '#ffffff30', fontSize: '10px', letterSpacing: '3px' }, children: 'PICK DEL DÍA' } },
+                              { type: 'span', props: { style: { color: '#00d4ff', fontSize: '42px', fontWeight: 'bold', letterSpacing: '6px' }, children: 'CF ANÁLISIS' } },
+                              { type: 'span', props: { style: { color: '#ffffff30', fontSize: '14px', letterSpacing: '4px' }, children: 'PICK DEL DÍA' } },
                             ],
                           },
                         },
                       ],
                     },
                   },
-                  {
-                    type: 'div', props: {
-                      style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' },
-                      children: [
-                        { type: 'span', props: { style: { color: '#ffffffcc', fontSize: '14px', fontWeight: 'bold' }, children: fecha } },
-                        { type: 'span', props: { style: { color: '#00d4ff70', fontSize: '12px' }, children: hora ? `🕐 ${hora} COL` : '' } },
-                      ],
-                    },
-                  },
-                ],
-              },
-            },
 
-            // ── DIVIDER ──
-            { type: 'div', props: { style: { height: '1px', background: 'linear-gradient(90deg, transparent, #00d4ff50, transparent)', marginBottom: '20px' } } },
+                  // ── DIVIDER ──
+                  { type: 'div', props: { style: { height: '1px', width: '100%', background: 'linear-gradient(90deg, transparent, #00d4ff40, transparent)', marginBottom: '32px' } } },
 
-            // ── EQUIPOS ──
-            {
-              type: 'div', props: {
-                style: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', marginBottom: '18px' },
-                children: [
-                  // Local
+                  // ── ESCUDOS + INFO CENTRAL ──
                   {
                     type: 'div', props: {
-                      style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', flex: '1' },
+                      style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: '28px' },
                       children: [
-                        teamBadge(homeLogoB64, home, '#00d4ff', '#00d4ff40'),
-                        { type: 'span', props: { style: { color: '#ffffffaa', fontSize: '12px', textAlign: 'center' }, children: home } },
-                      ],
-                    },
-                  },
-                  // Centro
-                  {
-                    type: 'div', props: {
-                      style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' },
-                      children: [
-                        { type: 'span', props: { style: { color: '#ffffff20', fontSize: '22px', fontWeight: 'bold' }, children: 'VS' } },
+                        // Home
                         {
                           type: 'div', props: {
-                            style: { display: 'flex', alignItems: 'center', gap: '6px' },
+                            style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', flex: '1' },
                             children: [
-                              leagueLogoB64 ? { type: 'img', props: { src: leagueLogoB64, width: 18, height: 18, style: { objectFit: 'contain' } } } : null,
-                              { type: 'span', props: { style: { color: '#ffffff30', fontSize: '10px', letterSpacing: '1px', textAlign: 'center', maxWidth: '130px' }, children: league.toUpperCase() } },
+                              badge(homeB64, home, '#00d4ff', 'rgba(0,212,255,0.08)'),
+                              { type: 'span', props: { style: { color: '#ffffffcc', fontSize: '14px', textAlign: 'center', maxWidth: '140px', fontWeight: 'bold' }, children: home } },
+                            ],
+                          },
+                        },
+                        // Centro: liga + VS + fecha + hora
+                        {
+                          type: 'div', props: {
+                            style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', flex: '1' },
+                            children: [
+                              leagueB64 ? { type: 'img', props: { src: leagueB64, width: 36, height: 36, style: { objectFit: 'contain' } } } : null,
+                              { type: 'span', props: { style: { color: '#ffffff20', fontSize: '18px', fontWeight: 'bold', letterSpacing: '2px' }, children: 'VS' } },
+                              fecha ? { type: 'span', props: { style: { color: '#ffffff50', fontSize: '12px', letterSpacing: '1px' }, children: fecha } } : null,
+                              hora  ? { type: 'span', props: { style: { color: '#00d4ff80', fontSize: '14px' }, children: `🕐 ${hora}` } } : null,
+                              { type: 'span', props: { style: { color: '#ffffff25', fontSize: '11px', letterSpacing: '1px', textAlign: 'center', maxWidth: '110px' }, children: league.toUpperCase() } },
                             ].filter(Boolean),
+                          },
+                        },
+                        // Away
+                        {
+                          type: 'div', props: {
+                            style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', flex: '1' },
+                            children: [
+                              badge(awayB64, away, '#a78bfa', 'rgba(167,139,250,0.08)'),
+                              { type: 'span', props: { style: { color: '#ffffffcc', fontSize: '14px', textAlign: 'center', maxWidth: '140px', fontWeight: 'bold' }, children: away } },
+                            ],
                           },
                         },
                       ],
                     },
                   },
-                  // Visitante
+
+                  // ── TARJETA CUOTA + PROBABILIDAD ──
                   {
                     type: 'div', props: {
-                      style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', flex: '1' },
+                      style: {
+                        width: '100%',
+                        background: 'linear-gradient(135deg, rgba(0,212,255,0.07), rgba(124,58,237,0.07))',
+                        border: '1px solid rgba(0,212,255,0.2)',
+                        borderRadius: '20px',
+                        padding: '24px 32px',
+                        display: 'flex',
+                        justifyContent: 'space-around',
+                        alignItems: 'center',
+                        marginBottom: '24px',
+                      },
                       children: [
-                        teamBadge(awayLogoB64, away, '#a78bfa', '#7c3aed40'),
-                        { type: 'span', props: { style: { color: '#ffffffaa', fontSize: '12px', textAlign: 'center' }, children: away } },
+                        // Cuota
+                        {
+                          type: 'div', props: {
+                            style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' },
+                            children: [
+                              { type: 'span', props: { style: { color: '#ffffff30', fontSize: '11px', letterSpacing: '3px' }, children: 'CUOTA' } },
+                              { type: 'span', props: { style: { color: '#f59e0b', fontSize: '52px', fontWeight: 'bold' }, children: `${odd}x` } },
+                            ],
+                          },
+                        },
+                        // Separador
+                        { type: 'div', props: { style: { width: '1px', height: '60px', background: 'rgba(255,255,255,0.1)' } } },
+                        // Prob
+                        {
+                          type: 'div', props: {
+                            style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' },
+                            children: [
+                              { type: 'span', props: { style: { color: '#ffffff30', fontSize: '11px', letterSpacing: '3px' }, children: 'PROBABILIDAD' } },
+                              { type: 'span', props: { style: { color: '#00d4ff', fontSize: '52px', fontWeight: 'bold' }, children: `${prob}%` } },
+                              { type: 'span', props: { style: { color: '#00d4ff30', fontSize: '12px', letterSpacing: '2px' }, children: probBar } },
+                            ],
+                          },
+                        },
                       ],
                     },
                   },
+
+                  // ── APUESTA (pick text) ──
+                  {
+                    type: 'div', props: {
+                      style: { display: 'flex', alignItems: 'center', gap: '12px', width: '100%' },
+                      children: [
+                        { type: 'span', props: { style: { fontSize: '22px' }, children: '✅' } },
+                        {
+                          type: 'div', props: {
+                            style: { display: 'flex', flexDirection: 'column', gap: '2px' },
+                            children: [
+                              { type: 'span', props: { style: { color: '#ffffff40', fontSize: '11px', letterSpacing: '3px' }, children: 'APUESTA' } },
+                              { type: 'span', props: { style: { color: '#ffffff', fontSize: '20px', fontWeight: 'bold' }, children: pick } },
+                            ],
+                          },
+                        },
+                      ],
+                    },
+                  },
+
                 ],
               },
             },
 
-            // ── DIVIDER ──
-            { type: 'div', props: { style: { height: '1px', background: '#ffffff0f', marginBottom: '16px' } } },
-
-            // ── PICK + STATS ──
+            // ═══════════════════════════════════════════
+            // BOTTOM 40% — analisis IA
+            // ═══════════════════════════════════════════
             {
               type: 'div', props: {
-                style: { display: 'flex', gap: '12px', marginBottom: analysis ? '14px' : '0' },
+                style: {
+                  height: `${BOT_H}px`, width: '100%',
+                  display: 'flex', flexDirection: 'column',
+                  padding: '28px 40px 36px 40px',
+                  borderTop: '1px solid rgba(0,212,255,0.15)',
+                  background: 'rgba(0,0,0,0.3)',
+                },
                 children: [
+                  // Header analisis
                   {
                     type: 'div', props: {
-                      style: { flex: '1', background: '#00d4ff08', border: '1px solid #00d4ff20', borderRadius: '12px', padding: '16px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '8px' },
+                      style: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' },
                       children: [
-                        { type: 'span', props: { style: { color: '#ffffff30', fontSize: '10px', letterSpacing: '3px' }, children: 'PRONÓSTICO' } },
-                        { type: 'span', props: { style: { color: '#ffffff', fontSize: '16px', fontWeight: 'bold' }, children: `✅  ${pick}` } },
+                        { type: 'span', props: { style: { fontSize: '18px' }, children: '🤖' } },
+                        { type: 'span', props: { style: { color: '#00d4ff', fontSize: '12px', fontWeight: 'bold', letterSpacing: '3px' }, children: 'ANÁLISIS IA' } },
+                        { type: 'div', props: { style: { flex: '1', height: '1px', background: 'rgba(0,212,255,0.2)', marginLeft: '8px' } } },
                       ],
                     },
                   },
+                  // Texto analisis
                   {
                     type: 'div', props: {
-                      style: { background: '#00d4ff08', border: '1px solid #00d4ff20', borderRadius: '12px', padding: '16px 18px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', minWidth: '108px' },
+                      style: {
+                        flex: '1',
+                        color: '#ffffffaa',
+                        fontSize: '17px',
+                        lineHeight: '1.7',
+                        overflow: 'hidden',
+                      },
+                      children: analysis || 'Análisis no disponible.',
+                    },
+                  },
+                  // Footer
+                  {
+                    type: 'div', props: {
+                      style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '16px', borderTop: '1px solid rgba(255,255,255,0.06)' },
                       children: [
-                        { type: 'span', props: { style: { color: '#ffffff30', fontSize: '10px', letterSpacing: '2px' }, children: 'PROB.' } },
-                        { type: 'span', props: { style: { color: '#00d4ff', fontSize: '28px', fontWeight: 'bold' }, children: `${prob}%` } },
-                        { type: 'span', props: { style: { color: '#00d4ff35', fontSize: '10px' }, children: bar } },
+                        { type: 'span', props: { style: { color: '#ffffff15', fontSize: '11px' }, children: '⚠️ Juega con responsabilidad' } },
+                        { type: 'span', props: { style: { color: '#00d4ff60', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px' }, children: 'cfanalisis.com' } },
                       ],
                     },
                   },
-                  {
-                    type: 'div', props: {
-                      style: { background: '#f59e0b08', border: '1px solid #f59e0b25', borderRadius: '12px', padding: '16px 18px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', minWidth: '108px' },
-                      children: [
-                        { type: 'span', props: { style: { color: '#ffffff30', fontSize: '10px', letterSpacing: '2px' }, children: 'CUOTA' } },
-                        { type: 'span', props: { style: { color: '#f59e0b', fontSize: '28px', fontWeight: 'bold' }, children: `${odd}x` } },
-                      ],
-                    },
-                  },
-                ],
-              },
-            },
-
-            // ── ANÁLISIS IA (opcional) ──
-            ...(analysis ? [{
-              type: 'div', props: {
-                style: { background: '#ffffff04', borderLeft: '3px solid #00d4ff60', borderRadius: '0 10px 10px 0', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: '6px' },
-                children: [
-                  { type: 'span', props: { style: { color: '#00d4ff70', fontSize: '10px', letterSpacing: '2px', fontWeight: 'bold' }, children: '🤖  ANÁLISIS IA' } },
-                  { type: 'span', props: { style: { color: '#ffffffbb', fontSize: '13px', lineHeight: '1.6' }, children: analysis } },
-                ],
-              },
-            }] : []),
-
-            // ── FOOTER ──
-            {
-              type: 'div', props: {
-                style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '14px' },
-                children: [
-                  { type: 'span', props: { style: { color: '#ffffff18', fontSize: '11px' }, children: '⚠️ Juega con responsabilidad' } },
-                  { type: 'span', props: { style: { color: '#00d4ff', fontSize: '14px', fontWeight: 'bold', letterSpacing: '1px' }, children: 'cfanalisis.com' } },
                 ],
               },
             },
@@ -284,14 +356,20 @@ export async function GET(req) {
           ],
         },
       },
-      { width: 800, height: HEIGHT, fonts: [{ name: 'Inter', data: fontData, weight: 700, style: 'normal' }] }
+      { width: W, height: H, fonts: [{ name: 'Inter', data: fontData, weight: 700, style: 'normal' }] }
     );
 
-    const png = await sharp(Buffer.from(svg)).png().toBuffer();
+    // Sharp con alta calidad — quality 100, compression 6 (sweet spot)
+    const png = await sharp(Buffer.from(svg))
+      .png({ quality: 100, compressionLevel: 6 })
+      .toBuffer();
+
     return new Response(png, {
       headers: {
         'Content-Type': 'image/png',
-        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+        // No cache para iteracion rapida durante desarrollo de la imagen.
+        // Cambia a 'public, max-age=3600' cuando estes feliz con el diseño.
+        'Cache-Control': 'no-store',
       },
     });
 
