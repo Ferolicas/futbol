@@ -1,0 +1,121 @@
+name: Deploy to VPS
+
+# Reemplaza deploy-worker.yml. Ahora deploya AMBOS — Next.js (frontend +
+# API routes) Y worker BullMQ — al mismo VPS. Decide qué redeployar
+# segun los archivos que cambiaron en el commit.
+#
+# Vercel ya NO se usa (DNS apunta al VPS desde Fase 4 — 2026-05-23).
+# Si tienes el repo aun conectado a Vercel, desactiva el auto-deploy
+# desde dashboard Vercel → Settings → Git → Disconnect.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Si dos commits llegan a la vez, encolar — NO ejecutar en paralelo
+  # (race condition en git pull + npm install).
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          # Subimos timeout porque next build con ~1392 deps puede tardar
+          # 2-3 min, mas npm install otros 1-2 min. 10 min de margen.
+          command_timeout: 10m
+          script: |
+            set -e
+
+            cd /apps/futbol
+
+            # Diff de commits para decidir qué rebuildear
+            BEFORE=$(git rev-parse HEAD 2>/dev/null || echo "")
+            git pull --ff-only
+            AFTER=$(git rev-parse HEAD)
+
+            if [ "$BEFORE" = "$AFTER" ]; then
+              echo "No new commits — nothing to deploy"
+              exit 0
+            fi
+
+            CHANGED=$(git diff --name-only "$BEFORE" "$AFTER")
+            echo "=== Changed files ==="
+            echo "$CHANGED"
+            echo "====================="
+
+            # ─────────────────────────────────────────────────────────────
+            # FRONTEND: rebuild Next.js
+            # ─────────────────────────────────────────────────────────────
+            # Triggers: rutas, componentes, lib/* (algunas las usa el worker
+            # tambien — esas tambien disparan el bloque worker abajo),
+            # middleware, config, deps, assets publicos.
+            WEB_RE='^(app/|components/|lib/|middleware\.js|next\.config\.|package\.json|package-lock\.json|public/|hooks/|jsconfig\.json)'
+            if echo "$CHANGED" | grep -qE "$WEB_RE"; then
+              echo ""
+              echo "▶ Frontend changed — rebuilding Next.js"
+
+              # Dev deps necesarias para next build (typescript types, etc).
+              NODE_ENV=development npm install --include=dev --no-audit --no-fund
+
+              # Build prod
+              NODE_ENV=production npm run build
+
+              # Next.js standalone requiere copiar public + static manualmente
+              # (no los incluye en .next/standalone/).
+              cp -r public .next/standalone/
+              mkdir -p .next/standalone/.next
+              cp -r .next/static .next/standalone/.next/
+
+              # Reload pm2 con env del .env recargado (sin downtime)
+              pm2 reload cfanalisis-web --update-env
+
+              echo "✓ Next.js redeployed"
+            else
+              echo ""
+              echo "○ Frontend NOT changed — skipping Next.js build"
+            fi
+
+            # ─────────────────────────────────────────────────────────────
+            # WORKER: rebuild + restart
+            # ─────────────────────────────────────────────────────────────
+            # Triggers: codigo del worker (apps/cfanalisis-worker/) o
+            # cualquier lib/* que el worker importa dinamicamente via
+            # apps/cfanalisis-worker/src/shared.ts. Si cambia una lib que
+            # el worker NO usa (ej lib/stripe.js, lib/zeptomail.js), no
+            # disparamos restart del worker.
+            WORKER_RE='^(apps/cfanalisis-worker/|lib/(api-football|api-baseball|combinada|calculations|calibration|baseball-model|baseball-calibration|odds-api|redis|sanity-cache|supabase|supabase-cache|db|webpush|leagues|league-half-factors)\.js$)'
+            if echo "$CHANGED" | grep -qE "$WORKER_RE"; then
+              echo ""
+              echo "▶ Worker changed — rebuilding worker"
+
+              cd /apps/futbol/apps/cfanalisis-worker
+
+              # Worker deps incluyendo dev (TypeScript necesita tsc).
+              npm install --include=dev --no-audit --no-fund
+
+              # Compile TS → dist/
+              npm run build
+
+              # Reload pm2
+              pm2 reload cfanalisis-worker --update-env
+
+              cd /apps/futbol
+              echo "✓ Worker redeployed"
+            else
+              echo ""
+              echo "○ Worker NOT changed — skipping worker rebuild"
+            fi
+
+            echo ""
+            echo "=== Deploy summary ==="
+            pm2 list
+            echo "======================"
