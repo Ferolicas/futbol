@@ -169,6 +169,150 @@ async function sendGoalPushes(liveDetailsMap, existingLive) {
   }));
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Corner + Card delta pushes — detecta cambios entre el live anterior y el
+// actual. Si un user tiene el fixture en favoritos, recibe push con:
+//   - "🚩 Córner Real Madrid (4) - Barcelona (2) total 6 · 67'"
+//   - "🟨 Tarjeta Real Madrid (2) - Barcelona (3) total 5 · 67'"
+//   - "🟥 ROJA Real Madrid (1) - Barcelona (0) total 1 · 67'"
+// Detecta solo cuando el contador SUBE — un valor que vuelve a 0 (raro,
+// indica que la API limpio stats) NO dispara push.
+// ────────────────────────────────────────────────────────────────────────────
+function formatMinute(status) {
+  const e = status?.elapsed;
+  const x = status?.extra;
+  if (!e) return '?';
+  return x > 0 ? `${e}+${x}` : `${e}`;
+}
+
+async function sendCornerCardPushes(liveDetailsMap, existingLive) {
+  // Recolecta deltas por fixture y por tipo
+  const events = []; // { fixtureId, type, team, body, tag }
+
+  for (const [fid, data] of Object.entries(liveDetailsMap)) {
+    const prev = existingLive[fid];
+    if (!prev) continue; // primera vez que vemos el partido, sin baseline
+
+    const home = data.homeTeam?.name || '?';
+    const away = data.awayTeam?.name || '?';
+    const minute = formatMinute(data.status);
+
+    // ── Córners ──
+    const pHC = prev.corners?.home ?? 0, pAC = prev.corners?.away ?? 0;
+    const nHC = data.corners?.home ?? 0, nAC = data.corners?.away ?? 0;
+    if (nHC > pHC || nAC > pAC) {
+      const team = nHC > pHC ? home : away;
+      events.push({
+        fixtureId: Number(fid),
+        type: 'corner',
+        title: `🚩 Córner — ${team}`,
+        body: `${home} (${nHC}) — ${away} (${nAC}) · total ${nHC + nAC} · ${minute}'`,
+        tag: `corner-${fid}-${nHC}-${nAC}`,
+      });
+    }
+
+    // ── Tarjeta amarilla ──
+    const pHY = prev.yellowCards?.home ?? 0, pAY = prev.yellowCards?.away ?? 0;
+    const nHY = data.yellowCards?.home ?? 0, nAY = data.yellowCards?.away ?? 0;
+    if (nHY > pHY || nAY > pAY) {
+      const team = nHY > pHY ? home : away;
+      // Intentar sacar quien fue de cardEvents (ultimo evento yellow del team)
+      const lastCard = (data.cardEvents || [])
+        .filter(e => e.type === 'Yellow Card' && e.teamName === team)
+        .slice(-1)[0];
+      const playerStr = lastCard?.player ? `${lastCard.player} · ` : '';
+      events.push({
+        fixtureId: Number(fid),
+        type: 'yellow',
+        title: `🟨 Amarilla — ${team}`,
+        body: `${playerStr}${home} (${nHY}) — ${away} (${nAY}) · total ${nHY + nAY} · ${minute}'`,
+        tag: `yellow-${fid}-${nHY}-${nAY}`,
+      });
+    }
+
+    // ── Tarjeta roja ──
+    const pHR = prev.redCards?.home ?? 0, pAR = prev.redCards?.away ?? 0;
+    const nHR = data.redCards?.home ?? 0, nAR = data.redCards?.away ?? 0;
+    if (nHR > pHR || nAR > pAR) {
+      const team = nHR > pHR ? home : away;
+      const lastCard = (data.cardEvents || [])
+        .filter(e => (e.type === 'Red Card' || e.type === 'Second Yellow card') && e.teamName === team)
+        .slice(-1)[0];
+      const playerStr = lastCard?.player ? `${lastCard.player} · ` : '';
+      events.push({
+        fixtureId: Number(fid),
+        type: 'red',
+        title: `🟥 ROJA — ${team}`,
+        body: `${playerStr}${home} (${nHR}) — ${away} (${nAR}) · total ${nHR + nAR} · ${minute}'`,
+        tag: `red-${fid}-${nHR}-${nAR}`,
+      });
+    }
+  }
+
+  if (events.length === 0) return;
+
+  // Mismo patron que sendGoalPushes: traer subs + favoritos por user
+  const { data: subs } = await supabaseAdmin.from('push_subscriptions').select('user_id, subscription');
+  if (!subs?.length) return;
+
+  const favoritesByUser = {};
+  await Promise.all(subs.map(async (row) => {
+    if (favoritesByUser[row.user_id] !== undefined) return;
+    const { data: favRows } = await supabaseAdmin
+      .from('user_favorites')
+      .select('fixture_id')
+      .eq('user_id', row.user_id);
+    favoritesByUser[row.user_id] = (favRows || []).map(r => r.fixture_id);
+  }));
+
+  const expiredByUser = {};
+
+  for (const ev of events) {
+    await Promise.allSettled(subs.map(async (row) => {
+      const userFavorites = favoritesByUser[row.user_id] || [];
+      if (!userFavorites.includes(ev.fixtureId)) return;
+
+      const deviceSubs = toSubArray(row.subscription);
+      await Promise.allSettled(deviceSubs.map(async (sub) => {
+        if (!sub?.endpoint) return;
+        const result = await sendPushNotification(sub, {
+          title: ev.title, body: ev.body, tag: ev.tag,
+        });
+        if (result === 'expired') {
+          if (!expiredByUser[row.user_id]) expiredByUser[row.user_id] = new Set();
+          expiredByUser[row.user_id].add(sub.endpoint);
+        }
+      }));
+    }));
+  }
+
+  // Limpieza de subs expiradas (mismo patron que sendGoalPushes)
+  const usersWithExpired = Object.keys(expiredByUser);
+  if (usersWithExpired.length === 0) return;
+
+  await Promise.allSettled(usersWithExpired.map(async (userId) => {
+    try {
+      const expiredEndpoints = expiredByUser[userId];
+      const { data: row } = await supabaseAdmin
+        .from('push_subscriptions')
+        .select('subscription')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (!row) return;
+
+      const remaining = toSubArray(row.subscription).filter(s => !expiredEndpoints.has(s?.endpoint));
+
+      if (remaining.length === 0) {
+        await supabaseAdmin.from('push_subscriptions').delete().eq('user_id', userId);
+      } else {
+        await supabaseAdmin.from('push_subscriptions').update({ subscription: remaining }).eq('user_id', userId);
+      }
+    } catch (e) {
+      console.error('[push:purge-expired]', userId, e.message);
+    }
+  }));
+}
+
 export async function runLive(_payload = {}) {
   const today = new Date().toISOString().split('T')[0];
   const now = Date.now();
@@ -296,8 +440,9 @@ export async function runLive(_payload = {}) {
     }));
   }
 
-  // Fire-and-forget goal pushes
-  sendGoalPushes(liveDetailsMap, existingLive).catch(err => console.error('[live:pushes]', err.message));
+  // Fire-and-forget pushes (goal + corner/card delta)
+  sendGoalPushes(liveDetailsMap, existingLive).catch(err => console.error('[live:goal-pushes]', err.message));
+  sendCornerCardPushes(liveDetailsMap, existingLive).catch(err => console.error('[live:cc-pushes]', err.message));
 
   const mergedLive = { ...existingLive };
   for (const [fid, data] of Object.entries(liveDetailsMap)) {
