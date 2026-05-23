@@ -18,6 +18,14 @@
  *   workers import named symbols from here as if it were a normal module.
  */
 
+// Paths pasados como variables — TypeScript NO puede seguir estos imports
+// estaticamente (los resuelve Node en runtime). Esto es deliberado: con
+// rutas literales, TS los incluye en el program graph y como estan fuera
+// del rootDir/src/ falla con TS5055 ("would overwrite input file").
+//
+// Concat manual = TS solo ve `import(string)` → tipo any → cero conflicto
+// de emit. Comportamiento en runtime identico al literal.
+const LIB = '../../../lib/';
 const [
   _redis,
   _apiFootball,
@@ -34,20 +42,20 @@ const [
   _oddsApi,
   _db,
 ] = await Promise.all([
-  import('../../../lib/redis.js'),
-  import('../../../lib/api-football.js'),
-  import('../../../lib/api-baseball.js'),
-  import('../../../lib/supabase.js'),
-  import('../../../lib/supabase-cache.js'),
-  import('../../../lib/sanity-cache.js'),
-  import('../../../lib/webpush.js'),
-  import('../../../lib/leagues.js'),
-  import('../../../lib/calculations.js'),
-  import('../../../lib/combinada.js'),
-  import('../../../lib/baseball-model.js'),
-  import('../../../lib/baseball-calibration.js'),
-  import('../../../lib/odds-api.js'),
-  import('../../../lib/db.js'),
+  import(LIB + 'redis.js'),
+  import(LIB + 'api-football.js'),
+  import(LIB + 'api-baseball.js'),
+  import(LIB + 'supabase.js'),
+  import(LIB + 'supabase-cache.js'),
+  import(LIB + 'sanity-cache.js'),
+  import(LIB + 'webpush.js'),
+  import(LIB + 'leagues.js'),
+  import(LIB + 'calculations.js'),
+  import(LIB + 'combinada.js'),
+  import(LIB + 'baseball-model.js'),
+  import(LIB + 'baseball-calibration.js'),
+  import(LIB + 'odds-api.js'),
+  import(LIB + 'db.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
