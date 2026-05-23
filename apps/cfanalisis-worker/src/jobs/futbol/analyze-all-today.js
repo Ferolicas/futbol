@@ -94,7 +94,13 @@ export async function runAnalyzeAllToday(payload = {}, job = null) {
     // cacheado en Supabase/Redis y la re-analizacion no hace nada (termina
     // en 1 seg porque solo lee de cache).
     const result = await analyzeMatch(fixture, { date, force: forceAll });
-    if (!result || result.dataQuality === 'insufficient') {
+    // ⚠️ NO skipeamos si dataQuality='insufficient' — el modelo usa fallbacks
+    // (lambda=1.2 etc.) y produce probabilidades aproximadas. El frontend
+    // muestra la advertencia "Datos limitados" en esos partidos. Si los
+    // skipeamos, quedan eternamente como "pendientes" en /ferney aunque
+    // el usuario presione "Re-analizar todos". Mejor analizar partial que
+    // dejar el partido sin analisis.
+    if (!result) {
       processed++;
       await reportProgress({
         phase: 'analyzing', processed, total: toAnalyze.length,

@@ -41,8 +41,16 @@ function extractResult(match) {
   const goalEvents = (match.events || []).filter(e => e.type === 'Goal' && e.detail !== 'Missed Penalty');
   const cardEvents = (match.events || []).filter(e => e.type === 'Card');
 
+  const statusShort = match.fixture?.status?.short ?? null;
   const hGoals = match.goals?.home ?? null;
   const aGoals = match.goals?.away ?? null;
+
+  // FULLTIME = marcador a 90 min (sin AET). Las casas apuestas pagan a 90min.
+  // Si match.score.fulltime existe lo usamos; si no, asumimos goals === fulltime
+  // (partidos normales FT).
+  const ftHome = match.score?.fulltime?.home ?? hGoals;
+  const ftAway = match.score?.fulltime?.away ?? aGoals;
+
   const hCorners = getStat(homeStats, 'Corner Kicks') || 0;
   const aCorners = getStat(awayStats, 'Corner Kicks') || 0;
 
@@ -54,6 +62,16 @@ function extractResult(match) {
   const totalCards = fromStats
     ? (yh || 0) + (ya || 0) + (rh || 0) + (ra || 0)
     : cardEvents.length;
+
+  // Stats nuevos para calibracion full (Shots, SoT, Fouls, Offsides)
+  const hShots   = getStat(homeStats, 'Total Shots')   ?? null;
+  const aShots   = getStat(awayStats, 'Total Shots')   ?? null;
+  const hSot     = getStat(homeStats, 'Shots on Goal') ?? null;
+  const aSot     = getStat(awayStats, 'Shots on Goal') ?? null;
+  const hFouls   = getStat(homeStats, 'Fouls')         ?? null;
+  const aFouls   = getStat(awayStats, 'Fouls')         ?? null;
+  const hOffside = getStat(homeStats, 'Offsides')      ?? null;
+  const aOffside = getStat(awayStats, 'Offsides')      ?? null;
 
   const goalMinutes = goalEvents
     .map(e => (e.time?.elapsed != null ? e.time.elapsed + (e.time.extra || 0) : null))
@@ -69,6 +87,63 @@ function extractResult(match) {
     detail: e.detail || null,
   }));
 
+  // Construir actuals_full — JSON unificado con TODO lo necesario para
+  // calibrar cualquier mercado en build-calibration.js. Distinguimos
+  // valores "90min" (fulltime, lo que paga el bookmaker) de "AET" (incluye
+  // prorroga). Casas pagan a 90min, asi que para calibracion correcta de
+  // over/under usamos goals.totalFt no goals.total.
+  const actualsFull = {
+    status: statusShort,                          // FT / AET / PEN
+    result:
+      ftHome === null || ftAway === null
+        ? null
+        : ftHome > ftAway ? 'H' : ftHome < ftAway ? 'A' : 'D',
+    goals: {
+      home:    ftHome,
+      away:    ftAway,
+      total:   ftHome !== null && ftAway !== null ? ftHome + ftAway : null,
+      btts:    ftHome !== null && ftAway !== null ? (ftHome > 0 && ftAway > 0) : null,
+      // Datos AET incluyendo prorroga (informativo, NO usado para over/under)
+      homeAet:  hGoals,
+      awayAet:  aGoals,
+      totalAet: hGoals !== null && aGoals !== null ? hGoals + aGoals : null,
+    },
+    corners: {
+      home:  hCorners,
+      away:  aCorners,
+      total: hCorners + aCorners,
+    },
+    cards: {
+      yellowHome: yh ?? null,
+      yellowAway: ya ?? null,
+      redHome:    rh ?? null,
+      redAway:    ra ?? null,
+      home:       (yh ?? 0) + (rh ?? 0),
+      away:       (ya ?? 0) + (ra ?? 0),
+      total:      totalCards,
+    },
+    shots: {
+      home:           hShots,
+      away:           aShots,
+      total:          hShots !== null && aShots !== null ? hShots + aShots : null,
+      onTargetHome:   hSot,
+      onTargetAway:   aSot,
+      totalOnTarget:  hSot !== null && aSot !== null ? hSot + aSot : null,
+    },
+    fouls: {
+      home:  hFouls,
+      away:  aFouls,
+      total: hFouls !== null && aFouls !== null ? hFouls + aFouls : null,
+    },
+    offsides: {
+      home:  hOffside,
+      away:  aOffside,
+      total: hOffside !== null && aOffside !== null ? hOffside + aOffside : null,
+    },
+    firstGoalMinute,
+    goalMinutes,
+  };
+
   return {
     homeId, awayId, homeStats, awayStats,
     hGoals, aGoals,
@@ -82,6 +157,8 @@ function extractResult(match) {
     goalMinutes,
     goalScorers,
     goalEvents, cardEvents,
+    // Nuevo: payload completo para calibracion JSONB
+    actualsFull,
   };
 }
 
@@ -143,6 +220,7 @@ async function upsertMatchResult(fid, date, match, r) {
 
 async function updatePrediction(fid, r) {
   return supabaseAdmin.from('match_predictions').update({
+    // Columnas legacy (compat con queries existentes + calibracion vieja)
     actual_home_goals:        r.hGoals,
     actual_away_goals:        r.aGoals,
     actual_result:            r.actualResult,
@@ -153,6 +231,8 @@ async function updatePrediction(fid, r) {
     actual_first_goal_minute: r.firstGoalMinute ?? null,
     actual_goal_minutes:      r.goalMinutes && r.goalMinutes.length ? r.goalMinutes : null,
     actual_goal_scorers:      r.goalScorers && r.goalScorers.length ? r.goalScorers : null,
+    // Nuevo: payload completo para calibracion dinamica de TODOS los mercados
+    actuals_full:             r.actualsFull,
     finalized_at:             new Date().toISOString(),
   }).eq('fixture_id', fid);
 }

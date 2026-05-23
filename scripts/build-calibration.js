@@ -1,53 +1,178 @@
 /* eslint-disable */
-// Construye tabla de calibración isotonic regression desde match_predictions finalizadas.
-// Guarda los nudos en app_config bajo la clave `calibration_dc_v1` para que computeAllProbabilities los aplique.
+// ──────────────────────────────────────────────────────────────────────────
+// Construye calibración isotonic regression desde match_predictions
+// finalizadas. Guarda los nudos en app_config[calibration_dc_v1].
+//
+// MODOS:
+//   - Si la fila tiene predictions_full + actuals_full (formato nuevo
+//     post-Fase 4), usa esos JSONB para extraer probs/outcomes para
+//     CUALQUIER mercado.
+//   - Si solo tiene las columnas legacy (p_* + actual_*), se construye
+//     la estructura equivalente para los mercados antiguos. Asi calibramos
+//     usando TODA la historia disponible.
+//
+// MERCADOS calibrados:
+//   - 1X2 (home_win, draw, away_win)
+//   - BTTS (btts, btts_no)
+//   - First goal (first_goal_30, first_goal_45)
+//   - Over/Under DINAMICO para todos los grupos:
+//       total_goals, total_corners, total_cards,
+//       total_shots, total_sot, total_fouls,
+//       home_goals, away_goals,
+//       home_corners, away_corners,
+//       home_cards, away_cards,
+//       home_shots, away_shots,
+//       home_fouls, away_fouls
+//     Cada grupo emite over_K_5 y under_K_5 para K = 0..20.
+//
+// Run on VPS (carga env con --env-file, no dotenv):
+//   cd /apps/futbol
+//   node --env-file=.env scripts/build-calibration.js
+// ──────────────────────────────────────────────────────────────────────────
 
-require('dotenv').config({ path: '.env.local' });
-const { createClient } = require('@supabase/supabase-js');
+// Soporta tanto Vercel (.env.local) como VPS (.env). Si Node 22 ya cargo
+// el env via --env-file=.env, dotenv no hace nada (no overrides).
+try { require('dotenv').config({ path: '.env.local' }); } catch {}
+try { require('dotenv').config({ path: '.env' }); } catch {}
 
-const s = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+const { Pool } = require('pg');
 
-const MARKETS = [
-  { key: 'home_win',     pCol: 'p_home_win',         outcome: (r) => r.actual_result === 'H',     gate: (r) => r.actual_result != null },
-  { key: 'draw',         pCol: 'p_draw',             outcome: (r) => r.actual_result === 'D',     gate: (r) => r.actual_result != null },
-  { key: 'away_win',     pCol: 'p_away_win',         outcome: (r) => r.actual_result === 'A',     gate: (r) => r.actual_result != null },
-  { key: 'btts',         pCol: 'p_btts',             outcome: (r) => r.actual_btts === true,      gate: (r) => r.actual_btts != null },
-  { key: 'over_15',      pCol: 'p_over_15',          outcome: (r) => r.actual_total_goals > 1.5,  gate: (r) => r.actual_total_goals != null },
-  { key: 'over_25',      pCol: 'p_over_25',          outcome: (r) => r.actual_total_goals > 2.5,  gate: (r) => r.actual_total_goals != null },
-  { key: 'over_35',      pCol: 'p_over_35',          outcome: (r) => r.actual_total_goals > 3.5,  gate: (r) => r.actual_total_goals != null },
-  { key: 'corners_85',   pCol: 'p_corners_over_85',  outcome: (r) => r.actual_corners > 8.5,      gate: (r) => r.actual_corners != null && r.actual_corners > 0 },
-  { key: 'corners_95',   pCol: 'p_corners_over_95',  outcome: (r) => r.actual_corners > 9.5,      gate: (r) => r.actual_corners != null && r.actual_corners > 0 },
-  { key: 'cards_25',     pCol: 'p_cards_over_25',    outcome: (r) => r.actual_total_cards > 2.5,  gate: (r) => r.actual_total_cards != null },
-  { key: 'cards_35',     pCol: 'p_cards_over_35',    outcome: (r) => r.actual_total_cards > 3.5,  gate: (r) => r.actual_total_cards != null },
-  { key: 'cards_45',     pCol: 'p_cards_over_45',    outcome: (r) => r.actual_total_cards > 4.5,  gate: (r) => r.actual_total_cards != null },
-  // Para "primer gol antes del minuto X": si el partido fue 0-0, no hay primer gol → contamos como NO ocurrido (false).
-  { key: 'first_goal_30', pCol: 'p_first_goal_30',   outcome: (r) => r.actual_first_goal_minute != null && r.actual_first_goal_minute <= 30, gate: (r) => r.actual_total_goals != null },
-  { key: 'first_goal_45', pCol: 'p_first_goal_45',   outcome: (r) => r.actual_first_goal_minute != null && r.actual_first_goal_minute <= 45, gate: (r) => r.actual_total_goals != null },
+const pgPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
+  max: 5,
+});
+
+// ─── Estructura de mercados ────────────────────────────────────────────────
+// Cada GROUP define como extraer la prob y el actual de cada fila.
+// expandGroupMarkets emite over_K_5 y under_K_5 para K en [0, 20].
+
+const SCALAR_MARKETS = [
+  { key: 'home_win',  getProb: (p) => p?.winner?.home, getOutcome: (a) => a?.result === 'H', gate: (a) => a?.result != null },
+  { key: 'draw',      getProb: (p) => p?.winner?.draw, getOutcome: (a) => a?.result === 'D', gate: (a) => a?.result != null },
+  { key: 'away_win',  getProb: (p) => p?.winner?.away, getOutcome: (a) => a?.result === 'A', gate: (a) => a?.result != null },
+  { key: 'btts',      getProb: (p) => p?.btts,         getOutcome: (a) => a?.goals?.btts === true,  gate: (a) => a?.goals?.btts != null },
+  { key: 'btts_no',   getProb: (p) => p?.bttsNo,       getOutcome: (a) => a?.goals?.btts === false, gate: (a) => a?.goals?.btts != null },
+  { key: 'first_goal_30', getProb: (p) => p?.firstGoal?.before30,
+    getOutcome: (a) => a?.firstGoalMinute != null && a.firstGoalMinute <= 30,
+    gate: (a) => a?.goals?.total != null },
+  { key: 'first_goal_45', getProb: (p) => p?.firstGoal?.before45,
+    getOutcome: (a) => a?.firstGoalMinute != null && a.firstGoalMinute <= 45,
+    gate: (a) => a?.goals?.total != null },
 ];
 
-/**
- * Pool Adjacent Violators algorithm — isotonic regression.
- * Input: array of [x, y] sorted by x. Output: array of [x, y_iso] where y_iso is monotonically non-decreasing.
- */
+const OU_GROUPS = {
+  total_goals:   { probObj: (p) => p?.overUnder,                  actualValue: (a) => a?.goals?.total },
+  total_corners: { probObj: (p) => p?.corners,                    actualValue: (a) => a?.corners?.total },
+  total_cards:   { probObj: (p) => p?.cards,                      actualValue: (a) => a?.cards?.total },
+  total_shots:   { probObj: (p) => p?.shots,                      actualValue: (a) => a?.shots?.total },
+  total_sot:     { probObj: (p) => p?.sot,                        actualValue: (a) => a?.shots?.totalOnTarget },
+  total_fouls:   { probObj: (p) => p?.fouls,                      actualValue: (a) => a?.fouls?.total },
+  home_goals:    { probObj: (p) => p?.perTeam?.home?.goals,       actualValue: (a) => a?.goals?.home },
+  away_goals:    { probObj: (p) => p?.perTeam?.away?.goals,       actualValue: (a) => a?.goals?.away },
+  home_corners:  { probObj: (p) => p?.perTeam?.home?.corners,     actualValue: (a) => a?.corners?.home },
+  away_corners:  { probObj: (p) => p?.perTeam?.away?.corners,     actualValue: (a) => a?.corners?.away },
+  home_cards:    { probObj: (p) => p?.perTeam?.home?.cards,       actualValue: (a) => a?.cards?.home },
+  away_cards:    { probObj: (p) => p?.perTeam?.away?.cards,       actualValue: (a) => a?.cards?.away },
+  home_shots:    { probObj: (p) => p?.perTeamShots?.home,         actualValue: (a) => a?.shots?.home },
+  away_shots:    { probObj: (p) => p?.perTeamShots?.away,         actualValue: (a) => a?.shots?.away },
+  home_fouls:    { probObj: (p) => p?.perTeamFouls?.home,         actualValue: (a) => a?.fouls?.home },
+  away_fouls:    { probObj: (p) => p?.perTeamFouls?.away,         actualValue: (a) => a?.fouls?.away },
+};
+
+function expandOuMarkets() {
+  const out = [];
+  for (const [groupKey, group] of Object.entries(OU_GROUPS)) {
+    for (let k = 0; k <= 20; k++) {
+      const overField  = `over${k}_5`;
+      const underField = `under${k}_5`;
+      const threshold = k + 0.5;
+      out.push({
+        key: `${groupKey}_${overField}`,
+        getProb:    (p) => group.probObj(p)?.[overField],
+        getOutcome: (a) => { const v = group.actualValue(a); return v != null && v > threshold; },
+        gate:       (a) => group.actualValue(a) != null,
+      });
+      out.push({
+        key: `${groupKey}_${underField}`,
+        getProb:    (p) => group.probObj(p)?.[underField],
+        getOutcome: (a) => { const v = group.actualValue(a); return v != null && v < threshold; },
+        gate:       (a) => group.actualValue(a) != null,
+      });
+    }
+  }
+  return out;
+}
+
+const ALL_MARKETS = [...SCALAR_MARKETS, ...expandOuMarkets()];
+
+// ─── Legacy → JSONB normalization ────────────────────────────────────────
+// Si la fila no tiene predictions_full/actuals_full, sintetizamos JSONB
+// equivalente desde las columnas legacy (p_* y actual_*). Asi datos
+// historicos siguen calibrando los mercados antiguos.
+
+function rowToPredictions(row) {
+  if (row.predictions_full) return row.predictions_full;
+  return {
+    winner: {
+      home: row.p_home_win,
+      draw: row.p_draw,
+      away: row.p_away_win,
+    },
+    btts:    row.p_btts,
+    bttsNo:  row.p_btts != null ? 100 - row.p_btts : null,
+    overUnder: {
+      over1_5: row.p_over_15,
+      over2_5: row.p_over_25,
+      over3_5: row.p_over_35,
+    },
+    corners: {
+      over8_5: row.p_corners_over_85,
+      over9_5: row.p_corners_over_95,
+    },
+    cards: {
+      over2_5: row.p_cards_over_25,
+      over3_5: row.p_cards_over_35,
+      over4_5: row.p_cards_over_45,
+    },
+    firstGoal: {
+      before30: row.p_first_goal_30,
+      before45: row.p_first_goal_45,
+    },
+  };
+}
+
+function rowToActuals(row) {
+  if (row.actuals_full) return row.actuals_full;
+  return {
+    result: row.actual_result,
+    goals: {
+      home:  row.actual_home_goals,
+      away:  row.actual_away_goals,
+      total: row.actual_total_goals,
+      btts:  row.actual_btts,
+    },
+    corners: { total: row.actual_corners },
+    cards:   { total: row.actual_total_cards },
+    firstGoalMinute: row.actual_first_goal_minute,
+  };
+}
+
+// ─── Isotonic regression (PAV) ────────────────────────────────────────────
+
 function isotonicPAV(points) {
   const n = points.length;
   if (n === 0) return [];
   const xs = points.map((p) => p[0]);
   const ys = points.map((p) => p[1]);
   const ws = new Array(n).fill(1);
-  // Pool adjacent violators
   let i = 0;
   while (i < n - 1) {
     if (ys[i] > ys[i + 1]) {
-      // Merge i and i+1
       const newW = ws[i] + ws[i + 1];
       const newY = (ys[i] * ws[i] + ys[i + 1] * ws[i + 1]) / newW;
       ys[i] = newY; ws[i] = newW;
       ys.splice(i + 1, 1); ws.splice(i + 1, 1); xs.splice(i + 1, 1);
-      // Step back to re-check
       if (i > 0) i--;
     } else {
       i++;
@@ -56,22 +181,17 @@ function isotonicPAV(points) {
   return xs.map((x, idx) => [x, ys[idx]]);
 }
 
-/**
- * Build calibration knots for a market: groups predictions into 5pp wide buckets and runs isotonic.
- * Bucket centers: 5, 10, 15, ..., 95. Each bucket's y = empirical hit rate (with Laplace smoothing).
- */
-function buildKnots(rows, pCol, outcomeFn) {
+function buildKnots(rows, market) {
   const buckets = {};
   for (const r of rows) {
-    const p = r[pCol];
+    const p = market.getProb(r._prob);
     if (p == null) continue;
-    // Round to nearest 5: 0, 5, 10, ..., 100
+    if (!market.gate(r._actual)) continue;
     const center = Math.round(p / 5) * 5;
     if (!buckets[center]) buckets[center] = { hits: 0, total: 0 };
     buckets[center].total++;
-    if (outcomeFn(r)) buckets[center].hits++;
+    if (market.getOutcome(r._actual)) buckets[center].hits++;
   }
-  // Convert to [x, y] points with Laplace smoothing (add 0.5 hit + 0.5 miss to soften extremes)
   const points = Object.entries(buckets)
     .map(([center, b]) => {
       const x = Number(center);
@@ -80,11 +200,9 @@ function buildKnots(rows, pCol, outcomeFn) {
     })
     .sort((a, b) => a[0] - b[0]);
 
-  // Apply isotonic regression weighted by sample size
   const isoInput = points.map(([x, y]) => [x, y]);
   const iso = isotonicPAV(isoInput);
 
-  // Anchor endpoints: ensure 0% maps to 0% and 100% maps to 100% if not already covered
   const knots = [];
   if (iso.length === 0 || iso[0][0] > 0) knots.push([0, 0]);
   for (const [x, y] of iso) knots.push([x, Math.round(y * 10) / 10]);
@@ -93,49 +211,70 @@ function buildKnots(rows, pCol, outcomeFn) {
   return { knots, samples: points.map(([x, , n]) => ({ x, n })) };
 }
 
+// ─── Main ────────────────────────────────────────────────────────────────
+
 (async () => {
-  const { data: rows, error } = await s
-    .from('match_predictions')
-    .select('*')
-    .not('finalized_at', 'is', null);
-  if (error) { console.error(error.message); process.exit(1); }
-  console.log(`\nMuestras: ${rows.length}`);
+  const { rows } = await pgPool.query(
+    `SELECT * FROM match_predictions WHERE finalized_at IS NOT NULL`
+  );
+  console.log(`\nMuestras totales finalizadas: ${rows.length}`);
+  const withFull = rows.filter(r => r.predictions_full && r.actuals_full).length;
+  console.log(`  - Con predictions_full + actuals_full: ${withFull}`);
+  console.log(`  - Legacy (solo p_* / actual_*): ${rows.length - withFull}`);
+
+  // Normalize all rows
+  for (const r of rows) {
+    r._prob = rowToPredictions(r);
+    r._actual = rowToActuals(r);
+  }
 
   const calibration = {};
   const skipped = [];
-  for (const m of MARKETS) {
-    const valid = rows.filter((r) => r[m.pCol] != null && m.gate(r));
-    const { knots, samples } = buildKnots(valid, m.pCol, m.outcome);
-    // Gate de calidad: si la dispersión es degenerada (predicciones casi
-    // todas iguales) la calibración isotónica empeora en lugar de mejorar.
-    // Requiere ≥3 buckets con ≥20 muestras para considerarse fiable.
+  let calibrated = 0;
+
+  for (const market of ALL_MARKETS) {
+    const { knots, samples } = buildKnots(rows, market);
+    // Gate de calidad: necesitamos >=3 buckets con >=20 muestras
     const goodBuckets = samples.filter(s => s.n >= 20).length;
     if (goodBuckets < 3) {
-      skipped.push({ key: m.key, n: valid.length, goodBuckets });
-      console.log(`\n  ${m.key.padEnd(14)}  n=${valid.length}  ⚠ SKIP (solo ${goodBuckets} buckets fiables)`);
+      skipped.push({ key: market.key, goodBuckets, samples: samples.length });
       continue;
     }
-    calibration[m.key] = knots;
-    console.log(`\n  ${m.key.padEnd(14)}  n=${valid.length}  knots=${knots.length}`);
-    console.log('    ', knots.map(([x, y]) => `${x}→${y}`).join('  '));
-  }
-  if (skipped.length > 0) {
-    console.log(`\n⚠ Mercados sin calibrar (datos insuficientes, se usa raw):`);
-    skipped.forEach(s => console.log(`   - ${s.key}: ${s.goodBuckets} buckets con ≥20 muestras`));
+    calibration[market.key] = knots;
+    calibrated++;
+    if (calibrated <= 30) {
+      console.log(`  ✓ ${market.key.padEnd(28)}  buckets=${goodBuckets}  knots=${knots.length}`);
+    }
   }
 
-  // Persist to app_config
+  if (calibrated > 30) {
+    console.log(`  ... y ${calibrated - 30} mercados mas calibrados`);
+  }
+
+  console.log(`\nResumen: ${calibrated} mercados calibrados, ${skipped.length} skipped por datos insuficientes`);
+
+  // Persist
   const payload = {
-    model_version: 'dc-v1.1',
+    model_version: 'dc-v1.2',  // bump: ahora incluye todos los grupos OU
     built_at: new Date().toISOString(),
     sample_size: rows.length,
     markets: calibration,
+    skipped_count: skipped.length,
   };
-  const { error: upErr } = await s.from('app_config').upsert({
-    key: 'calibration_dc_v1',
-    value: payload,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'key' });
-  if (upErr) { console.error('Persist error:', upErr.message); process.exit(1); }
-  console.log('\n✓ Calibración guardada en app_config[calibration_dc_v1]');
-})();
+
+  await pgPool.query(
+    `INSERT INTO app_config (key, value, updated_at)
+     VALUES ($1, $2::jsonb, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+    ['calibration_dc_v1', JSON.stringify(payload)]
+  );
+
+  console.log(`\n✓ Calibracion guardada en app_config[calibration_dc_v1]`);
+  console.log(`  model_version: ${payload.model_version}`);
+  console.log(`  built_at:      ${payload.built_at}`);
+
+  await pgPool.end();
+})().catch(e => {
+  console.error('FATAL:', e.message);
+  process.exit(1);
+});
