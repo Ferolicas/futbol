@@ -1006,13 +1006,13 @@ export default function Dashboard() {
 
   const apuestaDelDia = useMemo(() => {
     // Reglas:
-    //  - Solo selecciones con probabilidad ≥ 90% Y cuota real ≥ 1.20
+    //  - Solo selecciones con probabilidad ≥ 95% Y cuota real ≥ 1.20
     //  - SIN límite por partido: si un partido tiene 10 opciones que cumplen,
     //    se muestran las 10
     //  - Solo partidos próximos (NS) o en vivo — los finalizados desaparecen
     //  - Orden: NS > en vivo, dentro de cada grupo prob desc
     //  - Cap visual 95% (nunca se muestra 100% para no dar falsa certeza)
-    const MIN_PROB = 90;
+    const MIN_PROB = 95;
     const MIN_ODD  = 1.20;
     const all = [];
 

@@ -35,7 +35,7 @@ import { getAnalyzedFixtureIds, getAnalyzedMatchesFull } from '../../../../lib/s
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const MIN_PROB = 90;
+const MIN_PROB = 95;
 const MIN_ODD  = 1.20;
 const VISUAL_PROB_CAP = 95; // no mostrar nunca 100% para no dar falsa certeza
 const FINISHED_STATUSES = new Set(['FT', 'AET', 'PEN', 'AWD', 'WO', 'CANC', 'PST', 'ABD', 'SUSP']);
