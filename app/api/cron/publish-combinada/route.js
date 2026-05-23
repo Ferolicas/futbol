@@ -94,7 +94,13 @@ async function handle(request) {
         matchName:    `${data.homeTeam || '?'} vs ${data.awayTeam || '?'}`,
         homeTeam:     data.homeTeam || null,
         awayTeam:     data.awayTeam || null,
+        homeId:       data.homeId   || null,
+        awayId:       data.awayId   || null,
+        homeLogo:     data.homeLogo || null,
+        awayLogo:     data.awayLogo || null,
         league:       data.league   || null,
+        leagueId:     data.leagueId || null,
+        leagueLogo:   data.leagueLogo || null,
         kickoff:      data.kickoff  || null,
         probability:  Math.min(VISUAL_PROB_CAP, sel.probability),
       });
