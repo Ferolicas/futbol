@@ -39,7 +39,19 @@ jobs:
 
             # Diff de commits para decidir qué rebuildear
             BEFORE=$(git rev-parse HEAD 2>/dev/null || echo "")
-            git pull --ff-only
+
+            # Pull strategy: si hay cambios locales no commiteados (tipicamente
+            # package-lock.json regenerado por npm install manual), los
+            # descartamos PORQUE el deploy va a regenerar todo igualmente. Si
+            # quieres preservar cambios de develop en VPS, no los hagas en
+            # /apps/futbol — usa una copia separada.
+            #
+            # 1. Descarta cambios sin commitear en archivos rastreados.
+            # 2. Fetch + reset --hard a origin/main. Sobreescribe cualquier
+            #    commit local no pusheado (raro pero posible si testeas en VPS).
+            git fetch origin main
+            git reset --hard origin/main
+
             AFTER=$(git rev-parse HEAD)
 
             if [ "$BEFORE" = "$AFTER" ]; then
