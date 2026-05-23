@@ -144,12 +144,19 @@ function extractResult(match) {
     goalMinutes,
   };
 
+  // CRITICO: las columnas legacy (actual_result, actual_btts, actual_total_goals)
+  // alimentan la calibracion vieja y los reportes financieros. Las casas de
+  // apuestas pagan over/under y 1X2 a 90 MIN, NO incluyendo AET. Por eso aqui
+  // usamos ftHome/ftAway (score.fulltime) en vez de hGoals/aGoals (que incluyen
+  // AET cuando status='AET' o 'PEN'). Sin este fix, AET goals contaminaban el
+  // entrenamiento del modelo (over 2.5 marcaba TRUE en un 2-2 ET aunque las
+  // casas hubieran pagado UNDER 2.5).
   return {
     homeId, awayId, homeStats, awayStats,
-    hGoals, aGoals,
-    actualResult: hGoals === null ? null : hGoals > aGoals ? 'H' : hGoals < aGoals ? 'A' : 'D',
-    actualBtts:   hGoals > 0 && aGoals > 0,
-    totalGoals:   hGoals !== null ? hGoals + aGoals : null,
+    hGoals: ftHome, aGoals: ftAway,   // legacy: usar FT no goals (NO AET)
+    actualResult: ftHome === null ? null : ftHome > ftAway ? 'H' : ftHome < ftAway ? 'A' : 'D',
+    actualBtts:   ftHome > 0 && ftAway > 0,
+    totalGoals:   ftHome !== null && ftAway !== null ? ftHome + ftAway : null,
     totalCorners: hCorners + aCorners,
     hCorners, aCorners,
     totalCards,
@@ -157,7 +164,7 @@ function extractResult(match) {
     goalMinutes,
     goalScorers,
     goalEvents, cardEvents,
-    // Nuevo: payload completo para calibracion JSONB
+    // Nuevo: payload completo para calibracion JSONB (ya separa FT vs AET)
     actualsFull,
   };
 }
