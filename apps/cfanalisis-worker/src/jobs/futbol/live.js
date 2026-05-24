@@ -40,16 +40,36 @@ async function apiFetch(endpoint) {
   }
 }
 
+// Normalización de stat lookup — API-Football devuelve nombres de stat
+// inconsistentes entre ligas (ej. "Corner Kicks" vs "Corners" vs "Corner",
+// "Yellow Cards" vs "Yellowcards"). También a veces value llega como string
+// "null" (truthy con ||) o como número string "5". Normalizamos todo aquí.
+function statLookup(teamStats, ...candidates) {
+  const arr = teamStats?.statistics;
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  const norm = s => (s || '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
+  const wanted = candidates.map(norm);
+  for (const s of arr) {
+    const t = norm(s.type);
+    if (wanted.includes(t)) {
+      const v = s.value;
+      if (v === null || v === undefined || v === 'null' || v === '') return null;
+      const n = typeof v === 'number' ? v : Number(v);
+      return Number.isFinite(n) ? n : null;
+    }
+  }
+  return null;
+}
+
 function extractLiveStats(match, events, stats) {
   const homeId = match.teams.home.id;
   const awayId = match.teams.away.id;
   const homeStats = (stats || []).find(s => s.team?.id === homeId);
   const awayStats = (stats || []).find(s => s.team?.id === awayId);
 
-  const getVal = (teamStats, type) => {
-    const stat = (teamStats?.statistics || []).find(s => s.type === type);
-    return stat?.value || 0;
-  };
+  // getVal con normalización flexible + soporte de aliases que API-Football
+  // usa según liga. Si no hay dato → null (no 0). Caller hace fallback.
+  const getVal = (teamStats, ...aliases) => statLookup(teamStats, ...aliases);
 
   const goalScorers = [], cardEvents = [], missedPenalties = [];
   // Stage notif: capturamos eventos discretos que API-Football reporta en
@@ -100,16 +120,37 @@ function extractLiveStats(match, events, stats) {
     }
   }
 
-  const hCorners = getVal(homeStats, 'Corner Kicks');
-  const aCorners = getVal(awayStats, 'Corner Kicks');
-  const hYellow = getVal(homeStats, 'Yellow Cards') || cardEvents.filter(e => e.teamId === homeId && e.type === 'Yellow Card').length;
-  const aYellow = getVal(awayStats, 'Yellow Cards') || cardEvents.filter(e => e.teamId === awayId && e.type === 'Yellow Card').length;
-  const hRed = getVal(homeStats, 'Red Cards') || cardEvents.filter(e => e.teamId === homeId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
-  const aRed = getVal(awayStats, 'Red Cards') || cardEvents.filter(e => e.teamId === awayId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
-  // Stage notif: offsides — vienen de stats por equipo (no de events).
-  // Algunas ligas menores no reportan offsides; default 0.
-  const hOffsides = getVal(homeStats, 'Offsides');
-  const aOffsides = getVal(awayStats, 'Offsides');
+  // Corners: ligas exóticas (Ucrania, China, Serbia, etc.) a veces NO devuelven
+  // stats en /fixtures?live=all. Cuando getVal devuelve null, dejamos null
+  // explícito para que el caller (live.js) sepa que tiene que hacer fetch al
+  // endpoint dedicado /fixtures/statistics?fixture=X. NO usamos 0 como default
+  // porque "0 corners en el min 80" sería un dato real, mientras que null = "no
+  // sabemos". Esto distingue "API no reporta" vs "el partido realmente no tuvo".
+  const hCornersRaw = getVal(homeStats, 'Corner Kicks', 'Corners', 'Corner');
+  const aCornersRaw = getVal(awayStats, 'Corner Kicks', 'Corners', 'Corner');
+  const hCorners = hCornersRaw ?? 0;
+  const aCorners = aCornersRaw ?? 0;
+  const cornersAreReal = hCornersRaw !== null || aCornersRaw !== null;
+
+  // Cards: fallback a contar events SIEMPRE que stats no haya devuelto dato
+  // explícito. El bug previo (`getVal(...) || count`) tiraba el 0 legítimo del
+  // stat y caía al fallback, doblando el conteo. Ahora: si stat es null →
+  // fallback events; si stat es 0 → 0 (real); si stat > 0 → ese valor.
+  const yhStat = getVal(homeStats, 'Yellow Cards', 'Yellowcards');
+  const yaStat = getVal(awayStats, 'Yellow Cards', 'Yellowcards');
+  const rhStat = getVal(homeStats, 'Red Cards', 'Redcards');
+  const raStat = getVal(awayStats, 'Red Cards', 'Redcards');
+  const hYellow = yhStat ?? cardEvents.filter(e => e.teamId === homeId && e.type === 'Yellow Card').length;
+  const aYellow = yaStat ?? cardEvents.filter(e => e.teamId === awayId && e.type === 'Yellow Card').length;
+  const hRed = rhStat ?? cardEvents.filter(e => e.teamId === homeId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
+  const aRed = raStat ?? cardEvents.filter(e => e.teamId === awayId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
+
+  // Offsides: idem corners — null preserva la incertidumbre. No hay fallback
+  // por events (API-Football no expone offsides como events discretos).
+  const hOffsidesRaw = getVal(homeStats, 'Offsides', 'Offside');
+  const aOffsidesRaw = getVal(awayStats, 'Offsides', 'Offside');
+  const hOffsides = hOffsidesRaw ?? 0;
+  const aOffsides = aOffsidesRaw ?? 0;
 
   return {
     fixtureId: match.fixture.id,
@@ -118,7 +159,7 @@ function extractLiveStats(match, events, stats) {
     score: match.score,
     homeTeam: { id: homeId, name: match.teams.home.name },
     awayTeam: { id: awayId, name: match.teams.away.name },
-    corners: { home: hCorners, away: aCorners, total: hCorners + aCorners },
+    corners: { home: hCorners, away: aCorners, total: hCorners + aCorners, isReal: cornersAreReal },
     yellowCards: { home: hYellow, away: aYellow, total: hYellow + aYellow },
     redCards: { home: hRed, away: aRed, total: hRed + aRed },
     offsides: { home: hOffsides, away: aOffsides, total: hOffsides + aOffsides },
@@ -450,22 +491,48 @@ export async function runLive(_payload = {}) {
     if (elapsed < 10) return false;
     const hasStats = (m.statistics || []).length > 0;
     if (hasStats) return false;
+    // Antes: `cached?.corners?.total > 0` saltaba el fetch si HABÍA corners
+    // cacheados. Pero "corners.total === 0" en ligas exóticas es típicamente
+    // "stats no reportadas" (bug raíz). Ahora chequeamos `isReal` (flag puesta
+    // por extractLiveStats cuando los corners salieron de stats reales). Si
+    // nunca fueron reales, intentamos otra vez.
     const cached = existingLive[fid];
-    if (cached?.corners?.total > 0) return false;
+    if (cached?.corners?.isReal && cached.corners.total >= 0) return false;
     return true;
   });
 
   if (needsStatsFetch.length > 0) {
     await Promise.all(needsStatsFetch.map(async (match) => {
       const fid = match.fixture.id;
+      // Paso 1: /fixtures?id=X — devuelve el partido completo. Para la mayoría
+      // de ligas esto trae `statistics` inline. Para ligas exóticas (Ucrania
+      // 333, China 169, Serbia 286, etc.) `statistics` viene vacío incluso aquí.
       const data = await apiFetch(`/fixtures?id=${fid}`);
       apiCalls++;
-      if (data?.[0]) {
-        const full = data[0];
-        const fullData = extractLiveStats(full, full.events || [], full.statistics || []);
-        fullData.date = today;
-        liveDetailsMap[fid] = fullData;
+      let fullStats = (data?.[0]?.statistics) || [];
+      let fullEvents = (data?.[0]?.events) || (match.events || []);
+      let fullMatch = data?.[0] || match;
+
+      // Paso 2 (fallback ligas exóticas): si statistics sigue vacío, vamos al
+      // endpoint dedicado /fixtures/statistics?fixture=X que SÍ devuelve datos
+      // para esas ligas. Es la diferencia clave — el endpoint principal
+      // /fixtures incluye stats inline solo cuando la liga tiene "cobertura
+      // completa" según el plan; el endpoint dedicado los expone siempre que
+      // el proveedor de datos los tenga.
+      if (fullStats.length === 0) {
+        const dedicated = await apiFetch(`/fixtures/statistics?fixture=${fid}`);
+        apiCalls++;
+        if (Array.isArray(dedicated) && dedicated.length > 0) {
+          fullStats = dedicated;
+          console.log(`[live] stats rescue via /fixtures/statistics for fid=${fid} (${dedicated.length} teams)`);
+        } else {
+          console.log(`[live] no stats available for fid=${fid} after dedicated fetch — liga sin cobertura statistics`);
+        }
       }
+
+      const fullData = extractLiveStats(fullMatch, fullEvents, fullStats);
+      fullData.date = today;
+      liveDetailsMap[fid] = fullData;
     }));
   }
 
@@ -518,7 +585,18 @@ export async function runLive(_payload = {}) {
         const fresh = data[0];
         const freshStatus = fresh.fixture.status.short;
         if (FINISHED_STATUSES.includes(freshStatus)) {
-          const fullStats = extractLiveStats(fresh, fresh.events || [], fresh.statistics || []);
+          // Mismo fallback que en needsStatsFetch: si la respuesta principal
+          // no trae statistics (ligas exóticas), pedirlo del endpoint dedicado.
+          let statsArr = fresh.statistics || [];
+          if (statsArr.length === 0) {
+            const dedicated = await apiFetch(`/fixtures/statistics?fixture=${fid}`);
+            apiCalls++;
+            if (Array.isArray(dedicated) && dedicated.length > 0) {
+              statsArr = dedicated;
+              console.log(`[live:stale] stats rescue via /fixtures/statistics for fid=${fid}`);
+            }
+          }
+          const fullStats = extractLiveStats(fresh, fresh.events || [], statsArr);
           fullStats.date = today;
           fullStats.savedAt = new Date().toISOString();
           await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);

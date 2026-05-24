@@ -1925,7 +1925,8 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
     );
     const sels = comb?.selections || [];
     return sels
-      .filter(s => s.odd && s.odd > 1 && s.probability >= 70 && s.probability <= 95)
+      // P6: filtro 1.20 mínimo (alineado con MIN_DISPLAY_ODDS en lib/constants.js)
+      .filter(s => s.odd && s.odd >= 1.20 && s.probability >= 70 && s.probability <= 95)
       .map((s, i) => ({
         id: s.id || `mkt-${i}`,
         name: s.name,

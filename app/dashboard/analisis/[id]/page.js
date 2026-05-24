@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -1043,9 +1043,12 @@ export default function AnalisisPage() {
           ══════════════════════════════════════════ */}
           {(() => {
             if (!c || c.selections.length === 0) return null;
-            const allSels = c.selections;
+            // P6: filtro de presentación — selecciones con cuota < 1.20 NO se
+            // muestran. El backend siguió calculándolas y guardándolas en BD.
+            const allSels = c.selections.filter(s => s.odd && s.odd >= 1.20);
+            if (allSels.length === 0) return null;
             const matchName = `${a.homeTeam} vs ${a.awayTeam}`;
-            const withOdds = allSels.filter(s => s.odd && s.odd > 1);
+            const withOdds = allSels;
             const cOdd = withOdds.length >= 1 ? withOdds.reduce((acc, s) => acc * s.odd, 1) : null;
             const cProb = allSels.reduce((acc, s) => acc + s.probability, 0) / allSels.length;
             const isHighRisk = cProb < 70;
@@ -1112,7 +1115,7 @@ export default function AnalisisPage() {
                             </span>
                             <div style={{ minWidth: 0 }}>
                               <div style={{ fontWeight: 700, fontSize: '1rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sel.name}</div>
-                              {sel.odd && sel.odd > 1 && <div style={{ fontSize: '.78rem',  color: 'white' }}>Cuota: {sel.odd.toFixed(2)}</div>}
+                              {sel.odd && sel.odd >= 1.20 && <div style={{ fontSize: '.78rem',  color: 'white' }}>Cuota: {sel.odd.toFixed(2)}</div>}
                             </div>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, position: 'relative', zIndex: 1 }}>
@@ -1178,9 +1181,25 @@ export default function AnalisisPage() {
 // ══════════════════════════════════════════
 // GLASS SECTION WRAPPER
 // ══════════════════════════════════════════
-function GlassSection({ title, icon, sectionKey, collapsed, toggle, delay = 0, defaultOpen = false, children }) {
+// P8: lazy mount + keep-mounted-once-opened. Antes los children del acordeón
+// (PlayerHighlights, PerTeamSection, etc.) se montaban en el primer render
+// del padre aunque estuvieran colapsados, y se re-construían en cada
+// re-render. Ahora:
+//   - Si nunca se abrió: children NO se monta (no corre la función del
+//     componente hijo, no se hace fetch interno, no se computa nada).
+//   - Una vez abierto: children queda mounted y SOLO se oculta visualmente
+//     al cerrar. Re-abrir es instantáneo.
+//   - children está envuelto en React.memo implícitamente porque solo se
+//     re-renderiza cuando cambian sus props (no por re-render del padre).
+const GlassSection = memo(function GlassSection({ title, icon, sectionKey, collapsed, toggle, delay = 0, defaultOpen = false, children }) {
   const isCollapsed = sectionKey ? collapsed?.[sectionKey] : false;
   const handleToggle = () => { if (sectionKey && toggle) toggle(sectionKey); };
+
+  // Track si se abrió alguna vez (para lazy mount). Una vez true, se queda.
+  const [everOpened, setEverOpened] = useState(!isCollapsed || defaultOpen);
+  useEffect(() => {
+    if (!isCollapsed && !everOpened) setEverOpened(true);
+  }, [isCollapsed, everOpened]);
 
   return (
     <motion.div
@@ -1204,22 +1223,28 @@ function GlassSection({ title, icon, sectionKey, collapsed, toggle, delay = 0, d
           <span className="ap2-sec-title">{icon}{title}</span>
         </div>
       )}
-      <AnimatePresence>
-        {!isCollapsed && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: .25 }}
-            style={{ overflow: 'hidden' }}
-          >
-            {children}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Keep mounted: una vez abierto, mantiene los hijos en el DOM y
+          oculta con visibility/height. Eso evita re-montar PlayerHighlights
+          y otros pesados al re-abrir. Cierre primera vez = todavía sin
+          montar = display:none + null children. */}
+      {everOpened && (
+        <motion.div
+          initial={false}
+          animate={{
+            opacity: isCollapsed ? 0 : 1,
+            height: isCollapsed ? 0 : 'auto',
+          }}
+          transition={{ duration: .25 }}
+          style={{ overflow: 'hidden' }}
+          // aria-hidden cuando colapsado para a11y
+          aria-hidden={isCollapsed}
+        >
+          {children}
+        </motion.div>
+      )}
     </motion.div>
   );
-}
+});
 
 // ══════════════════════════════════════════
 // TEAM LOGO
@@ -1575,7 +1600,10 @@ function BajasSection({ filteredInjuries, allInjuries, homeTeam, awayTeam, onRef
 // ══════════════════════════════════════════
 // PLAYER HIGHLIGHTS
 // ══════════════════════════════════════════
-function PlayerHighlights({ highlights }) {
+// P8: memo — PlayerHighlights es uno de los componentes más pesados (parsea
+// scorers/shooters/assisters/foulers/bookers, calcula percentiles). Solo
+// re-render cuando cambia `highlights` (referencia), no en cada render padre.
+const PlayerHighlights = memo(function PlayerHighlights({ highlights }) {
   if (!highlights) return <div style={{  color: 'white', padding: 16 }}>Sin datos de jugadores</div>;
 
   const { shooters, scorers, shotsTotalists, assisters, foulers, bookers } = highlights;
@@ -1797,12 +1825,13 @@ function PlayerGroupList({ title, hint, players, metric, totalKey, unit, accentB
       })}
     </div>
   );
-}
+});
 
 // ══════════════════════════════════════════
 // PER-TEAM SECTION
 // ══════════════════════════════════════════
-function PerTeamSection({ perTeam, homeTeam, awayTeam, homeLogo, awayLogo }) {
+// P8: memo — solo re-render cuando cambia perTeam.
+const PerTeamSection = memo(function PerTeamSection({ perTeam, homeTeam, awayTeam, homeLogo, awayLogo }) {
   const thresholdLabels = {
     goals: { over05: '+0.5', over15: '+1.5', over25: '+2.5' },
     cards: { over05: '+0.5', over15: '+1.5', over25: '+2.5', over35: '+3.5' },
@@ -1847,12 +1876,13 @@ function PerTeamSection({ perTeam, homeTeam, awayTeam, homeLogo, awayLogo }) {
       {renderTeamColumn(perTeam.away, awayTeam, awayLogo, 'rgba(236,72,153,.07)', 'rgba(236,72,153,.2)')}
     </div>
   );
-}
+});
 
 // ══════════════════════════════════════════
 // GOAL TIMING SECTION
 // ══════════════════════════════════════════
-function GoalTimingSection({ goalTiming, homeTeam, awayTeam }) {
+// P8: memo — solo re-render cuando cambia goalTiming.
+const GoalTimingSection = memo(function GoalTimingSection({ goalTiming, homeTeam, awayTeam }) {
   const periods = ['0-15', '15-30', '30-45', '45-60', '60-75', '75-90'];
 
   const timingClass = (prob) => {
@@ -1953,4 +1983,4 @@ function GoalTimingSection({ goalTiming, homeTeam, awayTeam }) {
       </div>
     </div>
   );
-}
+});

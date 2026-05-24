@@ -21,6 +21,10 @@ export async function GET(request) {
   const userTimezone = searchParams.get('tz') || 'UTC';
   const todayStr = new Date().toISOString().split('T')[0];
   const date = searchParams.get('date') || todayStr;
+  // P6: min_odds — cuota mínima para selecciones devueltas. Default 1.20.
+  // Pasar min_odds=0 explícitamente para desactivar el filtro.
+  const minOddsRaw = searchParams.get('min_odds');
+  const minOdds = minOddsRaw != null ? Number(minOddsRaw) : 1.20;
 
   try {
     // ===== PHASE 1: Load fixtures (Redis -> Supabase/API) + start auth in parallel =====
@@ -506,6 +510,22 @@ export async function GET(request) {
       }
     }
 
+    // P6: filtrar selecciones de combinada con cuota < minOdds. Defensa en
+    // profundidad — el frontend también filtra, pero si por alguna razón
+    // el cliente no aplica el filtro (ej. consumidor externo de la API),
+    // el endpoint ya devuelve filtrado. min_odds=0 desactiva el filtro.
+    if (Number.isFinite(minOdds) && minOdds > 0 && analyzedData) {
+      for (const fid of Object.keys(analyzedData)) {
+        const a = analyzedData[fid];
+        if (a?.combinada?.selections && Array.isArray(a.combinada.selections)) {
+          a.combinada = {
+            ...a.combinada,
+            selections: a.combinada.selections.filter(s => s?.odd && s.odd >= minOdds),
+          };
+        }
+      }
+    }
+
     return Response.json({
       fixtures,
       fromCache,
@@ -524,6 +544,7 @@ export async function GET(request) {
         completed: batchFlag.completed || false,
         startedAt: batchFlag.startedAt || null,
       } : null,
+      minOdds,
       ...(error ? { error } : {}),
     }, {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },

@@ -667,8 +667,9 @@ function AccordionBaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }
 
   // Filtro coherente con el acordeón de fútbol: 60-95% (más laxo porque
   // baseball produce menos mercados con prob alta que fútbol).
+  // P6: cuota mínima 1.20 (alineado con MIN_DISPLAY_ODDS en lib/constants.js).
   const markets = sels
-    .filter(s => s.probability >= 60 && s.probability <= 95 && s.odd && s.odd > 1)
+    .filter(s => s.probability >= 60 && s.probability <= 95 && s.odd && s.odd >= 1.20)
     .sort((a, b) => b.probability - a.probability)
     .map(s => ({
       key: s.id,

@@ -16,21 +16,54 @@ const FINALIZE_CONCURRENCY = 10;
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 const API_HOST = 'v3.football.api-sports.io';
 
-async function fetchFixture(fid, apiKey) {
-  const res = await fetch(`https://${API_HOST}/fixtures?id=${fid}`, {
+async function apiGet(path, apiKey) {
+  const res = await fetch(`https://${API_HOST}${path}`, {
     headers: { 'x-apisports-key': apiKey },
     cache: 'no-store',
     signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) return null;
   const json = await res.json();
-  return json.response?.[0] || null;
+  return json.response || null;
 }
 
-function getStat(statsObj, name) {
-  if (!statsObj?.statistics) return null;
-  const s = statsObj.statistics.find(x => x.type === name);
-  return s?.value ?? null;
+async function fetchFixture(fid, apiKey) {
+  const resp = await apiGet(`/fixtures?id=${fid}`, apiKey);
+  const match = Array.isArray(resp) ? resp[0] : null;
+  if (!match) return null;
+
+  // Fallback ligas exóticas: si statistics viene vacío en la respuesta
+  // principal, ir al endpoint dedicado /fixtures/statistics?fixture=X que SÍ
+  // tiene corners/cards/shots para esas ligas. Crítico para que la calibración
+  // isotónica se alimente correctamente (sin esto, Ucrania/China/Serbia
+  // quedaban con corners=0 perpetuo y nunca contribuían al entrenamiento).
+  if (!Array.isArray(match.statistics) || match.statistics.length === 0) {
+    const dedicated = await apiGet(`/fixtures/statistics?fixture=${fid}`, apiKey);
+    if (Array.isArray(dedicated) && dedicated.length > 0) {
+      match.statistics = dedicated;
+      console.log(`[finalize] stats rescue via /fixtures/statistics for fid=${fid}`);
+    }
+  }
+  return match;
+}
+
+// getStat con normalización flexible — API-Football varía nombres entre ligas
+// ("Corner Kicks" vs "Corners", "Yellow Cards" vs "Yellowcards"). Si value
+// es la cadena "null" o vacía, también devolvemos null (no string truthy).
+function getStat(statsObj, ...candidates) {
+  const arr = statsObj?.statistics;
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  const norm = s => (s || '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
+  const wanted = candidates.map(norm);
+  for (const s of arr) {
+    if (wanted.includes(norm(s.type))) {
+      const v = s.value;
+      if (v === null || v === undefined || v === 'null' || v === '') return null;
+      const n = typeof v === 'number' ? v : Number(v);
+      return Number.isFinite(n) ? n : null;
+    }
+  }
+  return null;
 }
 
 function extractResult(match) {
@@ -51,13 +84,13 @@ function extractResult(match) {
   const ftHome = match.score?.fulltime?.home ?? hGoals;
   const ftAway = match.score?.fulltime?.away ?? aGoals;
 
-  const hCorners = getStat(homeStats, 'Corner Kicks') || 0;
-  const aCorners = getStat(awayStats, 'Corner Kicks') || 0;
+  const hCorners = getStat(homeStats, 'Corner Kicks', 'Corners', 'Corner') ?? 0;
+  const aCorners = getStat(awayStats, 'Corner Kicks', 'Corners', 'Corner') ?? 0;
 
-  const yh = getStat(homeStats, 'Yellow Cards');
-  const ya = getStat(awayStats, 'Yellow Cards');
-  const rh = getStat(homeStats, 'Red Cards');
-  const ra = getStat(awayStats, 'Red Cards');
+  const yh = getStat(homeStats, 'Yellow Cards', 'Yellowcards');
+  const ya = getStat(awayStats, 'Yellow Cards', 'Yellowcards');
+  const rh = getStat(homeStats, 'Red Cards', 'Redcards');
+  const ra = getStat(awayStats, 'Red Cards', 'Redcards');
   const fromStats = [yh, ya, rh, ra].some(v => v != null);
   const totalCards = fromStats
     ? (yh || 0) + (ya || 0) + (rh || 0) + (ra || 0)

@@ -181,6 +181,14 @@ function isotonicPAV(points) {
   return xs.map((x, idx) => [x, ys[idx]]);
 }
 
+// Prior para shrinkage Bayesiano hacia la identidad. Con `total < PRIOR_N` la
+// calibración apenas se desvía del raw_pct (porque no tenemos data suficiente
+// para confiar en el empírico). A medida que `total` crece, el peso de la
+// observación empírica supera al prior y la calibración converge al valor
+// real. Esto permite registrar mercados desde la PRIMERA muestra sin que un
+// solo dato (1/1 hits → 100%) distorsione la curva.
+const SHRINKAGE_PRIOR_N = 10;
+
 function buildKnots(rows, market) {
   const buckets = {};
   for (const r of rows) {
@@ -195,8 +203,12 @@ function buildKnots(rows, market) {
   const points = Object.entries(buckets)
     .map(([center, b]) => {
       const x = Number(center);
-      const smoothed = (b.hits + 0.5) / (b.total + 1);
-      return [x, smoothed * 100, b.total];
+      // Laplace smoothing: evita 0% y 100% absolutos
+      const empirical = (b.hits + 0.5) / (b.total + 1);
+      // Shrinkage hacia identidad (x/100): si n=1 → casi raw, si n=100 → casi empírico
+      const weight = b.total / (b.total + SHRINKAGE_PRIOR_N);
+      const calibrated = empirical * weight + (x / 100) * (1 - weight);
+      return [x, calibrated * 100, b.total];
     })
     .sort((a, b) => a[0] - b[0]);
 
@@ -234,16 +246,18 @@ function buildKnots(rows, market) {
 
   for (const market of ALL_MARKETS) {
     const { knots, samples } = buildKnots(rows, market);
-    // Gate de calidad: necesitamos >=3 buckets con >=20 muestras
-    const goodBuckets = samples.filter(s => s.n >= 20).length;
-    if (goodBuckets < 3) {
-      skipped.push({ key: market.key, goodBuckets, samples: samples.length });
+    // Gate mínimo: con AL MENOS 1 muestra ya calibramos (Stage P7 — usuario
+    // quiere visibilidad desde la 1ra entrada, no esperar a 20). El shrinkage
+    // hacia identidad en buildKnots evita que pocas muestras distorsionen.
+    if (samples.length < 1) {
+      skipped.push({ key: market.key, goodBuckets: 0, samples: 0 });
       continue;
     }
+    const totalSamples = samples.reduce((acc, s) => acc + s.n, 0);
     calibration[market.key] = knots;
     calibrated++;
     if (calibrated <= 30) {
-      console.log(`  ✓ ${market.key.padEnd(28)}  buckets=${goodBuckets}  knots=${knots.length}`);
+      console.log(`  ✓ ${market.key.padEnd(28)}  buckets=${samples.length}  n=${totalSamples}  knots=${knots.length}`);
     }
   }
 
