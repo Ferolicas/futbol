@@ -1715,7 +1715,7 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
                     transition={{ duration: 1.2, repeat: Infinity }}
                   >
                     <motion.span className="ap2-live-dot" animate={{ opacity: [1, .3, 1] }} transition={{ duration: 1, repeat: Infinity }} />
-                    {match.fixture.status.short === 'HT' ? 'ENTRETIEMPO' : 'EN VIVO'}
+                    {(match.fixture.status.short === 'HT' || match.fixture.status.short === 'BT') ? '' : 'EN VIVO'}
                     {match.fixture.status.elapsed > 0 && (
                       <span style={{ marginLeft: 4 }}>
                         <MatchTimer elapsed={match.fixture.status.elapsed} extra={match.fixture.status.extra} status={match.fixture.status.short} />
@@ -2030,7 +2030,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                       transition={{ duration: 1.2, repeat: Infinity }}
                     >
                       <motion.span className="ap2-live-dot" animate={{ opacity: [1, .3, 1] }} transition={{ duration: 1, repeat: Infinity }} />
-                      {match.fixture.status.short === 'HT' ? 'ENTRETIEMPO' : 'EN VIVO'}
+                      {(match.fixture.status.short === 'HT' || match.fixture.status.short === 'BT') ? '' : 'EN VIVO'}
                       {match.fixture.status.elapsed > 0 && (
                         <span style={{ marginLeft: 4 }}>
                           <MatchTimer elapsed={match.fixture.status.elapsed} extra={match.fixture.status.extra} status={match.fixture.status.short} />
@@ -2287,9 +2287,9 @@ function MatchTimer({ elapsed, extra, status }) {
   // Por eso: minuto real = elapsed + extra (ej. 90 + 3 = 93'). NO mostramos
   // "(+X)" del total decretado porque la API no lo provee separado del
   // transcurrido; mostrarlo sería inventar/duplicar el dato.
-  if (status === 'HT') return <span>Descanso</span>;
-  if (status === 'BT') return <span>Descanso ET</span>;
-  if (status === 'P')  return <span>Penales</span>;
+  if (status === 'HT') return <span>DESCANSO</span>;
+  if (status === 'BT') return <span>DESCANSO ET</span>;
+  if (status === 'P')  return <span>PENALES</span>;
 
   const base = Number(elapsed) || 0;
   const add  = Number(extra)   || 0;
