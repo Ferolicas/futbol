@@ -307,7 +307,10 @@ function buildEventBundle(fid, data, prev) {
 }
 
 async function sendBundledPushes(liveDetailsMap, existingLive) {
+  const LP = '[live:push]';
   // 1. Construir bundles por fixture (solo cuando hay deltas y baseline previa)
+  const fids = Object.keys(liveDetailsMap);
+  const withBaseline = fids.filter(fid => existingLive[fid]).length;
   const bundles = [];
   for (const [fid, data] of Object.entries(liveDetailsMap)) {
     const prev = existingLive[fid];
@@ -315,12 +318,18 @@ async function sendBundledPushes(liveDetailsMap, existingLive) {
     const bundle = buildEventBundle(fid, data, prev);
     if (bundle) bundles.push(bundle);
   }
+  console.log(`${LP} tick: fixtures=${fids.length} conBaseline=${withBaseline} bundles=${bundles.length}`);
   if (bundles.length === 0) return;
+  for (const b of bundles) {
+    console.log(`${LP} bundle fid=${b.fixtureId} "${b.title}" lineas=[${b.body.replace(/\n/g, ' | ')}]`);
+  }
 
   // 2. Cargar suscripciones + favoritos por usuario una sola vez
-  const { data: subs } = await supabaseAdmin
+  const { data: subs, error: subsErr } = await supabaseAdmin
     .from('push_subscriptions')
     .select('user_id, subscription');
+  if (subsErr) { console.error(`${LP} error leyendo push_subscriptions:`, subsErr.message || subsErr); return; }
+  console.log(`${LP} suscripciones en BD: ${subs?.length || 0}`);
   if (!subs?.length) return;
 
   const favoritesByUser = {};
@@ -332,29 +341,38 @@ async function sendBundledPushes(liveDetailsMap, existingLive) {
       .eq('user_id', row.user_id);
     favoritesByUser[row.user_id] = new Set((favRows || []).map(r => Number(r.fixture_id)));
   }));
+  for (const uid of Object.keys(favoritesByUser)) {
+    console.log(`${LP} user=${uid.slice(0, 8)} favoritos=[${[...favoritesByUser[uid]].join(',')}]`);
+  }
 
   // 3. Enviar — recolectar endpoints expirados para purga al final
   const expiredByUser = {};
+  let attempted = 0, delivered = 0, failed = 0, expiredN = 0, skippedNoFav = 0;
   for (const bundle of bundles) {
     await Promise.allSettled(subs.map(async (row) => {
       const favs = favoritesByUser[row.user_id] || new Set();
-      if (!favs.has(bundle.fixtureId)) return;
+      if (!favs.has(bundle.fixtureId)) { skippedNoFav++; return; }
 
       const deviceSubs = toSubArray(row.subscription);
       await Promise.allSettled(deviceSubs.map(async (sub) => {
         if (!sub?.endpoint) return;
+        attempted++;
         const result = await sendPushNotification(
           sub,
           { title: bundle.title, body: bundle.body, tag: bundle.tag },
           { urgency: bundle.urgent ? 'high' : 'normal' },
         );
-        if (result === 'expired') {
+        if (result === true) delivered++;
+        else if (result === 'expired') {
+          expiredN++;
           if (!expiredByUser[row.user_id]) expiredByUser[row.user_id] = new Set();
           expiredByUser[row.user_id].add(sub.endpoint);
-        }
+        } else failed++;
+        console.log(`${LP} send fid=${bundle.fixtureId} user=${row.user_id.slice(0, 8)} ep=…${String(sub.endpoint).slice(-12)} → ${result}`);
       }));
     }));
   }
+  console.log(`${LP} resumen: intentos=${attempted} ok=${delivered} fallo=${failed} expirados=${expiredN} sinFav(skip)=${skippedNoFav}`);
 
   // 4. Purga atómica de endpoints expirados
   const usersWithExpired = Object.keys(expiredByUser);

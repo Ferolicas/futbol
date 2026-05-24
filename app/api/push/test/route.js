@@ -18,11 +18,15 @@ export async function POST() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  // Env sanity check first — easiest failure to diagnose
+  // Env sanity check first — easiest failure to diagnose. OJO: este check
+  // mira el env del proceso Next (sitio principal). El cron live corre en el
+  // worker, que es otro proceso PM2 con su propio env. Si test funciona pero
+  // el cron no envía nada, lo más probable es que el WORKER no tenga las
+  // VAPID en su env (ver `pm2 logs cfanalisis-worker | grep VAPID`).
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
     return Response.json({
       ok: false,
-      reason: 'VAPID keys missing on the server. Set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY in Vercel.',
+      reason: 'VAPID keys missing en el env del proceso Next. Añadelas a /apps/futbol/.env y reinicia pm2 (sitio + worker).',
     }, { status: 500 });
   }
 

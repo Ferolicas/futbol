@@ -1,4 +1,20 @@
-import 'dotenv/config';
+// Cargar .env del REPO RAÍZ explícitamente (no depender del cwd).
+// El worker vive en /apps/futbol/apps/cfanalisis-worker pero el .env con
+// VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY/DATABASE_URL/etc está en /apps/futbol.
+// Con cwd=worker dir, `import 'dotenv/config'` cargaría el .env LOCAL del
+// worker (que puede no tener las VAPID) → web-push silenciosamente no enviaba.
+// Resolvemos la ruta desde el archivo, así da igual el cwd.
+import { config as dotenvConfig } from 'dotenv';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// src/index.ts → /apps/futbol (subir 4 niveles desde dist/src/ tras tsc, o
+// 3 desde src/ en tsx watch — probamos ambos, dotenv ignora archivos ausentes).
+const repoRoot = resolve(__dirname, '../../../..');
+const workerRoot = resolve(__dirname, '../..');
+dotenvConfig({ path: resolve(workerRoot, '.env') });   // por si tiene overrides locales
+dotenvConfig({ path: resolve(repoRoot, '.env'), override: false });
+
 // logger primero — los modulos siguientes pueden usarlo en su top-level.
 import { logger } from './logger.js';
 import { notifyError } from './notifier.js';
@@ -11,6 +27,17 @@ import { queues } from './queues.js';
 const PORT = Number(process.env.PORT || 8080);
 
 async function main() {
+  // Diagnóstico explícito de env críticos al arranque — sale en pm2 logs:
+  const vapidPubLen = (process.env.VAPID_PUBLIC_KEY || '').length;
+  const vapidPrivLen = (process.env.VAPID_PRIVATE_KEY || '').length;
+  logger.info({
+    repoRoot, workerRoot, cwd: process.cwd(),
+    VAPID_PUBLIC_KEY: vapidPubLen ? `len=${vapidPubLen}` : 'MISSING',
+    VAPID_PRIVATE_KEY: vapidPrivLen ? `len=${vapidPrivLen}` : 'MISSING',
+    DATABASE_URL: process.env.DATABASE_URL ? 'set' : 'MISSING',
+    FOOTBALL_API_KEY: process.env.FOOTBALL_API_KEY ? 'set' : 'MISSING',
+  }, 'env diagnóstico al arranque');
+
   // Start HTTP enqueue server
   const app = buildServer();
   await app.listen({ port: PORT, host: '0.0.0.0' });
