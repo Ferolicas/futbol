@@ -38,7 +38,18 @@ export async function POST(request) {
     user_id: user.id,
     subscription: updatedArray,
   }, { onConflict: 'user_id' });
-  if (error) console.error('[push:subscribe]', error.message);
+
+  // Antes devolvía success:true aunque el guardado fallara (solo log) → el
+  // frontend creía estar suscrito pero la fila nunca se escribía y no llegaban
+  // notificaciones. Ahora si el upsert falla, devolvemos 500 para que el
+  // cliente lo sepa y muestre el error.
+  if (error) {
+    console.error('[push:subscribe]', error.message);
+    return Response.json(
+      { error: 'No se pudo guardar la suscripción', detail: error.message },
+      { status: 500 },
+    );
+  }
 
   return Response.json({ success: true, deviceCount: updatedArray.length });
 }
