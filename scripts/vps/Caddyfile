@@ -1,8 +1,58 @@
-# /etc/caddy/Caddyfile — cfanalisis worker
+# /etc/caddy/Caddyfile — cfanalisis (sitio principal + worker)
 #
-# Caddy maneja Let's Encrypt automaticamente. Pre-requisito: que
-# worker.cfanalisis.com apunte ya por DNS a la IP del VPS antes de
-# arrancar el servicio.
+# Caddy maneja Let's Encrypt automaticamente. Pre-requisito: que los
+# subdominios apunten ya por DNS a la IP del VPS antes de arrancar el servicio.
+
+# ════════════════════════════════════════════════════════════════════════════
+# SITIO PRINCIPAL — Next.js standalone en localhost:3000
+# ════════════════════════════════════════════════════════════════════════════
+cfanalisis.com, www.cfanalisis.com {
+    log {
+        output file /var/log/caddy/cfanalisis.log {
+            roll_size 10MB
+            roll_keep 10
+        }
+        format json
+    }
+
+    encode gzip zstd
+
+    # ── Estáticos servidos por Caddy DIRECTAMENTE (sin pasar por Node) ──
+    # El standalone de Next.js no estaba sirviendo /public de forma fiable
+    # (logo.png, Bet365-Logo.png, sw.js, manifest.json, icons, fonts daban
+    # 404 tras cada deploy). En este setup (Caddy = reverse_proxy puro a
+    # :3000) lo correcto es que Caddy sirva los estáticos él mismo.
+    #
+    # El matcher `file` aplica SOLO si el archivo existe físicamente en
+    # /apps/futbol/public. Todo lo demás —rutas de la app, /_next/*, /api/*—
+    # NO matchea y cae al reverse_proxy. Así no interfiere con los assets
+    # propios de Next (/_next/static/*) que sí sirve el server de Node.
+    root * /apps/futbol/public
+    @static file
+    handle @static {
+        file_server
+    }
+
+    # ── Resto → Next.js standalone ──
+    handle {
+        reverse_proxy localhost:3000 {
+            header_up X-Real-IP         {remote_host}
+            header_up X-Forwarded-For   {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    header {
+        Strict-Transport-Security "max-age=15552000; includeSubDomains"
+        X-Content-Type-Options    "nosniff"
+        X-Frame-Options           "SAMEORIGIN"
+        Referrer-Policy           "strict-origin-when-cross-origin"
+    }
+}
+
+# ════════════════════════════════════════════════════════════════════════════
+# WORKER — WebSocket + endpoints internos en localhost:8080
+# ════════════════════════════════════════════════════════════════════════════
 
 worker.cfanalisis.com {
     log {
