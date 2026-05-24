@@ -2277,22 +2277,20 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
 function MatchTimer({ elapsed, extra, status }) {
   // Minuto EXACTO de API-Football, sin interpolación ni offset local.
   //   - fixture.status.elapsed = minuto base (45/90/120).
-  //   - fixture.status.extra   = minutos de tiempo añadido que reporta la API.
+  //   - fixture.status.extra   = minutos de adición TRANSCURRIDOS (va 1,2,3...),
+  //     NO el total decretado por el árbitro. API-Football no expone el total
+  //     decretado en ningún campo, así que no se puede mostrar "(+5)" sin
+  //     inventarlo.
   //
-  // Notación de fútbol estándar: "90+7'" muestra el minuto base Y el tiempo
-  // añadido por separado (que es justo lo que el usuario quiere VER). Sumarlo
-  // a "97'" escondía el "+7". Cuando no hay añadido, solo el minuto: "67'".
+  // Minuto real en curso = elapsed + extra (ej. 90 + 1 = 91'). Cuando no hay
+  // adición, solo el minuto base (67').
   if (status === 'HT') return <span>DESCANSO</span>;
   if (status === 'BT') return <span>DESCANSO ET</span>;
   if (status === 'P')  return <span>PENALES</span>;
 
   const base = Number(elapsed) || 0;
   const add  = Number(extra)   || 0;
-
-  if ((status === '1H' || status === '2H' || status === 'ET') && add > 0) {
-    return <span>{base}+{add}&apos;</span>;   // ej. 90+7'
-  }
-  return <span>{base}&apos;</span>;
+  return <span>{base + add}&apos;</span>;   // 91' en 90+1, 47' en 45+2
 }
 
 function LiveStatsBar({ stats }) {
