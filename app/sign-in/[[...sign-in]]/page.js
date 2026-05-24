@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getSupabaseBrowserClient } from '../../../lib/supabase-client';
 
 export default function SignInPage() {
   const router = useRouter();
@@ -12,21 +11,36 @@ export default function SignInPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Auth nativo PG: POST a /api/auth/login (setea cookie httpOnly JWT).
+  // Antes: supabase.auth.signInWithPassword en el browser.
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
-    const supabase = getSupabaseBrowserClient();
-    const { data: { user }, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json().catch(() => ({}));
 
-    if (authError) {
+      if (!res.ok) {
+        setLoading(false);
+        if (data.needsReset) {
+          setError('Tu cuenta fue migrada. Usa "¿Olvidaste tu contraseña?" para crear una nueva.');
+        } else {
+          setError(data.error || 'Email o contraseña incorrectos');
+        }
+        return;
+      }
+
+      router.replace('/dashboard');
+    } catch {
       setLoading(false);
-      setError('Email o contraseña incorrectos');
-      return;
+      setError('Error de red. Intenta de nuevo.');
     }
-
-    router.replace('/dashboard');
   };
 
   return (

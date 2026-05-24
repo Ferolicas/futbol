@@ -1,5 +1,14 @@
-import { supabaseAdmin } from '../../../../lib/supabase';
+// Reset password — auth nativo PG VPS (Fase 2.5 cerrada).
+// El token de reset lo genera forgot-password en Redis (pwd-reset:{token}).
+// Aquí validamos el token y escribimos el hash bcrypt directo en la tabla
+// `users` del VPS (antes: supabaseAdmin.auth.admin.updateUserById).
+import bcrypt from 'bcryptjs';
+import { pgQuery } from '../../../../lib/db';
 import { redisGet, redisDel } from '../../../../lib/redis';
+
+export const dynamic = 'force-dynamic';
+
+const BCRYPT_ROUNDS = 10;
 
 export async function POST(request) {
   try {
@@ -12,20 +21,28 @@ export async function POST(request) {
       return Response.json({ error: 'La contrasena debe tener al menos 6 caracteres' }, { status: 400 });
     }
 
-    // Look up token in Redis
+    // Token en Redis (puesto por forgot-password con TTL 1h)
     const tokenData = await redisGet(`pwd-reset:${token}`);
-    if (!tokenData) {
+    if (!tokenData?.userId) {
       return Response.json({ error: 'Enlace invalido o expirado' }, { status: 400 });
     }
 
-    // Update password via Supabase Auth (Supabase handles hashing)
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(tokenData.userId, { password });
-    if (error) {
-      console.error('[ResetPassword] updateUser:', error.message);
-      return Response.json({ error: 'Error al actualizar la contrasena' }, { status: 500 });
-    }
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-    // Delete used token
+    // Escribir hash en users + resetear lockout. Revocar todas las sesiones
+    // para forzar re-login en todos los dispositivos.
+    await pgQuery(
+      `UPDATE users SET
+         password_hash = $1,
+         failed_login_attempts = 0,
+         locked_until = NULL,
+         password_reset_token = NULL,
+         password_reset_expires = NULL
+       WHERE id = $2`,
+      [passwordHash, tokenData.userId],
+    );
+    await pgQuery('DELETE FROM auth_sessions WHERE user_id = $1', [tokenData.userId]).catch(() => {});
+
     await redisDel(`pwd-reset:${token}`);
 
     return Response.json({ success: true });

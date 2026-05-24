@@ -1,5 +1,11 @@
+// Registro de usuario — auth nativo PG VPS (Fase 2.5 cerrada).
+// Antes usaba supabaseAdmin.auth.admin.createUser. Ahora signupUser de
+// lib/auth-pg.js: bcrypt + tabla `users` + sesión inmediata (cookie JWT).
+import { signupUser } from '../../../lib/auth-pg';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { sendWelcomeEmail } from '../../../lib/zeptomail';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
   try {
@@ -13,26 +19,26 @@ export async function POST(request) {
     }
 
     const emailLower = email.toLowerCase().trim();
+    const ua = request.headers.get('user-agent') || null;
+    const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null;
 
-    // Create Supabase Auth user (handles password hashing)
-    const { data, error } = await supabaseAdmin.auth.admin.createUser({
-      email: emailLower,
-      password,
-      email_confirm: true,
-      user_metadata: { name: name.trim(), country: country || 'unknown' },
+    // signupUser: crea users + user_profiles minimal + sesión (setea cookie).
+    const result = await signupUser(emailLower, password, {
+      displayName: name.trim(),
+      userAgent: ua,
+      ip,
     });
 
-    if (error) {
-      if (error.message?.includes('already been registered') || error.message?.includes('already registered')) {
+    if (result.error) {
+      if (result.error.code === 'EMAIL_TAKEN') {
         return Response.json({ error: 'Este email ya esta registrado' }, { status: 409 });
       }
-      console.error('[Register] createUser:', error.message);
-      return Response.json({ error: 'Error al registrar usuario' }, { status: 500 });
+      return Response.json({ error: result.error.message || 'Error al registrar usuario' }, { status: 400 });
     }
 
-    const userId = data.user.id;
+    const userId = result.user.id;
 
-    // Create user profile
+    // Completar el perfil con country/plan (signupUser crea el perfil minimal).
     const { error: profileErr } = await supabaseAdmin.from('user_profiles').upsert({
       id: userId,
       email: emailLower,
@@ -45,7 +51,8 @@ export async function POST(request) {
     }, { onConflict: 'id' });
     if (profileErr) console.error('[Register] profile:', profileErr.message);
 
-    // Send welcome email (fire and forget)
+    // Welcome email (fire and forget). NO incluir password en claro en el email
+    // ya no es necesario — el usuario la eligió. Mantenemos compat con la firma.
     sendWelcomeEmail({ to: emailLower, name: name.trim(), password }).catch((e) =>
       console.error('[Register] Welcome email failed:', e.message)
     );

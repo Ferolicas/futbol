@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getSupabaseBrowserClient } from '../../../lib/supabase-client';
 
 export default function SignUpPage() {
   const router = useRouter();
@@ -13,19 +12,21 @@ export default function SignUpPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Auth nativo PG: /api/register (signupUser) ya crea la sesión y setea la
+  // cookie. No hace falta un segundo signInWithPassword. Antes el auto-login
+  // se hacía con el browser client de Supabase.
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
     try {
-      // Register via API (creates Supabase Auth user + profile)
       const res = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, password }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         setError(data.error || 'Error al registrarse');
@@ -33,16 +34,8 @@ export default function SignUpPage() {
         return;
       }
 
-      // Auto sign in after register
-      const supabase = getSupabaseBrowserClient();
-      const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
-
-      if (authError) {
-        setError('Registro exitoso. Inicia sesion.');
-        router.push('/sign-in');
-      } else {
-        router.replace('/planes');
-      }
+      // Sesión ya creada por signupUser → ir directo a planes.
+      router.replace('/planes');
     } catch {
       setError('Error al registrarse. Intenta de nuevo.');
       setLoading(false);

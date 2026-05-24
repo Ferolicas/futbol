@@ -1,16 +1,44 @@
-import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
+import { jwtVerify } from 'jose';
 import { rateLimiters, RATE_LIMIT_MESSAGE } from './lib/ratelimit';
 
 /**
  * Middleware — dos responsabilidades:
- *   1. Refrescar la sesion Supabase + bloqueo de paginas protegidas sin sesion
- *   2. Rate limiting de /api/* via Upstash RateLimit
+ *   1. Validar la sesión PG (cookie JWT cf_session) + bloqueo de páginas
+ *      protegidas sin sesión.
+ *   2. Rate limiting de /api/* (in-memory, ver lib/ratelimit.js).
+ *
+ * Auth nativo PG (Fase 2.5): la cookie cf_session es un JWT HS256 firmado
+ * con AUTH_JWT_SECRET. Lo verificamos aquí con `jose` (Edge-compatible) SIN
+ * tocar la BD — solo validamos firma + expiry. La validación de que la
+ * sesión sigue viva en auth_sessions (revocación) la hacen los layouts/rutas
+ * vía getCurrentUser(), que sí corren en Node y pueden hablar con el VPS PG.
  *
  * Los checks de plan activo y rol admin se hacen en los layouts
- * (`app/dashboard/layout.js`, `app/admin/layout.js`) — Edge runtime no
- * puede hablar con el VPS Postgres por TCP, ver commit c6fbdda.
+ * (`app/dashboard/layout.js`, `app/admin/layout.js`).
  */
+
+const COOKIE_NAME = 'cf_session';
+
+function getJwtSecret() {
+  const raw = process.env.AUTH_JWT_SECRET || process.env.NEXTAUTH_SECRET;
+  if (!raw || raw.length < 32) return null;
+  return new TextEncoder().encode(raw);
+}
+
+// Verifica el JWT de sesión (firma + expiry). Devuelve el payload {uid,sid}
+// o null. NO consulta la BD — Edge runtime no puede hablar con el VPS PG.
+async function verifySessionToken(token) {
+  if (!token) return null;
+  const secret = getJwtSecret();
+  if (!secret) return null;
+  try {
+    const { payload } = await jwtVerify(token, secret, { algorithms: ['HS256'] });
+    return payload;
+  } catch {
+    return null;
+  }
+}
 
 const isApiPath = (p) => p.startsWith('/api/');
 
@@ -55,15 +83,12 @@ function rateLimitedResponse(reset) {
 }
 
 export async function middleware(request) {
-  let supabaseResponse = NextResponse.next({ request });
-
   const { pathname } = request.nextUrl;
   const bucket = pickBucket(pathname);
 
-  // ── Rate limiting (antes de auth para no malgastar la query a Supabase) ──
-  // Para el bucket 'admin' (scope: 'user') necesitamos identificar al user,
-  // asi que diferimos la decision hasta DESPUES de getUser(). Para el resto
-  // (scope: 'ip') resolvemos ya con la IP del request.
+  // ── Rate limiting (antes de auth) ──
+  // Para 'admin' (scope: 'user') diferimos hasta saber el user. Para el resto
+  // (scope: 'ip') resolvemos ya con la IP.
   let ipRateLimitDone = false;
   if (bucket && bucket.scope === 'ip' && rateLimiters[bucket.name]) {
     const ip = clientIp(request);
@@ -72,44 +97,28 @@ export async function middleware(request) {
     if (!r.success) return rateLimitedResponse(r.reset);
   }
 
-  // ── Refresh de sesion Supabase ──
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    {
-      cookies: {
-        getAll() { return request.cookies.getAll(); },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          supabaseResponse = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
-  const { data: { user } } = await supabase.auth.getUser();
+  // ── Validar sesión PG (cookie JWT) — solo firma + expiry, sin DB ──
+  const token = request.cookies.get(COOKIE_NAME)?.value || null;
+  const payload = await verifySessionToken(token);
+  const userId = payload?.uid || null;
 
-  // ── Rate limit scope: 'user' (admin/ferney) — ahora que sabemos quien es ──
+  // ── Rate limit scope: 'user' (admin/ferney) ──
   if (!ipRateLimitDone && bucket && bucket.scope === 'user' && rateLimiters[bucket.name]) {
-    // Si no hay user, caemos a IP como identifier — es la actitud conservadora:
-    // un actor sin sesion no debe poder reventar /api/admin/* con anonymous keys.
-    const id = user?.id || `ip:${clientIp(request)}`;
+    const id = userId || `ip:${clientIp(request)}`;
     const r = await rateLimiters[bucket.name].limit(id);
     if (!r.success) return rateLimitedResponse(r.reset);
   }
 
-  // ── Bloqueo de paginas protegidas sin sesion ──
+  // ── Bloqueo de páginas protegidas sin sesión ──
   const protectedPaths = ['/dashboard', '/admin', '/ferney'];
   const needsAuth = protectedPaths.some(p => pathname.startsWith(p));
-  if (needsAuth && !user) {
+  if (needsAuth && !userId) {
     const url = request.nextUrl.clone();
     url.pathname = '/sign-in';
     return NextResponse.redirect(url);
   }
 
-  return supabaseResponse;
+  return NextResponse.next();
 }
 
 export const config = {
