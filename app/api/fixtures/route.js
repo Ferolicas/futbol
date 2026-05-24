@@ -176,6 +176,35 @@ export async function GET(request) {
       fixtures = filterFixturesByLocalDate(fixtures, date, userTimezone);
     }
 
+    // ── Cross-midnight live (bug #3) ──────────────────────────────────────
+    // Un partido que arrancó ayer ~23:00 y sigue EN VIVO a las 00:05 de hoy
+    // queda indexado por su fecha de inicio (ayer) y el filtro por fecha local
+    // lo descarta de la vista de "hoy". Aquí reincorporamos cualquier partido
+    // del día anterior que esté actualmente en juego, sin importar su kickoff.
+    // Cuando finalice (status FT/AET/PEN) deja de ser "live" y vuelve solo a su
+    // fecha real. Solo aplica a la VISTA del cliente (no toca la BD) y solo en
+    // días no-pasados (un día pasado nunca debe arrastrar lives de su víspera).
+    if (!isPastDate) {
+      const LIVE_NOW = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
+      const d = new Date(date + 'T12:00:00Z');
+      const prevDay = new Date(d.getTime() - 86400000).toISOString().split('T')[0];
+      const idsNow = new Set(fixtures.map(f => f.fixture?.id));
+      try {
+        const prevFixtures = await redisGet(KEYS.fixtures(prevDay));
+        if (Array.isArray(prevFixtures)) {
+          for (const f of prevFixtures) {
+            if (LIVE_NOW.includes(f.fixture?.status?.short) &&
+                f.fixture?.id && !idsNow.has(f.fixture.id)) {
+              fixtures.push(f);
+              idsNow.add(f.fixture.id);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[fixtures] cross-midnight live scan failed:', e.message);
+      }
+    }
+
     // ===== PHASE 2: Parallel middle section =====
     const fixtureIds = fixtures.map(f => f.fixture.id);
     const leagueIds = fixtures.length > 0

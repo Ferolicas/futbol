@@ -2275,48 +2275,23 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
 /* ======================== LIVE STATS COMPONENTS ======================== */
 
 function MatchTimer({ elapsed, extra, status }) {
-  const [localElapsed, setLocalElapsed] = useState(elapsed || 0);
-  const [seconds, setSeconds] = useState(0);
-  // Tracks the highest minute accepted — prevents backwards jumps when API
-  // keeps returning elapsed:90 while the local counter has advanced past it
-  const maxElapsedRef = useRef(elapsed || 0);
-
-  useEffect(() => {
-    const newElapsed = elapsed || 0;
-    // Only advance if the API sends a strictly higher minute
-    if (newElapsed > maxElapsedRef.current) {
-      maxElapsedRef.current = newElapsed;
-      setLocalElapsed(newElapsed);
-      setSeconds(0);
-    }
-
-    if (status !== '1H' && status !== '2H' && status !== 'ET') return;
-
-    const interval = setInterval(() => {
-      setSeconds(prev => {
-        if (prev >= 59) {
-          maxElapsedRef.current += 1;
-          setLocalElapsed(m => m + 1);
-          return 0;
-        }
-        return prev + 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [status, elapsed]);
-
-  if (status === 'HT') return <span>ET</span>;
+  // Mostramos el minuto EXACTO que devuelve API-Football (fixture.status.elapsed)
+  // sin interpolación local ni offset. La versión anterior llevaba un contador
+  // MM:SS propio que se desincronizaba del reloj real del partido (iba ~2 min
+  // desfasado) y además pisaba el tiempo añadido. Ahora: elapsed directo, y
+  // "elapsed+extra" cuando la API reporta minutos de adición (status.extra).
+  if (status === 'HT') return <span>Descanso</span>;
   if (status === 'BT') return <span>Descanso ET</span>;
-  if (status === 'P') return <span>Penales</span>;
+  if (status === 'P')  return <span>Penales</span>;
 
-  // Si la API reporta extra (tiempo añadido: 45+2, 90+5...), lo mostramos
-  // como "45+2" usando el elapsed RAW de la API — NO el localElapsed que
-  // sigue avanzando por su cuenta y haria que mostremos "47+2" en lugar
-  // de "45+2". Cuando extra > 0, confiamos en API > localElapsed.
-  const showExtra = (status === '1H' || status === '2H' || status === 'ET') && extra > 0;
-  if (showExtra) return <span>{elapsed}+{extra}&apos;</span>;
+  const base = Number(elapsed) || 0;
+  const add  = Number(extra)   || 0;
 
-  return <span>{localElapsed}:{String(seconds).padStart(2, '0')}</span>;
+  // Tiempo añadido (45+2, 90+5, ET 90+X) — solo en fases con reloj corriendo.
+  if ((status === '1H' || status === '2H' || status === 'ET') && add > 0) {
+    return <span>{base}+{add}&apos;</span>;
+  }
+  return <span>{base}&apos;</span>;
 }
 
 function LiveStatsBar({ stats }) {
