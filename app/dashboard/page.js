@@ -1650,7 +1650,7 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '.82rem', fontWeight: 600, color: '#f1f5f9' }}>
             {match.league.logo
-              ? <img src={match.league.logo} alt={match.league.name} title={match.league.name} style={{ width: 72, height: 72, objectFit: 'contain' }} />
+              ? <img src={match.league.logo} alt={match.league.name} title={match.league.name} className="league-logo" />
               : <span>{flag} {match.league.name}</span>}
           </div>
           <span style={{ fontSize: '.75rem', color: 'rgba(255,255,255,.6)', textTransform: 'capitalize' }}>{cardDate}</span>
@@ -1660,7 +1660,7 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px 12px' }}>
           {/* Local — order 1 */}
           <div style={{ order: 1, flex: 1, minWidth: 0 }}>
-            <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} size={144} />
+            <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} size={36} />
             <div style={{ fontSize: 'clamp(.9rem, 3vw, 1.25rem)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4, color: '#f1f5f9' }}>
               {match.teams.home.name}
             </div>
@@ -1688,7 +1688,7 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
           {/* Visitante — order 2 */}
           <div style={{ order: 2, flex: 1, minWidth: 0, textAlign: 'right' }}>
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} size={144} />
+              <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} size={36} />
             </div>
             <div style={{ fontSize: 'clamp(.9rem, 3vw, 1.25rem)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4, color: '#f1f5f9' }}>
               {match.teams.away.name}
@@ -1951,7 +1951,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
           {/* ── Fila 1: Liga + Fecha ── */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '.82rem', fontWeight: 600, color: '#f1f5f9' }}>
-              {match.league.logo && <img src={match.league.logo} alt="" style={{ width: 36, height: 36, objectFit: 'contain' }} />}
+              {match.league.logo && <img src={match.league.logo} alt="" className="league-logo" />}
               <span>{flag} {match.league.name}</span>
             </div>
             <span style={{ fontSize: '.75rem', color: 'rgba(255,255,255,.6)', textTransform: 'capitalize' }}>{cardDate}</span>
@@ -1961,7 +1961,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px 12px' }}>
             {/* Local */}
             <div style={{ order: 1, flex: 1, minWidth: 0 }}>
-              <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} size={144} />
+              <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} size={36} />
               <div style={{ fontSize: 'clamp(.9rem, 3vw, 1.25rem)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4, color: '#f1f5f9' }}>
                 {match.teams.home.name}
               </div>
@@ -2003,7 +2003,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
             {/* Visitante */}
             <div style={{ order: 2, flex: 1, minWidth: 0, textAlign: 'right' }}>
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} size={144} />
+                <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} size={36} />
               </div>
               <div style={{ fontSize: 'clamp(.9rem, 3vw, 1.25rem)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4, color: '#f1f5f9' }}>
                 {match.teams.away.name}
@@ -2659,7 +2659,7 @@ function Last5Block({ homeLastFive, awayLastFive, homeName, awayName, homeLogo, 
   const renderTeam = (matches, teamName, teamLogo) => (
     <div className="l5-team">
       <div className="l5-team-header">
-        <TeamLogo src={teamLogo} name={teamName} size={72} />
+        <TeamLogo src={teamLogo} name={teamName} size={32} />
         <span className="l5-team-name">{teamName}</span>
       </div>
       {matches.map((m, i) => (
@@ -2915,7 +2915,10 @@ function TeamLogo({ src, name, size = 96 }) {
       </div>
     );
   }
-  return <img src={src} alt={name} width={size} height={size} className="team-crest" onError={() => setErr(true)} />;
+  // Inline width/height para que el prop `size` mande sobre la regla CSS
+  // .team-crest{width:24px} (la clase ganaba al atributo HTML y aplastaba
+  // todos los escudos a 24px, invirtiendo la jerarquía vs logos de liga).
+  return <img src={src} alt={name} className="team-crest" style={{ width: size, height: size, objectFit: 'contain', flexShrink: 0 }} onError={() => setErr(true)} />;
 }
 
 function getMinOdd(fixture, analyzedOdds) {

@@ -83,9 +83,18 @@ jobs:
 
               # Next.js standalone requiere copiar public + static manualmente
               # (no los incluye en .next/standalone/).
-              cp -r public .next/standalone/
+              #
+              # IMPORTANTE: usar destino EXPLICITO + rm -rf previo. El patron
+              # viejo `cp -r public .next/standalone/` ANIDABA en cada deploy
+              # repetido: si .next/standalone/public ya existia (next build no
+              # la borra porque no la genera el), cp copiaba DENTRO creando
+              # .next/standalone/public/public/ → /logo.png y /Bet365-Logo.png
+              # daban 404. Con destino explicito + rm previo es idempotente.
+              rm -rf .next/standalone/public
+              cp -r public .next/standalone/public
+              rm -rf .next/standalone/.next/static
               mkdir -p .next/standalone/.next
-              cp -r .next/static .next/standalone/.next/
+              cp -r .next/static .next/standalone/.next/static
 
               # Reload pm2 con env del .env recargado (sin downtime)
               pm2 reload cfanalisis-web --update-env

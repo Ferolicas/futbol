@@ -769,6 +769,11 @@ body {
 
 /* ===================== TEAM LOGO ===================== */
 .team-crest { width: 24px; height: 24px; object-fit: contain; flex-shrink: 0; }
+
+/* ===================== LEAGUE LOGO =====================
+   Jerarquía visual uniforme: logos de LIGA siempre 22px (subordinados),
+   logos de EQUIPO 32-40px (prominentes). Ver TeamLogo (size inline). */
+.league-logo { width: 22px; height: 22px; object-fit: contain; flex-shrink: 0; }
 .team-logo-fallback {
   display: flex; align-items: center; justify-content: center;
   border-radius: 50%;

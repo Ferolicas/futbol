@@ -405,7 +405,7 @@ export default function AnalisisPage() {
                   animate={{ x: [0, 4, 0] }}
                   transition={{ duration: 2, repeat: Infinity }}
                 >
-                  {a.leagueLogo && <img src={a.leagueLogo} alt="" style={{ width: 20, height: 20, objectFit: 'contain' }} />}
+                  {a.leagueLogo && <img src={a.leagueLogo} alt="" className="league-logo" />}
                   <Trophy size={16} style={{ color: '#fbbf24', flexShrink: 0 }} />
                   <span>{a.league}</span>
                 </motion.div>
