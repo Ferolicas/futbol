@@ -2275,23 +2275,27 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
 /* ======================== LIVE STATS COMPONENTS ======================== */
 
 function MatchTimer({ elapsed, extra, status }) {
-  // Mostramos el minuto EXACTO que devuelve API-Football (fixture.status.elapsed)
-  // sin interpolación local ni offset. La versión anterior llevaba un contador
-  // MM:SS propio que se desincronizaba del reloj real del partido (iba ~2 min
-  // desfasado) y además pisaba el tiempo añadido. Ahora: elapsed directo, y
-  // "elapsed+extra" cuando la API reporta minutos de adición (status.extra).
+  // Minuto EXACTO de API-Football, sin interpolación ni offset local.
+  //
+  // Semántica de la API:
+  //   - fixture.status.elapsed = minuto base (1..90/120).
+  //   - fixture.status.extra   = minutos TRANSCURRIDOS dentro del tiempo
+  //     añadido (sube 1,2,3... conforme avanza la adición). NO es el total
+  //     decretado por el árbitro (el "+5" del tablero) — la API no expone ese
+  //     dato en ningún campo.
+  //
+  // Por eso: minuto real = elapsed + extra (ej. 90 + 3 = 93'). NO mostramos
+  // "(+X)" del total decretado porque la API no lo provee separado del
+  // transcurrido; mostrarlo sería inventar/duplicar el dato.
   if (status === 'HT') return <span>Descanso</span>;
   if (status === 'BT') return <span>Descanso ET</span>;
   if (status === 'P')  return <span>Penales</span>;
 
   const base = Number(elapsed) || 0;
   const add  = Number(extra)   || 0;
+  const minute = base + add;   // 93' en 90+3, 47' en 45+2, etc.
 
-  // Tiempo añadido (45+2, 90+5, ET 90+X) — solo en fases con reloj corriendo.
-  if ((status === '1H' || status === '2H' || status === 'ET') && add > 0) {
-    return <span>{base}+{add}&apos;</span>;
-  }
-  return <span>{base}&apos;</span>;
+  return <span>{minute}&apos;</span>;
 }
 
 function LiveStatsBar({ stats }) {
