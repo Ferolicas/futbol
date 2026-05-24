@@ -595,45 +595,9 @@ export default function Dashboard() {
     }
   }, [pushSupported]);
 
-  const handlePushToggle = async () => {
-    if (!pushSupported) return;
-    setPushError(null);
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      const existing = await reg.pushManager.getSubscription();
-      if (existing) {
-        await existing.unsubscribe();
-        await fetch('/api/push/subscribe', {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ endpoint: existing.endpoint }),
-        });
-        setPushEnabled(false);
-      } else {
-        await subscribePush();
-      }
-    } catch (e) {
-      console.error('[PUSH]', e);
-      setPushError('Error al cambiar notificaciones');
-    }
-  };
-
-  // Test push — fires a notification end-to-end to verify SW + VAPID + sub
-  const handlePushTest = async () => {
-    setPushError(null);
-    try {
-      const res = await fetch('/api/push/test', { method: 'POST' });
-      const data = await res.json();
-      if (data.ok) {
-        setPushError(null);
-        alert(`✅ Push de prueba enviado a ${data.delivered}/${data.devicesCount} dispositivo(s). Revisa tu sistema operativo.`);
-      } else {
-        setPushError(data.reason || 'No se pudo enviar el push de prueba');
-      }
-    } catch (e) {
-      setPushError('Error de red al probar push');
-    }
-  };
+  // handlePushToggle y handlePushTest eliminados: la campanita global desapareció.
+  // Las notificaciones se manejan exclusivamente via toggleFavorite. El endpoint
+  // /api/push/test sigue disponible para diagnóstico via consola si hace falta.
 
   // === PUSHER REAL-TIME EVENTS ===
   // Only subscribe to Pusher for today's date — past dates are historical/fixed
@@ -896,7 +860,15 @@ export default function Dashboard() {
   };
 
   // Toggle favorite — optimistic update + persist + rollback si falla.
-  // Si se ANADE favorito, intentar subscribirse a push (no prompt si denied).
+  //
+  // Al MARCAR favorito, las notificaciones push son AUTOMÁTICAS:
+  //   - Si el permiso del navegador está 'default' → se pide ahora mismo.
+  //   - Si está 'granted' y no hay sub aún → se crea y registra.
+  //   - Si está 'denied' → mensaje claro al usuario (no podemos volver a
+  //     pedir desde JS; debe ir a ajustes del navegador).
+  //
+  // Marcar favorito SIN push = no tendría sentido, por eso lo forzamos.
+  // La campanita global fue eliminada — el favorito ES el toggle de alertas.
   const toggleFavorite = async (e, fixtureId) => {
     e.stopPropagation();
     const isFav = favorites.includes(fixtureId);
@@ -919,8 +891,18 @@ export default function Dashboard() {
         body: JSON.stringify({ fixtureId }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      if (!isFav && !pushEnabled && pushSupported && Notification.permission === 'granted') {
-        subscribePush();
+
+      // Al MARCAR favorito → asegurar suscripción push inmediatamente.
+      if (!isFav && pushSupported && typeof Notification !== 'undefined') {
+        if (Notification.permission === 'denied') {
+          setPushError('Las notificaciones están bloqueadas en tu navegador. Habilítalas en ajustes para recibir alertas de tus favoritos.');
+        } else if (!pushEnabled) {
+          // subscribePush() internamente pide permiso si está 'default'
+          // y crea la subscription via service worker.
+          subscribePush().catch(err => {
+            console.error('[toggleFavorite] push subscribe failed:', err?.message);
+          });
+        }
       }
     } catch (e) {
       console.error('[toggleFavorite] rollback:', e.message);
@@ -1178,39 +1160,13 @@ export default function Dashboard() {
                 <button className="btn-signout" onClick={async () => { await supabase?.auth.signOut(); window.location.href = '/'; }}>Salir</button>
               </div>
             )}
-            {pushSupported && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <button
-                    className={`btn-bell${pushEnabled ? ' btn-bell--on' : ''}`}
-                    onClick={handlePushToggle}
-                    title={pushEnabled ? 'Desactivar notificaciones' : 'Activar notificaciones de goles (favoritos)'}
-                  >
-                    {pushEnabled ? '🔔' : '🔕'}
-                  </button>
-                  {pushEnabled && (
-                    <button
-                      onClick={handlePushTest}
-                      title="Enviar push de prueba a tus dispositivos"
-                      style={{
-                        background: 'rgba(34,211,238,0.1)',
-                        border: '1px solid rgba(34,211,238,0.3)',
-                        color: '#22d3ee',
-                        borderRadius: 8,
-                        padding: '4px 8px',
-                        fontSize: 11,
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                      }}
-                    >
-                      🧪 probar
-                    </button>
-                  )}
-                </div>
-                {pushError && (
-                  <span style={{ fontSize: 11, color: '#ef4444', maxWidth: 220, textAlign: 'right' }}>{pushError}</span>
-                )}
-              </div>
+            {/* La campanita global fue eliminada — las notificaciones se
+                activan automáticamente al marcar un partido como favorito
+                (toggleFavorite pide permiso si está 'default' y suscribe).
+                Solo dejamos el mensaje de error si el flujo de favoritos
+                falló al activar push (p.ej. permisos denied). */}
+            {pushSupported && pushError && (
+              <span style={{ fontSize: 11, color: '#ef4444', maxWidth: 280, textAlign: 'right' }}>{pushError}</span>
             )}
             <button className="btn-reload" onClick={async () => { await refreshLiveData(undefined, { force: true }); loadFixtures(date); }} disabled={loading || refreshingLive}>
               <span className={loading || refreshingLive ? 'spin' : ''}>&#8635;</span>

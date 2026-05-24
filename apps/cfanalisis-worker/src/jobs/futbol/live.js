@@ -52,16 +52,51 @@ function extractLiveStats(match, events, stats) {
   };
 
   const goalScorers = [], cardEvents = [], missedPenalties = [];
+  // Stage notif: capturamos eventos discretos que API-Football reporta en
+  // /fixtures?live=all (campo `events`). El team detection viene del propio
+  // evento; el delta vs el tick anterior se calcula afuera en buildEventBundle.
+  const substitutions = []; // { playerIn, playerOut, teamId, teamName, minute, extra }
+  const varEvents = [];     // { detail, teamId, teamName, minute, extra, player }  detail: 'Goal cancelled' | 'Penalty cancelled' | 'Goal confirmed' | 'Penalty confirmed' …
+  const penaltyEvents = []; // { kind: 'scored'|'missed'|'awarded', player, teamId, teamName, minute }
+
   for (const ev of (events || [])) {
+    const baseInfo = {
+      teamId: ev.team?.id,
+      teamName: ev.team?.name,
+      minute: ev.time?.elapsed,
+      extra: ev.time?.extra,
+      player: ev.player?.name,
+    };
+
     if (ev.type === 'Goal') {
       if (ev.detail === 'Missed Penalty') {
-        missedPenalties.push({ player: ev.player?.name, teamId: ev.team?.id, teamName: ev.team?.name, minute: ev.time?.elapsed, extra: ev.time?.extra });
+        missedPenalties.push(baseInfo);
+        penaltyEvents.push({ ...baseInfo, kind: 'missed' });
       } else {
-        goalScorers.push({ player: ev.player?.name, teamId: ev.team?.id, teamName: ev.team?.name, minute: ev.time?.elapsed, extra: ev.time?.extra, type: ev.detail });
+        goalScorers.push({ ...baseInfo, type: ev.detail });
+        if (ev.detail === 'Penalty') {
+          penaltyEvents.push({ ...baseInfo, kind: 'scored' });
+        }
       }
     }
     if (ev.type === 'Card') {
-      cardEvents.push({ player: ev.player?.name, teamId: ev.team?.id, teamName: ev.team?.name, minute: ev.time?.elapsed, type: ev.detail });
+      cardEvents.push({ ...baseInfo, type: ev.detail });
+    }
+    // Sustitución: API-Football usa type 'subst' (case-sensitive en la doc
+    // pero algunos endpoints devuelven 'Subst'). Comparamos case-insensitive.
+    if (typeof ev.type === 'string' && ev.type.toLowerCase() === 'subst') {
+      substitutions.push({
+        playerIn: ev.assist?.name || null,   // entra
+        playerOut: ev.player?.name || null,  // sale
+        teamId: ev.team?.id,
+        teamName: ev.team?.name,
+        minute: ev.time?.elapsed,
+        extra: ev.time?.extra,
+      });
+    }
+    // VAR: type 'Var', detail describe la decisión.
+    if (typeof ev.type === 'string' && ev.type.toLowerCase() === 'var') {
+      varEvents.push({ ...baseInfo, detail: ev.detail || 'VAR Review' });
     }
   }
 
@@ -71,6 +106,10 @@ function extractLiveStats(match, events, stats) {
   const aYellow = getVal(awayStats, 'Yellow Cards') || cardEvents.filter(e => e.teamId === awayId && e.type === 'Yellow Card').length;
   const hRed = getVal(homeStats, 'Red Cards') || cardEvents.filter(e => e.teamId === homeId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
   const aRed = getVal(awayStats, 'Red Cards') || cardEvents.filter(e => e.teamId === awayId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
+  // Stage notif: offsides — vienen de stats por equipo (no de events).
+  // Algunas ligas menores no reportan offsides; default 0.
+  const hOffsides = getVal(homeStats, 'Offsides');
+  const aOffsides = getVal(awayStats, 'Offsides');
 
   return {
     fixtureId: match.fixture.id,
@@ -82,9 +121,13 @@ function extractLiveStats(match, events, stats) {
     corners: { home: hCorners, away: aCorners, total: hCorners + aCorners },
     yellowCards: { home: hYellow, away: aYellow, total: hYellow + aYellow },
     redCards: { home: hRed, away: aRed, total: hRed + aRed },
+    offsides: { home: hOffsides, away: aOffsides, total: hOffsides + aOffsides },
     goalScorers,
     cardEvents,
     missedPenalties,
+    substitutions,
+    varEvents,
+    penaltyEvents,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -95,88 +138,21 @@ function toSubArray(stored) {
   return Array.isArray(parsed) ? parsed : [parsed];
 }
 
-async function sendGoalPushes(liveDetailsMap, existingLive) {
-  const goals = [];
-  for (const [fid, data] of Object.entries(liveDetailsMap)) {
-    const prev = existingLive[fid];
-    if (!prev?.goals) continue;
-    const prevH = prev.goals.home ?? 0, prevA = prev.goals.away ?? 0;
-    const newH = data.goals?.home ?? 0, newA = data.goals?.away ?? 0;
-    if (newH > prevH || newA > prevA) {
-      const lastScorer = data.goalScorers?.slice(-1)[0];
-      goals.push({ fixtureId: Number(fid), homeTeam: data.homeTeam?.name || '?', awayTeam: data.awayTeam?.name || '?', homeScore: newH, awayScore: newA, scorer: lastScorer?.player, minute: lastScorer?.minute });
-    }
-  }
-  if (goals.length === 0) return;
-
-  const { data: subs } = await supabaseAdmin.from('push_subscriptions').select('user_id, subscription');
-  if (!subs?.length) return;
-
-  const favoritesByUser = {};
-  await Promise.all(subs.map(async (row) => {
-    if (favoritesByUser[row.user_id] !== undefined) return;
-    const { data: favRows } = await supabaseAdmin
-      .from('user_favorites')
-      .select('fixture_id')
-      .eq('user_id', row.user_id);
-    favoritesByUser[row.user_id] = (favRows || []).map(r => r.fixture_id);
-  }));
-
-  const expiredByUser = {};
-
-  for (const goal of goals) {
-    const title = `⚽ GOL! ${goal.homeTeam} ${goal.homeScore}-${goal.awayScore} ${goal.awayTeam}`;
-    const body = goal.scorer ? `${goal.scorer} · min. ${goal.minute}` : `min. ${goal.minute || '?'}`;
-    await Promise.allSettled(subs.map(async (row) => {
-      const userFavorites = favoritesByUser[row.user_id] || [];
-      if (!userFavorites.includes(goal.fixtureId)) return;
-
-      const deviceSubs = toSubArray(row.subscription);
-      await Promise.allSettled(deviceSubs.map(async (sub) => {
-        if (!sub?.endpoint) return;
-        const result = await sendPushNotification(sub, { title, body, tag: `goal-${goal.fixtureId}` });
-        if (result === 'expired') {
-          if (!expiredByUser[row.user_id]) expiredByUser[row.user_id] = new Set();
-          expiredByUser[row.user_id].add(sub.endpoint);
-        }
-      }));
-    }));
-  }
-
-  const usersWithExpired = Object.keys(expiredByUser);
-  if (usersWithExpired.length === 0) return;
-
-  await Promise.allSettled(usersWithExpired.map(async (userId) => {
-    try {
-      const expiredEndpoints = expiredByUser[userId];
-      const { data: row } = await supabaseAdmin
-        .from('push_subscriptions')
-        .select('subscription')
-        .eq('user_id', userId)
-        .maybeSingle();
-      if (!row) return;
-
-      const remaining = toSubArray(row.subscription).filter(s => !expiredEndpoints.has(s?.endpoint));
-
-      if (remaining.length === 0) {
-        await supabaseAdmin.from('push_subscriptions').delete().eq('user_id', userId);
-      } else {
-        await supabaseAdmin.from('push_subscriptions').update({ subscription: remaining }).eq('user_id', userId);
-      }
-    } catch (e) {
-      console.error('[push:purge-expired]', userId, e.message);
-    }
-  }));
-}
-
 // ────────────────────────────────────────────────────────────────────────────
-// Corner + Card delta pushes — detecta cambios entre el live anterior y el
-// actual. Si un user tiene el fixture en favoritos, recibe push con:
-//   - "🚩 Córner Real Madrid (4) - Barcelona (2) total 6 · 67'"
-//   - "🟨 Tarjeta Real Madrid (2) - Barcelona (3) total 5 · 67'"
-//   - "🟥 ROJA Real Madrid (1) - Barcelona (0) total 1 · 67'"
-// Detecta solo cuando el contador SUBE — un valor que vuelve a 0 (raro,
-// indica que la API limpio stats) NO dispara push.
+// Bundled push delivery — 1 push por fixture/tick que agrupa TODOS los
+// deltas detectados desde el live anterior:
+//   ⚽ Goles · 🚩 córners · 🟨 amarillas · 🟥 rojas · 🚫 offside ·
+//   🔄 sustituciones · 🅿️ penalti · 📺 VAR (gol anulado / penalti anulado)
+//
+// Si un partido tiene en un mismo tick (1 minuto): 2 córners + 1 amarilla
+// + 1 cambio, se envía UN solo push compuesto en lugar de 4 separados.
+// Esto reduce el ruido brutalmente vs el flujo anterior (1 push por evento).
+//
+// Detección por delta vs el tick anterior (`existingLive`):
+//   - Contadores que SUBEN → evento.
+//   - Listas (events array) → nuevos eventos no presentes antes (por minuto+player).
+//   - Si `existingLive[fid]` no existe → es la primera vez que vemos el
+//     partido, no notificamos para no spamear el estado inicial.
 // ────────────────────────────────────────────────────────────────────────────
 function formatMinute(status) {
   const e = status?.elapsed;
@@ -185,74 +161,125 @@ function formatMinute(status) {
   return x > 0 ? `${e}+${x}` : `${e}`;
 }
 
-async function sendCornerCardPushes(liveDetailsMap, existingLive) {
-  // Recolecta deltas por fixture y por tipo
-  const events = []; // { fixtureId, type, team, body, tag }
+// Key estable para deduplicar eventos en listas (subst, var, penalty).
+// Lo usamos para comparar contra el tick anterior.
+function evKey(ev) {
+  return `${ev.minute ?? '?'}|${ev.extra ?? 0}|${ev.player ?? ''}|${ev.teamId ?? ''}|${ev.detail ?? ev.kind ?? ev.type ?? ''}`;
+}
 
-  for (const [fid, data] of Object.entries(liveDetailsMap)) {
-    const prev = existingLive[fid];
-    if (!prev) continue; // primera vez que vemos el partido, sin baseline
+function buildEventBundle(fid, data, prev) {
+  const home = data.homeTeam?.name || '?';
+  const away = data.awayTeam?.name || '?';
+  const minute = formatMinute(data.status);
+  const lines = []; // emoji + texto, una línea por evento
+  let urgent = false;
 
-    const home = data.homeTeam?.name || '?';
-    const away = data.awayTeam?.name || '?';
-    const minute = formatMinute(data.status);
-
-    // ── Córners ──
-    const pHC = prev.corners?.home ?? 0, pAC = prev.corners?.away ?? 0;
-    const nHC = data.corners?.home ?? 0, nAC = data.corners?.away ?? 0;
-    if (nHC > pHC || nAC > pAC) {
-      const team = nHC > pHC ? home : away;
-      events.push({
-        fixtureId: Number(fid),
-        type: 'corner',
-        title: `🚩 Córner — ${team}`,
-        body: `${home} (${nHC}) — ${away} (${nAC}) · total ${nHC + nAC} · ${minute}'`,
-        tag: `corner-${fid}-${nHC}-${nAC}`,
-      });
-    }
-
-    // ── Tarjeta amarilla ──
-    const pHY = prev.yellowCards?.home ?? 0, pAY = prev.yellowCards?.away ?? 0;
-    const nHY = data.yellowCards?.home ?? 0, nAY = data.yellowCards?.away ?? 0;
-    if (nHY > pHY || nAY > pAY) {
-      const team = nHY > pHY ? home : away;
-      // Intentar sacar quien fue de cardEvents (ultimo evento yellow del team)
-      const lastCard = (data.cardEvents || [])
-        .filter(e => e.type === 'Yellow Card' && e.teamName === team)
-        .slice(-1)[0];
-      const playerStr = lastCard?.player ? `${lastCard.player} · ` : '';
-      events.push({
-        fixtureId: Number(fid),
-        type: 'yellow',
-        title: `🟨 Amarilla — ${team}`,
-        body: `${playerStr}${home} (${nHY}) — ${away} (${nAY}) · total ${nHY + nAY} · ${minute}'`,
-        tag: `yellow-${fid}-${nHY}-${nAY}`,
-      });
-    }
-
-    // ── Tarjeta roja ──
-    const pHR = prev.redCards?.home ?? 0, pAR = prev.redCards?.away ?? 0;
-    const nHR = data.redCards?.home ?? 0, nAR = data.redCards?.away ?? 0;
-    if (nHR > pHR || nAR > pAR) {
-      const team = nHR > pHR ? home : away;
-      const lastCard = (data.cardEvents || [])
-        .filter(e => (e.type === 'Red Card' || e.type === 'Second Yellow card') && e.teamName === team)
-        .slice(-1)[0];
-      const playerStr = lastCard?.player ? `${lastCard.player} · ` : '';
-      events.push({
-        fixtureId: Number(fid),
-        type: 'red',
-        title: `🟥 ROJA — ${team}`,
-        body: `${playerStr}${home} (${nHR}) — ${away} (${nAR}) · total ${nHR + nAR} · ${minute}'`,
-        tag: `red-${fid}-${nHR}-${nAR}`,
-      });
-    }
+  // ── Goles ──
+  const pHG = prev.goals?.home ?? 0, pAG = prev.goals?.away ?? 0;
+  const nHG = data.goals?.home ?? 0, nAG = data.goals?.away ?? 0;
+  if (nHG > pHG || nAG > pAG) {
+    const last = data.goalScorers?.slice(-1)[0];
+    const team = nHG > pHG ? home : away;
+    lines.push(`⚽ ${team}${last?.player ? ` · ${last.player}` : ''}`);
+    urgent = true;
   }
 
-  if (events.length === 0) return;
+  // ── Córners ──
+  const pHC = prev.corners?.home ?? 0, pAC = prev.corners?.away ?? 0;
+  const nHC = data.corners?.home ?? 0, nAC = data.corners?.away ?? 0;
+  if (nHC > pHC || nAC > pAC) {
+    const team = nHC > pHC ? home : away;
+    const inc = (nHC - pHC) + (nAC - pAC);
+    lines.push(`🚩 Córner${inc > 1 ? ` x${inc}` : ''} · ${team}`);
+  }
 
-  // Mismo patron que sendGoalPushes: traer subs + favoritos por user
-  const { data: subs } = await supabaseAdmin.from('push_subscriptions').select('user_id, subscription');
+  // ── Amarillas ──
+  const pHY = prev.yellowCards?.home ?? 0, pAY = prev.yellowCards?.away ?? 0;
+  const nHY = data.yellowCards?.home ?? 0, nAY = data.yellowCards?.away ?? 0;
+  if (nHY > pHY || nAY > pAY) {
+    const team = nHY > pHY ? home : away;
+    const lastCard = (data.cardEvents || [])
+      .filter(e => e.type === 'Yellow Card' && e.teamName === team)
+      .slice(-1)[0];
+    lines.push(`🟨 ${team}${lastCard?.player ? ` · ${lastCard.player}` : ''}`);
+  }
+
+  // ── Rojas (incluye expulsiones por 2a amarilla) ──
+  const pHR = prev.redCards?.home ?? 0, pAR = prev.redCards?.away ?? 0;
+  const nHR = data.redCards?.home ?? 0, nAR = data.redCards?.away ?? 0;
+  if (nHR > pHR || nAR > pAR) {
+    const team = nHR > pHR ? home : away;
+    const lastCard = (data.cardEvents || [])
+      .filter(e => (e.type === 'Red Card' || e.type === 'Second Yellow card') && e.teamName === team)
+      .slice(-1)[0];
+    lines.push(`🟥 EXPULSADO · ${team}${lastCard?.player ? ` · ${lastCard.player}` : ''}`);
+    urgent = true;
+  }
+
+  // ── Offsides ──
+  const pHO = prev.offsides?.home ?? 0, pAO = prev.offsides?.away ?? 0;
+  const nHO = data.offsides?.home ?? 0, nAO = data.offsides?.away ?? 0;
+  if (nHO > pHO || nAO > pAO) {
+    const team = nHO > pHO ? home : away;
+    const inc = (nHO - pHO) + (nAO - pAO);
+    lines.push(`🚫 Offside${inc > 1 ? ` x${inc}` : ''} · ${team}`);
+  }
+
+  // ── Sustituciones (lista) ──
+  const prevSubKeys = new Set((prev.substitutions || []).map(evKey));
+  const newSubs = (data.substitutions || []).filter(s => !prevSubKeys.has(evKey(s)));
+  for (const s of newSubs) {
+    const out = s.playerOut || '?';
+    const inP = s.playerIn || '?';
+    lines.push(`🔄 ${s.teamName || '?'} · ${out} → ${inP}`);
+  }
+
+  // ── Penaltis (lista — scored/missed/awarded) ──
+  const prevPenKeys = new Set((prev.penaltyEvents || []).map(evKey));
+  const newPens = (data.penaltyEvents || []).filter(p => !prevPenKeys.has(evKey(p)));
+  for (const p of newPens) {
+    const verb = p.kind === 'scored' ? 'convertido' : p.kind === 'missed' ? 'fallado' : 'señalado';
+    lines.push(`🅿️ Penalti ${verb} · ${p.teamName || '?'}${p.player ? ` · ${p.player}` : ''}`);
+    urgent = true;
+  }
+
+  // ── VAR (gol anulado / penalti anulado / decisión cambiada) ──
+  const prevVarKeys = new Set((prev.varEvents || []).map(evKey));
+  const newVars = (data.varEvents || []).filter(v => !prevVarKeys.has(evKey(v)));
+  for (const v of newVars) {
+    const det = v.detail || 'VAR';
+    // Goles anulados son los más relevantes; los otros se reportan igual.
+    lines.push(`📺 ${det} · ${v.teamName || '?'}${v.player ? ` · ${v.player}` : ''}`);
+    urgent = true;
+  }
+
+  if (lines.length === 0) return null;
+
+  // Título: marcador en vivo + minuto. Body: líneas concatenadas (max ~3 líneas
+  // visibles en la notificación expandida; el resto se trunca silenciosamente).
+  const title = `${home} ${nHG}-${nAG} ${away} · ${minute}'`;
+  const body = lines.slice(0, 6).join('\n');
+  // Tag estable por fixture+minuto+nEventos para que múltiples ticks no
+  // sobrescriban notificaciones distintas. FCM reemplaza notifs con mismo tag.
+  const tag = `live-${fid}-${minute}-${lines.length}`;
+  return { fixtureId: Number(fid), title, body, tag, urgent };
+}
+
+async function sendBundledPushes(liveDetailsMap, existingLive) {
+  // 1. Construir bundles por fixture (solo cuando hay deltas y baseline previa)
+  const bundles = [];
+  for (const [fid, data] of Object.entries(liveDetailsMap)) {
+    const prev = existingLive[fid];
+    if (!prev) continue; // sin baseline → no notificamos el estado inicial
+    const bundle = buildEventBundle(fid, data, prev);
+    if (bundle) bundles.push(bundle);
+  }
+  if (bundles.length === 0) return;
+
+  // 2. Cargar suscripciones + favoritos por usuario una sola vez
+  const { data: subs } = await supabaseAdmin
+    .from('push_subscriptions')
+    .select('user_id, subscription');
   if (!subs?.length) return;
 
   const favoritesByUser = {};
@@ -262,22 +289,24 @@ async function sendCornerCardPushes(liveDetailsMap, existingLive) {
       .from('user_favorites')
       .select('fixture_id')
       .eq('user_id', row.user_id);
-    favoritesByUser[row.user_id] = (favRows || []).map(r => r.fixture_id);
+    favoritesByUser[row.user_id] = new Set((favRows || []).map(r => Number(r.fixture_id)));
   }));
 
+  // 3. Enviar — recolectar endpoints expirados para purga al final
   const expiredByUser = {};
-
-  for (const ev of events) {
+  for (const bundle of bundles) {
     await Promise.allSettled(subs.map(async (row) => {
-      const userFavorites = favoritesByUser[row.user_id] || [];
-      if (!userFavorites.includes(ev.fixtureId)) return;
+      const favs = favoritesByUser[row.user_id] || new Set();
+      if (!favs.has(bundle.fixtureId)) return;
 
       const deviceSubs = toSubArray(row.subscription);
       await Promise.allSettled(deviceSubs.map(async (sub) => {
         if (!sub?.endpoint) return;
-        const result = await sendPushNotification(sub, {
-          title: ev.title, body: ev.body, tag: ev.tag,
-        });
+        const result = await sendPushNotification(
+          sub,
+          { title: bundle.title, body: bundle.body, tag: bundle.tag },
+          { urgency: bundle.urgent ? 'high' : 'normal' },
+        );
         if (result === 'expired') {
           if (!expiredByUser[row.user_id]) expiredByUser[row.user_id] = new Set();
           expiredByUser[row.user_id].add(sub.endpoint);
@@ -286,7 +315,7 @@ async function sendCornerCardPushes(liveDetailsMap, existingLive) {
     }));
   }
 
-  // Limpieza de subs expiradas (mismo patron que sendGoalPushes)
+  // 4. Purga atómica de endpoints expirados
   const usersWithExpired = Object.keys(expiredByUser);
   if (usersWithExpired.length === 0) return;
 
@@ -440,9 +469,11 @@ export async function runLive(_payload = {}) {
     }));
   }
 
-  // Fire-and-forget pushes (goal + corner/card delta)
-  sendGoalPushes(liveDetailsMap, existingLive).catch(err => console.error('[live:goal-pushes]', err.message));
-  sendCornerCardPushes(liveDetailsMap, existingLive).catch(err => console.error('[live:cc-pushes]', err.message));
+  // Fire-and-forget pushes — 1 bundle por fixture/tick con TODOS los deltas
+  // (goles, córners, amarillas, rojas/expulsiones, offside, sustituciones,
+  // penalti, VAR). Anti-spam por agrupación en el propio bundle.
+  sendBundledPushes(liveDetailsMap, existingLive)
+    .catch(err => console.error('[live:bundled-pushes]', err.message));
 
   const mergedLive = { ...existingLive };
   for (const [fid, data] of Object.entries(liveDetailsMap)) {
@@ -450,8 +481,15 @@ export async function runLive(_payload = {}) {
     mergedLive[fid] = {
       ...data,
       corners: data.corners?.total > 0 ? data.corners : (existing?.corners || data.corners),
+      offsides: data.offsides?.total > 0 ? data.offsides : (existing?.offsides || data.offsides),
       goalScorers: data.goalScorers?.length > 0 ? data.goalScorers : (existing?.goalScorers || []),
       missedPenalties: data.missedPenalties?.length > 0 ? data.missedPenalties : (existing?.missedPenalties || []),
+      // Listas de eventos discretos: preservar las del tick previo si la
+      // API esta vez devolvió vacío (sucede cuando /fixtures?live=all no
+      // trae events y no se hizo el fetch detallado por fixture).
+      substitutions: data.substitutions?.length > 0 ? data.substitutions : (existing?.substitutions || []),
+      varEvents:     data.varEvents?.length > 0     ? data.varEvents     : (existing?.varEvents || []),
+      penaltyEvents: data.penaltyEvents?.length > 0 ? data.penaltyEvents : (existing?.penaltyEvents || []),
     };
   }
 
