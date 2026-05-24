@@ -32,7 +32,7 @@ export async function POST(request) {
     // Escribir hash en users + resetear lockout. Revocar todas las sesiones
     // para forzar re-login en todos los dispositivos.
     await pgQuery(
-      `UPDATE users SET
+      `UPDATE public.users SET
          password_hash = $1,
          failed_login_attempts = 0,
          locked_until = NULL,
@@ -41,7 +41,7 @@ export async function POST(request) {
        WHERE id = $2`,
       [passwordHash, tokenData.userId],
     );
-    await pgQuery('DELETE FROM auth_sessions WHERE user_id = $1', [tokenData.userId]).catch(() => {});
+    await pgQuery('DELETE FROM public.auth_sessions WHERE user_id = $1', [tokenData.userId]).catch(() => {});
 
     await redisDel(`pwd-reset:${token}`);
 
