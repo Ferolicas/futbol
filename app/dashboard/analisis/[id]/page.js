@@ -1774,7 +1774,7 @@ const PlayerHighlights = memo(function PlayerHighlights({ highlights }) {
       )}
     </div>
   );
-}
+});
 
 // Sub-componente reutilizable para grupos de jugadores (shotsTotalists,
 // assisters, foulers, bookers). Sigue el mismo patron visual que los
@@ -1825,7 +1825,7 @@ function PlayerGroupList({ title, hint, players, metric, totalKey, unit, accentB
       })}
     </div>
   );
-});
+}
 
 // ══════════════════════════════════════════
 // PER-TEAM SECTION
