@@ -81,23 +81,29 @@ jobs:
               # Build prod
               NODE_ENV=production npm run build
 
-              # Next.js standalone requiere copiar public + static manualmente
-              # (no los incluye en .next/standalone/).
-              #
-              # IMPORTANTE: usar destino EXPLICITO + rm -rf previo. El patron
-              # viejo `cp -r public .next/standalone/` ANIDABA en cada deploy
-              # repetido: si .next/standalone/public ya existia (next build no
-              # la borra porque no la genera el), cp copiaba DENTRO creando
-              # .next/standalone/public/public/ → /logo.png y /Bet365-Logo.png
-              # daban 404. Con destino explicito + rm previo es idempotente.
+              # Next.js standalone NO incluye public/ ni .next/static — hay que
+              # enlazarlos manualmente. Usamos SYMLINKS (no cp) por robustez:
+              #   - Atómicos: rm + ln no dejan estado a medias.
+              #   - Nunca anidan: rm -rf previo garantiza que el destino no
+              #     existe, así `ln` crea el enlace y NO lo mete dentro de un dir.
+              #   - Nunca quedan stale: el symlink apunta SIEMPRE al public/ real
+              #     del repo (que git reset --hard mantiene fresco), no a una
+              #     copia que puede quedar vieja entre deploys.
+              # El bug recurrente (/logo.png y /Bet365-Logo.png en 404 tras
+              # cada deploy) venía de la copia; el symlink lo elimina de raíz.
               rm -rf .next/standalone/public
-              cp -r public .next/standalone/public
-              rm -rf .next/standalone/.next/static
+              ln -sfn "$PWD/public" .next/standalone/public
               mkdir -p .next/standalone/.next
-              cp -r .next/static .next/standalone/.next/static
+              rm -rf .next/standalone/.next/static
+              ln -sfn "$PWD/.next/static" .next/standalone/.next/static
 
-              # Reload pm2 con env del .env recargado (sin downtime)
-              pm2 reload cfanalisis-web --update-env
+              # Verificación en el log: confirmar que el asset es accesible.
+              echo "── verificación assets standalone ──"
+              ls -lL .next/standalone/public/logo.png .next/standalone/public/Bet365-Logo.png 2>&1 || echo "⚠ assets NO accesibles via standalone/public"
+
+              # Restart (no reload) para que el server standalone tome los
+              # symlinks nuevos sin servir desde un working dir viejo.
+              pm2 restart cfanalisis-web --update-env
 
               echo "✓ Next.js redeployed"
             else
