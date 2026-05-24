@@ -63,12 +63,50 @@ const concurrency: Record<QueueName, number> = {
   'baseball-cleanup':        1,
 };
 
+// Lock / stall tuning per queue.
+//
+// Defaults de BullMQ (lockDuration=30s, stalledInterval=30s, maxStalledCount=1)
+// son agresivos para jobs CPU-bound largos: el motor de futbol (Dixon-Coles +
+// stages 3-6) bloquea el event loop por tramos que pueden exceder los 30s
+// cuando se analizan muchos partidos en paralelo, el setTimeout que renueva
+// el lock no se dispara, y el job termina marcado "stalled more than allowable
+// limit" aunque siga progresando.
+//
+// Para jobs pesados subimos lockDuration a 10 min, chequeo de stall a 60s y
+// permitimos 3 stalls antes de fallar definitivo. Para jobs livianos (live,
+// odds, cleanup) dejamos algo más holgado que el default pero no exagerado.
+type LockOpts = { lockDuration: number; stalledInterval: number; maxStalledCount: number };
+const HEAVY: LockOpts = { lockDuration: 600_000, stalledInterval: 60_000, maxStalledCount: 3 };
+const LIGHT: LockOpts = { lockDuration: 120_000, stalledInterval: 30_000, maxStalledCount: 2 };
+
+const lockOpts: Record<QueueName, LockOpts> = {
+  'futbol-fixtures':         LIGHT,
+  'futbol-daily':            HEAVY,
+  'futbol-analyze-batch':    HEAVY,
+  'futbol-analyze-all-today':HEAVY,
+  'futbol-finalize':         HEAVY,
+  'futbol-cleanup':          LIGHT,
+  'futbol-lineups':          HEAVY,
+  'futbol-live':             LIGHT,
+  'futbol-live-corners':     LIGHT,
+  'futbol-odds':             LIGHT,
+  'baseball-fixtures':       LIGHT,
+  'baseball-analyze':        HEAVY,
+  'baseball-live':           LIGHT,
+  'baseball-finalize':       HEAVY,
+  'baseball-cleanup':        LIGHT,
+};
+
 export function startWorkers(): Worker[] {
   const workers: Worker[] = [];
   for (const [name, handler] of Object.entries(handlers) as [QueueName, Processor][]) {
+    const lo = lockOpts[name];
     const w = new Worker(name, handler, {
       connection: bullConnection,
       concurrency: concurrency[name],
+      lockDuration: lo.lockDuration,
+      stalledInterval: lo.stalledInterval,
+      maxStalledCount: lo.maxStalledCount,
     });
     w.on('completed', (job) => {
       logger.info({ queue: name, jobId: job.id }, 'job completed');

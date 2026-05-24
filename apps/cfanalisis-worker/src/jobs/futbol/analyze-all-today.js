@@ -13,12 +13,20 @@
  */
 import {
   getFixtures, analyzeMatch, getQuota,
-  getAnalyzedFixtureIds, redisSet,
+  getAnalyzedFixtureIds, redisGet, redisSet,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
 
-const ANALYZE_CONCURRENCY = 25;
+// API-Football Ultra serializa a ~13 req/s vía el rate limiter de
+// lib/api-football.js. Más de ~10 en paralelo solo bloquea el event loop
+// con trabajo CPU del motor (Dixon-Coles + stages 3-6) y dispara stalls
+// porque el lock renewer de BullMQ no logra ejecutarse.
+const ANALYZE_CONCURRENCY = 8;
+// Persistir el agregado cada N análisis para que si el job stall, no se
+// pierda el progreso entero (el motor ya cachea cada análisis individual
+// vía analyzeMatch; lo que se reconstruye aquí es el set agregado del día).
+const PERSIST_EVERY = 10;
 
 function compactLastFive(lastFive) {
   if (!Array.isArray(lastFive)) return [];
@@ -54,34 +62,73 @@ export async function runAnalyzeAllToday(payload = {}, job = null) {
   const date = payload.date || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
   const forceAll = payload.force === true;
   const startTime = Date.now();
+  console.log(`[analyze-all-today] start date=${date} force=${forceAll}`);
   const reportProgress = async (extra) => {
     if (!job?.updateProgress) return;
     try { await job.updateProgress(extra); } catch {}
   };
 
-  const { fixtures } = await getFixtures(date, { forceApi: forceAll });
+  // OJO: NO pasamos forceApi:forceAll. La cache de fixtures se refresca por
+  // el cron `futbol-fixtures` a las 0:05 y por el staleness check interno
+  // de getFixtures (>2.5h sin actualizar partidos live). Re-pedir la lista
+  // a API-Football en cada "Re-analizar todo" añadía ~5-15s de latencia
+  // antes del primer análisis (la response global del día son varios MB,
+  // se filtra en JS, y compite por el rate limiter con jobs paralelos).
+  // El `force=true` se sigue propagando a analyzeMatch para que el motor
+  // re-corra ignorando el cache de análisis.
+  const tFixtures = Date.now();
+  const { fixtures } = await getFixtures(date);
+  console.log(`[analyze-all-today] getFixtures took ${Date.now() - tFixtures}ms`);
   const allFixtures = fixtures || [];
 
   if (allFixtures.length === 0) {
     return { ok: true, message: 'no fixtures', analyzed: 0, date };
   }
 
+  const tAlready = Date.now();
   const alreadyAnalyzed = forceAll ? [] : await getAnalyzedFixtureIds(date);
   const alreadySet = new Set(alreadyAnalyzed.map(Number));
   const toAnalyze = forceAll
     ? allFixtures
     : allFixtures.filter(f => !alreadySet.has(Number(f.fixture.id)));
+  console.log(`[analyze-all-today] toAnalyze=${toAnalyze.length}/${allFixtures.length} (already=${alreadyAnalyzed.length}) lookup=${Date.now() - tAlready}ms`);
 
   if (toAnalyze.length === 0) {
     return { ok: true, message: 'all already analyzed', analyzed: 0, total: allFixtures.length, date };
   }
 
-  const analyzedIds = [];
-  const analyzedOdds = {};
-  const analyzedData = {};
+  // SIEMPRE arrancar con el set existente — aunque sea forceAll. Si el
+  // job stallea o falla a mitad, los análisis previos NO se pierden. Los
+  // datos individuales (odds, summary) sí se sobrescriben cuando este job
+  // re-analiza el fixture (analyzeMatch con force=true devuelve datos nuevos),
+  // pero un fixture analizado y no re-procesado mantiene su entrada.
+  //
+  // Razón de UX: el usuario presiona "Re-analizar todo" esperando que NUNCA
+  // queden partidos sin analizar. Empezar de cero hace lo contrario: borra
+  // 99 análisis válidos en el primer instante; si algo falla, queda peor que
+  // antes. Con UNION, el peor caso es "algunos quedan con análisis viejo",
+  // mucho mejor que "algunos desaparecen".
+  const existing = (await redisGet(`analysis:${date}`)) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
+  const analyzedIdsSet = new Set((existing.globallyAnalyzed || []).map(Number));
+  const analyzedOdds = { ...(existing.analyzedOdds || {}) };
+  const analyzedData = { ...(existing.analyzedData || {}) };
   let success = 0, skipped = 0;
   let processed = 0;
   const errors = [];
+
+  // Debounced persist: a lo sumo un write Redis en vuelo. Cada N análisis
+  // disparamos un snapshot. Si el job stallea, el agregado parcial sobrevive.
+  let persistInFlight = null;
+  const schedulePersist = () => {
+    if (persistInFlight) return;
+    persistInFlight = redisSet(`analysis:${date}`, {
+      globallyAnalyzed: [...analyzedIdsSet],
+      analyzedOdds,
+      analyzedData,
+    }, 12 * 3600)
+      .catch(e => console.error('[job:futbol-analyze-all-today] persist:', e.message))
+      .finally(() => { persistInFlight = null; });
+  };
 
   await reportProgress({
     phase: 'analyzing', processed: 0, total: toAnalyze.length,
@@ -106,19 +153,25 @@ export async function runAnalyzeAllToday(payload = {}, job = null) {
         phase: 'analyzing', processed, total: toAnalyze.length,
         analyzed: success, skipped: skipped + 1, failed: errors.length, startedAt: startTime,
       });
+      await new Promise(r => setImmediate(r));
       return { fid, kind: 'skip' };
     }
     const a = result.analysis || result;
     success++;
-    analyzedIds.push(fid);
+    analyzedIdsSet.add(fid);
     if (a?.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
     const summary = buildSummary(a);
     if (summary) analyzedData[fid] = summary;
     processed++;
+    if (processed % PERSIST_EVERY === 0) schedulePersist();
     await reportProgress({
       phase: 'analyzing', processed, total: toAnalyze.length,
       analyzed: success, skipped, failed: errors.length, startedAt: startTime,
     });
+    // Cede el event loop entre análisis: el lock renewer de BullMQ
+    // (setTimeout cada lockDuration/2) puede dispararse aunque el motor
+    // del próximo análisis sea CPU-pesado.
+    await new Promise(r => setImmediate(r));
     return { fid, kind: 'ok' };
   });
 
@@ -143,11 +196,18 @@ export async function runAnalyzeAllToday(payload = {}, job = null) {
     }
   }
 
-  if (analyzedIds.length > 0) {
+  // Asegurar que el último snapshot quede persistido (espera el debounce
+  // en vuelo si lo hay y hace una última escritura con el set completo).
+  if (persistInFlight) await persistInFlight.catch(() => {});
+  if (analyzedIdsSet.size > 0) {
     try {
-      await redisSet(`analysis:${date}`, { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData }, 12 * 3600);
+      await redisSet(`analysis:${date}`, {
+        globallyAnalyzed: [...analyzedIdsSet],
+        analyzedOdds,
+        analyzedData,
+      }, 12 * 3600);
     } catch (e) {
-      console.error('[job:futbol-analyze-all-today] persist:', e.message);
+      console.error('[job:futbol-analyze-all-today] final persist:', e.message);
     }
   }
 

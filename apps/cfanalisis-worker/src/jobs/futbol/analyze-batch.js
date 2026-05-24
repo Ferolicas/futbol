@@ -23,7 +23,12 @@ import { analyzeMatch, getCachedFixturesRaw, redisGet, redisSet, triggerEvent } 
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
 
-const ANALYZE_CONCURRENCY = 25;
+// API-Football Ultra serializa todo a ~13 req/s vía el rate limiter compartido
+// en lib/api-football.js. Más de ~10 análisis en paralelo no acelera nada —
+// solo bloquea el event loop con trabajo CPU del motor (Dixon-Coles + stages
+// 3-6) y dispara el "job stalled more than allowable limit" de BullMQ porque
+// el setTimeout que renueva el lock no se logra ejecutar.
+const ANALYZE_CONCURRENCY = 8;
 const PERSIST_EVERY = 5;
 
 function compactLastFive(lastFive) {
@@ -135,6 +140,10 @@ export async function runAnalyzeBatch(payload = {}, job = null) {
       phase: 'analyzing', processed, total: allFixtures.length,
       analyzed, cached, failed: failedFids.length, startedAt,
     });
+    // Cede el event loop entre análisis: aunque el motor sea sync-pesado,
+    // los timers de BullMQ (renew lock cada lockDuration/2) tienen oportunidad
+    // de dispararse antes de que el siguiente análisis monopolice la CPU.
+    await new Promise(r => setImmediate(r));
     return { fid, skipped: false };
   });
 
