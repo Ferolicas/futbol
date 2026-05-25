@@ -14,7 +14,12 @@ import {
   extractBaseballPlayerHighlights, extractBaseballPitcherMatchup,
   supabaseAdmin,
 } from '../../shared.js';
+import { mapPool } from '../../pool.js';
 import { logger } from '../../logger.js';
+
+// Paralelismo igual que futbol-analyze-batch. API-Baseball comparte el rate
+// limiter de api-baseball.js; más de ~10 paralelo solo bloquea CPU del motor.
+const BASEBALL_ANALYZE_CONCURRENCY = 6;
 
 // cache_version semantica:
 //   1 = legacy (lo que habia antes del rework de baseball)
@@ -24,14 +29,18 @@ const BASEBALL_MIN_CACHE_VERSION = 2;
 
 /** @param {any} payload @param {any} [job] */
 export async function runBaseballAnalyze(payload = {}, job = null) {
-  // CRÍTICO: hora US/Eastern, mismo razonamiento que baseball-fixtures.
-  // Cron corre 01:30 España = 19:30 del día anterior Colombia (UTC-5).
-  // Si usáramos Bogotá, buscaríamos games del 24 cuando los reales (que el
-  // usuario ve a las 7am España) están bajo la fecha del 25 ET. Resultado:
-  // se quedaban sin analizar (síntoma del usuario "14 partidos sin analizar
-  // a las 7am").
-  const date = payload.date || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
-  console.log(`[job:baseball-analyze] date=${date} (America/New_York) force=${payload.force === true}`);
+  // Misma lógica que futbol-daily: UTC con anticipo a "mañana" cuando ya
+  // pasamos las 22 UTC. Debe coincidir con baseball-fixtures (mismo cálculo)
+  // para que el analyze encuentre el schedule recién guardado.
+  let date = payload.date;
+  if (!date) {
+    const now = new Date();
+    const utcHour = now.getUTCHours();
+    const todayUTC    = now.toISOString().split('T')[0];
+    const tomorrowUTC = new Date(now.getTime() + 86400000).toISOString().split('T')[0];
+    date = (utcHour >= 22 ? tomorrowUTC : todayUTC);
+  }
+  console.log(`[job:baseball-analyze] date=${date} force=${payload.force === true} concurrency=${BASEBALL_ANALYZE_CONCURRENCY}`);
   // force=true → ignora el check de cache_version + age, re-analiza todo.
   // Lo usa el boton "Analizar baseball" en /ferney para garantizar que
   // se vea trabajo aunque el cron diario ya haya procesado los partidos.
@@ -51,19 +60,26 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
     return { ok: true, analyzed: 0, message: 'no fixtures', date };
   }
 
-  let analyzed = 0, skipped = 0, failed = 0, processed = 0;
+  let analyzed = 0, skipped = 0, failed = 0, processed = 0, persistFailed = 0;
   const errors = [];
+  // Flag compartida — si una task detecta cuota agotada, las demás abortan
+  // su llamada API en lugar de seguir consumiendo. mapPool no tiene cancel
+  // nativo, así que usamos esta señal.
+  let quotaExhausted = false;
 
   await reportProgress({
     phase: 'analyzing', processed: 0, total: fixtures.length,
     analyzed: 0, skipped: 0, failed: 0, startedAt,
   });
 
-  for (const game of fixtures) {
+  // Procesa UN partido. Devuelve {kind: 'analyzed'|'skipped'|'failed'|'aborted'}.
+  // Nunca lanza — toda excepción se captura aquí para que mapPool no se rompa.
+  async function processOne(game) {
     const fixtureId = game.id;
+    if (quotaExhausted) return { kind: 'aborted', fixtureId };
+
     try {
-      // Skip si ya esta analizado recientemente con la version correcta.
-      // force=true salta el check — re-analiza todo (botón manual /ferney).
+      // Skip si ya está analizado recientemente con cache_version OK.
       if (!force) {
         const { data: existing } = await supabaseAdmin
           .from('baseball_match_analysis')
@@ -73,75 +89,61 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
         const ageMs = existing ? (Date.now() - new Date(existing.updated_at).getTime()) : Infinity;
         const versionOk = (existing?.cache_version || 0) >= BASEBALL_MIN_CACHE_VERSION;
         if (existing && ageMs < 6 * 3600 * 1000 && versionOk) {
-          skipped++;
-          processed++;
-          await reportProgress({ phase: 'analyzing', processed, total: fixtures.length, analyzed, skipped, failed, startedAt });
-          continue;
+          return { kind: 'skipped', fixtureId };
         }
       }
 
+      // Chequeo de cuota antes de gastar la API en este partido. Si está baja,
+      // marcamos la señal compartida y todos los siguientes abortan en seco.
       const quota = await getBaseballQuota();
       if (quota.remaining < 5) {
-        console.log(`[job:baseball-analyze] quota low (${quota.remaining}), stopping`);
-        break;
+        console.log(`[job:baseball-analyze] quota low (${quota.remaining}), aborting subsequent fixtures`);
+        quotaExhausted = true;
+        return { kind: 'aborted', fixtureId };
       }
 
       const homeId = game.teams?.home?.id;
       const awayId = game.teams?.away?.id;
       const leagueId = game.league?.id;
-
       const homeName = game.teams?.home?.name;
       const awayName = game.teams?.away?.name;
 
-      // Llamadas paralelas. fixturePlayersRes = /fixtures/players (bloque E),
-      // necesario para extraer starting pitcher + roster con stats.
+      // 5 llamadas paralelas a la API por partido (rate-limiter compartido las
+      // serializa internamente). Concurrencia=6 globalmente = ~30 calls/s burst,
+      // pero el rate limiter en lib/api-baseball.js mantiene el ritmo seguro.
       const [oddsRes, h2hRes, homeStatsRes, awayStatsRes, fixturePlayersRes] = await Promise.allSettled([
         getBaseballOddsByGame(fixtureId),
         getBaseballH2H(homeId, awayId),
         getBaseballTeamStats(homeId, leagueId),
         getBaseballTeamStats(awayId, leagueId),
-        getBaseballFixturePlayers(fixtureId),  // bloque E
+        getBaseballFixturePlayers(fixtureId),
       ]);
-
       const odds = oddsRes.status === 'fulfilled' ? oddsRes.value.odds : [];
       const h2h = h2hRes.status === 'fulfilled' ? h2hRes.value.h2h : [];
       const homeStats = homeStatsRes.status === 'fulfilled' ? homeStatsRes.value.stats : null;
       const awayStats = awayStatsRes.status === 'fulfilled' ? awayStatsRes.value.stats : null;
       const fixturePlayers = fixturePlayersRes.status === 'fulfilled' ? fixturePlayersRes.value : null;
 
-      // Bloque E — extraer starting pitchers + sus stats. Si falla, el modelo
-      // sigue funcionando sin pitcher matchup (vuelve al estimado por team stats).
       let pitcherMatchup = null;
       try {
         pitcherMatchup = await extractBaseballPitcherMatchup(fixturePlayers, homeId, awayId, leagueId, game.season);
-      } catch (e) {
-        console.warn(`[baseball-analyze] pitcherMatchup ${fixtureId}: ${e.message}`);
-      }
+      } catch (e) { console.warn(`[baseball-analyze] pitcherMatchup ${fixtureId}: ${e.message}`); }
 
-      // Bloque F — extraer player highlights (top batters por ofensive output).
       let playerHighlights = null;
       try {
         playerHighlights = await extractBaseballPlayerHighlights(fixturePlayers, homeId, awayId, homeName, awayName, leagueId, game.season);
-      } catch (e) {
-        console.warn(`[baseball-analyze] playerHighlights ${fixtureId}: ${e.message}`);
-      }
+      } catch (e) { console.warn(`[baseball-analyze] playerHighlights ${fixtureId}: ${e.message}`); }
 
       const rawProbs = computeBaseballProbabilities({
         homeStats, awayStats, homeId, awayId, h2h,
-        marketOdds: odds,
-        pitcherMatchup,         // bloque E
-        playerHighlights,       // bloque F (alimenta probabilities.players)
+        marketOdds: odds, pitcherMatchup, playerHighlights,
       });
       const probs = await calibrateBaseballProbabilities(rawProbs);
-
       const bestOdds = extractBestOdds(odds);
       const combinada = buildBaseballCombinada(probs, bestOdds, { home: homeName, away: awayName });
       const dq = scoreBaseballDataQuality({ homeStats, awayStats, h2h, odds, pitcherMatchup, playerHighlights });
 
-      // Upsert principal — capturar el error de DB explicitamente para
-      // que aparezca en el array `errors` y se vea en /ferney. Si la
-      // columna cache_version o cualquier otra falta, el upsert lanza
-      // PG error 42703 "column X does not exist".
+      // UPSERT principal. pgAdmin devuelve {error}, NO throw — lo leemos.
       const { error: upsertErr } = await supabaseAdmin.from('baseball_match_analysis').upsert({
         fixture_id: fixtureId,
         date,
@@ -164,7 +166,10 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
         updated_at: new Date().toISOString(),
       });
       if (upsertErr) {
-        throw new Error(`DB upsert match_analysis: ${upsertErr.message || upsertErr.code || upsertErr}`);
+        // No throw — tratamos como persist failure para que el job pueda
+        // distinguir "cálculo OK pero BD falló" de "cálculo falló".
+        console.error(`[baseball-analyze] PERSIST FALLÓ fid=${fixtureId}:`, upsertErr.message || upsertErr.code || upsertErr);
+        return { kind: 'persist_failed', fixtureId, error: upsertErr.message || String(upsertErr) };
       }
 
       const { error: predErr } = await supabaseAdmin.from('baseball_match_predictions').upsert({
@@ -180,13 +185,11 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
         console.warn(`[baseball-analyze] predictions fail (no critico) ${fixtureId}: ${predErr.message}`);
       }
 
-      analyzed++;
+      console.log(`[baseball-analyze] ✓ ${fixtureId} ${homeName} vs ${awayName} (dq=${dq?.score ?? '?'})`);
+      return { kind: 'analyzed', fixtureId };
     } catch (e) {
       const msg = e?.message || String(e);
       const stack = e?.stack || null;
-      // Pino structured log con campos para filtrar facilmente con jq
-      // sobre /var/log/cfanalisis/worker.log:
-      //   grep '"job":"baseball-analyze"' worker.log | jq '.fixtureId, .err'
       logger.error({
         job: 'baseball-analyze',
         fixtureId,
@@ -196,40 +199,60 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
         err: msg,
         stack: stack?.split('\n').slice(0, 5).join('\n'),
       }, `fixture ${fixtureId} failed: ${msg}`);
-      failed++;
-      errors.push({ fixtureId, error: msg, stack: stack?.split('\n')[0] });
-      if (msg.startsWith('BASEBALL_QUOTA_EXHAUSTED')) break;
+      if (msg.startsWith('BASEBALL_QUOTA_EXHAUSTED')) quotaExhausted = true;
+      return { kind: 'failed', fixtureId, error: msg, stack: stack?.split('\n')[0] };
     }
+  }
+
+  // mapPool: ANALYZE_CONCURRENCY tasks en vuelo a la vez. Cede el event loop
+  // entre tasks (setImmediate) para que el lock renewer de BullMQ no se ahogue
+  // — mismo patrón que futbol-analyze-batch.
+  const results = await mapPool(fixtures, BASEBALL_ANALYZE_CONCURRENCY, async (game) => {
+    const r = await processOne(game);
+    // Actualizar contadores y progreso desde aquí (single-threaded JS, sin race).
+    if (r.kind === 'analyzed')           analyzed++;
+    else if (r.kind === 'skipped')       skipped++;
+    else if (r.kind === 'persist_failed') { persistFailed++; errors.push({ fixtureId: r.fixtureId, error: r.error || 'persist' }); }
+    else if (r.kind === 'failed')        { failed++; errors.push({ fixtureId: r.fixtureId, error: r.error || 'unknown', stack: r.stack }); }
+    // 'aborted' → no se cuenta como ninguno (la cuota cortó el procesamiento).
+
     processed++;
-    // Reportar tras cada partido para que /ferney refleje progreso en vivo.
-    // Incluye `firstError` para que el panel muestre la razon concreta del
-    // fallo sin tener que ir a logs del worker.
     await reportProgress({
       phase: 'analyzing', processed, total: fixtures.length,
-      analyzed, skipped, failed, startedAt,
+      analyzed, skipped, failed: failed + persistFailed, startedAt,
       firstError: errors[0]?.error || null,
     });
-  }
+    await new Promise(r => setImmediate(r));
+    return r;
+  });
+  void results;
 
   const quota = await getBaseballQuota();
   const durationSec = ((Date.now() - startedAt) / 1000).toFixed(1);
+  const totalFails = failed + persistFailed;
   await reportProgress({
-    phase: failed > 0 ? 'failed' : 'complete',
+    phase: totalFails > 0 ? 'failed' : 'complete',
     processed: fixtures.length, total: fixtures.length,
-    analyzed, skipped, failed, startedAt,
+    analyzed, skipped, failed: totalFails, startedAt,
     durationSec: Number(durationSec),
     firstError: errors[0]?.error || null,
   });
 
-  // Summary log al final del job — buscar en logs con:
-  //   grep '"summary":"baseball-analyze"' /var/log/cfanalisis/worker.log
+  // Summary log con persist counter separado para diagnóstico claro.
   const errorSummary = errors.slice(0, 5).map(e => `fid=${e.fixtureId}: ${e.error}`).join(' | ');
   logger.info({
     summary: 'baseball-analyze',
-    date, total: fixtures.length, analyzed, skipped, failed,
+    date, total: fixtures.length, analyzed, skipped, failed, persistFailed,
     durationSec: Number(durationSec),
     firstErrors: errors.slice(0, 5),
-  }, `baseball-analyze done — ${analyzed} ok, ${skipped} skipped, ${failed} failed in ${durationSec}s${errors.length > 0 ? ` | ${errorSummary}` : ''}`);
+  }, `baseball-analyze done — ${analyzed} ok, ${skipped} skipped, ${failed} failed, ${persistFailed} persist-failed in ${durationSec}s${errors.length > 0 ? ` | ${errorSummary}` : ''}`);
 
-  return { ok: true, date, total: fixtures.length, analyzed, skipped, failed, durationSec: Number(durationSec), quota, errors: errors.slice(0, 5) };
+  // Si hubo fallos (cálculo o persistencia), throw → BullMQ reintenta. En el
+  // reintento los análisis OK quedan skipped por el cache, así solo se
+  // re-procesan los que fallaron. Mismo patrón que futbol-analyze-batch.
+  if (totalFails > 0 && !quotaExhausted) {
+    throw new Error(`baseball-analyze incomplete: ${failed} análisis + ${persistFailed} persist failures of ${fixtures.length}`);
+  }
+
+  return { ok: true, date, total: fixtures.length, analyzed, skipped, failed, persistFailed, durationSec: Number(durationSec), quota, errors: errors.slice(0, 5) };
 }

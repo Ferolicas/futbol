@@ -18,6 +18,7 @@ export const QUEUE_NAMES = [
   // Baseball
   'baseball-fixtures',
   'baseball-analyze',
+  'baseball-analyze-all-today',
   'baseball-live',
   'baseball-finalize',
   'baseball-cleanup',
@@ -62,12 +63,13 @@ const opts: Record<QueueName, JobsOptions> = {
   'futbol-live-corners':     liveJobOpts,
   'futbol-odds':             defaultJobOpts,
   'futbol-calibrate':        defaultJobOpts,
-  'baseball-fixtures':       defaultJobOpts,
-  'baseball-analyze':        analyzeJobOpts,
-  'baseball-live':           liveJobOpts,
-  'baseball-finalize':       analyzeJobOpts,
-  'baseball-cleanup':        defaultJobOpts,
-  'baseball-calibrate':      defaultJobOpts,
+  'baseball-fixtures':            defaultJobOpts,
+  'baseball-analyze':             analyzeJobOpts,
+  'baseball-analyze-all-today':   analyzeJobOpts,
+  'baseball-live':                liveJobOpts,
+  'baseball-finalize':            analyzeJobOpts,
+  'baseball-cleanup':             defaultJobOpts,
+  'baseball-calibrate':           defaultJobOpts,
 };
 
 export const queues: Record<QueueName, Queue> = Object.fromEntries(

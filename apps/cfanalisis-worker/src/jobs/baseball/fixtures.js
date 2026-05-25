@@ -8,22 +8,23 @@
 import { getBaseballFixturesByDate, getBaseballQuota, supabaseAdmin } from '../../shared.js';
 
 export async function runBaseballFixtures(payload = {}) {
-  // BUG anterior: usaba fecha Colombia. El cron corre 01:05 hora España (CET),
-  // que son 19:05 del día ANTERIOR Colombia (UTC-5). Como MLB programa los
-  // games en hora US, esto resultaba en buscar games del "ayer" Colombia
-  // mientras los reales (las 14 que el usuario ve a las 7am España) estaban
-  // bajo la fecha del "hoy" Colombia / "hoy" ET. El cron pasaba sin encontrar
-  // nada y por eso aparecen sin analizar.
+  // MISMA LÓGICA QUE futbol/fixtures.js: UTC con anticipo a "mañana" cuando
+  // ya pasamos las 22 UTC. Esto es timezone-agnóstico para el usuario — el
+  // frontend (/api/baseball/fixtures con ?tz=) filtra después por el día
+  // local del cliente y trae cross-midnight via adjacentDates. Aquí solo
+  // garantizamos que la cartelera del día (UTC, jornada deportiva) esté
+  // poblada y persistida antes de las 02:10 España, cuando arranca el
+  // analyze (gemelo de futbol-daily).
   //
-  // Fix: usar hora US/Eastern (America/New_York) que es donde MLB programa
-  // sus juegos. A las 01:05 España (19:05 ET del día N-1 entre Mar-Nov), un
-  // game MLB nocturno de "hoy" ET (que arranca ~19:00 ET) aún tiene su date
-  // bajo el día N-1 ET → el cron lo encuentra correctamente.
-  //
-  // Si el frontend muestra la fecha local del usuario y NO coincide, el
-  // matcher por fixtureId basta — la fecha es solo clave de cache.
-  const targetDate = payload.date || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
-  console.log(`[job:baseball-fixtures] targetDate=${targetDate} (America/New_York)`);
+  // Antes: TZ Bogotá → a las 01:05 ES (=19:05 CO del día anterior) caía
+  // siempre el día N-1 → buscaba games del 24 cuando ya eran del 25 →
+  // se quedaba todo sin analizar (el bug que el usuario vio a las 7am).
+  const now = new Date();
+  const utcHour = now.getUTCHours();
+  const todayUTC    = now.toISOString().split('T')[0];
+  const tomorrowUTC = new Date(now.getTime() + 86400000).toISOString().split('T')[0];
+  const targetDate = payload.date || (utcHour >= 22 ? tomorrowUTC : todayUTC);
+  console.log(`[job:baseball-fixtures] targetDate=${targetDate} (utcHour=${utcHour})`);
 
   const result = await getBaseballFixturesByDate(targetDate, { forceApi: true });
   const fixtures = result.fixtures || [];

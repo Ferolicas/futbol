@@ -38,12 +38,16 @@ const handlers: Record<QueueName, Processor> = {
   'futbol-live-corners':     async (job) => runLiveCorners(job.data),
   'futbol-odds':             async (job) => runOdds(job.data),
   'futbol-calibrate':        async () => runFutbolCalibration(),
-  'baseball-fixtures':       async (job) => runBaseballFixtures(job.data),
-  'baseball-analyze':        async (job) => runBaseballAnalyze(job.data, job),
-  'baseball-live':           async (job) => runBaseballLive(job.data),
-  'baseball-finalize':       async (job) => runBaseballFinalize(job.data),
-  'baseball-cleanup':        async (job) => runBaseballCleanup(job.data),
-  'baseball-calibrate':      async () => runBaseballCalibration(),
+  'baseball-fixtures':            async (job) => runBaseballFixtures(job.data),
+  'baseball-analyze':             async (job) => runBaseballAnalyze(job.data, job),
+  // analyze-all-today: mismo handler que analyze pero forzando force=true.
+  // Gemelo de futbol-analyze-all-today. Lo invoca el botón "Re-analizar
+  // baseball" del panel /ferney (POST a /admin/retry con payload {force:true}).
+  'baseball-analyze-all-today':   async (job) => runBaseballAnalyze({ ...(job.data || {}), force: true }, job),
+  'baseball-live':                async (job) => runBaseballLive(job.data),
+  'baseball-finalize':            async (job) => runBaseballFinalize(job.data),
+  'baseball-cleanup':             async (job) => runBaseballCleanup(job.data),
+  'baseball-calibrate':           async () => runBaseballCalibration(),
 };
 
 // Concurrency tuning per queue. Most are I/O bound (HTTP to API-Football,
@@ -61,12 +65,13 @@ const concurrency: Record<QueueName, number> = {
   'futbol-live-corners':     1,
   'futbol-odds':             1,
   'futbol-calibrate':        1,
-  'baseball-fixtures':       1,
-  'baseball-analyze':        1,
-  'baseball-live':           1,
-  'baseball-finalize':       1,
-  'baseball-cleanup':        1,
-  'baseball-calibrate':      1,
+  'baseball-fixtures':            1,
+  'baseball-analyze':             1,
+  'baseball-analyze-all-today':   1,
+  'baseball-live':                1,
+  'baseball-finalize':            1,
+  'baseball-cleanup':             1,
+  'baseball-calibrate':           1,
 };
 
 // Lock / stall tuning per queue.
@@ -97,12 +102,13 @@ const lockOpts: Record<QueueName, LockOpts> = {
   'futbol-live-corners':     LIGHT,
   'futbol-odds':             LIGHT,
   'futbol-calibrate':        HEAVY,
-  'baseball-fixtures':       LIGHT,
-  'baseball-analyze':        HEAVY,
-  'baseball-live':           LIGHT,
-  'baseball-finalize':       HEAVY,
-  'baseball-cleanup':        LIGHT,
-  'baseball-calibrate':      HEAVY,
+  'baseball-fixtures':            LIGHT,
+  'baseball-analyze':             HEAVY,
+  'baseball-analyze-all-today':   HEAVY,
+  'baseball-live':                LIGHT,
+  'baseball-finalize':            HEAVY,
+  'baseball-cleanup':             LIGHT,
+  'baseball-calibrate':           HEAVY,
 };
 
 export function startWorkers(): Worker[] {
