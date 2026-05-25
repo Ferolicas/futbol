@@ -3295,6 +3295,23 @@ input:checked + .cb-mark::after {
   transition: grid-template-rows .15s ease-out;
 }
 .app .subacc-grid[data-open="1"] { grid-template-rows: 1fr; }
+/* min-height:0 en el hijo del grid: sin esto el contenido tiene min-height
+   auto (= su altura intrínseca) y el 0fr no colapsa limpio, lo que produce
+   saltos. El acordeón principal (.acc-inner) ya lo tiene; aquí lo replicamos. */
+.app .subacc-grid > div { min-height: 0; overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .app .subacc-grid { transition: none; }
 }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   CAUSA del "el sub-acordeón se expande hacia arriba":
+   la lista usa useWindowVirtualizer + measureElement (ResizeObserver). Al
+   crecer un sub-acordeón, el navegador con overflow-anchor:auto (default)
+   re-ancla el scroll para "compensar" el cambio de altura → desplaza el
+   viewport y el inicio del sub queda fuera de vista arriba.
+   overflow-anchor:none lo desactiva: el scroll NO se mueve cuando el
+   contenido cambia de tamaño, así la expansión va siempre hacia abajo desde
+   el botón, sin mover la posición visual del usuario.
+   ─────────────────────────────────────────────────────────────────────────── */
+.app .match-list,
+.app .match-list * { overflow-anchor: none; }
