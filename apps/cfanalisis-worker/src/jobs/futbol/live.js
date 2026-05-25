@@ -267,6 +267,12 @@ async function markSent(key) {
   try { await redisSet(key, 1, DEDUP_TTL_SEC); } catch {}
 }
 
+// Igual que markSent pero con TTL explícito (usado por el throttle de
+// stats-fetch, que necesita una ventana distinta a la dedup de eventos).
+async function markSentTTL(key, ttlSec) {
+  try { await redisSet(key, 1, ttlSec); } catch {}
+}
+
 async function buildEventBundle(fid, data, prev) {
   const DP = '[live:push:diag]';
   const home = data.homeTeam?.name || '?';
@@ -388,18 +394,18 @@ async function buildEventBundle(fid, data, prev) {
   if (nHY > pHY) {
     const k = dedupKey(fid, 'yellow', 'home', nHY);
     if (!(await alreadySent(k))) {
+      // BUG FIX (amarillas no disparaban): antes, si no encontrábamos al
+      // jugador en cardEvents (típico en ligas sin `events` inline), se hacía
+      // SKIP y la amarilla nunca se notificaba. Ahora notificamos igualmente
+      // con el equipo (fallback solo-equipo, consistente con las rojas). Si
+      // hay jugador lo añadimos; si no, "🟨 Amarilla · Equipo".
       const lastCard = (data.cardEvents || [])
         .filter(e => e.type === 'Yellow Card' && e.teamName === home && e.player)
         .slice(-1)[0];
-      if (lastCard?.player) {
-        lines.push(`🟨 Amarilla · ${home} · ${lastCard.player}`);
-        sentKeys.push(k);
-        console.log(`${DP} fid=${fid} AMARILLA home delta ${pHY}→${nHY} jugador=${lastCard.player} ⇒ línea añadida`);
-      } else {
-        // si no hay jugador conocido → NO notificamos (skip, no añadimos sentKey)
-        skipReasons.push(`yellow-home(${nHY}):sin-jugador-en-events`);
-        console.log(`${DP} fid=${fid} AMARILLA home delta ${pHY}→${nHY} pero sin jugador en cardEvents ⇒ SKIP`);
-      }
+      const who = lastCard?.player ? ` · ${lastCard.player}` : '';
+      lines.push(`🟨 Amarilla · ${home}${who}`);
+      sentKeys.push(k);
+      console.log(`${DP} fid=${fid} AMARILLA home delta ${pHY}→${nHY} jugador=${lastCard?.player || 'desconocido(solo-equipo)'} ⇒ línea añadida`);
     } else {
       skipReasons.push(`yellow-home(${nHY}):dedup-ya-enviado`);
       console.log(`${DP} fid=${fid} AMARILLA home delta ${pHY}→${nHY} pero dedup key ya marcada ⇒ SKIP`);
@@ -411,14 +417,10 @@ async function buildEventBundle(fid, data, prev) {
       const lastCard = (data.cardEvents || [])
         .filter(e => e.type === 'Yellow Card' && e.teamName === away && e.player)
         .slice(-1)[0];
-      if (lastCard?.player) {
-        lines.push(`🟨 Amarilla · ${away} · ${lastCard.player}`);
-        sentKeys.push(k);
-        console.log(`${DP} fid=${fid} AMARILLA away delta ${pAY}→${nAY} jugador=${lastCard.player} ⇒ línea añadida`);
-      } else {
-        skipReasons.push(`yellow-away(${nAY}):sin-jugador-en-events`);
-        console.log(`${DP} fid=${fid} AMARILLA away delta ${pAY}→${nAY} pero sin jugador en cardEvents ⇒ SKIP`);
-      }
+      const who = lastCard?.player ? ` · ${lastCard.player}` : '';
+      lines.push(`🟨 Amarilla · ${away}${who}`);
+      sentKeys.push(k);
+      console.log(`${DP} fid=${fid} AMARILLA away delta ${pAY}→${nAY} jugador=${lastCard?.player || 'desconocido(solo-equipo)'} ⇒ línea añadida`);
     } else {
       skipReasons.push(`yellow-away(${nAY}):dedup-ya-enviado`);
       console.log(`${DP} fid=${fid} AMARILLA away delta ${pAY}→${nAY} pero dedup key ya marcada ⇒ SKIP`);
@@ -618,15 +620,33 @@ async function sendBundledPushes(liveDetailsMap, existingLive) {
     let bundleHadDelivery = false;
     let bundleHadSubscriberInFav = false;
 
+    // Cuántos suscriptores tienen ESTE fixture en favoritos — si es 0, el push
+    // nunca se intenta (todos caen en el guard de favoritos). Lo logueamos para
+    // distinguir "nadie lo tiene en favoritos" de "lo tienen pero falló el envío".
+    const subsWithThisFav = subs.filter(r => (favoritesByUser[r.user_id] || new Set()).has(bundle.fixtureId)).length;
+    console.log(`${LP} bundle fid=${bundle.fixtureId} (typeof=${typeof bundle.fixtureId}) → suscriptores con este fixture en favoritos: ${subsWithThisFav}/${subs.length}`);
+
     await Promise.allSettled(subs.map(async (row) => {
       const favs = favoritesByUser[row.user_id] || new Set();
-      if (!favs.has(bundle.fixtureId)) { skippedNoFav++; return; }
+      if (!favs.has(bundle.fixtureId)) {
+        skippedNoFav++;
+        console.log(`${LP} GUARD favoritos: user=${row.user_id.slice(0, 8)} NO tiene fid=${bundle.fixtureId} en favoritos=[${[...favs].join(',')}] ⇒ skip`);
+        return;
+      }
       bundleHadSubscriberInFav = true;
 
       const deviceSubs = toSubArray(row.subscription);
+      console.log(`${LP} user=${row.user_id.slice(0, 8)} tiene fid=${bundle.fixtureId} en favoritos → ${deviceSubs.length} dispositivo(s)`);
+      if (deviceSubs.length === 0) {
+        console.log(`${LP} GUARD subs: user=${row.user_id.slice(0, 8)} subscription vacía/no parseable ⇒ no hay dispositivo`);
+      }
       await Promise.allSettled(deviceSubs.map(async (sub) => {
-        if (!sub?.endpoint) return;
+        if (!sub?.endpoint) {
+          console.log(`${LP} GUARD endpoint: user=${row.user_id.slice(0, 8)} sub sin endpoint (keys=${sub ? Object.keys(sub).join(',') : 'null'}) ⇒ skip`);
+          return;
+        }
         attempted++;
+        console.log(`${LP} → invocando sendPushNotification fid=${bundle.fixtureId} user=${row.user_id.slice(0, 8)} ep=…${String(sub.endpoint).slice(-12)} urgency=${bundle.urgent ? 'high' : 'normal'}`);
         const result = await sendPushNotification(
           sub,
           { title: bundle.title, body: bundle.body, tag: bundle.tag },
@@ -835,22 +855,44 @@ export async function runLive(_payload = {}) {
   }
 
   const alreadyFetched = new Set(needsEventsFetch.map(m => m.fixture.id));
-  const needsStatsFetch = tracked.filter(m => {
+  const needsStatsFetchCandidates = tracked.filter(m => {
     const fid = m.fixture.id;
     if (alreadyFetched.has(fid)) return false;
     const elapsed = m.fixture?.status?.elapsed || 0;
     if (elapsed < 10) return false;
+    // Si /fixtures?live=all YA trajo statistics inline (ligas con cobertura
+    // completa), los corners de liveDetailsMap ya están frescos este tick →
+    // no hace falta el endpoint dedicado.
     const hasStats = (m.statistics || []).length > 0;
     if (hasStats) return false;
-    // Antes: `cached?.corners?.total > 0` saltaba el fetch si HABÍA corners
-    // cacheados. Pero "corners.total === 0" en ligas exóticas es típicamente
-    // "stats no reportadas" (bug raíz). Ahora chequeamos `isReal` (flag puesta
-    // por extractLiveStats cuando los corners salieron de stats reales). Si
-    // nunca fueron reales, intentamos otra vez.
-    const cached = existingLive[fid];
-    if (cached?.corners?.isReal && cached.corners.total >= 0) return false;
+    // BUG FIX (corner freeze): antes había `if (cached?.corners?.isReal) return
+    // false` — saltaba el fetch PERMANENTEMENTE en cuanto los corners eran
+    // reales una vez. Para ligas sin stats inline (BK Häcken/Allsvenskan,
+    // Ucrania, China…) eso CONGELABA los corners en su primer valor real
+    // (p.ej. 2): el partido seguía sumando corners (3, 4…) pero nunca se
+    // re-consultaban las stats, así que ni el actual ni el baseline avanzaban
+    // y no se generaba delta. Ahora SIEMPRE re-consultamos mientras el partido
+    // siga vivo (el throttle de abajo evita llamadas duplicadas por solape de
+    // crons). Re-fetchear /fixtures?id=X además trae los `events`, de donde
+    // sale el jugador de la amarilla → arregla también el bug de tarjetas.
     return true;
   });
+
+  // Throttle anti-solape: máx 1 stats-fetch por fixture cada 50s. Con el cron
+  // de live cada 60s esto es ~1 fetch/tick (corners frescos sin retraso), pero
+  // si dos ejecuciones se solapan (run largo + siguiente tick) NO duplicamos la
+  // llamada a la API. TTL 50s < 60s para no saltarnos un tick legítimo.
+  const STATS_FETCH_THROTTLE_SEC = 50;
+  const needsStatsFetch = [];
+  for (const m of needsStatsFetchCandidates) {
+    const tkey = `live:statsfetch:${m.fixture.id}`;
+    if (await alreadySent(tkey)) {
+      console.log(`${LL} stats-fetch throttle: fid=${m.fixture.id} consultado hace <${STATS_FETCH_THROTTLE_SEC}s ⇒ skip este tick`);
+      continue;
+    }
+    await markSentTTL(tkey, STATS_FETCH_THROTTLE_SEC);
+    needsStatsFetch.push(m);
+  }
 
   if (needsStatsFetch.length > 0) {
     await Promise.all(needsStatsFetch.map(async (match) => {
