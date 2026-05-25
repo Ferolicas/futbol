@@ -268,12 +268,38 @@ async function markSent(key) {
 }
 
 async function buildEventBundle(fid, data, prev) {
+  const DP = '[live:push:diag]';
   const home = data.homeTeam?.name || '?';
   const away = data.awayTeam?.name || '?';
   const minute = formatMinute(data.status);
   const lines = []; // emoji + texto, una línea por evento
   const sentKeys = []; // claves a marcar como notificadas si el bundle se envía
   let urgent = false;
+  // skipReasons: por qué un delta detectado NO terminó en línea (dedup, sin
+  // jugador, etc.). Vacío + lines vacío ⇒ no hubo ningún delta (baseline==actual).
+  const skipReasons = [];
+
+  // ── SNAPSHOT DIAGNÓSTICO baseline (prev) vs actual (data) ──
+  // Este log se emite por fixture/tick ANTES de cualquier comparación para
+  // que la auditoría vea exactamente qué valores se están comparando. Si un
+  // córner ocurre pero baseline==actual, aquí se ve que el delta nunca llegó.
+  const snap = {
+    goals:   { base: `${prev.goals?.home ?? 0}-${prev.goals?.away ?? 0}`,       now: `${data.goals?.home ?? 0}-${data.goals?.away ?? 0}` },
+    corners: { base: `${prev.corners?.home ?? 0}-${prev.corners?.away ?? 0}`,   now: `${data.corners?.home ?? 0}-${data.corners?.away ?? 0}`, baseReal: prev.corners?.isReal ?? null, nowReal: data.corners?.isReal ?? null },
+    yellow:  { base: `${prev.yellowCards?.home ?? 0}-${prev.yellowCards?.away ?? 0}`, now: `${data.yellowCards?.home ?? 0}-${data.yellowCards?.away ?? 0}` },
+    red:     { base: `${prev.redCards?.home ?? 0}-${prev.redCards?.away ?? 0}`, now: `${data.redCards?.home ?? 0}-${data.redCards?.away ?? 0}` },
+    subst:   { base: (prev.substitutions || []).length, now: (data.substitutions || []).length },
+    pen:     { base: (prev.penaltyEvents || []).length, now: (data.penaltyEvents || []).length },
+    var:     { base: (prev.varEvents || []).length, now: (data.varEvents || []).length },
+  };
+  console.log(`${DP} fid=${fid} ${home}-${away} min=${minute}' | ` +
+    `goals base=${snap.goals.base} now=${snap.goals.now} | ` +
+    `corners base=${snap.corners.base}(real=${snap.corners.baseReal}) now=${snap.corners.now}(real=${snap.corners.nowReal}) | ` +
+    `yellow base=${snap.yellow.base} now=${snap.yellow.now} | ` +
+    `red base=${snap.red.base} now=${snap.red.now} | ` +
+    `subst base=${snap.subst.base} now=${snap.subst.now} | ` +
+    `pen base=${snap.pen.base} now=${snap.pen.now} | ` +
+    `var base=${snap.var.base} now=${snap.var.now}`);
 
   // REGLA GLOBAL DE CALIDAD DE NOTIFICACIONES:
   // Solo emitimos una línea si los DATOS REALES están presentes (jugador,
@@ -299,6 +325,10 @@ async function buildEventBundle(fid, data, prev) {
       lines.push(`⚽ GOL · ${home} ${nHG}-${nAG}${who}${goalDetail(last)}`);
       sentKeys.push(k);
       urgent = true;
+      console.log(`${DP} fid=${fid} GOL home delta ${pHG}→${nHG} ⇒ línea añadida`);
+    } else {
+      skipReasons.push(`goal-home(${nHG}):dedup-ya-enviado`);
+      console.log(`${DP} fid=${fid} GOL home delta ${pHG}→${nHG} pero dedup key ya marcada ⇒ SKIP`);
     }
   }
   if (nAG > pAG) {
@@ -309,6 +339,10 @@ async function buildEventBundle(fid, data, prev) {
       lines.push(`⚽ GOL · ${away} ${nHG}-${nAG}${who}${goalDetail(last)}`);
       sentKeys.push(k);
       urgent = true;
+      console.log(`${DP} fid=${fid} GOL away delta ${pAG}→${nAG} ⇒ línea añadida`);
+    } else {
+      skipReasons.push(`goal-away(${nAG}):dedup-ya-enviado`);
+      console.log(`${DP} fid=${fid} GOL away delta ${pAG}→${nAG} pero dedup key ya marcada ⇒ SKIP`);
     }
   }
 
@@ -324,14 +358,26 @@ async function buildEventBundle(fid, data, prev) {
     if (!(await alreadySent(k))) {
       lines.push(`🚩 Córner · ${home} (${nHC}-${nAC})`);
       sentKeys.push(k);
+      console.log(`${DP} fid=${fid} CORNER home delta ${pHC}→${nHC} ⇒ línea añadida`);
+    } else {
+      skipReasons.push(`corner-home(${nHC}):dedup-ya-enviado`);
+      console.log(`${DP} fid=${fid} CORNER home delta ${pHC}→${nHC} pero dedup key ya marcada (${k}) ⇒ SKIP`);
     }
+  } else {
+    console.log(`${DP} fid=${fid} CORNER home sin delta (base=${pHC} now=${nHC})`);
   }
   if (nAC > pAC) {
     const k = dedupKey(fid, 'corner', 'away', nAC);
     if (!(await alreadySent(k))) {
       lines.push(`🚩 Córner · ${away} (${nHC}-${nAC})`);
       sentKeys.push(k);
+      console.log(`${DP} fid=${fid} CORNER away delta ${pAC}→${nAC} ⇒ línea añadida`);
+    } else {
+      skipReasons.push(`corner-away(${nAC}):dedup-ya-enviado`);
+      console.log(`${DP} fid=${fid} CORNER away delta ${pAC}→${nAC} pero dedup key ya marcada (${k}) ⇒ SKIP`);
     }
+  } else {
+    console.log(`${DP} fid=${fid} CORNER away sin delta (base=${pAC} now=${nAC})`);
   }
 
   // ── Amarillas ── REAL: tarjeta pitada con jugador (viene del array events).
@@ -348,8 +394,15 @@ async function buildEventBundle(fid, data, prev) {
       if (lastCard?.player) {
         lines.push(`🟨 Amarilla · ${home} · ${lastCard.player}`);
         sentKeys.push(k);
+        console.log(`${DP} fid=${fid} AMARILLA home delta ${pHY}→${nHY} jugador=${lastCard.player} ⇒ línea añadida`);
+      } else {
+        // si no hay jugador conocido → NO notificamos (skip, no añadimos sentKey)
+        skipReasons.push(`yellow-home(${nHY}):sin-jugador-en-events`);
+        console.log(`${DP} fid=${fid} AMARILLA home delta ${pHY}→${nHY} pero sin jugador en cardEvents ⇒ SKIP`);
       }
-      // si no hay jugador conocido → NO notificamos (skip, no añadimos sentKey)
+    } else {
+      skipReasons.push(`yellow-home(${nHY}):dedup-ya-enviado`);
+      console.log(`${DP} fid=${fid} AMARILLA home delta ${pHY}→${nHY} pero dedup key ya marcada ⇒ SKIP`);
     }
   }
   if (nAY > pAY) {
@@ -361,7 +414,14 @@ async function buildEventBundle(fid, data, prev) {
       if (lastCard?.player) {
         lines.push(`🟨 Amarilla · ${away} · ${lastCard.player}`);
         sentKeys.push(k);
+        console.log(`${DP} fid=${fid} AMARILLA away delta ${pAY}→${nAY} jugador=${lastCard.player} ⇒ línea añadida`);
+      } else {
+        skipReasons.push(`yellow-away(${nAY}):sin-jugador-en-events`);
+        console.log(`${DP} fid=${fid} AMARILLA away delta ${pAY}→${nAY} pero sin jugador en cardEvents ⇒ SKIP`);
       }
+    } else {
+      skipReasons.push(`yellow-away(${nAY}):dedup-ya-enviado`);
+      console.log(`${DP} fid=${fid} AMARILLA away delta ${pAY}→${nAY} pero dedup key ya marcada ⇒ SKIP`);
     }
   }
 
@@ -383,6 +443,10 @@ async function buildEventBundle(fid, data, prev) {
       lines.push(`🟥 EXPULSADO · ${home}${who}${how}`);
       sentKeys.push(k);
       urgent = true;
+      console.log(`${DP} fid=${fid} ROJA home delta ${pHR}→${nHR} jugador=${lastCard?.player || 'desconocido'} ⇒ línea añadida`);
+    } else {
+      skipReasons.push(`red-home(${nHR}):dedup-ya-enviado`);
+      console.log(`${DP} fid=${fid} ROJA home delta ${pHR}→${nHR} pero dedup key ya marcada ⇒ SKIP`);
     }
   }
   if (nAR > pAR) {
@@ -396,6 +460,10 @@ async function buildEventBundle(fid, data, prev) {
       lines.push(`🟥 EXPULSADO · ${away}${who}${how}`);
       sentKeys.push(k);
       urgent = true;
+      console.log(`${DP} fid=${fid} ROJA away delta ${pAR}→${nAR} jugador=${lastCard?.player || 'desconocido'} ⇒ línea añadida`);
+    } else {
+      skipReasons.push(`red-away(${nAR}):dedup-ya-enviado`);
+      console.log(`${DP} fid=${fid} ROJA away delta ${pAR}→${nAR} pero dedup key ya marcada ⇒ SKIP`);
     }
   }
 
@@ -410,39 +478,71 @@ async function buildEventBundle(fid, data, prev) {
   // notificamos — "🔄 Equipo · ? → ?" sería ruido sin información.
   const prevSubKeys = new Set((prev.substitutions || []).map(evKey));
   const newSubs = (data.substitutions || []).filter(s => !prevSubKeys.has(evKey(s)));
+  if (newSubs.length > 0) console.log(`${DP} fid=${fid} CAMBIO ${newSubs.length} evento(s) nuevo(s) vs baseline`);
   for (const s of newSubs) {
-    if (!s.playerOut || !s.playerIn) continue; // saltar sustituciones incompletas
+    if (!s.playerOut || !s.playerIn) {
+      skipReasons.push(`subst:incompleto(out=${s.playerOut || '?'},in=${s.playerIn || '?'})`);
+      console.log(`${DP} fid=${fid} CAMBIO incompleto (out=${s.playerOut || '?'} in=${s.playerIn || '?'}) ⇒ SKIP`);
+      continue; // saltar sustituciones incompletas
+    }
     const k = dedupKey(fid, 'subst', evKey(s));
-    if (await alreadySent(k)) continue;
+    if (await alreadySent(k)) {
+      skipReasons.push(`subst:dedup-ya-enviado`);
+      console.log(`${DP} fid=${fid} CAMBIO ${s.playerOut}→${s.playerIn} dedup ya marcada ⇒ SKIP`);
+      continue;
+    }
     lines.push(`🔄 Cambio · ${s.teamName || '?'} · ${s.playerOut} → ${s.playerIn}`);
     sentKeys.push(k);
+    console.log(`${DP} fid=${fid} CAMBIO ${s.teamName} ${s.playerOut}→${s.playerIn} ⇒ línea añadida`);
   }
 
   // ── Penaltis (lista — scored/missed/awarded) ──
   const prevPenKeys = new Set((prev.penaltyEvents || []).map(evKey));
   const newPens = (data.penaltyEvents || []).filter(p => !prevPenKeys.has(evKey(p)));
+  if (newPens.length > 0) console.log(`${DP} fid=${fid} PENALTI ${newPens.length} evento(s) nuevo(s) vs baseline`);
   for (const p of newPens) {
     const k = dedupKey(fid, 'penalty', evKey(p));
-    if (await alreadySent(k)) continue;
+    if (await alreadySent(k)) {
+      skipReasons.push(`penalty(${p.kind}):dedup-ya-enviado`);
+      console.log(`${DP} fid=${fid} PENALTI ${p.kind} dedup ya marcada ⇒ SKIP`);
+      continue;
+    }
     const verb = p.kind === 'scored' ? 'convertido' : p.kind === 'missed' ? 'fallado' : 'señalado';
     lines.push(`🅿️ Penalti ${verb} · ${p.teamName || '?'}${p.player ? ` · ${p.player}` : ''}`);
     sentKeys.push(k);
     urgent = true;
+    console.log(`${DP} fid=${fid} PENALTI ${verb} ${p.teamName} ⇒ línea añadida`);
   }
 
   // ── VAR (gol anulado / penalti anulado / decisión cambiada) ──
   const prevVarKeys = new Set((prev.varEvents || []).map(evKey));
   const newVars = (data.varEvents || []).filter(v => !prevVarKeys.has(evKey(v)));
+  if (newVars.length > 0) console.log(`${DP} fid=${fid} VAR ${newVars.length} evento(s) nuevo(s) vs baseline`);
   for (const v of newVars) {
     const k = dedupKey(fid, 'var', evKey(v));
-    if (await alreadySent(k)) continue;
+    if (await alreadySent(k)) {
+      skipReasons.push(`var:dedup-ya-enviado`);
+      console.log(`${DP} fid=${fid} VAR ${v.detail} dedup ya marcada ⇒ SKIP`);
+      continue;
+    }
     const det = v.detail || 'VAR';
     lines.push(`📺 ${det} · ${v.teamName || '?'}${v.player ? ` · ${v.player}` : ''}`);
     sentKeys.push(k);
     urgent = true;
+    console.log(`${DP} fid=${fid} VAR ${det} ${v.teamName} ⇒ línea añadida`);
   }
 
-  if (lines.length === 0) return null;
+  if (lines.length === 0) {
+    // RESUMEN del por qué NO se generó bundle para este fixture: o no hubo
+    // ningún delta (baseline==actual en todo) o todos los deltas fueron
+    // bloqueados (dedup / sin jugador / incompletos). skipReasons lo dice.
+    const motivo = skipReasons.length > 0
+      ? `deltas detectados pero TODOS bloqueados: [${skipReasons.join(', ')}]`
+      : 'sin deltas — baseline == actual en todos los contadores/listas';
+    console.log(`${DP} fid=${fid} ⇒ NO BUNDLE · ${motivo}`);
+    return null;
+  }
+  console.log(`${DP} fid=${fid} ⇒ BUNDLE con ${lines.length} línea(s)${skipReasons.length ? ` (${skipReasons.length} skip: [${skipReasons.join(', ')}])` : ''}`);
 
   // Título: marcador en vivo + minuto. Body: líneas concatenadas (max ~3 líneas
   // visibles en la notificación expandida; el resto se trunca silenciosamente).
