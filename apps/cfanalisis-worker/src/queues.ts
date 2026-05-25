@@ -14,12 +14,14 @@ export const QUEUE_NAMES = [
   'futbol-live',
   'futbol-live-corners',
   'futbol-odds',
+  'futbol-calibrate',
   // Baseball
   'baseball-fixtures',
   'baseball-analyze',
   'baseball-live',
   'baseball-finalize',
   'baseball-cleanup',
+  'baseball-calibrate',
 ] as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[number];
@@ -59,11 +61,13 @@ const opts: Record<QueueName, JobsOptions> = {
   'futbol-live':             liveJobOpts,
   'futbol-live-corners':     liveJobOpts,
   'futbol-odds':             defaultJobOpts,
+  'futbol-calibrate':        defaultJobOpts,
   'baseball-fixtures':       defaultJobOpts,
   'baseball-analyze':        analyzeJobOpts,
   'baseball-live':           liveJobOpts,
   'baseball-finalize':       analyzeJobOpts,
   'baseball-cleanup':        defaultJobOpts,
+  'baseball-calibrate':      defaultJobOpts,
 };
 
 export const queues: Record<QueueName, Queue> = Object.fromEntries(

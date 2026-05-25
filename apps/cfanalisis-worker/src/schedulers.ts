@@ -23,10 +23,19 @@ const STALE_SCHEDULER_IDS = ['futbol-live-1m'];
 
 const SCHEDULES: Sched[] = [
   // ── Fútbol — diarios (hora España) ──
-  { queue: 'futbol-fixtures', id: 'futbol-fixtures-daily', pattern: '5 2 * * *',   tz: TZ },
-  { queue: 'futbol-daily',    id: 'futbol-daily-daily',    pattern: '10 2 * * *',  tz: TZ },
-  { queue: 'futbol-finalize', id: 'futbol-finalize-daily', pattern: '0 3,4 * * *', tz: TZ },
-  { queue: 'futbol-cleanup',  id: 'futbol-cleanup-daily',  pattern: '0 3 * * *',   tz: TZ },
+  // ORDEN del ciclo de auto-mejora del modelo:
+  //   03:00 + 04:00  finalize  → cierra resultados de los partidos de la noche
+  //   05:00          calibrate → recalcula los knots isotónicos con esos
+  //                              resultados frescos (escribe app_config)
+  //   02:05 (día sig) fixtures + 02:10 daily → el análisis del día ya usa la
+  //                              calibración generada la madrugada anterior.
+  // Así el modelo se auto-corrige cada noche sin re-análisis manual: cada
+  // recomendación diaria nace con la calibración más reciente disponible.
+  { queue: 'futbol-fixtures',  id: 'futbol-fixtures-daily',  pattern: '5 2 * * *',   tz: TZ },
+  { queue: 'futbol-daily',     id: 'futbol-daily-daily',     pattern: '10 2 * * *',  tz: TZ },
+  { queue: 'futbol-finalize',  id: 'futbol-finalize-daily',  pattern: '0 3,4 * * *', tz: TZ },
+  { queue: 'futbol-calibrate', id: 'futbol-calibrate-daily', pattern: '0 5 * * *',   tz: TZ },
+  { queue: 'futbol-cleanup',   id: 'futbol-cleanup-daily',   pattern: '0 3 * * *',   tz: TZ },
   // ── Fútbol — periódicos ──
   // Live cada 20s: el handler hace smart-skip (0 llamadas fuera de partidos),
   // así que el 3x del intervalo solo aplica durante ventanas en vivo. En plan
@@ -37,10 +46,11 @@ const SCHEDULES: Sched[] = [
   { queue: 'futbol-live-corners', id: 'futbol-live-corners-30m', pattern: '*/30 * * * *' },
   { queue: 'futbol-odds',         id: 'futbol-odds-15m',         pattern: '*/15 * * * *' },
   // ── Baseball — diarios (hora España) ──
-  { queue: 'baseball-fixtures', id: 'baseball-fixtures-daily', pattern: '5 1 * * *',  tz: TZ }, // 1:05
-  { queue: 'baseball-analyze',  id: 'baseball-analyze-daily',  pattern: '30 1 * * *', tz: TZ }, // 1:30
-  { queue: 'baseball-finalize', id: 'baseball-finalize-daily', pattern: '0 5 * * *',  tz: TZ }, // 5:00
-  { queue: 'baseball-cleanup',  id: 'baseball-cleanup-weekly', pattern: '0 3 * * 0',  tz: TZ }, // dom 3:00
+  { queue: 'baseball-fixtures',  id: 'baseball-fixtures-daily',  pattern: '5 1 * * *',  tz: TZ }, // 1:05
+  { queue: 'baseball-analyze',   id: 'baseball-analyze-daily',   pattern: '30 1 * * *', tz: TZ }, // 1:30
+  { queue: 'baseball-finalize',  id: 'baseball-finalize-daily',  pattern: '0 5 * * *',  tz: TZ }, // 5:00
+  { queue: 'baseball-calibrate', id: 'baseball-calibrate-daily', pattern: '0 6 * * *',  tz: TZ }, // 6:00 (tras finalize)
+  { queue: 'baseball-cleanup',   id: 'baseball-cleanup-weekly',  pattern: '0 3 * * 0',  tz: TZ }, // dom 3:00
   // ── Baseball — live (cada 5 min) ──
   // El handler hace smart-skip: solo gasta API dentro de la ventana de juego,
   // con presupuesto de 30 llamadas/día y throttle dinámico 4-30 min. Fuera de
