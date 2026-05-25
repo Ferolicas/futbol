@@ -101,6 +101,11 @@ export async function runAnalyzeBatch(payload = {}, job = null) {
 
   let analyzed = 0, cached = 0, processed = 0;
   const failedFids = [];
+  // Persist tracking: separamos análisis OK pero BD-falló (persistFailedFids)
+  // del fallo total (failedFids). Antes el job reportaba 99/99 OK aunque la
+  // tabla match_analysis quedara vacía porque cacheAnalysis silenciaba errores.
+  const persistFailedFids = [];
+  let persistedDb = 0;
   let persistInFlight = null;
 
   // Debounced persistence: at most one Redis write in flight at a time,
@@ -133,6 +138,22 @@ export async function runAnalyzeBatch(payload = {}, job = null) {
     if (a?.odds?.matchWinner) analyzedOdds[fid] = a.odds.matchWinner;
     const summary = buildSummary(a);
     if (summary) analyzedData[fid] = summary;
+
+    // Chequeo explícito de persistencia en match_analysis. result.persist viene
+    // de cacheAnalysis ({ redis, db, error }). fromCache=true significa que el
+    // análisis vino de BD/Redis previa, así que ya está persistido por
+    // definición — no hace falta verificar.
+    if (!result.fromCache) {
+      const p = result.persist || { db: false, error: 'sin retorno' };
+      if (p.db) {
+        persistedDb++;
+      } else {
+        persistFailedFids.push(fid);
+        console.error(`[job:futbol-analyze-batch] PERSIST FALLÓ fid=${fid}: ${p.error || 'unknown'}`);
+      }
+    } else {
+      persistedDb++;
+    }
 
     processed++;
     if (processed % PERSIST_EVERY === 0) schedulePersist();
@@ -197,14 +218,27 @@ export async function runAnalyzeBatch(payload = {}, job = null) {
     durationSec: Number(durationSec),
   });
 
-  // If ANY fixture failed, throw — BullMQ will retry with backoff. On retry,
-  // analyzeMatch returns fromCache=true for completed ones so we only re-do
-  // the failures.
-  if (failedFids.length > 0) {
+  // Resumen de persistencia en match_analysis (auditable en pm2 logs).
+  console.log(
+    `[job:futbol-analyze-batch] persistencia match_analysis: ` +
+    `dbOk=${persistedDb}/${allFixtures.length} dbFail=${persistFailedFids.length}`,
+  );
+
+  // If ANY fixture failed (cálculo O persistencia), throw — BullMQ will retry
+  // with backoff. On retry, analyzeMatch returns fromCache=true for completed
+  // ones (sin reintentar el cálculo) y vuelve a intentar el upsert si la BD
+  // falló antes. Antes solo se chequeaba failedFids (errores del motor), por
+  // eso el job reportaba 99/99 OK mientras match_analysis quedaba en 0.
+  const allFail = [...failedFids, ...persistFailedFids];
+  if (allFail.length > 0) {
+    const kind = failedFids.length > 0 ? 'analysis' : 'persist';
     console.error(
-      `[job:futbol-analyze-batch] ${failedFids.length}/${allFixtures.length} fixtures failed in ${durationSec}s — throwing for BullMQ retry`,
+      `[job:futbol-analyze-batch] ${allFail.length}/${allFixtures.length} fixtures con fallo (${kind}) en ${durationSec}s — throwing for BullMQ retry`,
     );
-    throw new Error(`analyze-batch incomplete: ${failedFids.length} failures (${failedFids.slice(0, 10).join(',')}${failedFids.length > 10 ? '…' : ''})`);
+    throw new Error(
+      `analyze-batch incomplete: ${failedFids.length} análisis + ${persistFailedFids.length} persist failures ` +
+      `(${allFail.slice(0, 10).join(',')}${allFail.length > 10 ? '…' : ''})`,
+    );
   }
 
   await markComplete(date, allFixtures.length);
@@ -215,6 +249,7 @@ export async function runAnalyzeBatch(payload = {}, job = null) {
     total: allFixtures.length,
     analyzed,
     cached,
+    persistedDb,
     failed: 0,
     durationSec: Number(durationSec),
     concurrency: ANALYZE_CONCURRENCY,
