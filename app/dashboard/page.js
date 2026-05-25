@@ -1866,6 +1866,30 @@ function AnalysisModal({ id, onClose }) {
 
 /* ======================== ACCORDION CARD ======================== */
 
+// Toggle de sub-acordeón + revelado del header.
+//
+// POR QUÉ el scrollIntoView: la lista usa useWindowVirtualizer con
+// measureElement. El acordeón PRINCIPAL no sufre el problema porque al abrirlo
+// cambia expandedMatch (estado del padre) → el virtualizer cambia estimateSize
+// y RESERVA el espacio antes de medir. Los sub-acordeones cambian un estado
+// LOCAL del card → el virtualizer no reserva nada y depende de measureElement
+// (ResizeObserver), que remide tras el crecimiento y reposiciona el item de
+// forma que el contenido recién abierto puede quedar fuera del viewport (el
+// usuario tenía que hacer scroll hacia arriba). Tras abrir, revelamos el
+// header del sub con block:'nearest' (doble rAF = esperar a que el layout y la
+// remedición del virtualizer se asienten). 'nearest' NO mueve la vista si el
+// header ya está visible; solo lo trae de vuelta si quedó fuera.
+function toggleSubAndReveal(e, open, id, setOpenSub) {
+  e.stopPropagation();
+  const header = e.currentTarget; // capturar antes del async (luego puede ser null)
+  setOpenSub(open ? null : id);
+  if (!open && header) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      try { header.scrollIntoView({ block: 'nearest' }); } catch {}
+    }));
+  }
+}
+
 // SubAccordion CONTROLADO + exclusivo. El estado de "cuál está abierto" vive
 // en el AccordionCard padre (openSub/setOpenSub), así solo uno está abierto a
 // la vez. children SIEMPRE montados (grid 0fr→1fr), el toggle solo cambia CSS
@@ -1876,7 +1900,7 @@ function SubAccordion({ id, title, color, openSub, setOpenSub, children }) {
     <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
       <div
         role="button"
-        onClick={(e) => { e.stopPropagation(); setOpenSub(open ? null : id); }}
+        onClick={(e) => toggleSubAndReveal(e, open, id, setOpenSub)}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
       >
         <span style={{ fontSize: '.75rem', fontWeight: 700, color: color || 'var(--t2)', textTransform: 'uppercase', letterSpacing: '.05em' }}>{title}</span>
@@ -2485,7 +2509,7 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
     <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
       <div
         role="button"
-        onClick={(e) => { e.stopPropagation(); setOpenSub(open ? null : id); }}
+        onClick={(e) => toggleSubAndReveal(e, open, id, setOpenSub)}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#2dd4bf', textTransform: 'uppercase', letterSpacing: '.05em' }}>
@@ -2589,7 +2613,7 @@ function AccordionPlayersBlock({ highlights, id, openSub, setOpenSub }) {
     <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
       <div
         role="button"
-        onClick={(e) => { e.stopPropagation(); setOpenSub(open ? null : id); }}
+        onClick={(e) => toggleSubAndReveal(e, open, id, setOpenSub)}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '.05em' }}>
