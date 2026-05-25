@@ -208,79 +208,191 @@ function evKey(ev) {
   return `${ev.minute ?? '?'}|${ev.extra ?? 0}|${ev.player ?? ''}|${ev.teamId ?? ''}|${ev.detail ?? ev.kind ?? ev.type ?? ''}`;
 }
 
-function buildEventBundle(fid, data, prev) {
+// ─── Deduplicación cross-tick por Redis ────────────────────────────────────
+// PROBLEMA QUE RESUELVE: el mismo evento se notificaba 2-3 veces en ticks
+// consecutivos de 20s. Causa: `existingLive` se lee de Redis al inicio del
+// tick, pero `mergedLive` (con los contadores nuevos) se ESCRIBE de vuelta a
+// Redis DESPUÉS de invocar sendBundledPushes (que es fire-and-forget). Si el
+// siguiente tick de 20s arranca antes de que esa escritura se vea reflejada
+// (latencia de Redis, pipelining, o porque sendBundledPushes await-ea
+// subscriptions y favoritos primero), `existingLive` en el tick N+1 sigue
+// mostrando los contadores viejos → mismo delta → mismo push.
+//
+// FIX: en lugar de confiar solo en `existingLive` para evitar repeticiones,
+// marcamos en Redis con TTL=90s (3 ticks de 20s + buffer) una clave por
+// EVENTO ya notificado:
+//   push:sent:{fid}:goal:home:{count}        — gol home cuando contador llega a N
+//   push:sent:{fid}:corner:home:{count}      — cada córner home en valor exacto
+//   push:sent:{fid}:yellow:{teamId}:{count}  — amarilla por equipo y valor
+//   push:sent:{fid}:red:{teamId}:{count}
+//   push:sent:{fid}:offside:{teamId}:{count}
+//   push:sent:{fid}:subst:{evKey}            — eventos de lista por su evKey
+//   push:sent:{fid}:penalty:{evKey}
+//   push:sent:{fid}:var:{evKey}
+//
+// Antes de añadir la línea al bundle, comprobamos cada clave. Si existe →
+// skip. Las claves quedan en Redis con TTL 90s y desaparecen solas; el evento
+// (que es estrictamente posterior a "ese contador en ese valor") nunca se
+// repetirá dentro de los próximos 90s.
+const DEDUP_TTL_SEC = 90;
+
+function dedupKey(fid, ...parts) {
+  return `push:sent:${fid}:${parts.join(':')}`;
+}
+
+async function alreadySent(key) {
+  try {
+    const v = await redisGet(key);
+    return v !== null && v !== undefined;
+  } catch {
+    // Si Redis falla en la lectura, FAIL OPEN — no bloqueamos la
+    // notificación. Es mejor un push duplicado ocasional que un evento
+    // perdido por un transient de Redis.
+    return false;
+  }
+}
+
+async function markSent(key) {
+  try { await redisSet(key, 1, DEDUP_TTL_SEC); } catch {}
+}
+
+async function buildEventBundle(fid, data, prev) {
   const home = data.homeTeam?.name || '?';
   const away = data.awayTeam?.name || '?';
   const minute = formatMinute(data.status);
   const lines = []; // emoji + texto, una línea por evento
+  const sentKeys = []; // claves a marcar como notificadas si el bundle se envía
   let urgent = false;
 
-  // ── Goles ──
+  // ── Goles ── (clave por equipo+valor — un gol nunca decrece)
   const pHG = prev.goals?.home ?? 0, pAG = prev.goals?.away ?? 0;
   const nHG = data.goals?.home ?? 0, nAG = data.goals?.away ?? 0;
-  if (nHG > pHG || nAG > pAG) {
-    const last = data.goalScorers?.slice(-1)[0];
-    const team = nHG > pHG ? home : away;
-    lines.push(`⚽ ${team}${last?.player ? ` · ${last.player}` : ''}`);
-    urgent = true;
+  if (nHG > pHG) {
+    const k = dedupKey(fid, 'goal', 'home', nHG);
+    if (!(await alreadySent(k))) {
+      const last = data.goalScorers?.slice(-1)[0];
+      lines.push(`⚽ ${home}${last?.player ? ` · ${last.player}` : ''}`);
+      sentKeys.push(k);
+      urgent = true;
+    }
+  }
+  if (nAG > pAG) {
+    const k = dedupKey(fid, 'goal', 'away', nAG);
+    if (!(await alreadySent(k))) {
+      const last = data.goalScorers?.slice(-1)[0];
+      lines.push(`⚽ ${away}${last?.player ? ` · ${last.player}` : ''}`);
+      sentKeys.push(k);
+      urgent = true;
+    }
   }
 
-  // ── Córners ──
+  // ── Córners ── (clave por equipo+valor exacto — incrementos discretos)
   const pHC = prev.corners?.home ?? 0, pAC = prev.corners?.away ?? 0;
   const nHC = data.corners?.home ?? 0, nAC = data.corners?.away ?? 0;
-  if (nHC > pHC || nAC > pAC) {
-    const team = nHC > pHC ? home : away;
-    const inc = (nHC - pHC) + (nAC - pAC);
-    lines.push(`🚩 Córner${inc > 1 ? ` x${inc}` : ''} · ${team}`);
+  if (nHC > pHC) {
+    const k = dedupKey(fid, 'corner', 'home', nHC);
+    if (!(await alreadySent(k))) {
+      lines.push(`🚩 Córner · ${home}`);
+      sentKeys.push(k);
+    }
+  }
+  if (nAC > pAC) {
+    const k = dedupKey(fid, 'corner', 'away', nAC);
+    if (!(await alreadySent(k))) {
+      lines.push(`🚩 Córner · ${away}`);
+      sentKeys.push(k);
+    }
   }
 
   // ── Amarillas ──
   const pHY = prev.yellowCards?.home ?? 0, pAY = prev.yellowCards?.away ?? 0;
   const nHY = data.yellowCards?.home ?? 0, nAY = data.yellowCards?.away ?? 0;
-  if (nHY > pHY || nAY > pAY) {
-    const team = nHY > pHY ? home : away;
-    const lastCard = (data.cardEvents || [])
-      .filter(e => e.type === 'Yellow Card' && e.teamName === team)
-      .slice(-1)[0];
-    lines.push(`🟨 ${team}${lastCard?.player ? ` · ${lastCard.player}` : ''}`);
+  if (nHY > pHY) {
+    const k = dedupKey(fid, 'yellow', 'home', nHY);
+    if (!(await alreadySent(k))) {
+      const lastCard = (data.cardEvents || [])
+        .filter(e => e.type === 'Yellow Card' && e.teamName === home)
+        .slice(-1)[0];
+      lines.push(`🟨 ${home}${lastCard?.player ? ` · ${lastCard.player}` : ''}`);
+      sentKeys.push(k);
+    }
+  }
+  if (nAY > pAY) {
+    const k = dedupKey(fid, 'yellow', 'away', nAY);
+    if (!(await alreadySent(k))) {
+      const lastCard = (data.cardEvents || [])
+        .filter(e => e.type === 'Yellow Card' && e.teamName === away)
+        .slice(-1)[0];
+      lines.push(`🟨 ${away}${lastCard?.player ? ` · ${lastCard.player}` : ''}`);
+      sentKeys.push(k);
+    }
   }
 
   // ── Rojas (incluye expulsiones por 2a amarilla) ──
   const pHR = prev.redCards?.home ?? 0, pAR = prev.redCards?.away ?? 0;
   const nHR = data.redCards?.home ?? 0, nAR = data.redCards?.away ?? 0;
-  if (nHR > pHR || nAR > pAR) {
-    const team = nHR > pHR ? home : away;
-    const lastCard = (data.cardEvents || [])
-      .filter(e => (e.type === 'Red Card' || e.type === 'Second Yellow card') && e.teamName === team)
-      .slice(-1)[0];
-    lines.push(`🟥 EXPULSADO · ${team}${lastCard?.player ? ` · ${lastCard.player}` : ''}`);
-    urgent = true;
+  if (nHR > pHR) {
+    const k = dedupKey(fid, 'red', 'home', nHR);
+    if (!(await alreadySent(k))) {
+      const lastCard = (data.cardEvents || [])
+        .filter(e => (e.type === 'Red Card' || e.type === 'Second Yellow card') && e.teamName === home)
+        .slice(-1)[0];
+      lines.push(`🟥 EXPULSADO · ${home}${lastCard?.player ? ` · ${lastCard.player}` : ''}`);
+      sentKeys.push(k);
+      urgent = true;
+    }
+  }
+  if (nAR > pAR) {
+    const k = dedupKey(fid, 'red', 'away', nAR);
+    if (!(await alreadySent(k))) {
+      const lastCard = (data.cardEvents || [])
+        .filter(e => (e.type === 'Red Card' || e.type === 'Second Yellow card') && e.teamName === away)
+        .slice(-1)[0];
+      lines.push(`🟥 EXPULSADO · ${away}${lastCard?.player ? ` · ${lastCard.player}` : ''}`);
+      sentKeys.push(k);
+      urgent = true;
+    }
   }
 
   // ── Offsides ──
   const pHO = prev.offsides?.home ?? 0, pAO = prev.offsides?.away ?? 0;
   const nHO = data.offsides?.home ?? 0, nAO = data.offsides?.away ?? 0;
-  if (nHO > pHO || nAO > pAO) {
-    const team = nHO > pHO ? home : away;
-    const inc = (nHO - pHO) + (nAO - pAO);
-    lines.push(`🚫 Offside${inc > 1 ? ` x${inc}` : ''} · ${team}`);
+  if (nHO > pHO) {
+    const k = dedupKey(fid, 'offside', 'home', nHO);
+    if (!(await alreadySent(k))) {
+      lines.push(`🚫 Offside · ${home}`);
+      sentKeys.push(k);
+    }
+  }
+  if (nAO > pAO) {
+    const k = dedupKey(fid, 'offside', 'away', nAO);
+    if (!(await alreadySent(k))) {
+      lines.push(`🚫 Offside · ${away}`);
+      sentKeys.push(k);
+    }
   }
 
-  // ── Sustituciones (lista) ──
+  // ── Sustituciones (lista) ── evKey ya identifica el evento concreto
   const prevSubKeys = new Set((prev.substitutions || []).map(evKey));
   const newSubs = (data.substitutions || []).filter(s => !prevSubKeys.has(evKey(s)));
   for (const s of newSubs) {
+    const k = dedupKey(fid, 'subst', evKey(s));
+    if (await alreadySent(k)) continue;
     const out = s.playerOut || '?';
     const inP = s.playerIn || '?';
     lines.push(`🔄 ${s.teamName || '?'} · ${out} → ${inP}`);
+    sentKeys.push(k);
   }
 
   // ── Penaltis (lista — scored/missed/awarded) ──
   const prevPenKeys = new Set((prev.penaltyEvents || []).map(evKey));
   const newPens = (data.penaltyEvents || []).filter(p => !prevPenKeys.has(evKey(p)));
   for (const p of newPens) {
+    const k = dedupKey(fid, 'penalty', evKey(p));
+    if (await alreadySent(k)) continue;
     const verb = p.kind === 'scored' ? 'convertido' : p.kind === 'missed' ? 'fallado' : 'señalado';
     lines.push(`🅿️ Penalti ${verb} · ${p.teamName || '?'}${p.player ? ` · ${p.player}` : ''}`);
+    sentKeys.push(k);
     urgent = true;
   }
 
@@ -288,9 +400,11 @@ function buildEventBundle(fid, data, prev) {
   const prevVarKeys = new Set((prev.varEvents || []).map(evKey));
   const newVars = (data.varEvents || []).filter(v => !prevVarKeys.has(evKey(v)));
   for (const v of newVars) {
+    const k = dedupKey(fid, 'var', evKey(v));
+    if (await alreadySent(k)) continue;
     const det = v.detail || 'VAR';
-    // Goles anulados son los más relevantes; los otros se reportan igual.
     lines.push(`📺 ${det} · ${v.teamName || '?'}${v.player ? ` · ${v.player}` : ''}`);
+    sentKeys.push(k);
     urgent = true;
   }
 
@@ -303,19 +417,23 @@ function buildEventBundle(fid, data, prev) {
   // Tag estable por fixture+minuto+nEventos para que múltiples ticks no
   // sobrescriban notificaciones distintas. FCM reemplaza notifs con mismo tag.
   const tag = `live-${fid}-${minute}-${lines.length}`;
-  return { fixtureId: Number(fid), title, body, tag, urgent };
+  // sentKeys: el caller marca cada una en Redis DESPUÉS de enviar el push
+  // (ver sendBundledPushes), no aquí. Si marcamos antes de enviar y el envío
+  // falla, perdemos el evento para siempre. Marcar después es at-least-once.
+  return { fixtureId: Number(fid), title, body, tag, urgent, sentKeys };
 }
 
 async function sendBundledPushes(liveDetailsMap, existingLive) {
   const LP = '[live:push]';
-  // 1. Construir bundles por fixture (solo cuando hay deltas y baseline previa)
+  // 1. Construir bundles por fixture (solo cuando hay deltas y baseline previa).
+  // buildEventBundle es ahora async porque consulta dedup keys en Redis.
   const fids = Object.keys(liveDetailsMap);
   const withBaseline = fids.filter(fid => existingLive[fid]).length;
   const bundles = [];
   for (const [fid, data] of Object.entries(liveDetailsMap)) {
     const prev = existingLive[fid];
     if (!prev) continue; // sin baseline → no notificamos el estado inicial
-    const bundle = buildEventBundle(fid, data, prev);
+    const bundle = await buildEventBundle(fid, data, prev);
     if (bundle) bundles.push(bundle);
   }
   console.log(`${LP} tick: fixtures=${fids.length} conBaseline=${withBaseline} bundles=${bundles.length}`);
@@ -330,7 +448,17 @@ async function sendBundledPushes(liveDetailsMap, existingLive) {
     .select('user_id, subscription');
   if (subsErr) { console.error(`${LP} error leyendo push_subscriptions:`, subsErr.message || subsErr); return; }
   console.log(`${LP} suscripciones en BD: ${subs?.length || 0}`);
-  if (!subs?.length) return;
+  if (!subs?.length) {
+    // No hay nadie a quien notificar pero el evento ocurrió → marcamos las
+    // dedup keys igual para que el siguiente tick no vuelva a construir el
+    // mismo bundle inútilmente (evento ya "vivido").
+    for (const b of bundles) {
+      if (Array.isArray(b.sentKeys)) {
+        await Promise.all(b.sentKeys.map(k => markSent(k)));
+      }
+    }
+    return;
+  }
 
   const favoritesByUser = {};
   await Promise.all(subs.map(async (row) => {
@@ -349,9 +477,17 @@ async function sendBundledPushes(liveDetailsMap, existingLive) {
   const expiredByUser = {};
   let attempted = 0, delivered = 0, failed = 0, expiredN = 0, skippedNoFav = 0;
   for (const bundle of bundles) {
+    // Track si ALGÚN intento tuvo éxito para este bundle. Solo marcamos las
+    // dedup keys como "enviadas" si al menos uno se entregó OK — así, si todos
+    // los pushes fallan por un error transitorio del push server, el siguiente
+    // tick puede reintentar el mismo evento (at-least-once).
+    let bundleHadDelivery = false;
+    let bundleHadSubscriberInFav = false;
+
     await Promise.allSettled(subs.map(async (row) => {
       const favs = favoritesByUser[row.user_id] || new Set();
       if (!favs.has(bundle.fixtureId)) { skippedNoFav++; return; }
+      bundleHadSubscriberInFav = true;
 
       const deviceSubs = toSubArray(row.subscription);
       await Promise.allSettled(deviceSubs.map(async (sub) => {
@@ -362,7 +498,7 @@ async function sendBundledPushes(liveDetailsMap, existingLive) {
           { title: bundle.title, body: bundle.body, tag: bundle.tag },
           { urgency: bundle.urgent ? 'high' : 'normal' },
         );
-        if (result === true) delivered++;
+        if (result === true) { delivered++; bundleHadDelivery = true; }
         else if (result === 'expired') {
           expiredN++;
           if (!expiredByUser[row.user_id]) expiredByUser[row.user_id] = new Set();
@@ -371,6 +507,20 @@ async function sendBundledPushes(liveDetailsMap, existingLive) {
         console.log(`${LP} send fid=${bundle.fixtureId} user=${row.user_id.slice(0, 8)} ep=…${String(sub.endpoint).slice(-12)} → ${result}`);
       }));
     }));
+
+    // Marcar dedup keys: si hubo entrega exitosa, evidente. Si NO había
+    // ningún suscriptor con este fixture en favoritos, también las marcamos
+    // — el evento "ocurrió" y no hay nadie esperando, así que reintentar en
+    // los próximos ticks tampoco serviría de nada. Solo se queda SIN marcar
+    // el caso donde había favoritos pero todos los envíos fallaron (push
+    // server caído / red transitoria) → el siguiente tick reintenta.
+    const shouldMark = bundleHadDelivery || !bundleHadSubscriberInFav;
+    if (shouldMark && Array.isArray(bundle.sentKeys) && bundle.sentKeys.length > 0) {
+      await Promise.all(bundle.sentKeys.map(k => markSent(k)));
+      console.log(`${LP} dedup marcadas ${bundle.sentKeys.length} keys fid=${bundle.fixtureId} (TTL ${DEDUP_TTL_SEC}s)`);
+    } else if (!shouldMark) {
+      console.log(`${LP} dedup NO marcadas fid=${bundle.fixtureId} — todos los envíos fallaron, reintentará en próximo tick`);
+    }
   }
   console.log(`${LP} resumen: intentos=${attempted} ok=${delivered} fallo=${failed} expirados=${expiredN} sinFav(skip)=${skippedNoFav}`);
 
