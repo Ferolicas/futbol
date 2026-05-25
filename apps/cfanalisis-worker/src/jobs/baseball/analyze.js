@@ -24,9 +24,14 @@ const BASEBALL_MIN_CACHE_VERSION = 2;
 
 /** @param {any} payload @param {any} [job] */
 export async function runBaseballAnalyze(payload = {}, job = null) {
-  // Fecha en hora Colombia (igual que futbol-daily). Un partido a las 23h
-  // Colombia entra en el análisis del día aunque en UTC ya sea "mañana".
-  const date = payload.date || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
+  // CRÍTICO: hora US/Eastern, mismo razonamiento que baseball-fixtures.
+  // Cron corre 01:30 España = 19:30 del día anterior Colombia (UTC-5).
+  // Si usáramos Bogotá, buscaríamos games del 24 cuando los reales (que el
+  // usuario ve a las 7am España) están bajo la fecha del 25 ET. Resultado:
+  // se quedaban sin analizar (síntoma del usuario "14 partidos sin analizar
+  // a las 7am").
+  const date = payload.date || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+  console.log(`[job:baseball-analyze] date=${date} (America/New_York) force=${payload.force === true}`);
   // force=true → ignora el check de cache_version + age, re-analiza todo.
   // Lo usa el boton "Analizar baseball" en /ferney para garantizar que
   // se vea trabajo aunque el cron diario ya haya procesado los partidos.

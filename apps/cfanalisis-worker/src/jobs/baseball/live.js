@@ -16,9 +16,11 @@ const MIN_INTERVAL_MIN = 4;
 const MAX_INTERVAL_MIN = 30;
 const PRE_KICKOFF_BUFFER_MIN = 5;
 
-// Fecha en hora Colombia — debe coincidir con la fecha bajo la que
-// baseball-fixtures guarda el horario, si no live nunca lo encuentra.
-const bogotaDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
+// Fecha en hora US/Eastern — DEBE coincidir con la fecha bajo la que
+// baseball-fixtures guarda el horario (cambiada de Bogotá a NY por el bug
+// del cron 01:05 ES que devolvía día anterior y dejaba todo sin analizar).
+// Si live usa otra TZ, nunca encontraría el schedule.
+const bogotaDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
 const callsKey = (d) => `baseball:live:calls:${d}`;
 const lastCallKey = 'baseball:live:last_call_at';
 
