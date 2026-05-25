@@ -15,7 +15,7 @@ const TZ = 'Europe/Madrid';
 
 // `pattern` = cron (granularidad mínima 1 min). `every` = intervalo en ms
 // (para sub-minuto, ej. live cada 20s). Usar uno u otro, no ambos.
-type Sched = { queue: QueueName; id: string; pattern?: string; every?: number; tz?: string };
+type Sched = { queue: QueueName; id: string; pattern?: string; every?: number; tz?: string; data?: Record<string, unknown> };
 
 // IDs de schedulers viejos a eliminar en cada arranque (evita que sigan
 // corriendo en paralelo tras cambiar el id/cadencia de un job).
@@ -48,7 +48,10 @@ const SCHEDULES: Sched[] = [
   // ── Baseball — diarios (hora España) ──
   { queue: 'baseball-fixtures',  id: 'baseball-fixtures-daily',  pattern: '5 1 * * *',  tz: TZ }, // 1:05
   { queue: 'baseball-analyze',   id: 'baseball-analyze-daily',   pattern: '30 1 * * *', tz: TZ }, // 1:30
-  { queue: 'baseball-finalize',  id: 'baseball-finalize-daily',  pattern: '0 5 * * *',  tz: TZ }, // 5:00
+  // days:3 — el plan GRATUITO de api-baseball solo permite consultar los
+  // últimos 3 días. La ventana de finalize se limita a eso para no pedir
+  // fechas que la API rechazaría igualmente.
+  { queue: 'baseball-finalize',  id: 'baseball-finalize-daily',  pattern: '0 5 * * *',  tz: TZ, data: { days: 3 } }, // 5:00
   { queue: 'baseball-calibrate', id: 'baseball-calibrate-daily', pattern: '0 6 * * *',  tz: TZ }, // 6:00 (tras finalize)
   { queue: 'baseball-cleanup',   id: 'baseball-cleanup-weekly',  pattern: '0 3 * * 0',  tz: TZ }, // dom 3:00
   // ── Baseball — live (cada 5 min) ──
@@ -80,7 +83,7 @@ export async function registerSchedulers(): Promise<void> {
     const repeat = s.every != null
       ? { every: s.every }
       : { pattern: s.pattern!, ...(s.tz ? { tz: s.tz } : {}) };
-    await q.upsertJobScheduler(s.id, repeat, { name: s.queue, data: {} });
+    await q.upsertJobScheduler(s.id, repeat, { name: s.queue, data: s.data ?? {} });
   }
   logger.info({ count: SCHEDULES.length }, 'job schedulers registrados');
 }

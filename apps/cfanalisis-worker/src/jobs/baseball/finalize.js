@@ -29,23 +29,24 @@
  *   por sí solo no finaliza nada. El Pass 2 con API es el que realmente cierra
  *   el ciclo.
  *
- * Ventana: 30 días hacia atrás (antes 3) para recuperar el historial existente
- * — 645 predicciones acumuladas que nunca se finalizaron porque la tabla de
- * resultados no tenía FT/AOT.
+ * Ventana: 3 días hacia atrás por defecto. El plan GRATUITO de api-baseball
+ * SOLO permite consultar los últimos 3 días — pedir fechas más antiguas la API
+ * las rechaza, así que no tiene sentido ampliar la ventana. Para un backfill
+ * puntual con plan de pago se puede pasar { days: N } explícito.
  *
- * Cuota: api-baseball solo da 100 calls/día. Agrupar por fecha hace que el
- * backfill cueste ~1 call por día con predicciones pendientes (no por partido).
- * El job nocturno normal gastará 1-2 calls (hoy/ayer). Guard de cuota antes de
- * cada fetch para nunca pasarnos del presupuesto.
+ * Cuota: api-baseball gratuito da 100 calls/día. Agrupar por fecha hace que el
+ * finalize cueste ~1 call por día con predicciones pendientes (no por partido):
+ * con ventana de 3 días son ~3 calls como máximo. Guard de cuota antes de cada
+ * fetch para nunca pasarnos del presupuesto.
  *
- * Payload: { days?: number }  (override de la ventana, default 30)
+ * Payload: { days?: number }  (override de la ventana, default 3)
  */
 import { supabaseAdmin, getBaseballFixturesByDate, getBaseballQuota } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 
 const FINISHED = new Set(['FT', 'AOT', 'POST', 'CANC', 'INTR', 'ABD']);
 const TERMINAL_SCORED = new Set(['FT', 'AOT']); // solo estos tienen marcador real
-const DEFAULT_WINDOW_DAYS = 30;
+const DEFAULT_WINDOW_DAYS = 3;
 const QUOTA_SAFETY_RESERVE = 5;
 
 function sumF5(innings) {

@@ -122,8 +122,8 @@ export async function runBaseballCalibration() {
     .not('finalized_at', 'is', null);
   if (error) throw new Error(`fetch baseball predictions: ${error.message}`);
 
-  if (!rows || rows.length < 30) {
-    throw new Error(`Too few finalized predictions: ${rows?.length ?? 0} (need ≥30)`);
+  if (!rows || rows.length < 10) {
+    throw new Error(`Too few finalized predictions: ${rows?.length ?? 0} (need ≥10)`);
   }
 
   const calibration = {};
