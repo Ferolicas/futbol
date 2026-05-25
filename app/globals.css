@@ -3315,3 +3315,91 @@ input:checked + .cb-mark::after {
    ─────────────────────────────────────────────────────────────────────────── */
 .app .match-list,
 .app .match-list * { overflow-anchor: none; }
+
+/* =====================================================================
+   BASEBALL DASHBOARD — paleta amarillo tierra (amber-500/700/300)
+   Mismas piezas perf que fútbol (subacc-grid CSS 0fr→1fr, glow card,
+   acc-card.open animation) pero scoped a `.app-baseball` para no pisar
+   los tonos verde-teal del dashboard de fútbol.
+   ===================================================================== */
+.app-baseball { color: #e2e8f0; }
+
+.app-baseball .bb-card {
+  background: linear-gradient(135deg, rgba(245,158,11,.10), rgba(0,0,9,.55), rgba(180,83,9,.08));
+  border: 2px solid rgba(245,158,11,.32);
+  border-radius: 16px;
+  overflow: hidden;
+  transition: border-color .3s, box-shadow .3s;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 0 18px rgba(245,158,11,.08);
+}
+.app-baseball .bb-card.live {
+  border-color: rgba(252,211,77,.55);
+  box-shadow: 0 0 22px rgba(252,211,77,.22);
+}
+.app-baseball .bb-card.open {
+  border-color: rgba(252,211,77,.65);
+  animation: bb-open-glow 2s ease-in-out infinite;
+}
+@keyframes bb-open-glow {
+  0%,100% { box-shadow: 0 0 22px rgba(245,158,11,.22); }
+  50%     { box-shadow: 0 0 46px rgba(252,211,77,.45); }
+}
+.app-baseball .bb-card.selected {
+  border-color: rgba(252,211,77,.85);
+  box-shadow: 0 0 24px rgba(252,211,77,.30);
+}
+
+.app-baseball .bb-head { padding: 12px; cursor: pointer; transition: background .15s; }
+.app-baseball .bb-head:hover { background: rgba(245,158,11,.05); }
+.app-baseball .bb-head:active { background: rgba(245,158,11,.10); }
+
+/* Score box estilo glow amber */
+.app-baseball .bb-score {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 26px; padding: 2px 8px; border-radius: 6px;
+  background: linear-gradient(135deg, rgba(245,158,11,.20), rgba(180,83,9,.12));
+  border: 1px solid rgba(252,211,77,.40);
+  font-family: 'JetBrains Mono', monospace; font-weight: 800;
+  color: #fde68a; font-size: 1.05rem;
+}
+.app-baseball .bb-score.live { animation: bb-live-pulse 1.6s ease-in-out infinite; }
+@keyframes bb-live-pulse {
+  0%,100% { box-shadow: 0 0 0 rgba(252,211,77,0); }
+  50%     { box-shadow: 0 0 18px rgba(252,211,77,.55); }
+}
+
+/* Acordeón principal del card (perf: CSS grid 0fr→1fr) */
+.app-baseball .bb-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows .15s ease-out;
+  border-top: 1px solid transparent;
+}
+.app-baseball .bb-grid[data-open="1"] {
+  grid-template-rows: 1fr;
+  border-top-color: rgba(245,158,11,.18);
+}
+.app-baseball .bb-grid > div { min-height: 0; overflow: hidden; }
+
+/* Sub-acordeones exclusivos (Mercados / % Probabilidades) */
+.app-baseball .subacc-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows .15s ease-out;
+}
+.app-baseball .subacc-grid[data-open="1"] { grid-template-rows: 1fr; }
+.app-baseball .subacc-grid > div { min-height: 0; overflow: hidden; }
+
+/* Sin overflow-anchor en la lista para que sub-acordeones se abran
+   hacia abajo sin reanclar scroll (mismo fix que fútbol). */
+.app-baseball .bb-list,
+.app-baseball .bb-list * { overflow-anchor: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .app-baseball .bb-grid,
+  .app-baseball .subacc-grid { transition: none; }
+  .app-baseball .bb-card.open,
+  .app-baseball .bb-score.live { animation: none; }
+}

@@ -1,6 +1,24 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+/**
+ * Baseball Dashboard — paleta amarillo tierra (amber-500/700/300).
+ *
+ * Estructura/perf clonada del de fútbol:
+ *   - SWR llama `/api/baseball/fixtures?date=...&tz=<IANA>` → el backend
+ *     devuelve los partidos cuyo kickoff cae en el día LOCAL del usuario.
+ *     Esto cubre cross-midnight (game de 23:00 ET sigue vivo a 00:00 UTC).
+ *   - Card pricipal y sub-acordeones usan CSS grid 0fr→1fr (compositor,
+ *     150ms). Cero framer-motion en hot path (queda solo en ApuestaDelDia).
+ *   - Sub-acordeones EXCLUSIVOS: solo uno abierto a la vez (Mercados o
+ *     Probabilidades). El padre tiene `openSub` y los hijos lo togglean.
+ *   - `toggleSubAndReveal` con scrollIntoView({block:'nearest'}) en doble
+ *     rAF → el header del sub recién abierto siempre queda visible aunque
+ *     el ResizeObserver de la lista haya movido el viewport.
+ *
+ * Source 100% PG VPS: el endpoint usa supabaseAdmin (= pgAdmin proxy).
+ */
+
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
@@ -44,9 +62,24 @@ const statusText = (g) => {
     return `${arrow}${inning}`.trim() || 'EN VIVO';
   }
   if (isFinished(s)) return 'FIN';
-  if (isPostponed(s)) return s === 'POST' ? 'Pospuesto' : s === 'CANC' ? 'Cancelado' : s;
-  return 'Próximo';
+  if (isPostponed(s)) return s === 'POST' ? 'POSP' : s === 'CANC' ? 'CANC' : s;
+  return 'PRÓX';
 };
+
+// Toggle de sub-acordeón + revelado del header. Mismo helper que fútbol:
+// al abrir un sub, el ResizeObserver del card puede mover el item; en doble
+// rAF lo dejamos asentarse y traemos el header de vuelta con
+// scrollIntoView({block:'nearest'}) — solo mueve si quedó fuera de vista.
+function toggleSubAndReveal(e, isOpen, id, setOpenSub) {
+  e.stopPropagation();
+  const header = e.currentTarget;
+  setOpenSub(isOpen ? null : id);
+  if (!isOpen && header) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      try { header.scrollIntoView({ block: 'nearest' }); } catch {}
+    }));
+  }
+}
 
 // =====================================================================
 // DASHBOARD
@@ -69,9 +102,13 @@ export default function BaseballDashboard() {
   // Custom combinada — manual selections by user
   const [selectedMarkets, setSelectedMarkets] = useState({});
 
-  // ─── SWR: fixtures + quota ─────────────────────────────────────────
-  // Bloque G — fuente única, refresh automático 60s, revalidate on focus.
-  const fixturesKey = date ? `/api/baseball/fixtures?date=${date}` : null;
+  // ─── SWR: fixtures (con tz del cliente) + quota ────────────────────
+  // El endpoint con ?tz= pide 3 fechas UTC adyacentes a la fuente y filtra
+  // al día local del usuario. Si abres a las 9am España, ves los games cuya
+  // hora local española cae entre 00:00 y 23:59 ES — igual que fútbol.
+  const fixturesKey = date
+    ? `/api/baseball/fixtures?date=${date}&tz=${encodeURIComponent(userTz)}`
+    : null;
   const { data: fxData, mutate: fixturesMutate, isLoading: loadingFixtures } = useSWR(
     fixturesKey,
     fetcher,
@@ -83,7 +120,7 @@ export default function BaseballDashboard() {
     },
   );
   const { data: quotaData } = useSWR('/api/baseball/quota', fetcher, {
-    refreshInterval: 300_000,  // 5 min
+    refreshInterval: 300_000,
   });
 
   const games = fxData?.fixtures || [];
@@ -125,10 +162,6 @@ export default function BaseballDashboard() {
       });
       const data = await res.json();
 
-      // El endpoint devuelve un array `analyses` con success/error por
-      // fixture. Antes solo se leia `data.error` top-level, ahora tambien
-      // mostramos errores individuales para que el usuario sepa POR QUE
-      // no se analizo (cuota, fixture incompleto, fallo de DB, etc.).
       if (data.error) {
         setError(data.error);
       } else if (data.failedCount > 0 && data.analyzedCount === 0) {
@@ -149,7 +182,7 @@ export default function BaseballDashboard() {
     }
   };
 
-  // Optimistic dismiss + favorite con rollback (mismo patrón que fútbol)
+  // Optimistic dismiss + favorite con rollback
   const dismissMatch = async (e, fixtureId) => {
     e.stopPropagation();
     setSelectedMarkets(prev => { const n = { ...prev }; delete n[fixtureId]; return n; });
@@ -251,7 +284,6 @@ export default function BaseballDashboard() {
 
   const liveCount = games.filter(g => !hidden.includes(g.id) && isLive(g.status?.short)).length;
   const upcomingCount = games.filter(g => !hidden.includes(g.id) && g.status?.short === 'NS').length;
-  // Fix counter (mismo bug que tuvo fútbol): solo cuenta favoritos PRESENTES hoy
   const favoriteCount = games.filter(g => favorites.includes(g.id) && !hidden.includes(g.id)).length;
 
   const leagueOptions = useMemo(() => {
@@ -283,12 +315,16 @@ export default function BaseballDashboard() {
 
   // ─── RENDER ─────────────────────────────────────────────────────────
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 16px 80px', color: '#e2e8f0' }}>
+    <div className="app-baseball" style={{ maxWidth: 1200, margin: '0 auto', padding: '0 16px 80px' }}>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-        <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: '#f59e0b' }}>⚾ Baseball</h1>
+        <h1 style={{
+          margin: 0, fontSize: '1.5rem', fontWeight: 800,
+          background: 'linear-gradient(135deg, #fcd34d, #f59e0b, #b45309)',
+          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+        }}>⚾ Baseball</h1>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <span style={badgePill('#f59e0b')}>API {quota.used}/{quota.limit}</span>
+          <span style={badgePill('#fbbf24')}>API {quota.used}/{quota.limit}</span>
         </div>
       </div>
 
@@ -316,8 +352,6 @@ export default function BaseballDashboard() {
         </select>
       </div>
 
-      {/* TABS — solo Partidos y Combinada (bloque B: 'Analizados' desaparece, ahora son
-          acordeones inline en la lista de Partidos) */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: 6 }}>
         {[
           { key: 'partidos', label: 'Partidos', count: visible.length },
@@ -362,7 +396,7 @@ export default function BaseballDashboard() {
       ) : (
         <>
           {tab === 'partidos' && (
-            <>
+            <div className="bb-list">
               {sorted.length === 0 ? (
                 <EmptyState />
               ) : (
@@ -384,7 +418,7 @@ export default function BaseballDashboard() {
                   />
                 ))
               )}
-            </>
+            </div>
           )}
 
           {tab === 'combinada' && (
@@ -412,9 +446,9 @@ export default function BaseballDashboard() {
           disabled={analyzing}
           style={{
             position: 'fixed', bottom: 80, right: 24, padding: '14px 22px', borderRadius: 999,
-            background: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#06060b',
+            background: 'linear-gradient(135deg, #fcd34d, #f59e0b, #b45309)', color: '#1c1410',
             fontWeight: 800, border: 'none', cursor: analyzing ? 'wait' : 'pointer',
-            boxShadow: '0 8px 24px rgba(245,158,11,0.35)', fontSize: '.95rem', zIndex: 50,
+            boxShadow: '0 8px 24px rgba(245,158,11,0.45)', fontSize: '.95rem', zIndex: 50,
           }}
         >
           {analyzing ? `Analizando ${selected.size}…` : `Analizar ${selected.size} ${selected.size === 1 ? 'partido' : 'partidos'}`}
@@ -426,8 +460,9 @@ export default function BaseballDashboard() {
           onClick={() => setTab('combinada')}
           style={{
             position: 'fixed', bottom: 24, right: 24, padding: '12px 18px', borderRadius: 999,
-            background: '#22d3ee', color: '#06060b', fontWeight: 800, border: 'none', cursor: 'pointer',
-            boxShadow: '0 6px 18px rgba(34,211,238,0.3)', zIndex: 50,
+            background: 'linear-gradient(135deg, #fbbf24, #d97706)', color: '#1c1410',
+            fontWeight: 800, border: 'none', cursor: 'pointer',
+            boxShadow: '0 6px 18px rgba(251,191,36,0.4)', zIndex: 50,
           }}
         >
           🎯 Mi combinada · {totalSel}
@@ -447,12 +482,12 @@ function LeagueGroup({ group, userTz, selected, favorites, analyzed, expandedMat
       <h3 style={{
         fontSize: '.92rem', fontWeight: 800, color: '#cbd5e1',
         margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 6,
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        borderBottom: '1px solid rgba(245,158,11,0.18)',
       }}>
         <span>{BASEBALL_FLAGS[group.country] || '🌍'}</span>
         <span style={{ color: '#94a3b8' }}>{group.country}</span>
-        <span style={{ color: '#f59e0b' }}>·</span>
-        <span>{group.leagueName}</span>
+        <span style={{ color: '#fbbf24' }}>·</span>
+        <span style={{ color: '#fde68a' }}>{group.leagueName}</span>
         <span style={{ marginLeft: 'auto', fontSize: '.7rem', color: '#64748b', fontWeight: 600 }}>
           {group.games.length} {group.games.length === 1 ? 'partido' : 'partidos'}
         </span>
@@ -483,6 +518,9 @@ function LeagueGroup({ group, userTz, selected, favorites, analyzed, expandedMat
 function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded,
                     onExpand, onSelect, onFavorite, onDismiss,
                     selectedMarkets, onToggleMarket }) {
+  // Estado EXCLUSIVO de sub-acordeón (solo uno abierto: Mercados o Probabilidades).
+  const [openSub, setOpenSub] = useState(null);
+
   const home = game.teams?.home;
   const away = game.teams?.away;
   const live = isLive(game.status?.short);
@@ -498,43 +536,43 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
 
   const handleCardClick = (e) => {
     if (e.target.closest('button')) return;
-    // Si está analizado: expandir/contraer. Si no: seleccionar para analizar.
     if (isAnalyzed) onExpand();
     else onSelect(game.id);
   };
 
+  const cardClass = [
+    'bb-card',
+    isExpanded ? 'open' : '',
+    live ? 'live' : '',
+    isSelected ? 'selected' : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <div
-      style={{
-        background: isSelected ? 'rgba(245,158,11,0.08)' : 'rgba(255,255,255,0.02)',
-        border: isSelected ? '1px solid #f59e0b' : live ? '1px solid rgba(245,158,11,0.4)' : '1px solid rgba(255,255,255,0.06)',
-        borderRadius: 12, transition: 'all .15s', overflow: 'hidden',
-      }}
-    >
-      <div onClick={handleCardClick} style={{ padding: 12, cursor: 'pointer' }}>
+    <div className={cardClass}>
+      <div className="bb-head" onClick={handleCardClick}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button
             onClick={(e) => onFavorite(e, game.id)}
             style={{
-              width: 26, height: 26, borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)',
-              background: isFavorite ? 'rgba(245,158,11,0.18)' : 'transparent',
-              color: isFavorite ? '#f59e0b' : '#94a3b8', cursor: 'pointer', fontSize: 14,
+              width: 26, height: 26, borderRadius: 6, border: '1px solid rgba(252,211,77,0.25)',
+              background: isFavorite ? 'rgba(252,211,77,0.20)' : 'transparent',
+              color: isFavorite ? '#fcd34d' : '#94a3b8', cursor: 'pointer', fontSize: 14,
             }}
           >★</button>
 
           <div style={{ flex: 1, minWidth: 0 }}>
-            <TeamLine team={home} score={hasScore ? homeScore : null} winner={finished && homeScore > awayScore} />
-            <TeamLine team={away} score={hasScore ? awayScore : null} winner={finished && awayScore > homeScore} />
+            <TeamLine team={home} score={hasScore ? homeScore : null} winner={finished && homeScore > awayScore} live={live} />
+            <TeamLine team={away} score={hasScore ? awayScore : null} winner={finished && awayScore > homeScore} live={live} />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, minWidth: 70 }}>
             <span style={{
               fontSize: '.7rem', fontWeight: 800,
-              color: live ? '#f59e0b' : finished ? '#94a3b8' : '#22d3ee',
+              color: live ? '#fbbf24' : finished ? '#94a3b8' : '#fde68a',
               fontFamily: 'JetBrains Mono, monospace',
             }}>{statusText(game)}</span>
             {!hasScore && (
-              <span style={{ fontSize: '.78rem', color: '#22d3ee', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>
+              <span style={{ fontSize: '.78rem', color: '#fde68a', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>
                 {fmtTimeInTz(game.date, userTz)}
               </span>
             )}
@@ -543,17 +581,16 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
 
         {ml && (
           <div style={{ display: 'flex', gap: 4, fontSize: '.78rem', marginTop: 8, alignItems: 'center' }}>
-            <span style={{ color: '#10b981', fontWeight: 700, minWidth: 32 }}>{cap(ml.home).toFixed(0)}%</span>
+            <span style={{ color: '#fbbf24', fontWeight: 700, minWidth: 32 }}>{cap(ml.home).toFixed(0)}%</span>
             <div style={{ flex: 1, height: 5, borderRadius: 3, overflow: 'hidden', display: 'flex', background: 'rgba(255,255,255,0.04)' }}>
-              <div style={{ width: `${cap(ml.home)}%`, background: 'linear-gradient(90deg,#10b981,#059669)' }} />
-              <div style={{ width: `${cap(ml.away)}%`, background: 'linear-gradient(90deg,#ef4444,#dc2626)' }} />
+              <div style={{ width: `${cap(ml.home)}%`, background: 'linear-gradient(90deg,#fcd34d,#f59e0b)' }} />
+              <div style={{ width: `${cap(ml.away)}%`, background: 'linear-gradient(90deg,#b45309,#7c2d12)' }} />
             </div>
-            <span style={{ color: '#ef4444', fontWeight: 700, minWidth: 32, textAlign: 'right' }}>{cap(ml.away).toFixed(0)}%</span>
+            <span style={{ color: '#b45309', fontWeight: 700, minWidth: 32, textAlign: 'right' }}>{cap(ml.away).toFixed(0)}%</span>
           </div>
         )}
 
         <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Moneyline — favorito + porcentaje. Ej: "Dodgers gana — 67%" */}
           {ml && (() => {
             const homePct = cap(ml.home);
             const awayPct = cap(ml.away);
@@ -561,26 +598,24 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
             const favName = favHome ? (home?.name || 'Local') : (away?.name || 'Visitante');
             const favPct = Math.round(favHome ? homePct : awayPct);
             return (
-              <span style={miniChip(favPct >= 65 ? '#10b981' : '#22d3ee')}>
+              <span style={miniChip(favPct >= 65 ? '#fbbf24' : '#fde68a')}>
                 🏆 {favName} {favPct}%
               </span>
             );
           })()}
 
-          {/* Total carreras — Over/Under con el lado más probable */}
           {totals?.bestLine && totals.lines?.[totals.bestLine] && (() => {
             const t = totals.lines[totals.bestLine];
             const overWins = (t.over || 0) >= (t.under || 0);
             const side = overWins ? 'Over' : 'Under';
             const pct = overWins ? t.over : t.under;
             return (
-              <span style={miniChip(pct >= 65 ? '#10b981' : '#22d3ee')}>
+              <span style={miniChip(pct >= 65 ? '#fbbf24' : '#fde68a')}>
                 {side} {totals.bestLine} carreras — {pct}%
               </span>
             );
           })()}
 
-          {/* Combinada sugerida — N picks + prob combinada */}
           {combinada && combinada.combinedProbability >= 60 && (
             <span style={miniChip('#f59e0b')}>
               🎯 Combinada {combinada.selections?.length || 0} picks · {combinada.combinedProbability}%
@@ -588,7 +623,7 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
             </span>
           )}
           {isAnalyzed && (
-            <span style={miniChip(isExpanded ? '#f59e0b' : '#22d3ee')}>
+            <span style={miniChip(isExpanded ? '#fcd34d' : '#fde68a')}>
               {isExpanded ? 'Ocultar análisis ▲' : 'Ver análisis ▼'}
             </span>
           )}
@@ -604,70 +639,129 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
         </div>
       </div>
 
-      {/* Acordeón inline — bloque B+C */}
-      <AnimatePresence initial={false}>
-        {isAnalyzed && isExpanded && combinada && (
-          <motion.div
-            initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }}
-            style={{ overflow: 'hidden', borderTop: '1px solid rgba(255,255,255,0.06)' }}
-          >
-            <div style={{ padding: '12px' }}>
-              <AccordionBaseballMarketsBlock
-                game={game}
-                selectedMarkets={selectedMarkets}
-                onToggleMarket={onToggleMarket}
-              />
+      {/* Acordeón principal con CSS grid 0fr→1fr — sub-acordeones siempre
+          MONTADOS en el DOM (toggle solo cambia data-open). Apertura
+          instantánea garantizada incluso la primera vez. */}
+      <div className="bb-grid" data-open={isExpanded && isAnalyzed && combinada ? '1' : '0'}>
+        <div>
+          <div style={{ padding: 12 }}>
+            {isAnalyzed && combinada && (
+              <>
+                <SubAccordion
+                  id="markets"
+                  title="🎯 Selecciona para tu combinada"
+                  color="#fcd34d"
+                  openSub={openSub}
+                  setOpenSub={setOpenSub}
+                  defaultOpen
+                >
+                  <BaseballMarketsBlock
+                    game={game}
+                    selectedMarkets={selectedMarkets}
+                    onToggleMarket={onToggleMarket}
+                  />
+                </SubAccordion>
 
-              <AccordionBaseballProbBlock probabilities={game.analysis.probabilities} bestOdds={game.analysis.best_odds}
-                                          homeTeam={game.analysis.home_team || home?.name}
-                                          awayTeam={game.analysis.away_team || away?.name} />
+                <SubAccordion
+                  id="probs"
+                  title="📊 % Probabilidades calculadas"
+                  color="#fbbf24"
+                  openSub={openSub}
+                  setOpenSub={setOpenSub}
+                >
+                  <BaseballProbBlock
+                    probabilities={game.analysis.probabilities}
+                    bestOdds={game.analysis.best_odds}
+                    homeTeam={game.analysis.home_team || home?.name}
+                    awayTeam={game.analysis.away_team || away?.name}
+                  />
+                </SubAccordion>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-                <a
-                  href={`/dashboard/baseball/analisis/${game.id}`}
-                  style={{
-                    padding: '6px 12px', borderRadius: 8, fontSize: '.78rem', fontWeight: 700,
-                    background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.3)',
-                    color: '#22d3ee', textDecoration: 'none',
-                  }}
-                >Ver análisis completo →</a>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                  <a
+                    href={`/dashboard/baseball/analisis/${game.id}`}
+                    style={{
+                      padding: '6px 12px', borderRadius: 8, fontSize: '.78rem', fontWeight: 700,
+                      background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(252,211,77,0.4)',
+                      color: '#fde68a', textDecoration: 'none',
+                    }}
+                  >Ver análisis completo →</a>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-function TeamLine({ team, score, winner }) {
+function TeamLine({ team, score, winner, live }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0',
-      color: winner ? '#f1f5f9' : '#cbd5e1', fontWeight: winner ? 700 : 500,
+      color: winner ? '#fde68a' : '#cbd5e1', fontWeight: winner ? 700 : 500,
     }}>
       {team?.logo
         ? <Image src={team.logo} alt={team.name} width={20} height={20} style={{ objectFit: 'contain' }} unoptimized />
         : <span style={{ width: 20, height: 20, background: 'rgba(255,255,255,0.06)', borderRadius: 4 }} />}
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '.9rem' }}>{team?.name || '–'}</span>
       {score != null && (
-        <span style={{ fontWeight: 800, color: winner ? '#f59e0b' : '#94a3b8', fontSize: '1.05rem', minWidth: 22, textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>{score}</span>
+        <span className={`bb-score ${live ? 'live' : ''}`}>
+          {score}
+        </span>
       )}
     </div>
   );
 }
 
 // =====================================================================
-// ACCORDION: SELECCIONA PARA TU COMBINADA (bloque B)
-// Usa combinada.selections como FUENTE ÚNICA (mismo patrón que fútbol).
+// SUB-ACORDEÓN EXCLUSIVO (CSS grid 0fr→1fr, 150ms en compositor)
+// Children siempre montados → toggle = solo cambio de atributo.
 // =====================================================================
-function AccordionBaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
-  const sels = game.analysis?.combinada?.selections;
-  if (!Array.isArray(sels) || sels.length === 0) return null;
+function SubAccordion({ id, title, color, openSub, setOpenSub, defaultOpen, children }) {
+  // Si openSub nunca se ha tocado (null) y este sub tiene defaultOpen, lo
+  // tratamos como abierto. Pero en cuanto el usuario toggle CUALQUIER sub,
+  // el padre setea openSub a algo no-null y la regla deja de aplicar.
+  const isOpen = openSub === id || (openSub === null && !!defaultOpen);
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(245,158,11,.12)' }}>
+      <div
+        role="button"
+        onClick={(e) => toggleSubAndReveal(e, isOpen, id, setOpenSub)}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          width: '100%', cursor: 'pointer', gap: 8, textAlign: 'left',
+          WebkitTapHighlightColor: 'transparent',
+        }}
+      >
+        <span style={{ fontSize: '.75rem', fontWeight: 800, color: color || '#fde68a', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+          {title}
+        </span>
+        <span style={{
+          color: color || '#fde68a', fontSize: '.85rem',
+          display: 'inline-block', transform: isOpen ? 'rotate(180deg)' : 'none',
+          transition: 'transform .15s ease',
+        }}>▾</span>
+      </div>
+      <div className="subacc-grid" data-open={isOpen ? '1' : '0'}>
+        <div>
+          <div style={{ paddingTop: 10 }}>{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  // Filtro coherente con el acordeón de fútbol: 60-95% (más laxo porque
-  // baseball produce menos mercados con prob alta que fútbol).
-  // P6: cuota mínima 1.20 (alineado con MIN_DISPLAY_ODDS en lib/constants.js).
+// =====================================================================
+// BLOQUE: SELECCIONA MERCADOS (combinada.selections como fuente única)
+// =====================================================================
+function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
+  const sels = game.analysis?.combinada?.selections;
+  if (!Array.isArray(sels) || sels.length === 0) {
+    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Sin mercados seleccionables.</div>;
+  }
+
   const markets = sels
     .filter(s => s.probability >= 60 && s.probability <= 95 && s.odd && s.odd >= 1.20)
     .sort((a, b) => b.probability - a.probability)
@@ -680,9 +774,10 @@ function AccordionBaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }
       _line: s._line,
     }));
 
-  if (markets.length === 0) return null;
+  if (markets.length === 0) {
+    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Ningún mercado supera filtros 60-95% / cuota ≥ 1.20.</div>;
+  }
 
-  // Agrupar por categoría visual
   const byCat = markets.reduce((acc, m) => {
     (acc[m.cat] = acc[m.cat] || []).push(m);
     return acc;
@@ -690,12 +785,9 @@ function AccordionBaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }
 
   return (
     <div>
-      <div style={{ fontSize: '.78rem', fontWeight: 800, color: '#22d3ee', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
-        🎯 Selecciona para tu combinada
-      </div>
       {Object.entries(byCat).map(([cat, items]) => (
         <div key={cat} style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: '.7rem', color: '#64748b', fontWeight: 800, letterSpacing: 1, marginBottom: 4 }}>{cat}</div>
+          <div style={{ fontSize: '.7rem', color: '#fbbf24', fontWeight: 800, letterSpacing: 1, marginBottom: 4, textTransform: 'uppercase' }}>{cat}</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 6 }}>
             {items.map(m => {
               const sel = !!selectedMarkets[m.key];
@@ -705,23 +797,23 @@ function AccordionBaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }
                   onClick={() => onToggleMarket(m.key, m)}
                   style={{
                     padding: '6px 10px', borderRadius: 8, cursor: 'pointer',
-                    background: sel ? 'rgba(34,211,238,0.15)' : 'rgba(255,255,255,0.03)',
-                    border: sel ? '1px solid #22d3ee' : '1px solid rgba(255,255,255,0.05)',
+                    background: sel ? 'rgba(252,211,77,0.18)' : 'rgba(255,255,255,0.03)',
+                    border: sel ? '1px solid #fcd34d' : '1px solid rgba(245,158,11,0.10)',
                     textAlign: 'left', display: 'flex', alignItems: 'center', gap: 6,
                   }}
                 >
                   <span style={{
                     width: 14, height: 14, borderRadius: 3,
-                    background: sel ? '#22d3ee' : 'transparent',
+                    background: sel ? '#fcd34d' : 'transparent',
                     border: sel ? 'none' : '1px solid #475569',
-                    color: '#06060b', fontSize: 10, fontWeight: 800,
+                    color: '#1c1410', fontSize: 10, fontWeight: 800,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}>{sel ? '✓' : ''}</span>
                   <span style={{ flex: 1, fontSize: '.78rem', color: '#cbd5e1' }}>{m.label}</span>
-                  <span style={{ fontWeight: 800, fontSize: '.78rem', color: m.probability >= 75 ? '#10b981' : m.probability >= 60 ? '#f59e0b' : '#94a3b8' }}>
+                  <span style={{ fontWeight: 800, fontSize: '.78rem', color: m.probability >= 75 ? '#fcd34d' : m.probability >= 60 ? '#fbbf24' : '#94a3b8' }}>
                     {m.probability}%
                   </span>
-                  <span style={{ fontSize: '.7rem', color: '#22d3ee', fontFamily: 'JetBrains Mono, monospace' }}>@{m.odd}</span>
+                  <span style={{ fontSize: '.7rem', color: '#fde68a', fontFamily: 'JetBrains Mono, monospace' }}>@{m.odd}</span>
                 </button>
               );
             })}
@@ -750,9 +842,9 @@ function categorizeMarket(category, scope) {
 }
 
 // =====================================================================
-// % PROBABILIDADES CALCULADAS — bloque C (acordeón compacto)
+// BLOQUE: % PROBABILIDADES CALCULADAS
 // =====================================================================
-function AccordionBaseballProbBlock({ probabilities: p, bestOdds, homeTeam, awayTeam }) {
+function BaseballProbBlock({ probabilities: p, bestOdds, homeTeam, awayTeam }) {
   if (!p) return null;
   const hasOdd = (v) => isFinite(parseFloat(v)) && parseFloat(v) > 1;
 
@@ -829,7 +921,6 @@ function AccordionBaseballProbBlock({ probabilities: p, bestOdds, homeTeam, away
       { label: 'No', value: p.btts.no },
     ] },
 
-    // Bloque F — player markets (cuando lleguen)
     p.players?.strikeouts?.length > 0 && {
       title: 'Ponches por pitcher',
       items: p.players.strikeouts.flatMap(pl =>
@@ -877,31 +968,39 @@ function AccordionBaseballProbBlock({ probabilities: p, bestOdds, homeTeam, away
     },
   ].filter(Boolean).filter(c => c.items && c.items.length > 0);
 
-  if (cats.length === 0) return null;
+  if (cats.length === 0) {
+    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Sin probabilidades para mostrar.</div>;
+  }
 
   return (
-    <div style={{ marginTop: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#2dd4bf', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 10 }}>
-        <span>📊</span> % Probabilidades calculadas
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-        {cats.map((cat, ci) => (
-          <div key={ci} style={{ background: 'rgba(45,212,191,0.04)', border: '1px solid rgba(45,212,191,0.2)', borderRadius: 10, padding: '10px 12px', flex: '1 1 220px', minWidth: 0 }}>
-            <div style={{ fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: '#94a3b8', marginBottom: cat.subtitle ? 2 : 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.title}</div>
-            {cat.subtitle && <div style={{ fontSize: '.65rem', color: '#64748b', marginBottom: 8 }}>{cat.subtitle}</div>}
-            {cat.items.map((it, i) => {
-              const v = Math.round(it.value ?? 0);
-              const color = v >= 80 ? '#4ade80' : v >= 65 ? '#fbbf24' : v >= 50 ? '#f97316' : '#94a3b8';
-              return (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', gap: 8 }}>
-                  <span style={{ fontSize: '.72rem', color: '#cbd5e1', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
-                  <span style={{ fontSize: '.85rem', fontWeight: 700, color, fontFamily: 'JetBrains Mono, monospace', fontVariantNumeric: 'tabular-nums' }}>{v}%</span>
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+      {cats.map((cat, ci) => (
+        <div key={ci} style={{
+          background: 'rgba(245,158,11,0.05)',
+          border: '1px solid rgba(252,211,77,0.22)',
+          borderRadius: 10, padding: '10px 12px', flex: '1 1 220px', minWidth: 0,
+        }}>
+          <div style={{
+            fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px',
+            color: '#fbbf24', marginBottom: cat.subtitle ? 2 : 8,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{cat.title}</div>
+          {cat.subtitle && <div style={{ fontSize: '.65rem', color: '#92400e', marginBottom: 8 }}>{cat.subtitle}</div>}
+          {cat.items.map((it, i) => {
+            const v = Math.round(it.value ?? 0);
+            const color = v >= 80 ? '#fcd34d' : v >= 65 ? '#fbbf24' : v >= 50 ? '#f59e0b' : '#94a3b8';
+            return (
+              <div key={i} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                padding: '4px 0', borderBottom: '1px solid rgba(245,158,11,0.06)', gap: 8,
+              }}>
+                <span style={{ fontSize: '.72rem', color: '#cbd5e1', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
+                <span style={{ fontSize: '.85rem', fontWeight: 700, color, fontFamily: 'JetBrains Mono, monospace', fontVariantNumeric: 'tabular-nums' }}>{v}%</span>
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -914,22 +1013,23 @@ function ApuestaDelDiaBlock({ apuesta, show, onToggle }) {
     <motion.div
       initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
       style={{
-        background: 'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(239,68,68,0.06))',
-        border: '1px solid rgba(245,158,11,0.4)', borderRadius: 14, marginBottom: 16, overflow: 'hidden',
+        background: 'linear-gradient(135deg, rgba(252,211,77,0.14), rgba(180,83,9,0.08))',
+        border: '1px solid rgba(252,211,77,0.45)', borderRadius: 14, marginBottom: 16, overflow: 'hidden',
+        boxShadow: '0 0 20px rgba(252,211,77,0.10)',
       }}
     >
       <button
         onClick={onToggle}
         style={{
           width: '100%', padding: '12px 14px', background: 'transparent', border: 'none',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', color: '#f59e0b',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', color: '#fcd34d',
         }}
       >
         <span style={{ fontWeight: 800, fontSize: '.95rem' }}>🎯 Apuesta del Día</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: '1.3rem', fontWeight: 800 }}>{apuesta.combinedProbability}%</span>
           {apuesta.combinedOdd && (
-            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '1rem', color: '#22d3ee' }}>
+            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '1rem', color: '#fde68a' }}>
               @{apuesta.combinedOdd}
             </span>
           )}
@@ -946,45 +1046,31 @@ function ApuestaDelDiaBlock({ apuesta, show, onToggle }) {
                   padding: '10px 12px', borderRadius: 8, marginBottom: 4,
                   background: 'rgba(255,255,255,0.03)',
                 }}>
-                  {/* Badge de estado (NS / LIVE / FIN) */}
                   <span style={{
                     fontSize: '.65rem', fontWeight: 800, padding: '2px 7px', borderRadius: 4,
-                    background: s.priority === 2 ? 'rgba(34,211,238,0.15)' : s.priority === 1 ? 'rgba(239,68,68,0.15)' : 'rgba(148,163,184,0.15)',
-                    color: s.priority === 2 ? '#22d3ee' : s.priority === 1 ? '#ef4444' : '#94a3b8',
+                    background: s.priority === 2 ? 'rgba(252,211,77,0.18)' : s.priority === 1 ? 'rgba(239,68,68,0.15)' : 'rgba(148,163,184,0.15)',
+                    color: s.priority === 2 ? '#fcd34d' : s.priority === 1 ? '#ef4444' : '#94a3b8',
                     flexShrink: 0,
                   }}>
                     {s.priority === 2 ? '●' : s.priority === 1 ? 'LIVE' : 'FIN'}
                   </span>
 
-                  {/* 2 lineas: partido (arriba) + recomendacion (abajo).
-                      Antes el "name" estaba en columna grid que en mobile
-                      se aplastaba y solo se veia el matchName + 98% sin
-                      saber de QUE es el porcentaje. */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontSize: '.7rem', color: '#94a3b8', marginBottom: 2,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
+                    <div style={{ fontSize: '.7rem', color: '#94a3b8', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {s.matchName}
                     </div>
-                    <div style={{
-                      fontSize: '.85rem', color: '#f1f5f9', fontWeight: 600,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
+                    <div style={{ fontSize: '.85rem', color: '#f1f5f9', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {s.name || s.market || 'Pick'}
                     </div>
                   </div>
 
-                  {/* Probabilidad + cuota */}
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
                     <span style={{
                       fontWeight: 800, fontSize: '.95rem',
-                      color: s.probability >= 80 ? '#10b981' : '#f59e0b',
+                      color: s.probability >= 80 ? '#fcd34d' : '#fbbf24',
                     }}>{s.probability}%</span>
                     {s.odd && (
-                      <span style={{
-                        fontFamily: 'JetBrains Mono, monospace', fontSize: '.72rem', color: '#22d3ee',
-                      }}>@{s.odd}</span>
+                      <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '.72rem', color: '#fde68a' }}>@{s.odd}</span>
                     )}
                   </div>
                 </div>
@@ -1011,15 +1097,15 @@ function CombinadaTab({ customCombinada, onClear, onRemove }) {
     <div>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '12px 14px', background: 'rgba(34,211,238,0.08)',
-        border: '1px solid rgba(34,211,238,0.3)', borderRadius: 12, marginBottom: 12,
+        padding: '12px 14px', background: 'rgba(252,211,77,0.10)',
+        border: '1px solid rgba(252,211,77,0.35)', borderRadius: 12, marginBottom: 12,
       }}>
         <div>
           <div style={{ fontSize: '.75rem', color: '#94a3b8', fontWeight: 700 }}>Probabilidad combinada</div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#22d3ee' }}>
+          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#fcd34d' }}>
             {customCombinada.combinedProbability}%
             {customCombinada.combinedOdd && (
-              <span style={{ marginLeft: 12, color: '#10b981', fontFamily: 'JetBrains Mono, monospace' }}>
+              <span style={{ marginLeft: 12, color: '#fde68a', fontFamily: 'JetBrains Mono, monospace' }}>
                 @{customCombinada.combinedOdd}
               </span>
             )}
@@ -1038,8 +1124,8 @@ function CombinadaTab({ customCombinada, onClear, onRemove }) {
               <div style={{ fontSize: '.78rem', color: '#94a3b8', marginBottom: 2 }}>{s.matchName}</div>
               <div style={{ fontSize: '.85rem', color: '#cbd5e1', fontWeight: 600 }}>{s.name || s.market}</div>
             </div>
-            <span style={{ fontWeight: 800, color: s.probability >= 75 ? '#10b981' : '#f59e0b' }}>{s.probability}%</span>
-            {s.odd && <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#22d3ee' }}>@{s.odd}</span>}
+            <span style={{ fontWeight: 800, color: s.probability >= 75 ? '#fcd34d' : '#fbbf24' }}>{s.probability}%</span>
+            {s.odd && <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#fde68a' }}>@{s.odd}</span>}
             <button
               onClick={() => onRemove(s.fixtureId, s.marketKey)}
               style={{
@@ -1064,27 +1150,30 @@ function EmptyState() {
 }
 
 // =====================================================================
-// STYLES
+// STYLES — paleta amber tierra
 // =====================================================================
-const btn = (color = '#f59e0b') => ({
+const btn = (color = '#fde68a') => ({
   padding: '6px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.04)',
-  border: '1px solid rgba(255,255,255,0.08)',
+  border: '1px solid rgba(245,158,11,0.18)',
   color, fontSize: '.85rem', fontWeight: 600, cursor: 'pointer',
 });
 const tabBtn = (active) => ({
-  padding: '8px 16px', borderRadius: 8, background: active ? 'rgba(245,158,11,0.15)' : 'transparent',
-  border: active ? '1px solid rgba(245,158,11,0.4)' : '1px solid transparent',
-  color: active ? '#f59e0b' : '#94a3b8', fontWeight: active ? 700 : 600, cursor: 'pointer',
+  padding: '8px 16px', borderRadius: 8,
+  background: active ? 'rgba(252,211,77,0.15)' : 'transparent',
+  border: active ? '1px solid rgba(252,211,77,0.45)' : '1px solid transparent',
+  color: active ? '#fcd34d' : '#94a3b8', fontWeight: active ? 700 : 600, cursor: 'pointer',
   fontSize: '.9rem', display: 'flex', alignItems: 'center', gap: 8,
 });
 const tabBadge = (active) => ({
   padding: '1px 7px', borderRadius: 999, fontSize: '.7rem', fontWeight: 800,
-  background: active ? '#f59e0b' : 'rgba(148,163,184,0.2)', color: active ? '#06060b' : '#94a3b8',
+  background: active ? '#fcd34d' : 'rgba(148,163,184,0.2)',
+  color: active ? '#1c1410' : '#94a3b8',
 });
 const chip = (active) => ({
-  padding: '5px 11px', borderRadius: 999, background: active ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.03)',
-  border: active ? '1px solid #f59e0b' : '1px solid rgba(255,255,255,0.06)',
-  color: active ? '#f59e0b' : '#cbd5e1', fontWeight: 600, fontSize: '.78rem', cursor: 'pointer',
+  padding: '5px 11px', borderRadius: 999,
+  background: active ? 'rgba(252,211,77,0.15)' : 'rgba(255,255,255,0.03)',
+  border: active ? '1px solid #fcd34d' : '1px solid rgba(245,158,11,0.10)',
+  color: active ? '#fcd34d' : '#cbd5e1', fontWeight: 600, fontSize: '.78rem', cursor: 'pointer',
 });
 const badgePill = (color) => ({
   padding: '4px 10px', borderRadius: 999, background: `${color}1a`,
