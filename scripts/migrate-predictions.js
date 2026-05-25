@@ -97,6 +97,24 @@ async function* readBatches(supa, cols) {
   }
 }
 
+// Encode un valor JS para el binding de pg.
+// pg serializa Date/Buffer/string/number correctamente, PERO objetos y arrays
+// los pasa con String(v) → "[object Object]" / "1,2,3", y Postgres rechaza
+// eso para columnas jsonb con: invalid input syntax for type json.
+// match_predictions tiene columnas jsonb (home_team, away_team,
+// predicted_scorers, actual_goal_minutes, actual_goal_scorers) que llegan de
+// Supabase como objetos JS ya parseados → hay que reserializar a JSON string.
+function encodeParam(v) {
+  if (v === null || v === undefined) return null;
+  if (v instanceof Date) return v;
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(v)) return v;
+  // Plain object o array → JSON. Mismo criterio que lib/db.js#encodeParam.
+  if (Array.isArray(v) || (typeof v === 'object' && v.constructor === Object)) {
+    return JSON.stringify(v);
+  }
+  return v;
+}
+
 // Construye INSERT multi-row con placeholders y devuelve {sql, params}.
 // Una sola query por batch = mínima latencia red.
 function buildUpsert(cols, rows) {
@@ -104,7 +122,7 @@ function buildUpsert(cols, rows) {
   const params = [];
   const valuesSql = rows.map((row, rIdx) => {
     const cells = cols.map((c, cIdx) => {
-      params.push(row[c] === undefined ? null : row[c]);
+      params.push(encodeParam(row[c]));
       return '$' + params.length;
     });
     return '(' + cells.join(', ') + ')';
