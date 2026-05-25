@@ -1866,19 +1866,23 @@ function AnalysisModal({ id, onClose }) {
 
 /* ======================== ACCORDION CARD ======================== */
 
-function SubAccordion({ title, color, children }) {
-  const [open, setOpen] = useState(false);
+// SubAccordion CONTROLADO + exclusivo. El estado de "cuál está abierto" vive
+// en el AccordionCard padre (openSub/setOpenSub), así solo uno está abierto a
+// la vez. children SIEMPRE montados (grid 0fr→1fr), el toggle solo cambia CSS
+// → apertura instantánea garantizada incluso la 1ª vez. Transición 150ms.
+function SubAccordion({ id, title, color, openSub, setOpenSub, children }) {
+  const open = openSub === id;
   return (
     <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
       <div
         role="button"
-        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        onClick={(e) => { e.stopPropagation(); setOpenSub(open ? null : id); }}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
       >
         <span style={{ fontSize: '.75rem', fontWeight: 700, color: color || 'var(--t2)', textTransform: 'uppercase', letterSpacing: '.05em' }}>{title}</span>
-        <span style={{ color: color || 'var(--t2)', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
+        <span style={{ color: color || 'var(--t2)', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s ease' }}>&#9662;</span>
       </div>
-      <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
+      <div className="subacc-grid" data-open={open ? '1' : '0'}>
         <div style={{ overflow: 'hidden' }}>
           <div style={{ paddingTop: 10 }}>{children}</div>
         </div>
@@ -1888,6 +1892,9 @@ function SubAccordion({ title, color, children }) {
 }
 
 function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, onRemove, isFavorite, onFavorite, idx, userTz }) {
+  // Estado de sub-acordeón EXCLUSIVO (solo uno abierto a la vez). Los 3 bloques
+  // (Estadísticas / Probabilidades / Jugadores) leen openSub y lo togglean.
+  const [openSub, setOpenSub] = useState(null);
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
@@ -2145,10 +2152,8 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
         <div className="acc-inner">
           {data ? (
             <>
-              {/* Live match details */}
-              {(live || finished) && liveStats && (
-                <LiveMatchDetails stats={liveStats} homeTeam={match.teams.home} awayTeam={match.teams.away} />
-              )}
+              {/* LiveMatchDetails ELIMINADO entero: goleadores+minutos+marcador
+                  ya los muestra el score box de la tarjeta. Era 100% redundante. */}
 
               {/* Selectable markets — BEFORE auto combinada */}
               {markets.length > 0 && <div className="markets">
@@ -2205,7 +2210,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                   </div>
                 );
                 return (
-                  <SubAccordion title="📊 Estadísticas calculadas" color="#f97316">
+                  <SubAccordion id="stats" openSub={openSub} setOpenSub={setOpenSub} title="📊 Estadísticas calculadas" color="#f97316">
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                       <StatCard title={`Goles — ${hn}`} accent="rgba(0,212,255,.25)">
                         <Cell label="Prom. anotados"      value={p.homeGoals?.avgScored}   color="#4ade80" />
@@ -2238,6 +2243,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
 
               {/* ── % Probabilidades calculadas (todas las categorias con cuota real) ── */}
               <AccordionProbBlock
+                id="probs" openSub={openSub} setOpenSub={setOpenSub}
                 probabilities={data.calculatedProbabilities}
                 odds={data.odds}
                 homeTeam={match.teams.home.name}
@@ -2245,7 +2251,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
               />
 
               {/* ── Jugadores destacados ── */}
-              <AccordionPlayersBlock highlights={data.playerHighlights} />
+              <AccordionPlayersBlock id="players" openSub={openSub} setOpenSub={setOpenSub} highlights={data.playerHighlights} />
 
               {/* Last5Block y StatsBlock se quitaron del acordeon: son datos
                   base de input al modelo, no recomendaciones accionables. El
@@ -2322,11 +2328,15 @@ function LiveStatsBar({ stats }) {
 // (app/dashboard/analisis/[id]/page.js → SECCION 8). Misma data, render
 // compacto sin animaciones pesadas — el acordeon es vista resumida.
 
-function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
-  const [open, setOpen] = useState(false);
-  const [catOpen, setCatOpen] = useState({});
+function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, openSub, setOpenSub }) {
+  // catOpen exclusivo (key de categoría abierta o null) — una categoría a la vez.
+  const [catOpen, setCatOpen] = useState(null);
 
-  if (!p) return null;
+  // TODO el cálculo de categorías (≈25 categorías × muchos hasOdd) se memoiza:
+  // antes corría en CADA toggle (setState re-renderiza) → era lo que trababa
+  // la apertura. Con useMemo solo recalcula si cambian las props reales.
+  const groupDefs = useMemo(() => {
+  if (!p) return [];
   const o = odds || {};
   const hasOdd = (v) => isFinite(parseFloat(v)) && parseFloat(v) > 1;
 
@@ -2446,7 +2456,7 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
       }).filter(Boolean) },
   ].filter(Boolean).filter(c => c.items && c.items.length > 0);
 
-  const groupDefs = [
+  return [
     { key: 'goles',    label: '⚽ Goles',            color: '#4ade80' },
     { key: 'corners',  label: '🚩 Córners',           color: '#fbbf24' },
     { key: 'tarjetas', label: '🟨 Tarjetas',          color: '#f59e0b' },
@@ -2455,8 +2465,10 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
     { key: 'handicap', label: '🎰 Hándicap asiático', color: '#a78bfa' },
   ].map(g => ({ ...g, cats: allCats.filter(c => c.group === g.key) }))
    .filter(g => g.cats.length > 0);
+  }, [p, odds, homeTeam, awayTeam]);
 
-  if (groupDefs.length === 0) return null;
+  if (!p || groupDefs.length === 0) return null;
+  const open = openSub === id;
 
   const ProbItem = ({ it }) => {
     const v = Math.round(it.value ?? 0);
@@ -2473,28 +2485,28 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
     <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
       <div
         role="button"
-        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        onClick={(e) => { e.stopPropagation(); setOpenSub(open ? null : id); }}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#2dd4bf', textTransform: 'uppercase', letterSpacing: '.05em' }}>
           <span>📊</span> % Probabilidades calculadas
         </div>
-        <span style={{ color: '#2dd4bf', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
+        <span style={{ color: '#2dd4bf', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s ease' }}>&#9662;</span>
       </div>
-      <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
+      <div className="subacc-grid" data-open={open ? '1' : '0'}>
         <div style={{ overflow: 'hidden' }}>
           <div style={{ paddingTop: 10 }}>
             {groupDefs.map(g => (
               <div key={g.key} style={{ marginBottom: 8, background: 'var(--bg-2)', border: '1px solid rgba(45,212,191,0.12)', borderRadius: 10, overflow: 'hidden' }}>
                 <div
                   role="button"
-                  onClick={(e) => { e.stopPropagation(); setCatOpen(prev => ({ ...prev, [g.key]: !prev[g.key] })); }}
+                  onClick={(e) => { e.stopPropagation(); setCatOpen(prev => (prev === g.key ? null : g.key)); }}
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
                 >
                   <span style={{ fontSize: '.75rem', fontWeight: 700, color: g.color }}>{g.label}</span>
-                  <span style={{ color: g.color, fontSize: '.8rem', display: 'inline-block', transform: catOpen[g.key] ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
+                  <span style={{ color: g.color, fontSize: '.8rem', display: 'inline-block', transform: catOpen === g.key ? 'rotate(180deg)' : 'none', transition: 'transform .15s ease' }}>&#9662;</span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateRows: catOpen[g.key] ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
+                <div className="subacc-grid" data-open={catOpen === g.key ? '1' : '0'}>
                   <div style={{ overflow: 'hidden' }}>
                     <div style={{ padding: '0 12px 12px', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                       {g.cats.map((cat, ci) => (
@@ -2522,22 +2534,24 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
 // uno por partido). Sin las animaciones motion del analisis — el acordeon
 // se abre/cierra muchas veces durante la sesion, animar todo seria pesado.
 
-function AccordionPlayersBlock({ highlights }) {
-  const [open, setOpen] = useState(false);
-  const [grpOpen, setGrpOpen] = useState({});
+function AccordionPlayersBlock({ highlights, id, openSub, setOpenSub }) {
+  const [grpOpen, setGrpOpen] = useState(null); // grupo exclusivo o null
 
-  if (!highlights) return null;
-  const { scorers, shooters, shotsTotalists, assisters, foulers, bookers } = highlights;
-  const groups = [
-    { key: 'scorers',        data: scorers,        label: 'Goleadores en racha',  hint: '(gol en 5+ de últimos 10)',                               emoji: '⚽',  dotColor: '#22c55e', metric: 'goals',       unit: 'goles' },
-    { key: 'shooters',       data: shooters,       label: 'Tiros a puerta',        hint: '(remate al arco — 5+ de últimos 10)',                      emoji: '🎯',  dotColor: '#3b82f6', metric: 'shotsOnGoal', unit: 'a puerta' },
-    { key: 'shotsTotalists', data: shotsTotalists, label: 'Tiros totales',         hint: '(≥2 en 5+ de últimos 10)',                                 emoji: '💥', dotColor: '#60a5fa', metric: 'shotsTotal',  unit: 'tiros totales' },
-    { key: 'assisters',      data: assisters,      label: 'Asistentes',            hint: '(asistencia en 5+ de últimos 10)',                          emoji: '🅰️',  dotColor: '#a78bfa', metric: 'assists',     unit: 'asistencias' },
-    { key: 'foulers',        data: foulers,        label: 'Faltas frecuentes',     hint: '(falta cometida en 5+ de últimos 10)',                      emoji: '⚠️',  dotColor: '#f59e0b', metric: 'fouls',       unit: 'faltas' },
-    { key: 'bookers',        data: bookers,        label: 'Tarjetas frecuentes',   hint: '(amarilla en 5+ de últimos 10)',                            emoji: '🟨',  dotColor: '#facc15', metric: 'yellows',     unit: 'amarillas' },
-  ].filter(g => Array.isArray(g.data) && g.data.length > 0);
+  const groups = useMemo(() => {
+    if (!highlights) return [];
+    const { scorers, shooters, shotsTotalists, assisters, foulers, bookers } = highlights;
+    return [
+      { key: 'scorers',        data: scorers,        label: 'Goleadores en racha',  hint: '(gol en 5+ de últimos 10)',                               emoji: '⚽',  dotColor: '#22c55e', metric: 'goals',       unit: 'goles' },
+      { key: 'shooters',       data: shooters,       label: 'Tiros a puerta',        hint: '(remate al arco — 5+ de últimos 10)',                      emoji: '🎯',  dotColor: '#3b82f6', metric: 'shotsOnGoal', unit: 'a puerta' },
+      { key: 'shotsTotalists', data: shotsTotalists, label: 'Tiros totales',         hint: '(≥2 en 5+ de últimos 10)',                                 emoji: '💥', dotColor: '#60a5fa', metric: 'shotsTotal',  unit: 'tiros totales' },
+      { key: 'assisters',      data: assisters,      label: 'Asistentes',            hint: '(asistencia en 5+ de últimos 10)',                          emoji: '🅰️',  dotColor: '#a78bfa', metric: 'assists',     unit: 'asistencias' },
+      { key: 'foulers',        data: foulers,        label: 'Faltas frecuentes',     hint: '(falta cometida en 5+ de últimos 10)',                      emoji: '⚠️',  dotColor: '#f59e0b', metric: 'fouls',       unit: 'faltas' },
+      { key: 'bookers',        data: bookers,        label: 'Tarjetas frecuentes',   hint: '(amarilla en 5+ de últimos 10)',                            emoji: '🟨',  dotColor: '#facc15', metric: 'yellows',     unit: 'amarillas' },
+    ].filter(g => Array.isArray(g.data) && g.data.length > 0);
+  }, [highlights]);
 
-  if (groups.length === 0) return null;
+  if (!highlights || groups.length === 0) return null;
+  const open = openSub === id;
 
   const PlayerRow = ({ pl, g }) => {
     const hist = pl[g.metric] || [];
@@ -2575,31 +2589,31 @@ function AccordionPlayersBlock({ highlights }) {
     <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
       <div
         role="button"
-        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        onClick={(e) => { e.stopPropagation(); setOpenSub(open ? null : id); }}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '.05em' }}>
           <span>⭐</span> Jugadores destacados
         </div>
-        <span style={{ color: '#fbbf24', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
+        <span style={{ color: '#fbbf24', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s ease' }}>&#9662;</span>
       </div>
-      <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
+      <div className="subacc-grid" data-open={open ? '1' : '0'}>
         <div style={{ overflow: 'hidden' }}>
           <div style={{ paddingTop: 10 }}>
             {groups.map(g => (
               <div key={g.key} style={{ marginBottom: 8, background: 'var(--bg-2)', border: '1px solid rgba(251,191,36,0.12)', borderRadius: 10, overflow: 'hidden' }}>
                 <div
                   role="button"
-                  onClick={(e) => { e.stopPropagation(); setGrpOpen(prev => ({ ...prev, [g.key]: !prev[g.key] })); }}
+                  onClick={(e) => { e.stopPropagation(); setGrpOpen(prev => (prev === g.key ? null : g.key)); }}
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
                 >
                   <span style={{ fontSize: '.75rem', fontWeight: 700, color: g.dotColor }}>
                     {g.emoji} {g.label}
                     <span style={{ fontSize: '.65rem', color: 'var(--t3)', fontWeight: 400, marginLeft: 6 }}>{g.hint}</span>
                   </span>
-                  <span style={{ color: g.dotColor, fontSize: '.8rem', display: 'inline-block', transform: grpOpen[g.key] ? 'rotate(180deg)' : 'none', transition: 'transform .25s ease' }}>&#9662;</span>
+                  <span style={{ color: g.dotColor, fontSize: '.8rem', display: 'inline-block', transform: grpOpen === g.key ? 'rotate(180deg)' : 'none', transition: 'transform .15s ease' }}>&#9662;</span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateRows: grpOpen[g.key] ? '1fr' : '0fr', transition: 'grid-template-rows .3s ease' }}>
+                <div className="subacc-grid" data-open={grpOpen === g.key ? '1' : '0'}>
                   <div style={{ overflow: 'hidden' }}>
                     <div style={{ padding: '0 12px 12px' }}>
                       {g.data.slice(0, 5).map((pl, i) => <PlayerRow key={i} pl={pl} g={g} />)}
@@ -2789,50 +2803,6 @@ function StatsBlock({ homeLastFive, awayLastFive, homeName, awayName, goalTiming
               <span className="sblk-player-name">{p.name}</span>
               <span className="sblk-player-team">{p.teamName}</span>
               <span className="sblk-player-stat">&#127919; {p.totalShots} remates / 5 partidos</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ========================== LIVE MATCH DETAILS ==========================
-
-function LiveMatchDetails({ stats, homeTeam, awayTeam }) {
-  if (!stats) return null;
-
-  return (
-    <div className="live-details">
-      {/* Stats table ELIMINADA: era redundante con el score box de la tarjeta,
-          que ya muestra corners (🚩 h-a), amarillas/rojas (🟨/🟥) y el
-          marcador. Mantenemos solo goleadores y penales fallados, que NO
-          aparecen en el score box. */}
-
-      {/* Goal scorers */}
-      {stats.goalScorers?.length > 0 && (
-        <div className="live-scorers">
-          <h4 className="live-section-title">Goles</h4>
-          {stats.goalScorers.map((g, i) => (
-            <div key={i} className={`live-scorer ${g.teamId === homeTeam.id ? 'home' : 'away'} ${g.type === 'Own Goal' ? 'og' : ''}`}>
-              <span className="scorer-min">{g.minute}{g.extra ? `+${g.extra}` : ''}&apos;</span>
-              <span className="scorer-type">
-                {g.type === 'Penalty' ? '(P)' : g.type === 'Own Goal' ? '(AG)' : ''}
-              </span>
-              <span className="scorer-name">{g.player}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Missed penalties */}
-      {stats.missedPenalties?.length > 0 && (
-        <div className="live-scorers">
-          <h4 className="live-section-title">Penales fallados</h4>
-          {stats.missedPenalties.map((p, i) => (
-            <div key={i} className={`live-scorer missed ${p.teamId === homeTeam.id ? 'home' : 'away'}`}>
-              <span className="scorer-min">{p.minute}{p.extra ? `+${p.extra}` : ''}&apos;</span>
-              <span className="scorer-name">{p.player}</span>
             </div>
           ))}
         </div>
