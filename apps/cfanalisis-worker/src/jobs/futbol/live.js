@@ -341,17 +341,14 @@ async function buildEventBundle(fid, data, prev) {
   // detail puede ser: 'Normal Goal', 'Penalty', 'Own Goal'. Lo expone.
   const pHG = prev.goals?.home ?? 0, pAG = prev.goals?.away ?? 0;
   const nHG = data.goals?.home ?? 0, nAG = data.goals?.away ?? 0;
-  const goalDetail = (g) => g?.type === 'Penalty' ? ' (de penalti)'
-                        : g?.type === 'Own Goal' ? ' (en propia)'
-                        : '';
   if (nHG > pHG) {
     const k = dedupKey(fid, 'goal', 'home', nHG);
     if (!(await alreadySent(k))) {
       // Tomamos el ÚLTIMO gol del equipo correcto (no slice(-1) ciego, que
       // podía dar el del otro equipo si la API los devuelve mezclados).
       const last = (data.goalScorers || []).filter(g => g.teamName === home).slice(-1)[0];
-      const who = last?.player ? ` · ${last.player}` : '';
-      lines.push(`⚽ GOL · ${home} ${nHG}-${nAG}${who}${goalDetail(last)}`);
+      const who = last?.player ? ` - ${last.player}` : '';
+      lines.push(`⚽ ${home}${who} (${nHG}-${nAG})`);
       sentKeys.push(k);
       urgent = true;
       console.log(`${DP} fid=${fid} GOL home delta ${pHG}→${nHG} ⇒ línea añadida`);
@@ -364,8 +361,8 @@ async function buildEventBundle(fid, data, prev) {
     const k = dedupKey(fid, 'goal', 'away', nAG);
     if (!(await alreadySent(k))) {
       const last = (data.goalScorers || []).filter(g => g.teamName === away).slice(-1)[0];
-      const who = last?.player ? ` · ${last.player}` : '';
-      lines.push(`⚽ GOL · ${away} ${nHG}-${nAG}${who}${goalDetail(last)}`);
+      const who = last?.player ? ` - ${last.player}` : '';
+      lines.push(`⚽ ${away}${who} (${nHG}-${nAG})`);
       sentKeys.push(k);
       urgent = true;
       console.log(`${DP} fid=${fid} GOL away delta ${pAG}→${nAG} ⇒ línea añadida`);
@@ -385,7 +382,7 @@ async function buildEventBundle(fid, data, prev) {
   if (nHC > pHC) {
     const k = dedupKey(fid, 'corner', 'home', nHC);
     if (!(await alreadySent(k))) {
-      lines.push(`🚩 Córner · ${home} (${nHC}-${nAC})`);
+      lines.push(`🚩 ${home} (${nHC}-${nAC})`);
       sentKeys.push(k);
       console.log(`${DP} fid=${fid} CORNER home delta ${pHC}→${nHC} ⇒ línea añadida`);
     } else {
@@ -398,7 +395,7 @@ async function buildEventBundle(fid, data, prev) {
   if (nAC > pAC) {
     const k = dedupKey(fid, 'corner', 'away', nAC);
     if (!(await alreadySent(k))) {
-      lines.push(`🚩 Córner · ${away} (${nHC}-${nAC})`);
+      lines.push(`🚩 ${away} (${nHC}-${nAC})`);
       sentKeys.push(k);
       console.log(`${DP} fid=${fid} CORNER away delta ${pAC}→${nAC} ⇒ línea añadida`);
     } else {
@@ -425,8 +422,8 @@ async function buildEventBundle(fid, data, prev) {
       const lastCard = (data.cardEvents || [])
         .filter(e => e.type === 'Yellow Card' && e.teamName === home && e.player)
         .slice(-1)[0];
-      const who = lastCard?.player ? ` · ${lastCard.player}` : '';
-      lines.push(`🟨 Amarilla · ${home}${who}`);
+      const who = lastCard?.player ? `${lastCard.player} · ` : '';
+      lines.push(`🟨 ${who}${home} (${nHY}-${nAY})`);
       sentKeys.push(k);
       console.log(`${DP} fid=${fid} AMARILLA home delta ${pHY}→${nHY} jugador=${lastCard?.player || 'desconocido(solo-equipo)'} ⇒ línea añadida`);
     } else {
@@ -440,8 +437,8 @@ async function buildEventBundle(fid, data, prev) {
       const lastCard = (data.cardEvents || [])
         .filter(e => e.type === 'Yellow Card' && e.teamName === away && e.player)
         .slice(-1)[0];
-      const who = lastCard?.player ? ` · ${lastCard.player}` : '';
-      lines.push(`🟨 Amarilla · ${away}${who}`);
+      const who = lastCard?.player ? `${lastCard.player} · ` : '';
+      lines.push(`🟨 ${who}${away} (${nHY}-${nAY})`);
       sentKeys.push(k);
       console.log(`${DP} fid=${fid} AMARILLA away delta ${pAY}→${nAY} jugador=${lastCard?.player || 'desconocido(solo-equipo)'} ⇒ línea añadida`);
     } else {
@@ -463,9 +460,8 @@ async function buildEventBundle(fid, data, prev) {
       const lastCard = (data.cardEvents || [])
         .filter(e => (e.type === 'Red Card' || e.type === 'Second Yellow card') && e.teamName === home)
         .slice(-1)[0];
-      const who = lastCard?.player ? ` · ${lastCard.player}` : '';
-      const how = lastCard?.type === 'Second Yellow card' ? ' (2ª amarilla)' : '';
-      lines.push(`🟥 EXPULSADO · ${home}${who}${how}`);
+      const who = lastCard?.player ? `${lastCard.player} · ` : '';
+      lines.push(`🟥 ${who}${home} (${nHR}-${nAR})`);
       sentKeys.push(k);
       urgent = true;
       console.log(`${DP} fid=${fid} ROJA home delta ${pHR}→${nHR} jugador=${lastCard?.player || 'desconocido'} ⇒ línea añadida`);
@@ -480,9 +476,8 @@ async function buildEventBundle(fid, data, prev) {
       const lastCard = (data.cardEvents || [])
         .filter(e => (e.type === 'Red Card' || e.type === 'Second Yellow card') && e.teamName === away)
         .slice(-1)[0];
-      const who = lastCard?.player ? ` · ${lastCard.player}` : '';
-      const how = lastCard?.type === 'Second Yellow card' ? ' (2ª amarilla)' : '';
-      lines.push(`🟥 EXPULSADO · ${away}${who}${how}`);
+      const who = lastCard?.player ? `${lastCard.player} · ` : '';
+      lines.push(`🟥 ${who}${away} (${nHR}-${nAR})`);
       sentKeys.push(k);
       urgent = true;
       console.log(`${DP} fid=${fid} ROJA away delta ${pAR}→${nAR} jugador=${lastCard?.player || 'desconocido'} ⇒ línea añadida`);
@@ -516,7 +511,7 @@ async function buildEventBundle(fid, data, prev) {
       console.log(`${DP} fid=${fid} CAMBIO ${s.playerOut}→${s.playerIn} dedup ya marcada ⇒ SKIP`);
       continue;
     }
-    lines.push(`🔄 Cambio · ${s.teamName || '?'} · ${s.playerOut} → ${s.playerIn}`);
+    lines.push(`🔄 ${s.playerOut} → ${s.playerIn} · ${s.teamName || '?'}`);
     sentKeys.push(k);
     console.log(`${DP} fid=${fid} CAMBIO ${s.teamName} ${s.playerOut}→${s.playerIn} ⇒ línea añadida`);
   }
@@ -533,7 +528,7 @@ async function buildEventBundle(fid, data, prev) {
       continue;
     }
     const verb = p.kind === 'scored' ? 'convertido' : p.kind === 'missed' ? 'fallado' : 'señalado';
-    lines.push(`🅿️ Penalti ${verb} · ${p.teamName || '?'}${p.player ? ` · ${p.player}` : ''}`);
+    lines.push(`🅿️ ${p.player ? `${p.player} · ` : ''}${p.teamName || '?'}`);
     sentKeys.push(k);
     urgent = true;
     console.log(`${DP} fid=${fid} PENALTI ${verb} ${p.teamName} ⇒ línea añadida`);
@@ -569,10 +564,13 @@ async function buildEventBundle(fid, data, prev) {
   }
   console.log(`${DP} fid=${fid} ⇒ BUNDLE con ${lines.length} línea(s)${skipReasons.length ? ` (${skipReasons.length} skip: [${skipReasons.join(', ')}])` : ''}`);
 
-  // Título: marcador en vivo + minuto. Body: líneas concatenadas (max ~3 líneas
-  // visibles en la notificación expandida; el resto se trunca silenciosamente).
-  const title = `${home} ${nHG}-${nAG} ${away} · ${minute}'`;
-  const body = lines.slice(0, 6).join('\n');
+  // Título: "Local marcador-marcador Visitante" (ej. "IF Elfsborg 1-1 BK Häcken").
+  // El "from cfanalisis.com" que muestra Chrome debajo es el origen que el
+  // navegador añade automáticamente y NO se puede quitar por código.
+  // Body: un evento por entrada, separados por línea en blanco (\n\n) para que
+  // no queden pegados cuando hay varios en el mismo bundle.
+  const title = `${home} ${nHG}-${nAG} ${away}`;
+  const body = lines.slice(0, 6).join('\n\n');
   // Tag estable por fixture+minuto+nEventos para que múltiples ticks no
   // sobrescriban notificaciones distintas. FCM reemplaza notifs con mismo tag.
   const tag = `live-${fid}-${minute}-${lines.length}`;
