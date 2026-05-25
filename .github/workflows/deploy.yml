@@ -82,24 +82,47 @@ jobs:
               NODE_ENV=production npm run build
 
               # Next.js standalone NO incluye public/ ni .next/static — hay que
-              # enlazarlos manualmente. Usamos SYMLINKS (no cp) por robustez:
-              #   - Atómicos: rm + ln no dejan estado a medias.
-              #   - Nunca anidan: rm -rf previo garantiza que el destino no
-              #     existe, así `ln` crea el enlace y NO lo mete dentro de un dir.
-              #   - Nunca quedan stale: el symlink apunta SIEMPRE al public/ real
-              #     del repo (que git reset --hard mantiene fresco), no a una
-              #     copia que puede quedar vieja entre deploys.
-              # El bug recurrente (/logo.png y /Bet365-Logo.png en 404 tras
-              # cada deploy) venía de la copia; el symlink lo elimina de raíz.
-              rm -rf .next/standalone/public
+              # enlazarlos manualmente.
+              #
+              # ⚠ BUG GRAVE corregido aquí: el patrón anterior hacía
+              #   rm -rf .next/standalone/public
+              # PERO .next/standalone/public ya era un SYMLINK que apuntaba a
+              # /apps/futbol/public (el directorio público del repo).
+              # `rm -rf` aplicado a un symlink SIGUE el enlace y BORRA EL
+              # CONTENIDO al que apunta (no solo el enlace). Resultado: cada
+              # deploy VACIABA /apps/futbol/public/, el ln -sfn lo recreaba
+              # apuntando a un directorio vacío, y Caddy (que sirve directo
+              # desde /apps/futbol/public) daba 404 en logo/favicon/icons.
+              # El usuario tenía que copiar los assets a mano tras cada deploy.
+              #
+              # Fix: borrar SOLO el enlace (no su target) con `rm -f` (sin -r),
+              # y reservar `rm -rf` para casos donde sabemos que NO es symlink
+              # (mkdir + .next/static es regenerado en cada build). El `-h`
+              # extra protege contra el peor caso: si por algún motivo no
+              # existiera ya como symlink y fuera dir, no lo recursamos.
+              #
+              # NO se necesita "copiar public a otro lado" porque /apps/futbol
+              # es el repo Y el directorio que Caddy sirve — son el MISMO
+              # directorio. git reset --hard ya mantiene public/ actualizado.
+              [ -L .next/standalone/public ] && rm -f .next/standalone/public
+              [ -d .next/standalone/public ] && [ ! -L .next/standalone/public ] && rm -rf .next/standalone/public || true
               ln -sfn "$PWD/public" .next/standalone/public
+
               mkdir -p .next/standalone/.next
-              rm -rf .next/standalone/.next/static
+              # .next/static SÍ es regenerado por `next build`, no es shared
+              # con el repo — aquí rm -rf es seguro porque no es un symlink
+              # a algo que necesitemos preservar.
+              [ -L .next/standalone/.next/static ] && rm -f .next/standalone/.next/static
+              [ -d .next/standalone/.next/static ] && [ ! -L .next/standalone/.next/static ] && rm -rf .next/standalone/.next/static || true
               ln -sfn "$PWD/.next/static" .next/standalone/.next/static
 
-              # Verificación en el log: confirmar que el asset es accesible.
-              echo "── verificación assets standalone ──"
+              # Verificación en el log: confirmar que los assets del repo
+              # NO se borraron y siguen accesibles desde el standalone vía
+              # symlink. `ls -lL` sigue el enlace y muestra el archivo real.
+              echo "── verificación assets standalone (vía symlink) ──"
               ls -lL .next/standalone/public/logo.png .next/standalone/public/Bet365-Logo.png 2>&1 || echo "⚠ assets NO accesibles via standalone/public"
+              echo "── verificación public/ del repo (Caddy lee de aquí) ──"
+              ls -la "$PWD/public/" | head -15
 
               # Restart (no reload) para que el server standalone tome los
               # symlinks nuevos sin servir desde un working dir viejo.
