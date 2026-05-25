@@ -1,15 +1,22 @@
 /* eslint-disable */
 // Diagnóstico de calibración del modelo dc-v1
 // Lee match_predictions finalizadas, calcula Brier, log-loss y curva de calibración por mercado.
-// Uso: node scripts/calibration-diagnosis.js
+// Uso: node --env-file=.env scripts/calibration-diagnosis.js
+//
+// Migrado de @supabase/supabase-js → pg (DATABASE_URL del VPS), igual que
+// build-calibration.js, para que todos los scripts de calibración lean de
+// la misma fuente.
 
-require('dotenv').config({ path: '.env.local' });
-const { createClient } = require('@supabase/supabase-js');
+try { require('dotenv').config({ path: '.env.local' }); } catch {}
+try { require('dotenv').config({ path: '.env' }); } catch {}
 
-const s = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+const { Pool } = require('pg');
+
+const pgPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
+  max: 5,
+});
 
 const MARKETS = [
   { key: 'home_win',      pCol: 'p_home_win',      outcome: (r) => r.actual_result === 'H',           gate: (r) => r.actual_result != null,            label: '1 (Local gana)' },
@@ -112,13 +119,10 @@ function calibrationTable(rows, pCol, outcomeFn) {
 }
 
 (async () => {
-  const { data: rows, error } = await s
-    .from('match_predictions')
-    .select('*')
-    .not('finalized_at', 'is', null);
-
-  if (error) { console.error('ERROR:', error.message); process.exit(1); }
-  console.log(`\nMuestras finalizadas: ${rows.length}`);
+  const { rows } = await pgPool.query(
+    `SELECT * FROM match_predictions WHERE finalized_at IS NOT NULL`
+  );
+  console.log(`\nMuestras finalizadas (VPS): ${rows.length}`);
   console.log('=' .repeat(80));
 
   const summary = [];
@@ -162,4 +166,9 @@ function calibrationTable(rows, pCol, outcomeFn) {
   console.log('  Log-loss (0=perfecto, ~0.69=baseline 50/50)');
   console.log('  ECE = error de calibración esperado (0=perfecto, 5%+ sesgo notable)');
   console.log('  Sesgo global: + = subestima (modelo conservador), - = sobreestima (modelo optimista)');
-})();
+
+  await pgPool.end();
+})().catch(e => {
+  console.error('FATAL:', e.message);
+  process.exit(1);
+});

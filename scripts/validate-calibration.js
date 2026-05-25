@@ -2,14 +2,30 @@
 // Aplica la calibración guardada en app_config a las probs RAW de match_predictions
 // y compara métricas (Brier, log-loss, ECE) antes vs después.
 // No modifica datos — solo valida que la calibración mejora.
+//
+// Migrado de @supabase/supabase-js → pg (DATABASE_URL del VPS). Antes leía
+// de Supabase (datos viejos pre-migración: 839 filas) mientras la
+// calibración real se escribía/leía del PG del VPS (348 filas actuales) →
+// los knots que validate-calibration buscaba en app_config de Supabase no
+// existían o estaban desactualizados → interpolate caía al fallback
+// "return x" (línea: if (!knots?.length) return x) → before === after →
+// Δ=0pp en TODOS los mercados.
+//
+// Ahora lee de la misma fuente que build-calibration.js (DATABASE_URL),
+// así before y after se calculan sobre datos coherentes y los knots son
+// los recién generados.
 
-require('dotenv').config({ path: '.env.local' });
-const { createClient } = require('@supabase/supabase-js');
+// Soporta tanto Vercel (.env.local) como VPS (.env).
+try { require('dotenv').config({ path: '.env.local' }); } catch {}
+try { require('dotenv').config({ path: '.env' }); } catch {}
 
-const s = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+const { Pool } = require('pg');
+
+const pgPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
+  max: 5,
+});
 
 const MARKETS = [
   { key: 'home_win',     pCol: 'p_home_win',         outcome: (r) => r.actual_result === 'H',     gate: (r) => r.actual_result != null,                                  label: '1' },
@@ -76,23 +92,45 @@ function metrics(rows, getP, outcomeFn) {
 }
 
 (async () => {
-  const { data: rows, error } = await s.from('match_predictions').select('*').not('finalized_at', 'is', null);
-  if (error) { console.error(error.message); process.exit(1); }
+  // 1) Leer todas las predicciones finalizadas desde el VPS.
+  const { rows } = await pgPool.query(
+    `SELECT * FROM match_predictions WHERE finalized_at IS NOT NULL`
+  );
 
-  const { data: cfg } = await s.from('app_config').select('value').eq('key', 'calibration_dc_v1').single();
-  if (!cfg?.value?.markets) { console.error('No calibration in app_config'); process.exit(1); }
-  const knotsByMarket = cfg.value.markets;
+  // 2) Leer los knots desde el MISMO PG. La calibración la escribe
+  //    build-calibration.js en app_config[calibration_dc_v1] con un
+  //    payload jsonb { model_version, markets, ... }.
+  const cfgRes = await pgPool.query(
+    `SELECT value FROM app_config WHERE key = $1 LIMIT 1`,
+    ['calibration_dc_v1'],
+  );
+  const cfgValue = cfgRes.rows[0]?.value;
+  // jsonb llega ya parseado como objeto JS; defensa por si llegara como
+  // string (configuraciones distintas de pg parsers en escenarios raros).
+  const cfg = typeof cfgValue === 'string' ? JSON.parse(cfgValue) : cfgValue;
+  if (!cfg?.markets) {
+    console.error('No hay calibración en app_config[calibration_dc_v1]. Corre primero:');
+    console.error('  node --env-file=.env scripts/build-calibration.js');
+    process.exit(1);
+  }
+  const knotsByMarket = cfg.markets;
 
-  console.log(`\nMuestras: ${rows.length}    Modelo calibración: ${cfg.value.model_version}`);
+  console.log(`\nMuestras (match_predictions finalizadas en VPS): ${rows.length}`);
+  console.log(`Modelo calibración: ${cfg.model_version}   built_at: ${cfg.built_at || '?'}`);
+  console.log(`Mercados con knots: ${Object.keys(knotsByMarket).length}`);
   console.log('='.repeat(95));
-  console.log('Métricas: ANTES (raw dc-v1) → DESPUÉS (isotonic dc-v1.1)\n');
+  console.log('Métricas: ANTES (raw) → DESPUÉS (isotonic)\n');
 
   const summary = [];
+  const missingKnots = [];
   for (const m of MARKETS) {
     const valid = rows.filter((r) => r[m.pCol] != null && m.gate(r));
     if (!valid.length) continue;
-    const before = metrics(valid, (r) => r[m.pCol], m.outcome);
     const knots = knotsByMarket[m.key];
+    if (!knots) missingKnots.push(m.key);
+    const before = metrics(valid, (r) => r[m.pCol], m.outcome);
+    // Si no hay knots, interpolate devuelve x → after === before → Δ=0pp
+    // (síntoma del bug original). Lo registramos arriba en missingKnots.
     const after = metrics(valid, (r) => interpolate(knots, r[m.pCol]), m.outcome);
     summary.push({
       mercado: m.label,
@@ -105,8 +143,19 @@ function metrics(rows, getP, outcomeFn) {
       ece_pre:  before.ece.toFixed(1) + '%',
       ece_post: after.ece.toFixed(1) + '%',
       Δece:     ((after.ece - before.ece) > 0 ? '+' : '') + (after.ece - before.ece).toFixed(1) + 'pp',
+      knots: knots ? knots.length : '∅',
     });
   }
   console.table(summary);
+  if (missingKnots.length > 0) {
+    console.warn(`\n⚠ Mercados sin knots (Δ saldrá 0): ${missingKnots.join(', ')}`);
+    console.warn('  Asegúrate de correr build-calibration.js primero.');
+  }
   console.log('\nLectura: Δ negativo = mejora. Brier y log-loss más bajos = mejor calibración.');
-})();
+  console.log('Columna "knots" = nº de nudos isotonic generados; "∅" = sin calibración para ese mercado.');
+
+  await pgPool.end();
+})().catch(e => {
+  console.error('FATAL:', e.message);
+  process.exit(1);
+});
