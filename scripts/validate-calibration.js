@@ -27,19 +27,25 @@ const pgPool = new Pool({
   max: 5,
 });
 
+// IMPORTANTE: `key` debe COINCIDIR con la que escribe build-calibration.js
+// en app_config[calibration_dc_v1].markets. build usa el esquema unificado
+// `{grupo}_over{K}_5` / `{grupo}_under{K}_5` para los mercados OU desde
+// dc-v1.2. Las keys legacy ('over_15', 'corners_85', etc.) ya no existen en
+// el payload — usarlas devuelve undefined y la calibración aparece como '∅'
+// con Δ=0 aunque los datos sí estén calibrados.
 const MARKETS = [
   { key: 'home_win',     pCol: 'p_home_win',         outcome: (r) => r.actual_result === 'H',     gate: (r) => r.actual_result != null,                                  label: '1' },
   { key: 'draw',         pCol: 'p_draw',             outcome: (r) => r.actual_result === 'D',     gate: (r) => r.actual_result != null,                                  label: 'X' },
   { key: 'away_win',     pCol: 'p_away_win',         outcome: (r) => r.actual_result === 'A',     gate: (r) => r.actual_result != null,                                  label: '2' },
   { key: 'btts',         pCol: 'p_btts',             outcome: (r) => r.actual_btts === true,      gate: (r) => r.actual_btts != null,                                    label: 'BTTS' },
-  { key: 'over_15',      pCol: 'p_over_15',          outcome: (r) => r.actual_total_goals > 1.5,  gate: (r) => r.actual_total_goals != null,                             label: 'O 1.5' },
-  { key: 'over_25',      pCol: 'p_over_25',          outcome: (r) => r.actual_total_goals > 2.5,  gate: (r) => r.actual_total_goals != null,                             label: 'O 2.5' },
-  { key: 'over_35',      pCol: 'p_over_35',          outcome: (r) => r.actual_total_goals > 3.5,  gate: (r) => r.actual_total_goals != null,                             label: 'O 3.5' },
-  { key: 'corners_85',   pCol: 'p_corners_over_85',  outcome: (r) => r.actual_corners > 8.5,      gate: (r) => r.actual_corners != null && r.actual_corners > 0,         label: 'C 8.5' },
-  { key: 'corners_95',   pCol: 'p_corners_over_95',  outcome: (r) => r.actual_corners > 9.5,      gate: (r) => r.actual_corners != null && r.actual_corners > 0,         label: 'C 9.5' },
-  { key: 'cards_25',     pCol: 'p_cards_over_25',    outcome: (r) => r.actual_total_cards > 2.5,  gate: (r) => r.actual_total_cards != null,                             label: 'Card 2.5' },
-  { key: 'cards_35',     pCol: 'p_cards_over_35',    outcome: (r) => r.actual_total_cards > 3.5,  gate: (r) => r.actual_total_cards != null,                             label: 'Card 3.5' },
-  { key: 'cards_45',     pCol: 'p_cards_over_45',    outcome: (r) => r.actual_total_cards > 4.5,  gate: (r) => r.actual_total_cards != null,                             label: 'Card 4.5' },
+  { key: 'total_goals_over1_5',  pCol: 'p_over_15',          outcome: (r) => r.actual_total_goals > 1.5,  gate: (r) => r.actual_total_goals != null,                     label: 'O 1.5' },
+  { key: 'total_goals_over2_5',  pCol: 'p_over_25',          outcome: (r) => r.actual_total_goals > 2.5,  gate: (r) => r.actual_total_goals != null,                     label: 'O 2.5' },
+  { key: 'total_goals_over3_5',  pCol: 'p_over_35',          outcome: (r) => r.actual_total_goals > 3.5,  gate: (r) => r.actual_total_goals != null,                     label: 'O 3.5' },
+  { key: 'total_corners_over8_5',pCol: 'p_corners_over_85',  outcome: (r) => r.actual_corners > 8.5,      gate: (r) => r.actual_corners != null && r.actual_corners > 0, label: 'C 8.5' },
+  { key: 'total_corners_over9_5',pCol: 'p_corners_over_95',  outcome: (r) => r.actual_corners > 9.5,      gate: (r) => r.actual_corners != null && r.actual_corners > 0, label: 'C 9.5' },
+  { key: 'total_cards_over2_5',  pCol: 'p_cards_over_25',    outcome: (r) => r.actual_total_cards > 2.5,  gate: (r) => r.actual_total_cards != null,                     label: 'Card 2.5' },
+  { key: 'total_cards_over3_5',  pCol: 'p_cards_over_35',    outcome: (r) => r.actual_total_cards > 3.5,  gate: (r) => r.actual_total_cards != null,                     label: 'Card 3.5' },
+  { key: 'total_cards_over4_5',  pCol: 'p_cards_over_45',    outcome: (r) => r.actual_total_cards > 4.5,  gate: (r) => r.actual_total_cards != null,                     label: 'Card 4.5' },
   { key: 'first_goal_30',pCol: 'p_first_goal_30',    outcome: (r) => r.actual_first_goal_minute != null && r.actual_first_goal_minute <= 30, gate: (r) => r.actual_total_goals != null, label: '1°gol≤30' },
   { key: 'first_goal_45',pCol: 'p_first_goal_45',    outcome: (r) => r.actual_first_goal_minute != null && r.actual_first_goal_minute <= 45, gate: (r) => r.actual_total_goals != null, label: '1°gol≤45' },
 ];
