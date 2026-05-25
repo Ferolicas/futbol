@@ -378,15 +378,13 @@ async function buildEventBundle(fid, data, prev) {
   // información de "córner para X" SÍ es real (no es una estadística
   // ambigua como offsides — un córner se pita o no se pita).
   const pHC = prev.corners?.home ?? 0, pAC = prev.corners?.away ?? 0;
-  // Si los córners de ESTE tick NO son reales (la API no los reportó →
-  // extractor puso 0-0), NO usamos 0 como "now" (daría "base=4 now=0 → sin
-  // delta" y retrasaría la notificación hasta que volviera real=true). Usamos
-  // el último valor real conocido = `prev` (el baseline solo avanza con valores
-  // reales). Así no hay falso retroceso y, en cuanto llegue un valor real
-  // mayor, el delta se detecta de inmediato. (runLive ya arrastra el valor en
-  // liveDetailsMap; esto lo garantiza también dentro de buildEventBundle.)
-  const cornersNow = (data.corners?.isReal === false && prev.corners) ? prev.corners : data.corners;
-  const nHC = cornersNow?.home ?? 0, nAC = cornersNow?.away ?? 0;
+  // Córners monótonos por-lado: el "now" de cada lado es el máximo entre el
+  // acumulado (prev) y el del tick. Así un lado nulo (API lo trajo como 0)
+  // nunca baja el contador ni dispara falsos retrocesos, y un córner nuevo
+  // (cur>prev) sí dispara delta. Cubre tanto el tick entero no-real como el
+  // caso de un solo lado null (el bug 8-1 → 8-0).
+  const nHC = Math.max(pHC, data.corners?.home ?? 0);
+  const nAC = Math.max(pAC, data.corners?.away ?? 0);
   if (nHC > pHC) {
     const k = dedupKey(fid, 'corner', 'home', nHC);
     if (!(await alreadySent(k))) {
@@ -977,25 +975,27 @@ export async function runLive(_payload = {}) {
     }));
   }
 
-  // ── BUG FIX (retraso/perdida de corners por blip de la API) ──
-  // API-Football alterna en ticks consecutivos del MISMO partido entre devolver
-  // stats (isReal=true, p.ej. corners 0-4) y NO devolverlas (isReal=false → el
-  // extractor pone 0-0). Si dejáramos el `now` en 0-0 cuando isReal=false:
-  //   (a) se pierde el delta — un tick trae 0-4(real), el siguiente 0-0(no real)
-  //       degrada el baseline, y cuando vuelve 0-4 ya no se detecta como nuevo;
-  //   (b) el frontend parpadea a 0 y vuelve.
-  // FIX: cuando los corners de este tick NO son reales, ARRASTRAR el último
-  // valor real conocido (de existingLive). Así el `now` nunca retrocede a 0 por
-  // un blip y el baseline solo avanza con valores reales. Mutamos liveDetailsMap
-  // aquí para que TODO lo de abajo (push, merge, fixtureStats, Pusher) use el
-  // valor arrastrado de forma consistente.
+  // ── BUG FIX (córners monótonos por-lado) ──
+  // Los córners SOLO suben dentro de un partido. La API-Football provoca dos
+  // problemas que hacían "bajar" un lado y perder/pisar valores:
+  //   (a) tick entero sin stats → extractor pone 0-0 (isReal=false);
+  //   (b) PEOR y más sutil (caso Paderborn 8-1 → mostraba 8-0): un tick trae el
+  //       córner de HOME real (8) pero el de AWAY como null → extractor pone
+  //       away=0 y, como `cornersAreReal` es un OR, marca isReal=true. El merge
+  //       de abajo entonces pisaba el 8-1 guardado con 8-0.
+  // FIX único y robusto: forzar que cada lado NUNCA baje por debajo del último
+  // valor conocido (existingLive). Tomamos el máximo por-lado. Mutamos
+  // liveDetailsMap para que TODO (push, merge, fixtureStats, Pusher) use el
+  // valor monótono de forma consistente.
   for (const [fid, data] of Object.entries(liveDetailsMap)) {
-    if (data?.corners && data.corners.isReal === false) {
-      const lastReal = existingLive[fid]?.corners;
-      if (lastReal && lastReal.isReal && (lastReal.total || 0) > 0) {
-        data.corners = { ...lastReal };
-        console.log(`${LL} corners blip fid=${fid}: tick isReal=false → arrastro último real ${lastReal.home}-${lastReal.away} (total=${lastReal.total})`);
-      }
+    const prevC = existingLive[fid]?.corners;
+    if (!data?.corners || !prevC) continue;
+    const ph = prevC.home ?? 0, pa = prevC.away ?? 0;
+    const ch = data.corners.home ?? 0, ca = data.corners.away ?? 0;
+    if (ph > ch || pa > ca) {
+      const home = Math.max(ph, ch), away = Math.max(pa, ca);
+      data.corners = { home, away, total: home + away, isReal: data.corners.isReal === true || prevC.isReal === true };
+      console.log(`${LL} corners monótono fid=${fid}: tick ${ch}-${ca} → ${home}-${away} (piso por-lado, no bajar bajo prev ${ph}-${pa})`);
     }
   }
 
