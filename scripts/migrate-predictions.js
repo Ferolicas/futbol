@@ -139,6 +139,28 @@ function buildUpsert(cols, rows) {
   await vps.connect();
   console.log('   conexiones OK');
 
+  // Forzar search_path = public en AMBOS clientes:
+  //   - Supabase pooler (Supavisor) puede arrancar la sesión con un
+  //     search_path por defecto distinto a 'public' o con un rol/template
+  //     que lo deja vacío → "relation match_predictions does not exist".
+  //   - VPS: blindaje extra por si hubiera schemas legacy (auth.users etc).
+  // SET search_path persiste por la vida del Client (pg.Client reusa una sola
+  // conexión TCP, no la devuelve a un pool entre queries).
+  await supa.query('SET search_path = public');
+  await vps.query('SET search_path = public');
+  // Diagnóstico explícito — si la tabla SIGUE sin resolver, el output dirá
+  // exactamente cuál es current_database/current_user/schemas activos.
+  const diagSupa = await supa.query(
+    "SELECT current_database() AS db, current_user AS usr, current_schemas(true) AS schemas, " +
+    "to_regclass('public.' || $1) AS tbl", [TABLE]);
+  console.log(`   Supabase: db=${diagSupa.rows[0].db} user=${diagSupa.rows[0].usr} ` +
+              `schemas=${JSON.stringify(diagSupa.rows[0].schemas)} ` +
+              `tabla=${diagSupa.rows[0].tbl || 'NO ENCONTRADA'}`);
+  if (!diagSupa.rows[0].tbl) {
+    throw new Error(`La tabla public.${TABLE} no existe en Supabase con el rol "${diagSupa.rows[0].usr}". ` +
+                    `Verifica permisos GRANT o usa otra cadena de conexión.`);
+  }
+
   // 0) Diagnóstico
   const beforeSupa = await getCount(supa, 'Supabase');
   const beforeVps  = await getCount(vps,  'VPS');
