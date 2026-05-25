@@ -2036,31 +2036,26 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
             </div>
           </div>
 
-          {/* ── Score Box ── */}
+          {/* ── Score Box ── glow vía CSS (igual que MatchCard). Antes tenía
+              4 loops motion repeat:Infinity + backdropFilter:blur que corrían
+              en el main thread por cada card analizado visible → competían con
+              la apertura de los sub-acordeones. Movido a @keyframes CSS (GPU). */}
           <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <motion.div
-              style={{ width: '100%', borderRadius: 20, background: 'linear-gradient(135deg, rgba(30,135,105,.25), rgba(0,0,9,.4), rgba(30,135,105,.15))', border: '2px solid rgba(30,135,105,.5)', padding: '16px 20px', backdropFilter: 'blur(8px)' }}
-              animate={{ boxShadow: ['0 0 30px rgba(30,135,105,.3)', '0 0 50px rgba(30,135,105,.6)', '0 0 30px rgba(30,135,105,.3)'] }}
-              transition={{ duration: 2, repeat: Infinity }}
-            >
+            <div className="score-box-glow" style={{ width: '100%', borderRadius: 20, background: 'linear-gradient(135deg, rgba(30,135,105,.25), rgba(0,0,9,.4), rgba(30,135,105,.15))', border: '2px solid rgba(30,135,105,.5)', padding: '16px 20px' }}>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
 
                 {/* Badge de estado */}
                 <div>
                   {live ? (
-                    <motion.div
-                      className="ap2-live-badge"
-                      animate={{ boxShadow: ['0 0 8px rgba(220,38,38,.6)', '0 0 18px rgba(220,38,38,1)', '0 0 8px rgba(220,38,38,.6)'] }}
-                      transition={{ duration: 1.2, repeat: Infinity }}
-                    >
-                      <motion.span className="ap2-live-dot" animate={{ opacity: [1, .3, 1] }} transition={{ duration: 1, repeat: Infinity }} />
+                    <div className="ap2-live-badge live-badge-glow">
+                      <span className="ap2-live-dot live-dot-pulse" />
                       {(match.fixture.status.short === 'HT' || match.fixture.status.short === 'BT') ? '' : 'EN VIVO'}
                       {match.fixture.status.elapsed > 0 && (
                         <span style={{ marginLeft: 4 }}>
                           <MatchTimer elapsed={match.fixture.status.elapsed} extra={match.fixture.status.extra} status={match.fixture.status.short} />
                         </span>
                       )}
-                    </motion.div>
+                    </div>
                   ) : (
                     <div style={{ padding: '4px 14px', borderRadius: 999, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700, color: 'white', letterSpacing: '.05em' }}>
                       {sLabel}
@@ -2072,13 +2067,9 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   {hasScore ? (
                     <>
-                      <motion.span
-                        style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }}
-                        animate={{ textShadow: ['0 0 15px rgba(30,135,105,.5)', '0 0 25px rgba(30,135,105,1)', '0 0 15px rgba(30,135,105,.5)'] }}
-                        transition={{ duration: 2, repeat: Infinity }}
-                      >
+                      <span className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }}>
                         {match.goals.home}
-                      </motion.span>
+                      </span>
 
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
                         {liveStats?.corners && (
@@ -2143,7 +2134,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 )}
 
               </div>
-            </motion.div>
+            </div>
           </div>
 
           {/* ── Indicador: remove / fav / selCount / prob / chevron ── */}
