@@ -523,12 +523,27 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
 
   const home = game.teams?.home;
   const away = game.teams?.away;
-  const live = isLive(game.status?.short);
-  const finished = isFinished(game.status?.short);
   const liveResult = game.liveResult;
+  // El estado y el marcador FRESCOS viven en baseball_match_results (liveResult):
+  // el job live los actualiza incluso al terminar el partido (FT). game.status
+  // viene del snapshot matutino de fixtures (NS, 0-0), así que SIEMPRE preferimos
+  // liveResult cuando existe — si no, un partido terminado se vería como "próximo"
+  // o con 0-0 hasta que el finalize nocturno refresque el cache.
+  const effStatus = liveResult?.status || game.status?.short;
+  const live = isLive(effStatus);
+  const finished = isFinished(effStatus);
   const homeScore = liveResult?.home_score ?? game.scores?.home?.total;
   const awayScore = liveResult?.away_score ?? game.scores?.away?.total;
   const hasScore = (live || finished) && homeScore != null && awayScore != null;
+  // Status efectivo para statusText (incluye inning/half del liveResult).
+  const effStatusObj = liveResult
+    ? {
+        short: liveResult.status,
+        inning: liveResult.inning,
+        long: liveResult.inning_half === 'top' ? 'Top'
+            : liveResult.inning_half === 'bottom' ? 'Bottom' : '',
+      }
+    : game.status;
 
   const ml = game.analysis?.probabilities?.moneyline;
   const totals = game.analysis?.probabilities?.totals;
@@ -570,7 +585,7 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
               fontSize: '.7rem', fontWeight: 800,
               color: live ? '#fbbf24' : finished ? '#94a3b8' : '#fde68a',
               fontFamily: 'JetBrains Mono, monospace',
-            }}>{statusText(game)}</span>
+            }}>{statusText({ status: effStatusObj })}</span>
             {!hasScore && (
               <span style={{ fontSize: '.78rem', color: '#fde68a', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>
                 {fmtTimeInTz(game.date, userTz)}
