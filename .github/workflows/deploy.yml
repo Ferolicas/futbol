@@ -56,10 +56,13 @@ jobs:
 
             if [ "$BEFORE" = "$AFTER" ]; then
               echo "No new commits — nothing to deploy"
-              exit 0
+              # NOTA: NO salimos aquí. Aunque no haya commits nuevos, dejamos que
+              # corra la guardia de public/ del final (self-heal). Es idempotente
+              # y barata, y protege si public quedó dañado por cualquier motivo.
+              CHANGED=""
+            else
+              CHANGED=$(git diff --name-only "$BEFORE" "$AFTER")
             fi
-
-            CHANGED=$(git diff --name-only "$BEFORE" "$AFTER")
             echo "=== Changed files ==="
             echo "$CHANGED"
             echo "====================="
@@ -81,71 +84,33 @@ jobs:
               # Build prod
               NODE_ENV=production npm run build
 
-              # Next.js standalone NO incluye public/ ni .next/static — hay que
-              # enlazarlos manualmente.
+              # ── PUBLIC para el server standalone de Node ──
+              # El standalone de Next NO incluye public/ — hay que ponérselo al
+              # lado. ANTES esto era un SYMLINK:
+              #     ln -sfn "$PWD/public" .next/standalone/public
+              # y era la RAÍZ del bug recurrente: cualquier rm/ln/cp que tocara
+              # .next/standalone/public podía SEGUIR el enlace y vaciar el public
+              # REAL del repo (/apps/futbol/public), que es de donde sirve Caddy
+              # (ver scripts/vps/Caddyfile: root * /apps/futbol/public).
               #
-              # ⚠ BUG GRAVE corregido aquí: el patrón anterior hacía
-              #   rm -rf .next/standalone/public
-              # PERO .next/standalone/public ya era un SYMLINK que apuntaba a
-              # /apps/futbol/public (el directorio público del repo).
-              # `rm -rf` aplicado a un symlink SIGUE el enlace y BORRA EL
-              # CONTENIDO al que apunta (no solo el enlace). Resultado: cada
-              # deploy VACIABA /apps/futbol/public/, el ln -sfn lo recreaba
-              # apuntando a un directorio vacío, y Caddy (que sirve directo
-              # desde /apps/futbol/public) daba 404 en logo/favicon/icons.
-              # El usuario tenía que copiar los assets a mano tras cada deploy.
-              #
-              # Fix: borrar SOLO el enlace (no su target) con `rm -f` (sin -r),
-              # y reservar `rm -rf` para casos donde sabemos que NO es symlink
-              # (mkdir + .next/static es regenerado en cada build). El `-h`
-              # extra protege contra el peor caso: si por algún motivo no
-              # existiera ya como symlink y fuera dir, no lo recursamos.
-              #
-              # NO se necesita "copiar public a otro lado" porque /apps/futbol
-              # es el repo Y el directorio que Caddy sirve — son el MISMO
-              # directorio. git reset --hard ya mantiene public/ actualizado.
-              [ -L .next/standalone/public ] && rm -f .next/standalone/public
-              [ -d .next/standalone/public ] && [ ! -L .next/standalone/public ] && rm -rf .next/standalone/public || true
-              ln -sfn "$PWD/public" .next/standalone/public
+              # SOLUCIÓN DEFINITIVA: COPIA, no symlink. Así el public del repo
+              # NUNCA es destino de ninguna operación del standalone → imposible
+              # vaciarlo desde aquí. Es ~1.9MB, copia trivial.
+              [ -L .next/standalone/public ] && unlink .next/standalone/public || true
+              rm -rf .next/standalone/public
+              mkdir -p .next/standalone/public
+              cp -a public/. .next/standalone/public/
 
+              # ── .next/static ── (regenerado por next build, NO compartido con
+              # el repo → aquí un symlink SÍ es seguro: su target es build output
+              # efímero, no archivos versionados que debamos preservar).
               mkdir -p .next/standalone/.next
-              # .next/static SÍ es regenerado por `next build`, no es shared
-              # con el repo — aquí rm -rf es seguro porque no es un symlink
-              # a algo que necesitemos preservar.
               [ -L .next/standalone/.next/static ] && rm -f .next/standalone/.next/static
               [ -d .next/standalone/.next/static ] && [ ! -L .next/standalone/.next/static ] && rm -rf .next/standalone/.next/static || true
               ln -sfn "$PWD/.next/static" .next/standalone/.next/static
 
-              # ─── GUARDIA A PRUEBA DE BALAS ───────────────────────────────
-              # Caddy sirve los estáticos DIRECTAMENTE desde /apps/futbol/public
-              # (ver scripts/vps/Caddyfile: `root * /apps/futbol/public` +
-              # `@static file` + file_server). Para Caddy, lo ÚNICO que importa
-              # es que esos archivos existan en public/ del repo — el symlink al
-              # standalone es solo para el server de Node y es irrelevante para
-              # servir imágenes.
-              #
-              # public/ está 100% trackeado en git (logo.png, Bet365-Logo.png,
-              # icons, etc). `git checkout -- public/` RESTAURA cualquier archivo
-              # trackeado que se haya borrado/modificado, pase lo que pase en los
-              # pasos de symlink de arriba. Es idempotente y solo toca archivos
-              # versionados (los no-trackeados quedan intactos). Con esto, los
-              # assets de Caddy NO PUEDEN desaparecer tras un deploy — nunca más.
-              git checkout -- public/ 2>/dev/null || true
-
-              # Verificación dura: si algún asset crítico falta, FALLA el deploy
-              # en voz alta (set -e) en vez de dejar la web con 404 silenciosos.
-              echo "── verificación public/ del repo (Caddy lee de aquí) ──"
-              for asset in logo.png Bet365-Logo.png; do
-                if [ ! -f "$PWD/public/$asset" ]; then
-                  echo "✗ FATAL: public/$asset NO existe tras el build — abortando"
-                  exit 1
-                fi
-              done
-              ls -la "$PWD/public/" | head -15
-              echo "✓ assets de Caddy presentes en /apps/futbol/public"
-
-              # Restart (no reload) para que el server standalone tome los
-              # symlinks nuevos sin servir desde un working dir viejo.
+              # Restart (no reload) para que el server standalone tome el build
+              # nuevo sin servir desde un working dir viejo.
               pm2 restart cfanalisis-web --update-env
 
               echo "✓ Next.js redeployed"
@@ -184,6 +149,45 @@ jobs:
               echo ""
               echo "○ Worker NOT changed — skipping worker rebuild"
             fi
+
+            # ─────────────────────────────────────────────────────────────
+            # GUARDIA PUBLIC INCONDICIONAL — corre SIEMPRE, en TODOS los deploys
+            # (frontend, worker-only, e incluso "no new commits").
+            # ─────────────────────────────────────────────────────────────
+            # Caddy sirve logo/favicon/iconos/manifest DIRECTAMENTE desde
+            # /apps/futbol/public. Garantizamos que ese directorio SIEMPRE refleje
+            # el repo tras cualquier deploy, pase lo que pase arriba. public/ está
+            # 100% trackeado en git, así que `git checkout -- public/` restaura
+            # cualquier archivo borrado. Es idempotente y solo toca lo versionado.
+            cd /apps/futbol
+
+            # Si por algún arreglo manual previo /apps/futbol/public quedó como
+            # SYMLINK (en vez de directorio real), lo deshacemos para que git
+            # restaure el directorio real con su contenido.
+            if [ -L public ]; then
+              echo "⚠ /apps/futbol/public era un SYMLINK — lo elimino para restaurar el dir real"
+              unlink public
+            fi
+
+            git checkout -- public/ 2>/dev/null || git checkout HEAD -- public/ || true
+
+            echo "── /apps/futbol/public tras la guardia (Caddy lee de aquí) ──"
+            ls -la public/ | head -20
+
+            # Verificación dura: si falta un asset crítico, FALLA el deploy en voz
+            # alta (set -e) en vez de dejar la web con 404 silenciosos en logo/icons.
+            MISSING=0
+            for asset in logo.png vflogo.png apple-icon.png icon-192.png icon-512.png manifest.json sw.js; do
+              if [ ! -f "public/$asset" ]; then
+                echo "✗ FALTA public/$asset"
+                MISSING=1
+              fi
+            done
+            if [ "$MISSING" = "1" ]; then
+              echo "✗ FATAL: faltan assets en /apps/futbol/public tras el deploy — abortando"
+              exit 1
+            fi
+            echo "✓ public/ íntegro — todos los assets de Caddy presentes"
 
             echo ""
             echo "=== Deploy summary ==="
