@@ -378,7 +378,15 @@ async function buildEventBundle(fid, data, prev) {
   // información de "córner para X" SÍ es real (no es una estadística
   // ambigua como offsides — un córner se pita o no se pita).
   const pHC = prev.corners?.home ?? 0, pAC = prev.corners?.away ?? 0;
-  const nHC = data.corners?.home ?? 0, nAC = data.corners?.away ?? 0;
+  // Si los córners de ESTE tick NO son reales (la API no los reportó →
+  // extractor puso 0-0), NO usamos 0 como "now" (daría "base=4 now=0 → sin
+  // delta" y retrasaría la notificación hasta que volviera real=true). Usamos
+  // el último valor real conocido = `prev` (el baseline solo avanza con valores
+  // reales). Así no hay falso retroceso y, en cuanto llegue un valor real
+  // mayor, el delta se detecta de inmediato. (runLive ya arrastra el valor en
+  // liveDetailsMap; esto lo garantiza también dentro de buildEventBundle.)
+  const cornersNow = (data.corners?.isReal === false && prev.corners) ? prev.corners : data.corners;
+  const nHC = cornersNow?.home ?? 0, nAC = cornersNow?.away ?? 0;
   if (nHC > pHC) {
     const k = dedupKey(fid, 'corner', 'home', nHC);
     if (!(await alreadySent(k))) {
@@ -853,14 +861,35 @@ export async function runLive(_payload = {}) {
 
   const existingLive = (await redisGet(KEYS.liveStats(today))) || {};
 
-  const needsEventsFetch = tracked.filter(m => {
+  const needsEventsFetchCandidates = tracked.filter(m => {
     const fid = m.fixture.id;
     const totalGoals = (m.goals?.home || 0) + (m.goals?.away || 0);
-    if (totalGoals === 0 || (m.events || []).length > 0) return false;
+    if (totalGoals === 0) return false;
+    // BUG FIX (goleador faltante): antes saltábamos el fetch dedicado si
+    // `events.length > 0` — pero /fixtures?live=all a veces trae el array de
+    // events SIN el evento de gol con jugador (o con player=null) para ligas
+    // sin cobertura completa. Resultado: goalScorers vacío → push "⚽ Equipo
+    // (marcador)" sin nombre. Ahora contamos cuántos goleadores conocemos
+    // (events inline de este tick + cache) y pedimos /fixtures?id=X mientras
+    // ese número sea MENOR que el total de goles, para conseguir el jugador.
+    const inlineScorers = (m.events || []).filter(e => e.type === 'Goal' && e.detail !== 'Missed Penalty').length;
     const cached = existingLive[fid];
-    if (cached?.goalScorers?.length > 0 && ((cached.goals?.home || 0) + (cached.goals?.away || 0)) === totalGoals) return false;
+    const cachedScorers = (cached?.goalScorers || []).length;
+    const knownScorers = Math.max(inlineScorers, cachedScorers);
+    if (knownScorers >= totalGoals) return false; // ya conocemos un goleador por gol
     return true;
   });
+
+  // Throttle 15s (igual que stats): si la API NUNCA expone el goleador para esa
+  // liga, evita pedir /fixtures?id=X en cada tick de 20s eternamente. Permite
+  // el fetch en el tick del gol (común) y cap­a el caso patológico.
+  const needsEventsFetch = [];
+  for (const m of needsEventsFetchCandidates) {
+    const tkey = `live:eventsfetch:${m.fixture.id}`;
+    if (await alreadySent(tkey)) continue;
+    await markSentTTL(tkey, 15);
+    needsEventsFetch.push(m);
+  }
 
   if (needsEventsFetch.length > 0) {
     await Promise.all(needsEventsFetch.map(async (match) => {
@@ -882,29 +911,26 @@ export async function runLive(_payload = {}) {
     if (alreadyFetched.has(fid)) return false;
     const elapsed = m.fixture?.status?.elapsed || 0;
     if (elapsed < 10) return false;
-    // Si /fixtures?live=all YA trajo statistics inline (ligas con cobertura
-    // completa), los corners de liveDetailsMap ya están frescos este tick →
-    // no hace falta el endpoint dedicado.
+    // CLAVE para córners cada 20s: NO basta con que `statistics` venga
+    // (array no vacío). Muchas ligas (BK Häcken/Allsvenskan, etc.) devuelven
+    // el array de stats con OTROS campos pero el córner en null → extractor
+    // marca corners.isReal=false. Antes saltábamos el fetch dedicado si
+    // `hasStats` (array no vacío) y nos quedábamos con corners no reales hasta
+    // que /fixtures?live=all casualmente los traía (cada ~3 min) → córners cada
+    // 3 min. Ahora la condición de skip es: stats inline Y córners YA reales
+    // este tick. Si los córners NO son reales, pedimos el endpoint dedicado
+    // /fixtures/statistics que sí los expone, para tenerlos frescos cada tick.
+    const cornersReal = liveDetailsMap[fid]?.corners?.isReal === true;
     const hasStats = (m.statistics || []).length > 0;
-    if (hasStats) return false;
-    // BUG FIX (corner freeze): antes había `if (cached?.corners?.isReal) return
-    // false` — saltaba el fetch PERMANENTEMENTE en cuanto los corners eran
-    // reales una vez. Para ligas sin stats inline (BK Häcken/Allsvenskan,
-    // Ucrania, China…) eso CONGELABA los corners en su primer valor real
-    // (p.ej. 2): el partido seguía sumando corners (3, 4…) pero nunca se
-    // re-consultaban las stats, así que ni el actual ni el baseline avanzaban
-    // y no se generaba delta. Ahora SIEMPRE re-consultamos mientras el partido
-    // siga vivo (el throttle de abajo evita llamadas duplicadas por solape de
-    // crons). Re-fetchear /fixtures?id=X además trae los `events`, de donde
-    // sale el jugador de la amarilla → arregla también el bug de tarjetas.
+    if (hasStats && cornersReal) return false;
     return true;
   });
 
-  // Throttle anti-solape: máx 1 stats-fetch por fixture cada 50s. Con el cron
-  // de live cada 60s esto es ~1 fetch/tick (corners frescos sin retraso), pero
-  // si dos ejecuciones se solapan (run largo + siguiente tick) NO duplicamos la
-  // llamada a la API. TTL 50s < 60s para no saltarnos un tick legítimo.
-  const STATS_FETCH_THROTTLE_SEC = 50;
+  // Throttle anti-solape: máx 1 stats-fetch por fixture cada 15s. El cron de
+  // live corre cada 20s, así que con TTL 15s (< 20s) cada tick legítimo SÍ
+  // re-consulta (córners frescos cada ~20s), pero si dos ejecuciones se solapan
+  // (un run que tarda >15s + el siguiente tick) NO se duplica la llamada.
+  const STATS_FETCH_THROTTLE_SEC = 15;
   const needsStatsFetch = [];
   for (const m of needsStatsFetchCandidates) {
     const tkey = `live:statsfetch:${m.fixture.id}`;
