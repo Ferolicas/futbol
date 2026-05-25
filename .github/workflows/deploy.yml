@@ -116,13 +116,33 @@ jobs:
               [ -d .next/standalone/.next/static ] && [ ! -L .next/standalone/.next/static ] && rm -rf .next/standalone/.next/static || true
               ln -sfn "$PWD/.next/static" .next/standalone/.next/static
 
-              # Verificación en el log: confirmar que los assets del repo
-              # NO se borraron y siguen accesibles desde el standalone vía
-              # symlink. `ls -lL` sigue el enlace y muestra el archivo real.
-              echo "── verificación assets standalone (vía symlink) ──"
-              ls -lL .next/standalone/public/logo.png .next/standalone/public/Bet365-Logo.png 2>&1 || echo "⚠ assets NO accesibles via standalone/public"
+              # ─── GUARDIA A PRUEBA DE BALAS ───────────────────────────────
+              # Caddy sirve los estáticos DIRECTAMENTE desde /apps/futbol/public
+              # (ver scripts/vps/Caddyfile: `root * /apps/futbol/public` +
+              # `@static file` + file_server). Para Caddy, lo ÚNICO que importa
+              # es que esos archivos existan en public/ del repo — el symlink al
+              # standalone es solo para el server de Node y es irrelevante para
+              # servir imágenes.
+              #
+              # public/ está 100% trackeado en git (logo.png, Bet365-Logo.png,
+              # icons, etc). `git checkout -- public/` RESTAURA cualquier archivo
+              # trackeado que se haya borrado/modificado, pase lo que pase en los
+              # pasos de symlink de arriba. Es idempotente y solo toca archivos
+              # versionados (los no-trackeados quedan intactos). Con esto, los
+              # assets de Caddy NO PUEDEN desaparecer tras un deploy — nunca más.
+              git checkout -- public/ 2>/dev/null || true
+
+              # Verificación dura: si algún asset crítico falta, FALLA el deploy
+              # en voz alta (set -e) en vez de dejar la web con 404 silenciosos.
               echo "── verificación public/ del repo (Caddy lee de aquí) ──"
+              for asset in logo.png Bet365-Logo.png; do
+                if [ ! -f "$PWD/public/$asset" ]; then
+                  echo "✗ FATAL: public/$asset NO existe tras el build — abortando"
+                  exit 1
+                fi
+              done
               ls -la "$PWD/public/" | head -15
+              echo "✓ assets de Caddy presentes en /apps/futbol/public"
 
               # Restart (no reload) para que el server standalone tome los
               # symlinks nuevos sin servir desde un working dir viejo.
