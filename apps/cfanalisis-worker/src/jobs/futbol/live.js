@@ -403,35 +403,59 @@ async function sendBundledPushes(liveDetailsMap, existingLive) {
 
 export async function runLive(_payload = {}) {
   const today = new Date().toISOString().split('T')[0];
+  // Schedule cruzando medianoche: un partido que arrancó ~23:30 UTC del día N
+  // sigue vivo a las 00:15 UTC del día N+1, pero su entrada está en schedule[N]
+  // (no en N+1). Y a la inversa: el cron diario de fixtures corre a las 02:05
+  // España (~00:05/01:05 UTC), así que tras medianoche UTC el schedule del
+  // día nuevo aún no existe. Si miramos SOLO `today`, podemos:
+  //   - perder kickoffs del día anterior que siguen en juego (cross-midnight)
+  //   - leer "no fixtures scheduled today" antes de las 02:05 España y SKIPEAR
+  //     todo lo de madrugada
+  // Solución: unir los kickoffTimes de AYER + HOY + MAÑANA y operar sobre la
+  // unión. Es el mismo principio del fix del frontend para cross-midnight.
+  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+  const tomorrow  = new Date(Date.now() + 86400000).toISOString().split('T')[0];
   const now = Date.now();
   const LL = '[live]';
   const t0 = Date.now();
 
-  // Smart schedule check — skip if no matches active
-  let schedule = await redisGet(KEYS.schedule(today));
-  if (!schedule) schedule = await getMatchSchedule(today).catch(() => null);
-  console.log(`${LL} tick: today=${today} schedule=${schedule ? `kickoffs=${schedule.kickoffTimes?.length || 0}` : 'NULL'}`);
+  // Smart schedule check — skip si no hay matches activos en ninguno de los 3 días.
+  async function loadSchedule(d) {
+    let s = await redisGet(KEYS.schedule(d));
+    if (!s) s = await getMatchSchedule(d).catch(() => null);
+    return s;
+  }
+  const [schedYesterday, schedToday, schedTomorrow] = await Promise.all([
+    loadSchedule(yesterday),
+    loadSchedule(today),
+    loadSchedule(tomorrow),
+  ]);
+  // Unión de kickoffTimes (cada item es { fixtureId, kickoff, expectedEnd } en
+  // ms UTC — timezone-agnóstico, así que se pueden mezclar de los 3 días).
+  const allKickoffs = [
+    ...((schedYesterday?.kickoffTimes) || []),
+    ...((schedToday?.kickoffTimes)     || []),
+    ...((schedTomorrow?.kickoffTimes)  || []),
+  ];
+  console.log(`${LL} tick: today=${today} schedules(y/t/m)=${(schedYesterday?.kickoffTimes?.length||0)}/${(schedToday?.kickoffTimes?.length||0)}/${(schedTomorrow?.kickoffTimes?.length||0)} unión=${allKickoffs.length}`);
 
-  if (schedule) {
-    const firstKickoff = schedule.firstKickoff ? Number(schedule.firstKickoff) : null;
-    const lastExpectedEnd = schedule.lastExpectedEnd ? Number(schedule.lastExpectedEnd) : null;
+  if (allKickoffs.length > 0) {
+    // Ventana global: del primer kickoff (de cualquier día) al último expectedEnd.
+    const firstKickoff    = Math.min(...allKickoffs.map(m => Number(m.kickoff)).filter(Number.isFinite));
+    const lastExpectedEnd = Math.max(...allKickoffs.map(m => Number(m.expectedEnd)).filter(Number.isFinite));
 
-    if (!schedule.kickoffTimes || schedule.kickoffTimes.length === 0) {
-      console.log(`${LL} SKIP: no fixtures scheduled today`);
-      return { ok: true, skipped: true, reason: 'no fixtures scheduled today', apiCalls: 0 };
-    }
-    if (firstKickoff && now < firstKickoff - 5 * 60 * 1000) {
+    if (Number.isFinite(firstKickoff) && now < firstKickoff - 5 * 60 * 1000) {
       const minsTo = Math.round((firstKickoff - now) / 60000);
-      console.log(`${LL} SKIP: before first kickoff (${minsTo} min restantes)`);
+      console.log(`${LL} SKIP: before first kickoff (${minsTo} min restantes — ventana global y/t/m)`);
       return { ok: true, skipped: true, reason: 'before first kickoff', apiCalls: 0 };
     }
-    if (lastExpectedEnd && now > lastExpectedEnd + 30 * 60 * 1000) {
+    if (Number.isFinite(lastExpectedEnd) && now > lastExpectedEnd + 30 * 60 * 1000) {
       const minsAgo = Math.round((now - lastExpectedEnd) / 60000);
-      console.log(`${LL} SKIP: after last expected end + 30min (último kickoff terminó hace ${minsAgo} min)`);
+      console.log(`${LL} SKIP: after last expected end + 30min (último kickoff terminó hace ${minsAgo} min — ventana global y/t/m)`);
       return { ok: true, skipped: true, reason: 'after last expected end + 30min', apiCalls: 0 };
     }
 
-    const hasActiveMatch = schedule.kickoffTimes.some(m => {
+    const hasActiveMatch = allKickoffs.some(m => {
       const kickoff = Number(m.kickoff);
       const expectedEnd = Number(m.expectedEnd);
       return now >= kickoff - 5 * 60 * 1000 && now <= expectedEnd;
@@ -448,7 +472,7 @@ export async function runLive(_payload = {}) {
       console.log(`${LL} schedule OK: hay match activo en ventana → continúa`);
     }
   } else {
-    console.log(`${LL} sin schedule en Redis/BD → asumiendo activo, va a la API`);
+    console.log(`${LL} sin schedules en Redis/BD para y/t/m → asumiendo activo, va a la API`);
   }
 
   await redisSet('live-cron:last-run', String(now), 600);
