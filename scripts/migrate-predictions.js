@@ -46,11 +46,11 @@ function ident(name) {
 
 async function getCommonColumns(supa, vps) {
   // Listamos columnas a copiar como la INTERSECCIÓN de ambos esquemas
-  // (excluyendo `id` — es SERIAL en el VPS y debe regenerarse). Si Supabase
-  // tiene columnas que el VPS no tiene, las saltamos sin error. Si el VPS
-  // tiene columnas que Supabase no tiene, esas quedan en DEFAULT.
+  // (excluyendo `id` — es SERIAL en el VPS y debe regenerarse). También
+  // capturamos el udt_name del VPS para cada columna → eso decide cómo
+  // encodear cada valor antes del bind (jsonb vs array vs primitivo).
   const q = `
-    SELECT column_name
+    SELECT column_name, data_type, udt_name
     FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = $1 AND column_name <> 'id'
     ORDER BY ordinal_position
@@ -60,10 +60,24 @@ async function getCommonColumns(supa, vps) {
     vps.query(q,  [TABLE]),
   ]);
   const supaCols = new Set(a.rows.map(r => r.column_name));
-  const vpsCols  = new Set(b.rows.map(r => r.column_name));
-  const common   = [...supaCols].filter(c => vpsCols.has(c));
+  const vpsMap   = new Map(b.rows.map(r => [r.column_name, { data_type: r.data_type, udt_name: r.udt_name }]));
+  const common   = [...supaCols].filter(c => vpsMap.has(c));
   if (common.length === 0) throw new Error('No hay columnas en común entre Supabase y VPS para ' + TABLE);
-  return common;
+  // Devuelve [{ name, udt_name, data_type, kind }] donde kind ∈
+  //   'jsonb' | 'json' | 'pg_array' | 'scalar'
+  // El kind decide cómo encodear el valor en encodeForColumn.
+  return common.map(name => {
+    const info = vpsMap.get(name);
+    let kind;
+    if (info.udt_name === 'jsonb')          kind = 'jsonb';
+    else if (info.udt_name === 'json')      kind = 'json';
+    // En pg_catalog, los arrays se prefijan con '_' (p.ej. _int4 = integer[],
+    // _text = text[], _int2 = smallint[], etc.). data_type también dice
+    // 'ARRAY' para todos.
+    else if (info.udt_name.startsWith('_')) kind = 'pg_array';
+    else                                    kind = 'scalar';
+    return { name, udt_name: info.udt_name, data_type: info.data_type, kind };
+  });
 }
 
 async function getCount(client, label) {
@@ -77,7 +91,7 @@ async function getCount(client, label) {
 async function* readBatches(supa, cols) {
   await supa.query('BEGIN');
   try {
-    const colsSql = cols.map(ident).join(', ');
+    const colsSql = cols.map(c => ident(c.name)).join(', ');
     // ORDER BY id para que sea reproducible entre corridas. fixture_id también
     // sirve, pero `id` está garantizado UNIQUE y monotonic en Supabase.
     await supa.query(
@@ -97,32 +111,51 @@ async function* readBatches(supa, cols) {
   }
 }
 
-// Encode un valor JS para el binding de pg.
-// pg serializa Date/Buffer/string/number correctamente, PERO objetos y arrays
-// los pasa con String(v) → "[object Object]" / "1,2,3", y Postgres rechaza
-// eso para columnas jsonb con: invalid input syntax for type json.
-// match_predictions tiene columnas jsonb (home_team, away_team,
-// predicted_scorers, actual_goal_minutes, actual_goal_scorers) que llegan de
-// Supabase como objetos JS ya parseados → hay que reserializar a JSON string.
-function encodeParam(v) {
-  if (v === null || v === undefined) return null;
-  if (v instanceof Date) return v;
-  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(v)) return v;
-  // Plain object o array → JSON. Mismo criterio que lib/db.js#encodeParam.
-  if (Array.isArray(v) || (typeof v === 'object' && v.constructor === Object)) {
-    return JSON.stringify(v);
+// Encode un valor JS para el binding de pg según el TIPO REAL de la columna
+// destino. Sin este paso, los desajustes Supabase↔VPS rompen el INSERT:
+//   - Columna jsonb + valor objeto JS → pg manda "[object Object]" → fallo
+//     "invalid input syntax for type json".
+//   - Columna integer[] (pg array) + valor array JS → si lo JSON.stringify-eas
+//     llega "[1,2,3]" → fallo "malformed array literal". pg sabe convertir
+//     arrays JS a array PG si los pasa CRUDOS (no como string).
+//   - Columna text/integer/timestamptz → primitivos, pg los maneja solo.
+// Por eso usamos el `kind` deducido del udt_name del VPS (ver getCommonColumns).
+function encodeForColumn(value, col) {
+  if (value === null || value === undefined) return null;
+  switch (col.kind) {
+    case 'jsonb':
+    case 'json':
+      // Para jsonb/json: si ya viene como string (raro), lo dejamos; si es
+      // objeto/array JS (caso típico desde Supabase), lo serializamos.
+      if (typeof value === 'string') return value;
+      return JSON.stringify(value);
+    case 'pg_array':
+      // Para arrays PG (int[], text[], etc.): pg-node convierte arrays JS a
+      // la sintaxis '{1,2,3}' automáticamente. Si el valor llegó como string
+      // (caso raro: alguien serializó antes), intentamos parsear JSON.
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'string') {
+        try { const parsed = JSON.parse(value); if (Array.isArray(parsed)) return parsed; }
+        catch {}
+        return value;
+      }
+      // Si es objeto (poco probable para un array), envolvemos en array.
+      return [value];
+    case 'scalar':
+    default:
+      // Primitivos, Date, Buffer → tal cual. pg los binde correctamente.
+      return value;
   }
-  return v;
 }
 
 // Construye INSERT multi-row con placeholders y devuelve {sql, params}.
 // Una sola query por batch = mínima latencia red.
 function buildUpsert(cols, rows) {
-  const colsSql = cols.map(ident).join(', ');
+  const colsSql = cols.map(c => ident(c.name)).join(', ');
   const params = [];
-  const valuesSql = rows.map((row, rIdx) => {
-    const cells = cols.map((c, cIdx) => {
-      params.push(encodeParam(row[c]));
+  const valuesSql = rows.map((row) => {
+    const cells = cols.map((c) => {
+      params.push(encodeForColumn(row[c.name], c));
       return '$' + params.length;
     });
     return '(' + cells.join(', ') + ')';
@@ -187,7 +220,12 @@ function buildUpsert(cols, rows) {
 
   // 1) Columnas a copiar (intersección de schemas)
   const cols = await getCommonColumns(supa, vps);
-  console.log(`▶ Columnas comunes (${cols.length}): ${cols.join(', ')}`);
+  // Log con tipo destino — para diagnosticar al instante cualquier desajuste
+  // jsonb vs array vs scalar entre Supabase y VPS.
+  console.log(`▶ Columnas comunes (${cols.length}):`);
+  for (const c of cols) {
+    console.log(`   - ${c.name.padEnd(28)} VPS udt=${c.udt_name.padEnd(15)} kind=${c.kind}`);
+  }
 
   // 2) Stream + upsert por batches
   let totalRead = 0, totalInserted = 0, totalSkipped = 0;
