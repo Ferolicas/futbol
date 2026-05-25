@@ -242,13 +242,36 @@ function evKey(ev) {
 //   push:sent:{fid}:var:{evKey}
 //
 // Antes de añadir la línea al bundle, comprobamos cada clave. Si existe →
-// skip. Las claves quedan en Redis con TTL 90s y desaparecen solas; el evento
+// skip. Las claves quedan en Redis con TTL y desaparecen solas; el evento
 // (que es estrictamente posterior a "ese contador en ese valor") nunca se
-// repetirá dentro de los próximos 90s.
-const DEDUP_TTL_SEC = 90;
+// repetirá dentro de esa ventana.
+//
+// TTL POR TIPO DE EVENTO: eventos "de una vez" en el partido (gol, amarilla,
+// roja, cambio, penalti) usan 7200s (2h) para que NO se re-notifiquen aunque
+// la API reordene/reenvíe el evento mucho después. Eventos de contador que
+// suben varias veces (córner) o decisiones puntuales (VAR) mantienen el TTL
+// corto de 90s: su clave ya incluye el valor exacto del contador / evKey, así
+// que un TTL largo no aporta y un valor nuevo (otro córner) debe poder
+// notificarse en cuanto ocurra.
+const DEDUP_TTL_SEC = 90; // default (córner, VAR)
+const DEDUP_TTL_BY_TYPE = {
+  goal: 7200,
+  yellow: 7200,
+  red: 7200,
+  subst: 7200,
+  penalty: 7200,
+};
 
 function dedupKey(fid, ...parts) {
   return `push:sent:${fid}:${parts.join(':')}`;
+}
+
+// La clave tiene forma `push:sent:{fid}:{type}:...`; el tipo es el 4º segmento
+// (índice 3 tras split por ':'). Mapeamos tipo → TTL; si no está en el map,
+// usamos el default corto.
+function ttlForKey(key) {
+  const type = String(key).split(':')[3];
+  return DEDUP_TTL_BY_TYPE[type] ?? DEDUP_TTL_SEC;
 }
 
 async function alreadySent(key) {
@@ -264,7 +287,7 @@ async function alreadySent(key) {
 }
 
 async function markSent(key) {
-  try { await redisSet(key, 1, DEDUP_TTL_SEC); } catch {}
+  try { await redisSet(key, 1, ttlForKey(key)); } catch {}
 }
 
 // Igual que markSent pero con TTL explícito (usado por el throttle de
@@ -671,7 +694,8 @@ async function sendBundledPushes(liveDetailsMap, existingLive) {
     const shouldMark = bundleHadDelivery || !bundleHadSubscriberInFav;
     if (shouldMark && Array.isArray(bundle.sentKeys) && bundle.sentKeys.length > 0) {
       await Promise.all(bundle.sentKeys.map(k => markSent(k)));
-      console.log(`${LP} dedup marcadas ${bundle.sentKeys.length} keys fid=${bundle.fixtureId} (TTL ${DEDUP_TTL_SEC}s)`);
+      const ttlDetalle = bundle.sentKeys.map(k => `${k.split(':').slice(3).join(':')}=${ttlForKey(k)}s`).join(', ');
+      console.log(`${LP} dedup marcadas ${bundle.sentKeys.length} keys fid=${bundle.fixtureId} → ${ttlDetalle}`);
     } else if (!shouldMark) {
       console.log(`${LP} dedup NO marcadas fid=${bundle.fixtureId} — todos los envíos fallaron, reintentará en próximo tick`);
     }
