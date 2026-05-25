@@ -404,22 +404,30 @@ async function sendBundledPushes(liveDetailsMap, existingLive) {
 export async function runLive(_payload = {}) {
   const today = new Date().toISOString().split('T')[0];
   const now = Date.now();
+  const LL = '[live]';
+  const t0 = Date.now();
 
   // Smart schedule check — skip if no matches active
   let schedule = await redisGet(KEYS.schedule(today));
   if (!schedule) schedule = await getMatchSchedule(today).catch(() => null);
+  console.log(`${LL} tick: today=${today} schedule=${schedule ? `kickoffs=${schedule.kickoffTimes?.length || 0}` : 'NULL'}`);
 
   if (schedule) {
     const firstKickoff = schedule.firstKickoff ? Number(schedule.firstKickoff) : null;
     const lastExpectedEnd = schedule.lastExpectedEnd ? Number(schedule.lastExpectedEnd) : null;
 
     if (!schedule.kickoffTimes || schedule.kickoffTimes.length === 0) {
+      console.log(`${LL} SKIP: no fixtures scheduled today`);
       return { ok: true, skipped: true, reason: 'no fixtures scheduled today', apiCalls: 0 };
     }
     if (firstKickoff && now < firstKickoff - 5 * 60 * 1000) {
+      const minsTo = Math.round((firstKickoff - now) / 60000);
+      console.log(`${LL} SKIP: before first kickoff (${minsTo} min restantes)`);
       return { ok: true, skipped: true, reason: 'before first kickoff', apiCalls: 0 };
     }
     if (lastExpectedEnd && now > lastExpectedEnd + 30 * 60 * 1000) {
+      const minsAgo = Math.round((now - lastExpectedEnd) / 60000);
+      console.log(`${LL} SKIP: after last expected end + 30min (último kickoff terminó hace ${minsAgo} min)`);
       return { ok: true, skipped: true, reason: 'after last expected end + 30min', apiCalls: 0 };
     }
 
@@ -432,9 +440,15 @@ export async function runLive(_payload = {}) {
     if (!hasActiveMatch) {
       const lastRun = await redisGet('live-cron:last-run');
       if (lastRun && Number(lastRun) > now - 10 * 60 * 1000) {
+        console.log(`${LL} SKIP: no active matches in 5min-window y last-run reciente (<10min)`);
         return { ok: true, skipped: true, reason: 'no active matches in window', apiCalls: 0 };
       }
+      console.log(`${LL} schedule sin match activo en ventana, pero last-run viejo → CONTINÚA a la API`);
+    } else {
+      console.log(`${LL} schedule OK: hay match activo en ventana → continúa`);
     }
+  } else {
+    console.log(`${LL} sin schedule en Redis/BD → asumiendo activo, va a la API`);
   }
 
   await redisSet('live-cron:last-run', String(now), 600);
@@ -446,11 +460,22 @@ export async function runLive(_payload = {}) {
     // a stdout (visible en pm2 logs). NO lanzamos: con attempts:1 el cron del
     // minuto siguiente reintenta solo, y un throw aquí dispararía alerta de
     // Telegram cada minuto mientras dure la cuota agotada.
+    console.log(`${LL} SKIP: apiFetch /fixtures?live=all devolvió null (cuota agotada, error o red caída)`);
     return { ok: true, skipped: true, reason: 'API sin datos (cuota agotada / error API / red)' };
   }
+  console.log(`${LL} /fixtures?live=all → ${allLive.length} partidos en vivo (todas las ligas)`);
 
   const YOUTH_RE = /\bU-?1[2-9]\b|\bU-?2[0-3]\b|\bunder[ -]?(1[2-9]|2[0-3])\b|\byouth\b|\bjunior\b|\bsub-?(1[2-9]|2[0-3])\b/i;
   const tracked = allLive.filter(m => ALL_LEAGUE_IDS.includes(m.league.id) && !YOUTH_RE.test(m.league.name || ''));
+  console.log(`${LL} tracked (filtrado por ALL_LEAGUE_IDS + no-youth): ${tracked.length}/${allLive.length}`);
+  if (tracked.length === 0 && allLive.length > 0) {
+    // Diagnóstico: ¿qué ligas vinieron de la API que NO estamos rastreando?
+    const ligasOut = [...new Set(allLive.map(m => `${m.league?.id}:${m.league?.name}`))].slice(0, 10);
+    console.log(`${LL} ⚠ NINGÚN partido en ALL_LEAGUE_IDS. Ligas en API (sample 10): ${ligasOut.join(' | ')}`);
+  } else if (tracked.length > 0) {
+    const sample = tracked.slice(0, 5).map(m => `${m.fixture.id}(${m.league?.id}) ${m.teams?.home?.name?.slice(0,12)}-${m.teams?.away?.name?.slice(0,12)} ${m.fixture.status?.short}${m.fixture.status?.elapsed ? ' '+m.fixture.status.elapsed+"'" : ''} ${m.goals?.home}-${m.goals?.away}`);
+    console.log(`${LL} tracked sample: ${sample.join(' | ')}`);
+  }
 
   const liveDetailsMap = {};
   for (const match of tracked) {
@@ -557,8 +582,9 @@ export async function runLive(_payload = {}) {
   // Fire-and-forget pushes — 1 bundle por fixture/tick con TODOS los deltas
   // (goles, córners, amarillas, rojas/expulsiones, offside, sustituciones,
   // penalti, VAR). Anti-spam por agrupación en el propio bundle.
+  console.log(`${LL} → sendBundledPushes: liveDetailsMap=${Object.keys(liveDetailsMap).length} existingLive=${Object.keys(existingLive).length}`);
   sendBundledPushes(liveDetailsMap, existingLive)
-    .catch(err => console.error('[live:bundled-pushes]', err.message));
+    .catch(err => console.error('[live:bundled-pushes]', err.message, err.stack));
 
   const mergedLive = { ...existingLive };
   for (const [fid, data] of Object.entries(liveDetailsMap)) {
@@ -690,6 +716,8 @@ export async function runLive(_payload = {}) {
   }
 
   for (let i = 0; i < apiCalls; i++) await incrementApiCallCount();
+
+  console.log(`${LL} ✓ done en ${Date.now() - t0}ms — tracked=${tracked.length} totalLive=${allLive.length} staleFixed=${staleFixedCount} apiCalls=${apiCalls}`);
 
   return {
     ok: true,
