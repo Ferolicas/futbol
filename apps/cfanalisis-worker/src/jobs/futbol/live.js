@@ -929,6 +929,28 @@ export async function runLive(_payload = {}) {
     }));
   }
 
+  // ── BUG FIX (retraso/perdida de corners por blip de la API) ──
+  // API-Football alterna en ticks consecutivos del MISMO partido entre devolver
+  // stats (isReal=true, p.ej. corners 0-4) y NO devolverlas (isReal=false → el
+  // extractor pone 0-0). Si dejáramos el `now` en 0-0 cuando isReal=false:
+  //   (a) se pierde el delta — un tick trae 0-4(real), el siguiente 0-0(no real)
+  //       degrada el baseline, y cuando vuelve 0-4 ya no se detecta como nuevo;
+  //   (b) el frontend parpadea a 0 y vuelve.
+  // FIX: cuando los corners de este tick NO son reales, ARRASTRAR el último
+  // valor real conocido (de existingLive). Así el `now` nunca retrocede a 0 por
+  // un blip y el baseline solo avanza con valores reales. Mutamos liveDetailsMap
+  // aquí para que TODO lo de abajo (push, merge, fixtureStats, Pusher) use el
+  // valor arrastrado de forma consistente.
+  for (const [fid, data] of Object.entries(liveDetailsMap)) {
+    if (data?.corners && data.corners.isReal === false) {
+      const lastReal = existingLive[fid]?.corners;
+      if (lastReal && lastReal.isReal && (lastReal.total || 0) > 0) {
+        data.corners = { ...lastReal };
+        console.log(`${LL} corners blip fid=${fid}: tick isReal=false → arrastro último real ${lastReal.home}-${lastReal.away} (total=${lastReal.total})`);
+      }
+    }
+  }
+
   // Fire-and-forget pushes — 1 bundle por fixture/tick con TODOS los deltas
   // (goles, córners, amarillas, rojas/expulsiones, offside, sustituciones,
   // penalti, VAR). Anti-spam por agrupación en el propio bundle.
