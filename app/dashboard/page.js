@@ -1634,16 +1634,16 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
   const sLabel = { NS: 'PRÓXIMO', '1H': 'EN VIVO — 1T', '2H': 'EN VIVO — 2T', HT: 'ENTRETIEMPO', FT: 'FINALIZADO', ET: 'EN VIVO — Extra', P: 'EN VIVO — Penales', AET: 'FINALIZADO', PEN: 'FINALIZADO', SUSP: 'SUSPENDIDO', PST: 'POSPUESTO', CANC: 'CANCELADO' }[match.fixture.status.short] || match.fixture.status.short;
 
   return (
-    <motion.div
-      className={`mcard ${live ? 'live' : ''} ${finished ? 'fin' : ''} ${isSelected ? 'sel' : ''} ${isAnalyzed ? 'done' : ''} stagger`}
-      style={{ '--i': idx }}
+    <div
+      className={`mcard ${live ? 'live' : ''} ${finished ? 'fin' : ''} ${isSelected ? 'sel' : ''} ${isAnalyzed ? 'done' : ''} mcard-in`}
       onClick={isAnalyzed ? onView : onSelect}
-      initial={{ opacity: 0, y: 15 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: idx * 0.03 }}
-      whileHover={{ scale: 1.01 }}
-      layout
     >
+      {/* Convertido de motion.div → div: el prop `layout` de framer-motion
+          animaba el reflow 130px→320px al expandir el acordeón, recalculando
+          posiciones en cada frame (lentísimo con la lista virtualizada).
+          Sin layout, expandir es instantáneo. La entrada (fade-in) y el hover
+          ahora son CSS (.mcard-in / :hover) — corren en el compositor, no en
+          el main thread JS, así no compiten con la apertura del acordeón. */}
       <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* ── Fila 1: Liga + Fecha ── */}
@@ -1697,31 +1697,28 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
           </div>
         </div>
 
-        {/* ── Score Box ── igual al de analisis/[id] */}
+        {/* ── Score Box ── glow vía CSS (.score-box-glow), no framer-motion.
+            Los `animate={{boxShadow:[...]}} repeat:Infinity` corrían en el
+            main thread JS por cada card visible a la vez → al expandir el
+            acordeón competían por CPU y lo trababan. Movido a @keyframes CSS
+            (compositor GPU). backdropFilter:blur removido — era lo más caro de
+            repintar y el glow ya da el efecto. */}
         <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <motion.div
-            style={{ width: '100%', borderRadius: 20, background: 'linear-gradient(135deg, rgba(30,135,105,.25), rgba(0,0,9,.4), rgba(30,135,105,.15))', border: '2px solid rgba(30,135,105,.5)', padding: '16px 20px', backdropFilter: 'blur(8px)' }}
-            animate={{ boxShadow: ['0 0 30px rgba(30,135,105,.3)', '0 0 50px rgba(30,135,105,.6)', '0 0 30px rgba(30,135,105,.3)'] }}
-            transition={{ duration: 2, repeat: Infinity }}
-          >
+          <div className="score-box-glow" style={{ width: '100%', borderRadius: 20, background: 'linear-gradient(135deg, rgba(30,135,105,.25), rgba(0,0,9,.4), rgba(30,135,105,.15))', border: '2px solid rgba(30,135,105,.5)', padding: '16px 20px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
 
               {/* Badge de estado */}
               <div>
                 {live ? (
-                  <motion.div
-                    className="ap2-live-badge"
-                    animate={{ boxShadow: ['0 0 8px rgba(220,38,38,.6)', '0 0 18px rgba(220,38,38,1)', '0 0 8px rgba(220,38,38,.6)'] }}
-                    transition={{ duration: 1.2, repeat: Infinity }}
-                  >
-                    <motion.span className="ap2-live-dot" animate={{ opacity: [1, .3, 1] }} transition={{ duration: 1, repeat: Infinity }} />
+                  <div className="ap2-live-badge live-badge-glow">
+                    <span className="ap2-live-dot live-dot-pulse" />
                     {(match.fixture.status.short === 'HT' || match.fixture.status.short === 'BT') ? '' : 'EN VIVO'}
                     {match.fixture.status.elapsed > 0 && (
                       <span style={{ marginLeft: 4 }}>
                         <MatchTimer elapsed={match.fixture.status.elapsed} extra={match.fixture.status.extra} status={match.fixture.status.short} />
                       </span>
                     )}
-                  </motion.div>
+                  </div>
                 ) : (
                   <div style={{ padding: '4px 14px', borderRadius: 999, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700, color: 'white', letterSpacing: '.05em' }}>
                     {sLabel}
@@ -1733,13 +1730,9 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 {hasScore ? (
                   <>
-                    <motion.span
-                      style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }}
-                      animate={{ textShadow: ['0 0 15px rgba(30,135,105,.5)', '0 0 25px rgba(30,135,105,1)', '0 0 15px rgba(30,135,105,.5)'] }}
-                      transition={{ duration: 2, repeat: Infinity }}
-                    >
+                    <span className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }}>
                       {match.goals.home}
-                    </motion.span>
+                    </span>
 
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
                       {liveStats?.corners && (
@@ -1804,7 +1797,7 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
               )}
 
             </div>
-          </motion.div>
+          </div>
         </div>
 
         {/* ── Footer: selección / favorito / ocultar ── */}
@@ -1828,7 +1821,7 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
         </div>
 
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -2811,40 +2804,10 @@ function LiveMatchDetails({ stats, homeTeam, awayTeam }) {
 
   return (
     <div className="live-details">
-      {/* Stats table */}
-      <div className="live-stats-table">
-        <div className="lst-header">
-          <span className="lst-team-name">{homeTeam.name}</span>
-          <span className="lst-label">Estadistica</span>
-          <span className="lst-team-name">{awayTeam.name}</span>
-        </div>
-        {stats.corners && (
-          <div className="lst-row">
-            <span className="lst-val">{stats.corners.home}</span>
-            <span className="lst-label">Corners</span>
-            <span className="lst-val">{stats.corners.away}</span>
-          </div>
-        )}
-        <div className="lst-row">
-          <span className="lst-val">{stats.goals?.home ?? 0}</span>
-          <span className="lst-label">Goles</span>
-          <span className="lst-val">{stats.goals?.away ?? 0}</span>
-        </div>
-        {stats.yellowCards && (
-          <div className="lst-row">
-            <span className="lst-val"><span className="yellow-card-sm" /> {stats.yellowCards.home}</span>
-            <span className="lst-label">Amarillas</span>
-            <span className="lst-val">{stats.yellowCards.away} <span className="yellow-card-sm" /></span>
-          </div>
-        )}
-        {stats.redCards && (stats.redCards.home > 0 || stats.redCards.away > 0) && (
-          <div className="lst-row">
-            <span className="lst-val"><span className="red-card-sm" /> {stats.redCards.home}</span>
-            <span className="lst-label">Rojas</span>
-            <span className="lst-val">{stats.redCards.away} <span className="red-card-sm" /></span>
-          </div>
-        )}
-      </div>
+      {/* Stats table ELIMINADA: era redundante con el score box de la tarjeta,
+          que ya muestra corners (🚩 h-a), amarillas/rojas (🟨/🟥) y el
+          marcador. Mantenemos solo goleadores y penales fallados, que NO
+          aparecen en el score box. */}
 
       {/* Goal scorers */}
       {stats.goalScorers?.length > 0 && (

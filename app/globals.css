@@ -3232,3 +3232,51 @@ input:checked + .cb-mark::after {
 .app .scorer-chip { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); border-radius: 8px; color: white; padding: 2px 7px; font-size: .72rem; }
 .app .scorer-chip.missed { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.25); color: white; }
 .app .mcard-scorers { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 0 0; }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Animaciones del MatchCard — CSS puro (compositor GPU), NO framer-motion.
+   Antes el card usaba motion.div con `layout` (animaba el reflow al expandir,
+   lentísimo) + varios `animate repeat:Infinity` (glow/pulse en main thread JS,
+   por cada card visible a la vez). Movido todo a @keyframes CSS: corre fuera
+   del hilo JS, no compite con la apertura del acordeón → expand instantáneo.
+   Respeta prefers-reduced-motion (accesibilidad).
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Entrada del card (reemplaza initial/animate/transition de framer-motion) */
+@keyframes mcardIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.app .mcard-in { animation: mcardIn .25s ease-out both; }
+.app .mcard-in:hover { transform: translateY(-1px); transition: transform .15s ease-out; }
+
+/* Glow del score box (reemplaza animate boxShadow repeat:Infinity) */
+@keyframes scoreBoxGlow {
+  0%,100% { box-shadow: 0 0 30px rgba(30,135,105,.3); }
+  50%     { box-shadow: 0 0 50px rgba(30,135,105,.6); }
+}
+.app .score-box-glow { animation: scoreBoxGlow 2s ease-in-out infinite; will-change: box-shadow; }
+
+/* Glow del badge "EN VIVO" (reemplaza boxShadow repeat:Infinity) */
+@keyframes liveBadgeGlow {
+  0%,100% { box-shadow: 0 0 8px rgba(220,38,38,.6); }
+  50%     { box-shadow: 0 0 18px rgba(220,38,38,1); }
+}
+.app .live-badge-glow { animation: liveBadgeGlow 1.2s ease-in-out infinite; will-change: box-shadow; }
+
+/* Pulso del punto rojo (reemplaza opacity repeat:Infinity) */
+@keyframes liveDotPulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+.app .live-dot-pulse { animation: liveDotPulse 1s ease-in-out infinite; }
+
+/* Glow del marcador (reemplaza textShadow repeat:Infinity) */
+@keyframes scoreNumGlow {
+  0%,100% { text-shadow: 0 0 15px rgba(30,135,105,.5); }
+  50%     { text-shadow: 0 0 25px rgba(30,135,105,1); }
+}
+.app .score-num-glow { animation: scoreNumGlow 2s ease-in-out infinite; }
+
+/* Accesibilidad + ahorro de batería: sin loops si el usuario lo pide. */
+@media (prefers-reduced-motion: reduce) {
+  .app .mcard-in,
+  .app .score-box-glow,
+  .app .live-badge-glow,
+  .app .live-dot-pulse,
+  .app .score-num-glow { animation: none; }
+}
