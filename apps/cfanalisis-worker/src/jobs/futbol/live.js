@@ -145,8 +145,14 @@ function extractLiveStats(match, events, stats) {
   const hRed = rhStat ?? cardEvents.filter(e => e.teamId === homeId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
   const aRed = raStat ?? cardEvents.filter(e => e.teamId === awayId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
 
-  // Offsides: idem corners — null preserva la incertidumbre. No hay fallback
-  // por events (API-Football no expone offsides como events discretos).
+  // Offsides: el contador de stats agrega offsides POR MINUTO sin dar jugador
+  // ni jugada concreta. API-Football tampoco expone offsides como events
+  // discretos (event.type='Offside' no existe). Por eso un push "🚫 Offside ·
+  // Equipo" no aporta información real (¿quién? ¿en qué acción?). Decisión:
+  // SE MANTIENEN los contadores aquí para consistencia del schema y para
+  // mostrar el total en el dashboard, pero NO se notifican (ver
+  // buildEventBundle más abajo). Si en el futuro la API empieza a exponerlos
+  // como events con player, se puede reactivar la notificación.
   const hOffsidesRaw = getVal(homeStats, 'Offsides', 'Offside');
   const aOffsidesRaw = getVal(awayStats, 'Offsides', 'Offside');
   const hOffsides = hOffsidesRaw ?? 0;
@@ -182,8 +188,14 @@ function toSubArray(stored) {
 // ────────────────────────────────────────────────────────────────────────────
 // Bundled push delivery — 1 push por fixture/tick que agrupa TODOS los
 // deltas detectados desde el live anterior:
-//   ⚽ Goles · 🚩 córners · 🟨 amarillas · 🟥 rojas · 🚫 offside ·
+//   ⚽ Goles · 🚩 córners · 🟨 amarillas · 🟥 rojas/expulsiones ·
 //   🔄 sustituciones · 🅿️ penalti · 📺 VAR (gol anulado / penalti anulado)
+//
+// REGLA DE CALIDAD: solo notificamos eventos con datos REALES de API-Football
+// (array `events` con jugador/equipo concretos). NO se notifican estadísticas
+// agregadas sin contexto: los offsides (eliminados — solo vienen como contador
+// del stat, sin jugador, sin acción concreta). Tarjetas/cambios sin jugador
+// también se saltan. Mejor 1 push correcto que 5 ruidosos.
 //
 // Si un partido tiene en un mismo tick (1 minuto): 2 córners + 1 amarilla
 // + 1 cambio, se envía UN solo push compuesto en lugar de 4 separados.
@@ -225,7 +237,6 @@ function evKey(ev) {
 //   push:sent:{fid}:corner:home:{count}      — cada córner home en valor exacto
 //   push:sent:{fid}:yellow:{teamId}:{count}  — amarilla por equipo y valor
 //   push:sent:{fid}:red:{teamId}:{count}
-//   push:sent:{fid}:offside:{teamId}:{count}
 //   push:sent:{fid}:subst:{evKey}            — eventos de lista por su evKey
 //   push:sent:{fid}:penalty:{evKey}
 //   push:sent:{fid}:var:{evKey}
@@ -264,14 +275,28 @@ async function buildEventBundle(fid, data, prev) {
   const sentKeys = []; // claves a marcar como notificadas si el bundle se envía
   let urgent = false;
 
-  // ── Goles ── (clave por equipo+valor — un gol nunca decrece)
+  // REGLA GLOBAL DE CALIDAD DE NOTIFICACIONES:
+  // Solo emitimos una línea si los DATOS REALES están presentes (jugador,
+  // equipo, detalle concreto). Eventos con info incompleta o derivados solo
+  // de contadores agregados (como offsides, que vienen del stat agregado por
+  // minuto sin jugador) NO se notifican. Mejor 1 push correcto que 5 ruidosos.
+
+  // ── Goles ── (info real: scorer + detail de cómo fue el gol)
+  // goalScorers viene del array events de API-Football (type='Goal').
+  // detail puede ser: 'Normal Goal', 'Penalty', 'Own Goal'. Lo expone.
   const pHG = prev.goals?.home ?? 0, pAG = prev.goals?.away ?? 0;
   const nHG = data.goals?.home ?? 0, nAG = data.goals?.away ?? 0;
+  const goalDetail = (g) => g?.type === 'Penalty' ? ' (de penalti)'
+                        : g?.type === 'Own Goal' ? ' (en propia)'
+                        : '';
   if (nHG > pHG) {
     const k = dedupKey(fid, 'goal', 'home', nHG);
     if (!(await alreadySent(k))) {
-      const last = data.goalScorers?.slice(-1)[0];
-      lines.push(`⚽ ${home}${last?.player ? ` · ${last.player}` : ''}`);
+      // Tomamos el ÚLTIMO gol del equipo correcto (no slice(-1) ciego, que
+      // podía dar el del otro equipo si la API los devuelve mezclados).
+      const last = (data.goalScorers || []).filter(g => g.teamName === home).slice(-1)[0];
+      const who = last?.player ? ` · ${last.player}` : '';
+      lines.push(`⚽ GOL · ${home} ${nHG}-${nAG}${who}${goalDetail(last)}`);
       sentKeys.push(k);
       urgent = true;
     }
@@ -279,56 +304,72 @@ async function buildEventBundle(fid, data, prev) {
   if (nAG > pAG) {
     const k = dedupKey(fid, 'goal', 'away', nAG);
     if (!(await alreadySent(k))) {
-      const last = data.goalScorers?.slice(-1)[0];
-      lines.push(`⚽ ${away}${last?.player ? ` · ${last.player}` : ''}`);
+      const last = (data.goalScorers || []).filter(g => g.teamName === away).slice(-1)[0];
+      const who = last?.player ? ` · ${last.player}` : '';
+      lines.push(`⚽ GOL · ${away} ${nHG}-${nAG}${who}${goalDetail(last)}`);
       sentKeys.push(k);
       urgent = true;
     }
   }
 
-  // ── Córners ── (clave por equipo+valor exacto — incrementos discretos)
+  // ── Córners ── REAL: pasó un córner, sabemos qué equipo lo lanza.
+  // API-Football NO expone córners como events con jugador (solo el contador
+  // en stats por equipo). Por tanto no podemos dar el lanzador, pero la
+  // información de "córner para X" SÍ es real (no es una estadística
+  // ambigua como offsides — un córner se pita o no se pita).
   const pHC = prev.corners?.home ?? 0, pAC = prev.corners?.away ?? 0;
   const nHC = data.corners?.home ?? 0, nAC = data.corners?.away ?? 0;
   if (nHC > pHC) {
     const k = dedupKey(fid, 'corner', 'home', nHC);
     if (!(await alreadySent(k))) {
-      lines.push(`🚩 Córner · ${home}`);
+      lines.push(`🚩 Córner · ${home} (${nHC}-${nAC})`);
       sentKeys.push(k);
     }
   }
   if (nAC > pAC) {
     const k = dedupKey(fid, 'corner', 'away', nAC);
     if (!(await alreadySent(k))) {
-      lines.push(`🚩 Córner · ${away}`);
+      lines.push(`🚩 Córner · ${away} (${nHC}-${nAC})`);
       sentKeys.push(k);
     }
   }
 
-  // ── Amarillas ──
+  // ── Amarillas ── REAL: tarjeta pitada con jugador (viene del array events).
+  // SI no encontramos al jugador en cardEvents, NO notificamos — preferimos
+  // saltar antes que mostrar "🟨 Equipo" sin más (sería ruido).
   const pHY = prev.yellowCards?.home ?? 0, pAY = prev.yellowCards?.away ?? 0;
   const nHY = data.yellowCards?.home ?? 0, nAY = data.yellowCards?.away ?? 0;
   if (nHY > pHY) {
     const k = dedupKey(fid, 'yellow', 'home', nHY);
     if (!(await alreadySent(k))) {
       const lastCard = (data.cardEvents || [])
-        .filter(e => e.type === 'Yellow Card' && e.teamName === home)
+        .filter(e => e.type === 'Yellow Card' && e.teamName === home && e.player)
         .slice(-1)[0];
-      lines.push(`🟨 ${home}${lastCard?.player ? ` · ${lastCard.player}` : ''}`);
-      sentKeys.push(k);
+      if (lastCard?.player) {
+        lines.push(`🟨 Amarilla · ${home} · ${lastCard.player}`);
+        sentKeys.push(k);
+      }
+      // si no hay jugador conocido → NO notificamos (skip, no añadimos sentKey)
     }
   }
   if (nAY > pAY) {
     const k = dedupKey(fid, 'yellow', 'away', nAY);
     if (!(await alreadySent(k))) {
       const lastCard = (data.cardEvents || [])
-        .filter(e => e.type === 'Yellow Card' && e.teamName === away)
+        .filter(e => e.type === 'Yellow Card' && e.teamName === away && e.player)
         .slice(-1)[0];
-      lines.push(`🟨 ${away}${lastCard?.player ? ` · ${lastCard.player}` : ''}`);
-      sentKeys.push(k);
+      if (lastCard?.player) {
+        lines.push(`🟨 Amarilla · ${away} · ${lastCard.player}`);
+        sentKeys.push(k);
+      }
     }
   }
 
-  // ── Rojas (incluye expulsiones por 2a amarilla) ──
+  // ── Rojas / expulsiones ── REAL: viene del array events con jugador.
+  // Las rojas son críticas — si por algún motivo el array no tiene player
+  // (raro, pero posible en ligas exóticas), SÍ notificamos sin nombre porque
+  // una expulsión es relevante aunque no sepamos quién. Es la excepción al
+  // criterio de cards/offside.
   const pHR = prev.redCards?.home ?? 0, pAR = prev.redCards?.away ?? 0;
   const nHR = data.redCards?.home ?? 0, nAR = data.redCards?.away ?? 0;
   if (nHR > pHR) {
@@ -337,7 +378,9 @@ async function buildEventBundle(fid, data, prev) {
       const lastCard = (data.cardEvents || [])
         .filter(e => (e.type === 'Red Card' || e.type === 'Second Yellow card') && e.teamName === home)
         .slice(-1)[0];
-      lines.push(`🟥 EXPULSADO · ${home}${lastCard?.player ? ` · ${lastCard.player}` : ''}`);
+      const who = lastCard?.player ? ` · ${lastCard.player}` : '';
+      const how = lastCard?.type === 'Second Yellow card' ? ' (2ª amarilla)' : '';
+      lines.push(`🟥 EXPULSADO · ${home}${who}${how}`);
       sentKeys.push(k);
       urgent = true;
     }
@@ -348,39 +391,30 @@ async function buildEventBundle(fid, data, prev) {
       const lastCard = (data.cardEvents || [])
         .filter(e => (e.type === 'Red Card' || e.type === 'Second Yellow card') && e.teamName === away)
         .slice(-1)[0];
-      lines.push(`🟥 EXPULSADO · ${away}${lastCard?.player ? ` · ${lastCard.player}` : ''}`);
+      const who = lastCard?.player ? ` · ${lastCard.player}` : '';
+      const how = lastCard?.type === 'Second Yellow card' ? ' (2ª amarilla)' : '';
+      lines.push(`🟥 EXPULSADO · ${away}${who}${how}`);
       sentKeys.push(k);
       urgent = true;
     }
   }
 
-  // ── Offsides ──
-  const pHO = prev.offsides?.home ?? 0, pAO = prev.offsides?.away ?? 0;
-  const nHO = data.offsides?.home ?? 0, nAO = data.offsides?.away ?? 0;
-  if (nHO > pHO) {
-    const k = dedupKey(fid, 'offside', 'home', nHO);
-    if (!(await alreadySent(k))) {
-      lines.push(`🚫 Offside · ${home}`);
-      sentKeys.push(k);
-    }
-  }
-  if (nAO > pAO) {
-    const k = dedupKey(fid, 'offside', 'away', nAO);
-    if (!(await alreadySent(k))) {
-      lines.push(`🚫 Offside · ${away}`);
-      sentKeys.push(k);
-    }
-  }
+  // ── Offsides ── ELIMINADO (commit P3-quality):
+  // API-Football solo expone offsides como contador agregado en stats
+  // (sin jugador, sin minuto exacto, sin acción específica). El push
+  // "🚫 Offside · Equipo" no aporta información real al usuario. Se mantiene
+  // el contador en data.offsides para el dashboard, pero NO se notifica.
 
-  // ── Sustituciones (lista) ── evKey ya identifica el evento concreto
+  // ── Sustituciones (lista) ── REAL: API da player (sale) y assist (entra)
+  // como evento type='subst'. Si por algún motivo falta uno de los dos, NO
+  // notificamos — "🔄 Equipo · ? → ?" sería ruido sin información.
   const prevSubKeys = new Set((prev.substitutions || []).map(evKey));
   const newSubs = (data.substitutions || []).filter(s => !prevSubKeys.has(evKey(s)));
   for (const s of newSubs) {
+    if (!s.playerOut || !s.playerIn) continue; // saltar sustituciones incompletas
     const k = dedupKey(fid, 'subst', evKey(s));
     if (await alreadySent(k)) continue;
-    const out = s.playerOut || '?';
-    const inP = s.playerIn || '?';
-    lines.push(`🔄 ${s.teamName || '?'} · ${out} → ${inP}`);
+    lines.push(`🔄 Cambio · ${s.teamName || '?'} · ${s.playerOut} → ${s.playerIn}`);
     sentKeys.push(k);
   }
 
