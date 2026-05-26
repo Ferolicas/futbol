@@ -215,9 +215,18 @@ function formatMinute(status) {
 }
 
 // Key estable para deduplicar eventos en listas (subst, var, penalty).
-// Lo usamos para comparar contra el tick anterior.
+//
+// BUG FIX (penaltis/cambios duplicados — confirmado 2026-05-26: el penalti de
+// S. Ndlabi llegó 2 veces, como min 26 y min 27): antes la key incluía
+// minute+extra. API-Football frecuentemente CORRIGE el minuto de un evento
+// entre ticks (lo reporta primero en el 26 y luego lo ajusta al 27), y eso
+// generaba una key distinta → el mismo evento se contaba como nuevo → push
+// duplicado. La identidad real de un evento de lista es jugador+equipo+tipo
+// (un jugador no hace dos sustituciones ni dos penaltis del mismo tipo en un
+// partido), NO el minuto — que es un dato volátil. Quitar minute/extra de la
+// key hace la dedup robusta ante esas correcciones.
 function evKey(ev) {
-  return `${ev.minute ?? '?'}|${ev.extra ?? 0}|${ev.player ?? ''}|${ev.teamId ?? ''}|${ev.detail ?? ev.kind ?? ev.type ?? ''}`;
+  return `${ev.player ?? ''}|${ev.teamId ?? ''}|${ev.detail ?? ev.kind ?? ev.type ?? ''}`;
 }
 
 // ─── Deduplicación cross-tick por Redis ────────────────────────────────────
@@ -1010,33 +1019,29 @@ export async function runLive(_payload = {}) {
   if (needsStatsFetch.length > 0) {
     await Promise.all(needsStatsFetch.map(async (match) => {
       const fid = match.fixture.id;
-      // Paso 1: /fixtures?id=X — devuelve el partido completo. Para la mayoría
-      // de ligas esto trae `statistics` inline. Para ligas exóticas (Ucrania
-      // 333, China 169, Serbia 286, etc.) `statistics` viene vacío incluso aquí.
-      const data = await apiFetch(`/fixtures?id=${fid}`);
+      // BUG FIX córners (confirmado por medición 2026-05-26):
+      // /fixtures?live=all NO trae córners para muchísimas ligas (devolvía stats
+      // con posesión/tiros pero córners vacíos), mientras /fixtures/statistics SÍ
+      // los tiene frescos. El código anterior pedía /fixtures?id=X y solo caía al
+      // dedicado si NO había NINGUNA stat — como sí había otras stats, nunca pedía
+      // el dedicado → córners 2min+ tarde o nunca.
+      //
+      // Ahora vamos DIRECTO al endpoint dedicado /fixtures/statistics: es LA fuente
+      // fiable de córners (y demás stats), 1 sola llamada por tick (antes 2). Los
+      // events (goleador, tarjetas, cambios) ya vienen del feed principal /
+      // needsEventsFetch — aquí solo refrescamos las estadísticas. Si el dedicado
+      // viniera vacío (liga sin cobertura), caemos a las stats del feed principal.
+      const dedicated = await apiFetch(`/fixtures/statistics?fixture=${fid}`);
       apiCalls++;
-      let fullStats = (data?.[0]?.statistics) || [];
-      let fullEvents = (data?.[0]?.events) || (match.events || []);
-      let fullMatch = data?.[0] || match;
-
-      // Paso 2 (fallback ligas exóticas): si statistics sigue vacío, vamos al
-      // endpoint dedicado /fixtures/statistics?fixture=X que SÍ devuelve datos
-      // para esas ligas. Es la diferencia clave — el endpoint principal
-      // /fixtures incluye stats inline solo cuando la liga tiene "cobertura
-      // completa" según el plan; el endpoint dedicado los expone siempre que
-      // el proveedor de datos los tenga.
-      if (fullStats.length === 0) {
-        const dedicated = await apiFetch(`/fixtures/statistics?fixture=${fid}`);
-        apiCalls++;
-        if (Array.isArray(dedicated) && dedicated.length > 0) {
-          fullStats = dedicated;
-          console.log(`[live] stats rescue via /fixtures/statistics for fid=${fid} (${dedicated.length} teams)`);
-        } else {
-          console.log(`[live] no stats available for fid=${fid} after dedicated fetch — liga sin cobertura statistics`);
-        }
+      const statsArr = (Array.isArray(dedicated) && dedicated.length > 0)
+        ? dedicated
+        : (match.statistics || []);
+      if (Array.isArray(dedicated) && dedicated.length > 0) {
+        console.log(`[live] stats dedicado fid=${fid} (${dedicated.length} equipos) — córners frescos`);
+      } else {
+        console.log(`[live] sin stats dedicado para fid=${fid} — liga sin cobertura statistics`);
       }
-
-      const fullData = extractLiveStats(fullMatch, fullEvents, fullStats);
+      const fullData = extractLiveStats(match, match.events || [], statsArr);
       fullData.date = today;
       liveDetailsMap[fid] = fullData;
     }));
