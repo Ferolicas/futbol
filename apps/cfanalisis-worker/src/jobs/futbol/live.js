@@ -274,6 +274,45 @@ function ttlForKey(key) {
   return DEDUP_TTL_BY_TYPE[type] ?? DEDUP_TTL_SEC;
 }
 
+// ─── Event-log de observabilidad ───────────────────────────────────────────
+// Registro persistente y auditable de CADA evento en vivo detectado, con
+// timestamps reales. Resuelve la ceguera temporal del sistema anterior (logs
+// console.log sin hora). Permite comparar, por evento:
+//   - min        → minuto del partido en que ocurrió (lo que ve el usuario)
+//   - tDetected  → hora exacta (ISO) en que el worker lo detectó del feed API
+//   - tPush      → hora exacta en que se envió el push (o null si no se envió)
+//   - pushResult → delivered | no-favorites | failed
+//   - tShown     → hora en que el frontend lo pintó (lo rellena la telemetría
+//                  del cliente vía /api/telemetry/live-shown; null si nadie lo vio)
+// Guardado en Redis `eventlog:{date}` (lista JSON, TTL 48h, cap 3000). Seguro
+// con concurrency=1 del worker live (no hay dos ticks simultáneos).
+const EVENTLOG_TTL_SEC = 48 * 3600;
+const EVENTLOG_CAP = 3000;
+
+function detectEventType(line) {
+  if (line.startsWith('⚽')) return 'goal';
+  if (line.startsWith('🚩')) return 'corner';
+  if (line.startsWith('🟨')) return 'yellow';
+  if (line.startsWith('🟥')) return 'red';
+  if (line.startsWith('🔄')) return 'subst';
+  if (line.startsWith('🅿')) return 'penalty';
+  if (line.startsWith('📺')) return 'var';
+  return 'other';
+}
+
+async function appendEventLog(date, items) {
+  if (!items || items.length === 0) return;
+  const key = `eventlog:${date}`;
+  try {
+    const existing = (await redisGet(key)) || [];
+    const merged = [...existing, ...items];
+    const capped = merged.length > EVENTLOG_CAP ? merged.slice(-EVENTLOG_CAP) : merged;
+    await redisSet(key, capped, EVENTLOG_TTL_SEC);
+  } catch (e) {
+    console.error('[eventlog] append:', e.message);
+  }
+}
+
 async function alreadySent(key) {
   try {
     const v = await redisGet(key);
@@ -580,14 +619,24 @@ async function buildEventBundle(fid, data, prev) {
   // Tag estable por fixture+minuto+nEventos para que múltiples ticks no
   // sobrescriban notificaciones distintas. FCM reemplaza notifs con mismo tag.
   const tag = `live-${fid}-${minute}-${lines.length}`;
+  // Event-log: una entrada estructurada por línea/evento detectado, con la
+  // hora exacta de detección. El caller (sendBundledPushes) le añade tPush +
+  // pushResult tras intentar el envío y lo persiste en Redis.
+  const tDetected = new Date().toISOString();
+  const events = lines.map((line) => ({
+    fid: Number(fid), min: minute, type: detectEventType(line),
+    detail: line, home, away, score: `${nHG}-${nAG}`, tDetected,
+  }));
   // sentKeys: el caller marca cada una en Redis DESPUÉS de enviar el push
   // (ver sendBundledPushes), no aquí. Si marcamos antes de enviar y el envío
   // falla, perdemos el evento para siempre. Marcar después es at-least-once.
-  return { fixtureId: Number(fid), title, body, tag, urgent, sentKeys };
+  return { fixtureId: Number(fid), title, body, tag, urgent, sentKeys, events };
 }
 
-async function sendBundledPushes(liveDetailsMap, existingLive) {
+async function sendBundledPushes(liveDetailsMap, existingLive, today) {
   const LP = '[live:push]';
+  // Eventos a persistir en el event-log (con tPush + resultado por bundle).
+  const eventLogItems = [];
   // 1. Construir bundles por fixture (solo cuando hay deltas y baseline previa).
   // buildEventBundle es ahora async porque consulta dedup keys en Redis.
   const fids = Object.keys(liveDetailsMap);
@@ -619,7 +668,11 @@ async function sendBundledPushes(liveDetailsMap, existingLive) {
       if (Array.isArray(b.sentKeys)) {
         await Promise.all(b.sentKeys.map(k => markSent(k)));
       }
+      for (const ev of (b.events || [])) {
+        eventLogItems.push({ ...ev, tPush: null, pushResult: 'no-subscribers', subsTargeted: 0 });
+      }
     }
+    await appendEventLog(today, eventLogItems);
     return;
   }
 
@@ -703,7 +756,21 @@ async function sendBundledPushes(liveDetailsMap, existingLive) {
     } else if (!shouldMark) {
       console.log(`${LP} dedup NO marcadas fid=${bundle.fixtureId} — todos los envíos fallaron, reintentará en próximo tick`);
     }
+
+    // Event-log: registrar cada evento de este bundle con su resultado de push.
+    //   delivered     → al menos un dispositivo recibió el push
+    //   no-favorites  → nadie tenía este fixture en favoritos (no se intentó)
+    //   failed        → había favoritos pero todos los envíos fallaron
+    const pushResult = bundleHadDelivery ? 'delivered'
+      : (bundleHadSubscriberInFav ? 'failed' : 'no-favorites');
+    const tPush = bundleHadDelivery ? new Date().toISOString() : null;
+    for (const ev of (bundle.events || [])) {
+      eventLogItems.push({ ...ev, tPush, pushResult, subsTargeted: subsWithThisFav });
+    }
   }
+
+  // Persistir el event-log del tick (tras procesar todos los bundles).
+  await appendEventLog(today, eventLogItems);
   console.log(`${LP} resumen: intentos=${attempted} ok=${delivered} fallo=${failed} expirados=${expiredN} sinFav(skip)=${skippedNoFav}`);
 
   // 4. Purga atómica de endpoints expirados
@@ -1003,7 +1070,7 @@ export async function runLive(_payload = {}) {
   // (goles, córners, amarillas, rojas/expulsiones, offside, sustituciones,
   // penalti, VAR). Anti-spam por agrupación en el propio bundle.
   console.log(`${LL} → sendBundledPushes: liveDetailsMap=${Object.keys(liveDetailsMap).length} existingLive=${Object.keys(existingLive).length}`);
-  sendBundledPushes(liveDetailsMap, existingLive)
+  sendBundledPushes(liveDetailsMap, existingLive, today)
     .catch(err => console.error('[live:bundled-pushes]', err.message, err.stack));
 
   const mergedLive = { ...existingLive };

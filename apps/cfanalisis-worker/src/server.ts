@@ -4,7 +4,7 @@ import os from 'os';
 import { execSync } from 'child_process';
 import { isValidQueue, queues, QUEUE_NAMES, type QueueName } from './queues.js';
 import { getErrors } from './errors-log.js';
-import { redisGet, pgQuery } from './shared.js';
+import { redisGet, pgQuery, bogotaToday } from './shared.js';
 import { bullConnection } from './redis.js';
 import { logger } from './logger.js';
 import { notifyError } from './notifier.js';
@@ -287,6 +287,28 @@ export function buildServer() {
   app.get('/stats', async (req, reply) => {
     if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
     return { ok: true, ts: new Date().toISOString(), ...getVpsStats() };
+  });
+
+  // /admin/eventlog — auditoría temporal de eventos en vivo.
+  // Devuelve cada gol/corner/tarjeta/etc detectado con: minuto del partido,
+  // hora ISO de detección (tDetected), hora de envío del push (tPush),
+  // resultado (delivered|no-favorites|failed|no-subscribers) y, si la
+  // telemetría del cliente lo reportó, hora en que el frontend lo mostró
+  // (tShown) + latencia detección→pantalla. Filtros opcionales:
+  //   ?date=YYYY-MM-DD (Bogotá, default hoy)  ?fid=<fixtureId>  ?type=goal|corner|…
+  app.get('/admin/eventlog', async (req, reply) => {
+    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+    const q = req.query as { date?: string; fid?: string; type?: string };
+    const date = q.date || bogotaToday();
+    let events: any[] = (await redisGet(`eventlog:${date}`)) || [];
+    if (q.fid) events = events.filter((e) => String(e.fid) === String(q.fid));
+    if (q.type) events = events.filter((e) => e.type === q.type);
+    const withLatency = events.map((e) => ({
+      ...e,
+      latencyPushMs: e.tDetected && e.tPush ? Date.parse(e.tPush) - Date.parse(e.tDetected) : null,
+      latencyShownMs: e.tDetected && e.tShown ? Date.parse(e.tShown) - Date.parse(e.tDetected) : null,
+    }));
+    return { date, count: withLatency.length, events: withLatency };
   });
 
   // /health — sin auth (lo usan BetterUptime, scripts locales, Caddy).
