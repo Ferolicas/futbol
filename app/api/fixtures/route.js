@@ -392,9 +392,8 @@ export async function GET(request) {
     // ===== PHASE 4: Auto-trigger daily batch =====
     // Guard: only trigger if no batch has started/completed AND we haven't sent a trigger
     // in the last 4 hours (prevents multiple triggers when dailyBatch key expires mid-analysis).
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : 'http://localhost:3000');
+    // App 100% en el VPS (sin Vercel). NEXT_PUBLIC_APP_URL=https://cfanalisis.com.
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000';
 
     // Red de seguridad: si el cron del worker falló, la visita de un usuario
     // re-dispara el análisis para la fecha que está viendo. Se dispara cuando

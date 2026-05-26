@@ -53,10 +53,9 @@ function buildSummary(a) {
 }
 
 function getBaseUrl() {
-  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
-  if (process.env.NEXTAUTH_URL)        return process.env.NEXTAUTH_URL;
-  if (process.env.VERCEL_URL)          return `https://${process.env.VERCEL_URL}`;
-  return 'http://localhost:3000';
+  // App 100% en el VPS (sin Vercel). NEXT_PUBLIC_APP_URL=https://cfanalisis.com
+  // es la fuente canónica; NEXTAUTH_URL como respaldo legacy.
+  return process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000';
 }
 
 // ─── GET — progress polling ────────────────────────────────────────────────────
