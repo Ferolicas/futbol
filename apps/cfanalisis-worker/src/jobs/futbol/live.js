@@ -214,6 +214,17 @@ function formatMinute(status) {
   return x > 0 ? `${e}+${x}` : `${e}`;
 }
 
+// Sufijo del gol según cómo fue (viene de goalScorers[].type = ev.detail de la
+// API). Así un gol de penalti se ve como "⚽ … (de penal)" en el momento exacto
+// del gol (timing por marcador, sin tocar la detección), y no hace falta un
+// push de penalti aparte. Gol normal → sin sufijo.
+function goalTypeSuffix(scorer) {
+  const t = scorer?.type;
+  if (t === 'Penalty') return ' (de penal)';
+  if (t === 'Own Goal') return ' (en contra)';
+  return '';
+}
+
 // Key estable para deduplicar eventos en listas (subst, var, penalty).
 //
 // BUG FIX (penaltis/cambios duplicados — confirmado 2026-05-26: el penalti de
@@ -396,7 +407,7 @@ async function buildEventBundle(fid, data, prev) {
       // podía dar el del otro equipo si la API los devuelve mezclados).
       const last = (data.goalScorers || []).filter(g => g.teamName === home).slice(-1)[0];
       const who = last?.player ? ` - ${last.player}` : '';
-      lines.push(`⚽ ${home}${who} (${nHG}-${nAG})`);
+      lines.push(`⚽ ${home}${who} (${nHG}-${nAG})${goalTypeSuffix(last)}`);
       sentKeys.push(k);
       urgent = true;
       console.log(`${DP} fid=${fid} GOL home delta ${pHG}→${nHG} ⇒ línea añadida`);
@@ -410,7 +421,7 @@ async function buildEventBundle(fid, data, prev) {
     if (!(await alreadySent(k))) {
       const last = (data.goalScorers || []).filter(g => g.teamName === away).slice(-1)[0];
       const who = last?.player ? ` - ${last.player}` : '';
-      lines.push(`⚽ ${away}${who} (${nHG}-${nAG})`);
+      lines.push(`⚽ ${away}${who} (${nHG}-${nAG})${goalTypeSuffix(last)}`);
       sentKeys.push(k);
       urgent = true;
       console.log(`${DP} fid=${fid} GOL away delta ${pAG}→${nAG} ⇒ línea añadida`);
@@ -570,19 +581,31 @@ async function buildEventBundle(fid, data, prev) {
     console.log(`${DP} fid=${fid} CAMBIO ${s.teamName} ${s.playerOut}→${s.playerIn} ⇒ línea añadida`);
   }
 
-  // ── Penaltis (lista — scored/missed/awarded) ──
+  // ── Penaltis (lista — missed / awarded) ──
+  // Un penalti CONVERTIDO (kind='scored') NO se notifica aquí: ya llega como
+  // "⚽ … (de penal)" en el momento exacto del gol (vía delta de marcador, sin
+  // lag). Notificarlo otra vez duplicaba y llegaba tarde (el detail del evento
+  // de penalti llega con retraso respecto al marcador). Aquí solo notificamos
+  // los penaltis FALLADOS (sin gol, única forma de enterarse) y, si la API lo
+  // expone, los señalados. Así el usuario nunca pierde un penalti: gol→lo ve
+  // como gol de penal; fallado→push de penalti fallado.
   const prevPenKeys = new Set((prev.penaltyEvents || []).map(evKey));
   const newPens = (data.penaltyEvents || []).filter(p => !prevPenKeys.has(evKey(p)));
   if (newPens.length > 0) console.log(`${DP} fid=${fid} PENALTI ${newPens.length} evento(s) nuevo(s) vs baseline`);
   for (const p of newPens) {
+    if (p.kind === 'scored') {
+      skipReasons.push('penalty:scored→ya va como ⚽ (de penal)');
+      console.log(`${DP} fid=${fid} PENALTI convertido ${p.teamName} ⇒ NO push aparte (va como gol de penal)`);
+      continue;
+    }
     const k = dedupKey(fid, 'penalty', evKey(p));
     if (await alreadySent(k)) {
       skipReasons.push(`penalty(${p.kind}):dedup-ya-enviado`);
       console.log(`${DP} fid=${fid} PENALTI ${p.kind} dedup ya marcada ⇒ SKIP`);
       continue;
     }
-    const verb = p.kind === 'scored' ? 'convertido' : p.kind === 'missed' ? 'fallado' : 'señalado';
-    lines.push(`🅿️ ${p.player ? `${p.player} · ` : ''}${p.teamName || '?'}`);
+    const verb = p.kind === 'missed' ? 'fallado' : 'señalado';
+    lines.push(`🅿️ Penalti ${verb}${p.player ? ` · ${p.player}` : ''} · ${p.teamName || '?'}`);
     sentKeys.push(k);
     urgent = true;
     console.log(`${DP} fid=${fid} PENALTI ${verb} ${p.teamName} ⇒ línea añadida`);
