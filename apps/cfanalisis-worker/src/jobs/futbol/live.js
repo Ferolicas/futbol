@@ -758,11 +758,16 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today) {
           return;
         }
         attempted++;
-        console.log(`${LP} → invocando sendPushNotification fid=${bundle.fixtureId} user=${row.user_id.slice(0, 8)} ep=…${String(sub.endpoint).slice(-12)} urgency=${bundle.urgent ? 'high' : 'normal'}`);
+        // TODOS los eventos en vivo se envían con urgency 'high' (apns-priority
+        // 10). En una app de apuestas en vivo cada evento es time-sensitive: un
+        // córner/amarilla con urgency 'normal' hacía que iOS los retuviera y los
+        // entregara TARDE o en lote ("en fila de golpe"). 'high' fuerza entrega
+        // inmediata en APNs/FCM. `bundle.urgent` se conserva solo para métricas.
+        console.log(`${LP} → invocando sendPushNotification fid=${bundle.fixtureId} user=${row.user_id.slice(0, 8)} ep=…${String(sub.endpoint).slice(-12)} urgency=high`);
         const result = await sendPushNotification(
           sub,
           { title: bundle.title, body: bundle.body, tag: bundle.tag },
-          { urgency: bundle.urgent ? 'high' : 'normal' },
+          { urgency: 'high' },
         );
         if (result === true) { delivered++; bundleHadDelivery = true; }
         else if (result === 'expired') {
