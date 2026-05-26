@@ -51,6 +51,14 @@ function isotonicPAV(points) {
   return xs.map((x, idx) => [x, ys[idx]]);
 }
 
+// Prior de shrinkage bayesiano hacia la identidad (idéntico al motor de fútbol).
+// Con `total < PRIOR_N` la calibración apenas se desvía del raw (x/100) porque
+// no hay datos suficientes para confiar en el empírico. A medida que `total`
+// crece, el peso del empírico supera al prior y converge al valor real. Esto
+// evita el sobreajuste brutal que producían 48 muestras sin shrinkage (Δ de
+// +124pp era ruido de pocos partidos, NO una calibración que mejora).
+const SHRINKAGE_PRIOR_N = 10;
+
 function buildKnots(rows, pCol, outcomeFn, gateFn) {
   const buckets = {};
   for (const r of rows) {
@@ -65,25 +73,43 @@ function buildKnots(rows, pCol, outcomeFn, gateFn) {
   const points = Object.entries(buckets)
     .map(([center, b]) => {
       const x = Number(center);
-      const smoothed = (b.hits + 0.5) / (b.total + 1);
-      return [x, smoothed * 100, b.total];
+      // Laplace: evita 0%/100% absolutos con pocas muestras.
+      const empirical = (b.hits + 0.5) / (b.total + 1);
+      // Shrinkage hacia identidad: n pequeño → casi raw; n grande → casi empírico.
+      const weight = b.total / (b.total + SHRINKAGE_PRIOR_N);
+      const calibrated = empirical * weight + (x / 100) * (1 - weight);
+      return [x, calibrated * 100, b.total];
     })
-    .filter(([, , total]) => total >= 3)
     .sort((a, b) => a[0] - b[0]);
 
-  if (points.length < 2) return { knots: null, sampleSize: points.reduce((s, p) => s + p[2], 0) };
+  const sampleSize = points.reduce((s, p) => s + p[2], 0);
+  // Con shrinkage ya no hace falta el gate de ≥3 por bucket: 1 muestra apenas
+  // mueve la curva. Solo exigimos que exista AL MENOS un bucket con datos.
+  if (points.length === 0) return { knots: null, sampleSize: 0 };
 
-  const isoPoints = isotonicPAV(points.map(p => [p[0], p[1]]));
-  return {
-    knots: isoPoints.map(([x, y]) => [Math.round(x), Math.round(y * 10) / 10]),
-    sampleSize: points.reduce((s, p) => s + p[2], 0),
-  };
+  const iso = isotonicPAV(points.map(p => [p[0], p[1]]));
+  // Anclar bordes [0,0] y [100,100]: garantiza que el runtime y el diff NUNCA
+  // extrapolen fuera del rango de datos (causa de los -468pp del panel). Mismo
+  // criterio que el motor de fútbol.
+  const knots = [];
+  if (iso.length === 0 || iso[0][0] > 0) knots.push([0, 0]);
+  for (const [x, y] of iso) knots.push([Math.round(x), Math.round(y * 10) / 10]);
+  if (iso.length === 0 || iso[iso.length - 1][0] < 100) knots.push([100, 100]);
+
+  return { knots, sampleSize };
 }
 
 function knotDiff(before, after) {
   if (!Array.isArray(before) || !Array.isArray(after)) return null;
   const interp = (knots, x) => {
     if (!knots || knots.length === 0) return x;
+    // CLAMP fuera del rango (igual que el runtime applyKnots): si x está por
+    // debajo del primer knot o por encima del último, devolver el valor del
+    // borde, NUNCA extrapolar. La extrapolación lineal producía valores
+    // imposibles (-468pp en x=0) cuando los knots no cubrían los extremos.
+    if (x <= knots[0][0]) return knots[0][1];
+    const last = knots[knots.length - 1];
+    if (x >= last[0]) return last[1];
     for (let i = 1; i < knots.length; i++) {
       const [x0, y0] = knots[i - 1];
       const [x1, y1] = knots[i];
@@ -92,7 +118,7 @@ function knotDiff(before, after) {
         return y0 + ((y1 - y0) * (x - x0)) / (x1 - x0);
       }
     }
-    return knots[knots.length - 1][1];
+    return last[1];
   };
   let maxAbs = 0, sum = 0, count = 0, biggest = null;
   for (let x = 0; x <= 100; x += 5) {

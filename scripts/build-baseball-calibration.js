@@ -1,47 +1,31 @@
 /* eslint-disable */
 /**
- * Build baseball calibration knots via isotonic regression.
- * Reads finalized rows from baseball_match_predictions, groups predicted
- * probability into 5pp buckets, and computes empirical hit rates per bucket.
- * Stores monotone knots in app_config.calibration_baseball_v1.
+ * Build baseball calibration knots via isotonic regression + shrinkage bayesiano.
+ * Lee filas finalizadas de baseball_match_predictions (Postgres VPS), agrupa la
+ * probabilidad predicha en buckets de 5pp, calcula la tasa empírica con Laplace
+ * y la encoge hacia la identidad (shrinkage) para no sobreajustar con pocas
+ * muestras. Guarda knots monótonos en app_config.calibration_baseball_v1.
  *
- * Run: node scripts/build-baseball-calibration.js
+ * UNIFICADO con apps/cfanalisis-worker/src/jobs/calibration/baseball.js (misma
+ * lógica, mismos mercados). Antes este script leía de SUPABASE (datos viejos/
+ * vacíos tras la migración a VPS) y usaba buildKnots SIN shrinkage ni bordes
+ * anclados — correrlo podía SOBRESCRIBIR la calibración buena con una pobre.
  *
- * Recommended cadence: weekly (more data → better calibration).
- * Minimum useful sample: ~150 finalized games per market.
+ * Run on VPS: node --env-file=.env scripts/build-baseball-calibration.js
+ *
+ * Cadencia recomendada: semanal (más datos → mejor calibración).
  */
 
-const fs = require('fs');
-const path = require('path');
+try { require('dotenv').config({ path: '.env.local' }); } catch {}
+try { require('dotenv').config({ path: '.env' }); } catch {}
 
-// Manual .env.local loader (consistent with seed-admin.js / send-promo-email.js)
-const envPath = path.join(__dirname, '..', '.env.local');
-const env = {};
-if (fs.existsSync(envPath)) {
-  const raw = fs.readFileSync(envPath, 'utf8').replace(/^﻿/, '');
-  raw.split(/\r?\n/).forEach((rawLine) => {
-    let line = rawLine.trim();
-    if (!line || line.startsWith('#')) return;
-    if (line.startsWith('export ')) line = line.slice(7).trim();
-    const eq = line.indexOf('=');
-    if (eq < 0) return;
-    const key = line.slice(0, eq).trim();
-    let val = line.slice(eq + 1).trim();
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1);
-    }
-    env[key] = val;
-  });
-}
-const SUPA_URL = env.NEXT_PUBLIC_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPA_KEY = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-if (!SUPA_URL || !SUPA_KEY) {
-  console.error('Missing Supabase env vars');
-  process.exit(1);
-}
+const { Pool } = require('pg');
 
-const { createClient } = require('@supabase/supabase-js');
-const s = createClient(SUPA_URL, SUPA_KEY);
+const pgPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
+  max: 5,
+});
 
 const MARKETS = [
   { key: 'home_win',                     pCol: 'p_home_win',                outcome: r => r.actual_result === 'H',          gate: r => r.actual_result != null },
@@ -68,7 +52,7 @@ const MARKETS = [
   { key: 'team_total_away_over_45',      pCol: 'p_team_total_away_over_45', outcome: r => r.actual_away_score > 4.5,        gate: r => r.actual_away_score != null },
 ];
 
-// Pool Adjacent Violators — isotonic regression (monotone non-decreasing)
+// Pool Adjacent Violators — isotonic regression (monótona no decreciente)
 function isotonicPAV(points) {
   const xs = points.map(p => p[0]);
   const ys = points.map(p => p[1]);
@@ -88,6 +72,9 @@ function isotonicPAV(points) {
   return xs.map((x, idx) => [x, ys[idx]]);
 }
 
+// Shrinkage hacia identidad (idéntico al job del worker y al motor de fútbol).
+const SHRINKAGE_PRIOR_N = 10;
+
 function buildKnots(rows, pCol, outcomeFn, gateFn) {
   const buckets = {};
   for (const r of rows) {
@@ -102,56 +89,59 @@ function buildKnots(rows, pCol, outcomeFn, gateFn) {
   const points = Object.entries(buckets)
     .map(([center, b]) => {
       const x = Number(center);
-      const smoothed = (b.hits + 0.5) / (b.total + 1);
-      return [x, smoothed * 100, b.total];
+      const empirical = (b.hits + 0.5) / (b.total + 1);
+      const weight = b.total / (b.total + SHRINKAGE_PRIOR_N);
+      const calibrated = empirical * weight + (x / 100) * (1 - weight);
+      return [x, calibrated * 100, b.total];
     })
-    .filter(([, , total]) => total >= 3) // minimum sample size per bucket
     .sort((a, b) => a[0] - b[0]);
 
-  if (points.length < 2) return null;
+  const sampleSize = points.reduce((s, p) => s + p[2], 0);
+  if (points.length === 0) return { knots: null, sampleSize: 0 };
 
-  const isoPoints = isotonicPAV(points.map(p => [p[0], p[1]]));
-  return isoPoints.map(([x, y]) => [Math.round(x), Math.round(y * 10) / 10]);
+  const iso = isotonicPAV(points.map(p => [p[0], p[1]]));
+  const knots = [];
+  if (iso.length === 0 || iso[0][0] > 0) knots.push([0, 0]);
+  for (const [x, y] of iso) knots.push([Math.round(x), Math.round(y * 10) / 10]);
+  if (iso.length === 0 || iso[iso.length - 1][0] < 100) knots.push([100, 100]);
+
+  return { knots, sampleSize };
 }
 
 (async () => {
-  console.log('[build-baseball-calibration] Fetching finalized predictions...');
-  const { data: rows, error } = await s
-    .from('baseball_match_predictions')
-    .select('*')
-    .not('finalized_at', 'is', null);
+  console.log('[build-baseball-calibration] Leyendo predicciones finalizadas (VPS)...');
+  const { rows } = await pgPool.query(
+    `SELECT * FROM baseball_match_predictions WHERE finalized_at IS NOT NULL`
+  );
+  console.log(`Cargadas ${rows.length} predicciones finalizadas`);
 
-  if (error) {
-    console.error('Supabase error:', error.message);
-    process.exit(1);
-  }
-  console.log(`Loaded ${rows.length} finalized predictions`);
-
-  if (rows.length < 30) {
-    console.warn(`Only ${rows.length} samples. Need more games to build reliable calibration. Aborting.`);
+  if (rows.length < 10) {
+    console.warn(`Solo ${rows.length} muestras. Se necesitan ≥10. Abortando.`);
+    await pgPool.end();
     process.exit(0);
   }
 
   const knots = {};
+  let calibrated = 0;
   for (const m of MARKETS) {
-    const k = buildKnots(rows, m.pCol, m.outcome, m.gate);
+    const { knots: k, sampleSize } = buildKnots(rows, m.pCol, m.outcome, m.gate);
     if (k) {
       knots[m.key] = k;
-      console.log(`  ✓ ${m.key.padEnd(28)} → ${k.length} knots, ex: ${JSON.stringify(k.slice(0, 3))}`);
+      calibrated++;
+      console.log(`  ✓ ${m.key.padEnd(28)} n=${sampleSize}  knots=${k.length}  ex: ${JSON.stringify(k.slice(0, 3))}`);
     } else {
-      console.log(`  ✗ ${m.key.padEnd(28)} → insufficient data`);
+      console.log(`  ✗ ${m.key.padEnd(28)} sin datos`);
     }
   }
 
-  // Save to app_config
-  const { error: saveErr } = await s
-    .from('app_config')
-    .upsert({ key: 'calibration_baseball_v1', value: knots, updated_at: new Date().toISOString() });
+  await pgPool.query(
+    `INSERT INTO app_config (key, value, updated_at)
+     VALUES ($1, $2::jsonb, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+    ['calibration_baseball_v1', JSON.stringify(knots)]
+  );
 
-  if (saveErr) {
-    console.error('Save error:', saveErr.message);
-    process.exit(1);
-  }
-  console.log('\n[build-baseball-calibration] Saved knots to app_config.calibration_baseball_v1');
-  console.log(`Markets calibrated: ${Object.keys(knots).length}/${MARKETS.length}`);
-})();
+  console.log(`\n✓ Guardado en app_config.calibration_baseball_v1`);
+  console.log(`Mercados calibrados: ${calibrated}/${MARKETS.length}`);
+  await pgPool.end();
+})().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
