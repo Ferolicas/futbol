@@ -396,12 +396,26 @@ export async function GET(request) {
       ? `https://${process.env.VERCEL_URL}`
       : 'http://localhost:3000');
 
-    if (fixtures.length > 0 && !batchFlag?.started && !batchFlag?.completed) {
+    // Red de seguridad: si el cron del worker falló, la visita de un usuario
+    // re-dispara el análisis para la fecha que está viendo. Se dispara cuando
+    // NO está completado y (no iniciado O iniciado hace rato sin terminar —
+    // `started` huérfano). Antes solo `!started` bloqueaba para siempre un
+    // started que nunca completaba; ahora se auto-cura pasada la gracia.
+    const STARTED_GRACE_MS = 20 * 60 * 1000;
+    const startedMs = batchFlag?.startedAt ? Date.parse(batchFlag.startedAt) : 0;
+    const startedStale = batchFlag?.started && (!startedMs || (Date.now() - startedMs) > STARTED_GRACE_MS);
+    const needsTrigger = !batchFlag?.completed && (!batchFlag?.started || startedStale);
+    if (fixtures.length > 0 && needsTrigger) {
       const triggerLockKey = `daily-trigger-lock:${date}`;
       const alreadyTriggered = await redisGet(triggerLockKey);
       if (!alreadyTriggered) {
-        await redisSet(triggerLockKey, '1', 4 * 3600); // 4-hour lock prevents repeated triggers
-        fetch(`${baseUrl}/api/cron/daily?date=${date}`, {
+        // Lock de 30min (no 4h): si un trigger no cuaja, otra visita puede
+        // reintentar pronto. analyze-batch es idempotente, no hay duplicación.
+        await redisSet(triggerLockKey, '1', 30 * 60);
+        // force=true para que el worker ignore un `started` huérfano y
+        // re-encole de verdad (si no, daily volvería a ver el flag stale).
+        const forceParam = startedStale ? '&force=true' : '';
+        fetch(`${baseUrl}/api/cron/daily?date=${date}${forceParam}`, {
           headers: { 'x-internal-trigger': 'true' },
         }).catch(() => {});
       }

@@ -6,15 +6,13 @@
  *
  * Payload: { date?: 'YYYY-MM-DD', forceApi?: boolean }
  */
-import { getFixtures, getQuota, saveMatchSchedule, cacheFixtures, redisSet, KEYS } from '../../shared.js';
+import { getFixtures, getQuota, saveMatchSchedule, cacheFixtures, redisSet, KEYS, cronTargetDate } from '../../shared.js';
 
 export async function runFixtures(payload = {}) {
-  const now = new Date();
-  const utcHour = now.getUTCHours();
-  const todayUTC    = now.toISOString().split('T')[0];
-  const tomorrowUTC = new Date(now.getTime() + 86400000).toISOString().split('T')[0];
-
-  const targetDate = payload.date || (utcHour >= 22 ? tomorrowUTC : todayUTC);
+  // cronTargetDate() = jornada Bogotá objetivo (día siguiente de Bogotá a la
+  // hora del cron de las 02:10 Madrid). daily.js usa la MISMA función, así
+  // garantizamos que se analice exactamente el día que aquí se cachea.
+  const targetDate = payload.date || cronTargetDate();
   console.log(`[job:futbol-fixtures] target=${targetDate}`);
 
   const result   = await getFixtures(targetDate, { forceApi: payload.forceApi ?? true });

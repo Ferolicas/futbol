@@ -13,7 +13,7 @@
  */
 import {
   getFixtures, analyzeMatch, getQuota,
-  getAnalyzedFixtureIds, redisGet, redisSet,
+  getAnalyzedFixtureIds, redisGet, redisSet, bogotaToday,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
@@ -59,7 +59,10 @@ function buildSummary(a) {
 
 /** @param {any} payload @param {any} [job] */
 export async function runAnalyzeAllToday(payload = {}, job = null) {
-  const date = payload.date || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
+  // Uso MANUAL (botón "Re-analizar"): el día Bogotá ACTUAL (no el del cron, que
+  // prepara el día siguiente de noche). Si el frontend pasa una fecha explícita
+  // (la del día que el usuario está viendo) se respeta; si no, hoy en Bogotá.
+  const date = payload.date || bogotaToday();
   const forceAll = payload.force === true;
   const startTime = Date.now();
   console.log(`[analyze-all-today] start date=${date} force=${forceAll}`);

@@ -132,3 +132,56 @@ export const fetchOddsForFixtures = _oddsApi.fetchOddsForFixtures;
 
 // lib/db.js — acceso raw pg para casos que pgAdmin no cubre (RPC, raw SQL)
 export const pgQuery = _db.pgQuery;
+
+// ────────────────────────────────────────────────────────────────────────────
+// FECHAS DE LOS JOBS — TODO en hora de Bogotá (America/Bogota).
+//
+// La app es para usuarios de Colombia. Una "jornada" es un día COMPLETO de
+// Bogotá: 00:00–23:59 America/Bogota. `getFixtures(date)` ya consulta la API
+// con `timezone=America/Bogota` (lib/api-football.js), así que `date` SIEMPRE
+// es un día calendario de Bogotá. El frontend luego muestra a cada usuario los
+// partidos según su propia zona horaria, pero el análisis canónico es por día
+// de Bogotá.
+
+// Fecha (YYYY-MM-DD) de HOY en America/Bogota.
+export function bogotaToday(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(now);
+}
+
+// Hora (0-23) actual en America/Bogota.
+function bogotaHour(now: Date = new Date()): number {
+  return Number(
+    new Intl.DateTimeFormat('en-US', { timeZone: 'America/Bogota', hour: '2-digit', hour12: false }).format(now),
+  ) % 24;
+}
+
+// Suma `days` a una fecha calendario 'YYYY-MM-DD' (aritmética de calendario
+// pura, sin zona horaria — la fecha ya representa un día de Bogotá).
+function addDays(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d! + days)).toISOString().split('T')[0] as string;
+}
+
+// JORNADA OBJETIVO del batch diario (fixtures + daily + analyze-batch).
+//
+// BUG QUE RESUELVE (confirmado 2026-05-26): `fixtures.js` cacheaba el día
+// SIGUIENTE de Bogotá (lo correcto) mientras `daily.js` calculaba el día ACTUAL
+// de Bogotá → a la hora del cron (02:10 Madrid = 19:10 Bogotá del día anterior)
+// diferían en 1 día. `daily` leía `dailyBatch:{díaActual}` ya completado del
+// ciclo anterior, retornaba "already completed" y NUNCA encolaba analyze-batch
+// para el día que `fixtures` acababa de cachear. El día nunca se analizaba.
+//
+// El cron dispara a las 02:10 Europe/Madrid, que en Bogotá son ~19:10 del día
+// ANTERIOR. A esa hora el día de Bogotá en curso ya casi terminó (sus partidos
+// ya se jugaron), así que la jornada útil a preparar/analizar es la que está a
+// punto de empezar: el SIGUIENTE día de Bogotá (la próxima medianoche Bogotá).
+// Por eso, si en Bogotá ya pasó el mediodía → preparamos MAÑANA; si es la
+// mañana (única ventana de una posible llamada manual sin fecha) → HOY.
+//
+// Los caminos manuales (botón "re-analizar", auto-trigger del frontend) NO usan
+// esta función: pasan una fecha explícita (la del usuario / la del día que se
+// está viendo). Esta solo gobierna el cron automático de las 02:10 Madrid.
+export function cronTargetDate(now: Date = new Date()): string {
+  const today = bogotaToday(now);
+  return bogotaHour(now) >= 12 ? addDays(today, 1) : today;
+}
