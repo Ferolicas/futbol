@@ -609,6 +609,8 @@ export default function AnalisisPage() {
           ══════════════════════════════════════════ */}
           <GlassSection title="XI Alineación Titular" icon={<Users size={22} style={{ color: '#00d4ff' }} />} sectionKey="lineups" collapsed={collapsed} toggle={toggleSection} delay={.2}>
             {a.lineups?.available ? (
+              <>
+              <FormationPitch teams={a.lineups.data} />
               <div className="ap2-lineups-grid">
                 {a.lineups.data.map((team, idx) => (
                   <motion.div
@@ -629,6 +631,7 @@ export default function AnalisisPage() {
                     {team.startXI?.map((pl, i) => (
                       <div key={i} className="ap2-player-row">
                         <div className="ap2-player-num">{pl.player?.number}</div>
+                        <PlayerFace id={pl.player?.id} size={24} ring={idx === 0 ? 'rgba(0,212,255,.45)' : 'rgba(236,72,153,.45)'} />
                         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pl.player?.name}</span>
                         <span className="ap2-player-pos">{pl.player?.pos}</span>
                       </div>
@@ -637,6 +640,7 @@ export default function AnalisisPage() {
                     {team.substitutes?.map((pl, i) => (
                       <div key={i} className="ap2-player-row" style={{ opacity: .7 }}>
                         <div className="ap2-player-num" style={{ background: 'rgba(255,255,255,.07)',  color: 'white' }}>{pl.player?.number}</div>
+                        <PlayerFace id={pl.player?.id} size={24} ring={idx === 0 ? 'rgba(0,212,255,.35)' : 'rgba(236,72,153,.35)'} />
                         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pl.player?.name}</span>
                         <span className="ap2-player-pos">{pl.player?.pos}</span>
                       </div>
@@ -644,6 +648,7 @@ export default function AnalisisPage() {
                   </motion.div>
                 ))}
               </div>
+              </>
             ) : (
               <motion.div
                 style={{ textAlign: 'center', padding: '32px 24px', borderRadius: 20, background: 'linear-gradient(135deg, rgba(249,115,22,.2), rgba(239,68,68,.2))', border: '1px solid rgba(249,115,22,.3)' }}
@@ -1259,6 +1264,93 @@ function TeamLogo({ src, name, size = 32 }) {
     );
   }
   return <img src={src} alt={name} width={size} height={size} style={{ objectFit: 'contain', flexShrink: 0 }} onError={() => setErr(true)} />;
+}
+
+// ══════════════════════════════════════════
+// FOTO DE JUGADOR (media.api-sports.io) + fallback
+// ══════════════════════════════════════════
+function PlayerFace({ id, size = 22, ring }) {
+  const [err, setErr] = useState(false);
+  const src = id ? `https://media.api-sports.io/football/players/${id}.png` : null;
+  const common = { width: size, height: size, borderRadius: '50%', flexShrink: 0 };
+  if (!src || err) {
+    return <span style={{ ...common, background: 'rgba(255,255,255,.1)', border: `1px solid ${ring || 'rgba(255,255,255,.18)'}`, display: 'inline-block' }} aria-hidden="true" />;
+  }
+  return <img src={src} alt="" loading="lazy" onError={() => setErr(true)} style={{ ...common, objectFit: 'cover', background: 'rgba(255,255,255,.08)', border: ring ? `1.5px solid ${ring}` : 'none' }} />;
+}
+
+// ══════════════════════════════════════════
+// CAMPO CON FORMACIÓN VISUAL (tipo bet365/sofascore)
+// Usa player.grid "fila:columna" de API-Football. Local abajo (ataca arriba),
+// visitante arriba espejado. Si falta grid en algún titular → null (el caller
+// muestra solo las listas).
+// ══════════════════════════════════════════
+function PitchPlayer({ pl, accent }) {
+  const p = pl.player || {};
+  const surname = (p.name || '').split(' ').slice(-1)[0] || p.name || '';
+  return (
+    <div className="pitch-player">
+      <div className="pitch-face-wrap">
+        <PlayerFace id={p.id} size={34} ring={accent} />
+        <span className="pitch-num" style={{ background: accent }}>{p.number}</span>
+      </div>
+      <span className="pitch-name">{surname}</span>
+    </div>
+  );
+}
+
+function FormationPitch({ teams }) {
+  if (!Array.isArray(teams) || teams.length < 2) return null;
+  const hasGrid = teams.slice(0, 2).every(t => (t.startXI || []).length > 0 && t.startXI.every(p => p.player?.grid));
+  if (!hasGrid) return null;
+
+  // Reparte los 11 en coordenadas %: agrupa por fila del grid, ordena por
+  // columna y distribuye uniforme. Profundidad = fila/maxFila → GK pegado a su
+  // portería, delanteros hacia el centro. Visitante se voltea horizontal.
+  const place = (team, isHome) => {
+    const rows = {};
+    for (const pl of team.startXI) {
+      const [r, c] = String(pl.player.grid).split(':').map(Number);
+      (rows[r] = rows[r] || []).push({ pl, c });
+    }
+    const rowNums = Object.keys(rows).map(Number).sort((a, b) => a - b);
+    const maxRow = rowNums[rowNums.length - 1];
+    const nodes = [];
+    for (const r of rowNums) {
+      const inRow = rows[r].sort((a, b) => a.c - b.c);
+      const n = inRow.length;
+      const depth = maxRow > 1 ? (r - 1) / (maxRow - 1) : 0;
+      inRow.forEach((item, i) => {
+        let x = ((i + 1) / (n + 1)) * 100;
+        if (!isHome) x = 100 - x;
+        const y = isHome ? 96 - depth * 44 : 4 + depth * 44;
+        nodes.push({ pl: item.pl, x, y });
+      });
+    }
+    return nodes;
+  };
+
+  const accents = ['#00d4ff', '#ec4899'];
+  return (
+    <div className="pitch">
+      <div className="pitch-lines" aria-hidden="true">
+        <span className="pitch-box top" />
+        <span className="pitch-box bottom" />
+      </div>
+      {teams.slice(0, 2).map((team, idx) => (
+        <div key={idx}>
+          <span className={`pitch-team-tag ${idx === 0 ? 'home' : 'away'}`} style={{ color: accents[idx] }}>
+            {team.team?.name} · {team.formation}
+          </span>
+          {place(team, idx === 0).map((node, i) => (
+            <div key={i} className="pitch-pos" style={{ left: `${node.x}%`, top: `${node.y}%` }}>
+              <PitchPlayer pl={node.pl} accent={accents[idx]} />
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // ══════════════════════════════════════════

@@ -1764,32 +1764,7 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
 
               {/* Goleadores — 2 columnas igual al analisis */}
               {liveStats && (liveStats.goalScorers?.length > 0 || liveStats.missedPenalties?.length > 0) && (
-                <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {liveStats.goalScorers?.filter(g => g.teamId === homeId).map((g, i) => (
-                      <div key={i} style={{ fontSize: '.75rem', fontWeight: 600, color: '#6ee7b7', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {g.minute}{g.extra ? `+${g.extra}` : ''}&#39; {g.player}{g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
-                      </div>
-                    ))}
-                    {liveStats.missedPenalties?.filter(p => p.teamId === homeId).map((p, i) => (
-                      <div key={i} style={{ fontSize: '.75rem', color: '#fb923c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {p.player} ✗ {p.minute}&#39;
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'right' }}>
-                    {liveStats.goalScorers?.filter(g => g.teamId !== homeId).map((g, i) => (
-                      <div key={i} style={{ fontSize: '.75rem', fontWeight: 600, color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {g.minute}{g.extra ? `+${g.extra}` : ''}&#39; {g.player}{g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
-                      </div>
-                    ))}
-                    {liveStats.missedPenalties?.filter(p => p.teamId !== homeId).map((p, i) => (
-                      <div key={i} style={{ fontSize: '.75rem', color: '#fb923c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        ✗ {p.minute}&#39; {p.player}
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <GoalScorersGrid liveStats={liveStats} homeId={homeId} />
               )}
 
             </div>
@@ -2091,35 +2066,8 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                   )}
                 </div>
 
-                {/* Goleadores — 2 columnas */}
-                {liveStats && (liveStats.goalScorers?.length > 0 || liveStats.missedPenalties?.length > 0) && (
-                  <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {liveStats.goalScorers?.filter(g => g.teamId === homeId).map((g, i) => (
-                        <div key={i} style={{ fontSize: '.75rem', fontWeight: 600, color: '#6ee7b7', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {g.minute}{g.extra ? `+${g.extra}` : ''}&#39; {g.player}{g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
-                        </div>
-                      ))}
-                      {liveStats.missedPenalties?.filter(p => p.teamId === homeId).map((p, i) => (
-                        <div key={i} style={{ fontSize: '.75rem', color: '#fb923c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {p.player} ✗ {p.minute}&#39;
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'right' }}>
-                      {liveStats.goalScorers?.filter(g => g.teamId !== homeId).map((g, i) => (
-                        <div key={i} style={{ fontSize: '.75rem', fontWeight: 600, color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {g.minute}{g.extra ? `+${g.extra}` : ''}&#39; {g.player}{g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
-                        </div>
-                      ))}
-                      {liveStats.missedPenalties?.filter(p => p.teamId !== homeId).map((p, i) => (
-                        <div key={i} style={{ fontSize: '.75rem', color: '#fb923c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          ✗ {p.minute}&#39; {p.player}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                {/* Goleadores — 2 columnas con foto (componente compartido) */}
+                <GoalScorersGrid liveStats={liveStats} homeId={homeId} />
 
               </div>
             </div>
@@ -2324,6 +2272,67 @@ function GoalBurst() {
   return (
     <div className="goal-burst" aria-hidden="true">
       <span className="goal-burst-txt">⚽ GOL</span>
+    </div>
+  );
+}
+
+// Foto oficial del jugador (API-Football). Fallback a placeholder si no hay id
+// o la imagen 404ea. loading=lazy para no bloquear el scroll.
+const playerFace = (id) => id ? `https://media.api-sports.io/football/players/${id}.png` : null;
+function PlayerFace({ id, size = 18 }) {
+  const [err, setErr] = useState(false);
+  const src = playerFace(id);
+  if (!src || err) return <span className="scorer-face scorer-face-ph" style={{ width: size, height: size }} aria-hidden="true" />;
+  return <img src={src} alt="" width={size} height={size} className="scorer-face" loading="lazy" onError={() => setErr(true)} />;
+}
+
+// Línea de goleador con foto + minuto + nombre. side='home' (izq, verde) /
+// 'away' (der, blanco; row-reverse → foto al borde exterior).
+function ScorerLine({ g, side }) {
+  const sfx = g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : '';
+  const min = `${g.minute}${g.extra ? `+${g.extra}` : ''}'`;
+  return (
+    <div className={`scorer-line${side === 'away' ? ' right' : ''}`}>
+      <PlayerFace id={g.playerId} />
+      <span className="scorer-txt" style={{ color: side === 'home' ? '#6ee7b7' : '#f1f5f9' }}>
+        <span className="scorer-min">{min}</span> {g.player}{sfx}
+      </span>
+    </div>
+  );
+}
+
+// Penalti fallado (✗ naranja).
+function MissedLine({ p, side }) {
+  return (
+    <div className={`scorer-line${side === 'away' ? ' right' : ''}`}>
+      <PlayerFace id={p.playerId} />
+      <span className="scorer-txt" style={{ color: '#fb923c' }}>
+        <span className="scorer-min">✗ {p.minute}&#39;</span> {p.player}
+      </span>
+    </div>
+  );
+}
+
+// Rejilla de goleadores (local izq / visitante der) con fotos. Devuelve null si
+// no hay nada. Compartida por MatchCard y AccordionCard.
+function GoalScorersGrid({ liveStats, homeId }) {
+  if (!liveStats || (!(liveStats.goalScorers?.length) && !(liveStats.missedPenalties?.length))) return null;
+  const goals = liveStats.goalScorers || [];
+  const missed = liveStats.missedPenalties || [];
+  const homeGoals = goals.filter(g => g.teamId === homeId);
+  const awayGoals = goals.filter(g => g.teamId !== homeId);
+  const homeMissed = missed.filter(p => p.teamId === homeId);
+  const awayMissed = missed.filter(p => p.teamId !== homeId);
+  return (
+    <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 12px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+        {homeGoals.map((g, i) => <ScorerLine key={`g${i}`} g={g} side="home" />)}
+        {homeMissed.map((p, i) => <MissedLine key={`m${i}`} p={p} side="home" />)}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+        {awayGoals.map((g, i) => <ScorerLine key={`g${i}`} g={g} side="away" />)}
+        {awayMissed.map((p, i) => <MissedLine key={`m${i}`} p={p} side="away" />)}
+      </div>
     </div>
   );
 }

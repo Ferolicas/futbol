@@ -86,6 +86,11 @@ function extractLiveStats(match, events, stats) {
       minute: ev.time?.elapsed,
       extra: ev.time?.extra,
       player: ev.player?.name,
+      // playerId/assistId → foto oficial del jugador en el frontend
+      // (media.api-sports.io/football/players/{id}.png).
+      playerId: ev.player?.id ?? null,
+      assist: ev.assist?.name ?? null,
+      assistId: ev.assist?.id ?? null,
     };
 
     if (ev.type === 'Goal') {
