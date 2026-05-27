@@ -996,15 +996,21 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
   const awayName = game.analysis?.away_team || game.teams?.away?.name || 'Visitante';
 
   const opts = [];
-  // Combinada = apuestas REALES: solo opciones que EXISTEN en la casa (tienen
-  // cuota), con cuota ≥1.10. Probabilidad ≥80% para mercados de carreras/props
-  // (ahí se busca seguridad), PERO el GANADOR (moneyline) usa umbral más bajo
-  // (≥55%): un favorito al 58-65% es apostable y valioso, no necesita 80%.
+  // Modelo HÍBRIDO:
+  //  - Mercados principales (moneyline/totales/run line): The Odds API SÍ da
+  //    cuota → se muestran con cuota (apostables, cuota ≥1.10).
+  //  - Otros mercados (F5, team totals, BTTS): The Odds API solo los da por
+  //    evento (caro) → se muestran SIN cuota como REFERENCIA (existen en la
+  //    casa; el usuario ve la cuota allá). No gastan créditos extra.
+  // Probabilidad ≥80% para carreras/props; el GANADOR (moneyline) ≥55% (un
+  // favorito al 58-65% es apostable y valioso, no necesita 80%).
   const MIN_ODD = 1.10;
   const add = (key, cat, label, prob, odd, extra = {}, minProb = 80) => {
     if (prob == null || prob < minProb) return;
-    if (!odd || odd < MIN_ODD) return;
-    opts.push({ key, cat, label, probability: Math.round(prob), odd, ...extra });
+    // Si tiene cuota pero es < 1.10, no vale la pena → excluir.
+    // Si no tiene cuota, se muestra igual (referencia, sin @cuota).
+    if (odd != null && odd < MIN_ODD) return;
+    opts.push({ key, cat, label, probability: Math.round(prob), odd: (odd != null && odd >= MIN_ODD) ? odd : null, ...extra });
   };
 
   if (probs.moneyline) {
@@ -1044,9 +1050,10 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
     add('btts-n', 'Ambos anotan', 'Algún equipo en blanco', probs.btts.no, best.btts?.no);
   }
 
-  const markets = opts.sort((a, b) => b.probability - a.probability);
+  // Con cuota primero (apostables), luego por probabilidad.
+  const markets = opts.sort((a, b) => (b.odd ? 1 : 0) - (a.odd ? 1 : 0) || b.probability - a.probability);
   if (markets.length === 0) {
-    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Ninguna opción apostable (cuota ≥1.10; ganador ≥55%, resto ≥80%) en este partido.</div>;
+    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Ninguna opción (ganador ≥55%, resto ≥80%) en este partido.</div>;
   }
 
   const byCat = markets.reduce((acc, m) => {
@@ -1084,7 +1091,9 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
                   <span style={{ fontWeight: 800, fontSize: '.78rem', color: m.probability >= 75 ? '#fcd34d' : m.probability >= 60 ? '#fbbf24' : '#94a3b8' }}>
                     {m.probability}%
                   </span>
-                  {m.odd && <span style={{ fontSize: '.7rem', color: '#fde68a', fontFamily: 'JetBrains Mono, monospace' }}>@{m.odd}</span>}
+                  {m.odd
+                    ? <span style={{ fontSize: '.7rem', color: '#fde68a', fontFamily: 'JetBrains Mono, monospace' }}>@{m.odd}</span>
+                    : <span title="Mercado disponible en tu casa de apuestas; consulta la cuota allí" style={{ fontSize: '.62rem', color: '#64748b', fontStyle: 'italic' }}>ref.</span>}
                 </button>
               );
             })}
