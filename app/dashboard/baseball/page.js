@@ -997,17 +997,19 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
 
   const opts = [];
   // Combinada = apuestas REALES: solo opciones que EXISTEN en la casa (tienen
-  // cuota), con cuota ≥1.20 y probabilidad ≥80%. Sin cuota no se puede apostar
-  // → no se muestra (de nada sirve verla si no existe en la casa).
-  const add = (key, cat, label, prob, odd, extra = {}) => {
-    if (prob == null || prob < 80) return;
-    if (!odd || odd < 1.20) return;
+  // cuota), con cuota ≥1.10. Probabilidad ≥80% para mercados de carreras/props
+  // (ahí se busca seguridad), PERO el GANADOR (moneyline) usa umbral más bajo
+  // (≥55%): un favorito al 58-65% es apostable y valioso, no necesita 80%.
+  const MIN_ODD = 1.10;
+  const add = (key, cat, label, prob, odd, extra = {}, minProb = 80) => {
+    if (prob == null || prob < minProb) return;
+    if (!odd || odd < MIN_ODD) return;
     opts.push({ key, cat, label, probability: Math.round(prob), odd, ...extra });
   };
 
   if (probs.moneyline) {
-    add('ml-home', 'Moneyline', `${homeName} gana`, probs.moneyline.home, best.moneyline?.home);
-    add('ml-away', 'Moneyline', `${awayName} gana`, probs.moneyline.away, best.moneyline?.away);
+    add('ml-home', 'Moneyline', `${homeName} gana`, probs.moneyline.home, best.moneyline?.home, {}, 55);
+    add('ml-away', 'Moneyline', `${awayName} gana`, probs.moneyline.away, best.moneyline?.away, {}, 55);
   }
   if (probs.totals?.lines) {
     for (const [line, v] of Object.entries(probs.totals.lines)) {
@@ -1044,7 +1046,7 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
 
   const markets = opts.sort((a, b) => b.probability - a.probability);
   if (markets.length === 0) {
-    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Ninguna opción apostable (cuota ≥1.20 y probabilidad ≥80%) en este partido.</div>;
+    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Ninguna opción apostable (cuota ≥1.10; ganador ≥55%, resto ≥80%) en este partido.</div>;
   }
 
   const byCat = markets.reduce((acc, m) => {
