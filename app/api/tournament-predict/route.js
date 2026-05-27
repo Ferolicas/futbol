@@ -41,7 +41,6 @@ const TOURNAMENT_LEAGUES = new Set([
   13,   // CONMEBOL Libertadores
   26,   // CONCACAF Champions Cup
   17,   // AFC Champions League
-  12,   // CAF Champions League
   16,   // FIFA Club World Cup
   45,   // FA Cup
   143,  // Copa del Rey
