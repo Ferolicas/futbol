@@ -41,6 +41,7 @@ const [
   _baseballCalibration,
   _oddsApi,
   _db,
+  _mlbStatsApi,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
@@ -56,6 +57,7 @@ const [
   import(LIB + 'baseball-calibration.js'),
   import(LIB + 'odds-api.js'),
   import(LIB + 'db.js'),
+  import(LIB + 'mlb-stats-api.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -129,6 +131,17 @@ export const flattenProbabilitiesForStorage = _baseballCalibration.flattenProbab
 
 // lib/odds-api.js
 export const fetchOddsForFixtures = _oddsApi.fetchOddsForFixtures;
+export const fetchMlbOddsByDate = _oddsApi.fetchMlbOddsByDate;
+export const matchMlbOdds = _oddsApi.matchMlbOdds;
+
+// lib/mlb-stats-api.js — fuente oficial MLB/MiLB (statsapi.mlb.com)
+export const getMlbScheduleByDate = _mlbStatsApi.getMlbScheduleByDate;
+export const getMlbPitcherMatchup = _mlbStatsApi.getMlbPitcherMatchup;
+export const getMlbTeamSeasonStats = _mlbStatsApi.getMlbTeamSeasonStats;
+export const toModelTeamStats = _mlbStatsApi.toModelTeamStats;
+export const getMlbLiveGame = _mlbStatsApi.getMlbLiveGame;
+export const getMlbResultsByDate = _mlbStatsApi.getMlbResultsByDate;
+export const MLB_SPORT_IDS = _mlbStatsApi.MLB_SPORT_IDS;
 
 // lib/db.js — acceso raw pg para casos que pgAdmin no cubre (RPC, raw SQL)
 export const pgQuery = _db.pgQuery;
