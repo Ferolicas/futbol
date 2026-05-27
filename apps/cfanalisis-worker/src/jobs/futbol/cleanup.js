@@ -22,13 +22,11 @@ export async function runCleanup(payload = {}) {
   console.log(`[job:futbol-cleanup] ${isPurge ? 'PURGE' : 'routine'} cutoff=${cutoffDate}`);
   const results = {};
 
-  const { error: e1, count: c1 } = await supabaseAdmin
-    .from('match_analysis')
-    .delete()
-    .lt('date', cutoffDate)
-    .select('*', { count: 'exact', head: true });
-  results.match_analysis = c1 || 0;
-  if (e1) console.error('[cleanup] match_analysis:', e1.message);
+  // match_analysis YA NO SE BORRA — es información valiosa (forma últimos 10,
+  // stats, goles por jugador, alineaciones, cuotas point-in-time) que alimenta
+  // el modelo contextual. Antes se purgaba a los 7 días = se tiraba el histórico.
+  // fixtures_cache y match_schedule sí se limpian: son cachés regenerables.
+  results.match_analysis = 0;
 
   const { error: e2, count: c2 } = await supabaseAdmin
     .from('fixtures_cache')
