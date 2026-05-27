@@ -1091,9 +1091,7 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
                   <span style={{ fontWeight: 800, fontSize: '.78rem', color: m.probability >= 75 ? '#fcd34d' : m.probability >= 60 ? '#fbbf24' : '#94a3b8' }}>
                     {m.probability}%
                   </span>
-                  {m.odd
-                    ? <span style={{ fontSize: '.7rem', color: '#fde68a', fontFamily: 'JetBrains Mono, monospace' }}>@{m.odd}</span>
-                    : <span title="Mercado disponible en tu casa de apuestas; consulta la cuota allí" style={{ fontSize: '.62rem', color: '#64748b', fontStyle: 'italic' }}>ref.</span>}
+                  {m.odd && <span style={{ fontSize: '.7rem', color: '#fde68a', fontFamily: 'JetBrains Mono, monospace' }}>@{m.odd}</span>}
                 </button>
               );
             })}
