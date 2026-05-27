@@ -982,25 +982,65 @@ function SubAccordion({ id, title, color, openSub, setOpenSub, defaultOpen, chil
 // BLOQUE: SELECCIONA MERCADOS (combinada.selections como fuente única)
 // =====================================================================
 function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
-  const sels = game.analysis?.combinada?.selections;
-  if (!Array.isArray(sels) || sels.length === 0) {
-    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Sin mercados seleccionables.</div>;
+  // Las opciones salen de las PROBABILIDADES del modelo (igual que los chips de
+  // la tarjeta), NO de combinada.selections. Antes se leía la combinada, que
+  // filtra por cuota (s.odd ≥ 1.20) → si The Odds API no matcheaba ese partido,
+  // el acordeón salía vacío aunque la tarjeta mostrara opciones. La cuota es
+  // referencia: se muestra si existe (best_odds), pero NO es requisito.
+  const probs = game.analysis?.probabilities;
+  if (!probs) {
+    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Sin probabilidades calculadas.</div>;
+  }
+  const best = game.analysis?.best_odds || {};
+  const homeName = game.analysis?.home_team || game.teams?.home?.name || 'Local';
+  const awayName = game.analysis?.away_team || game.teams?.away?.name || 'Visitante';
+
+  const opts = [];
+  const add = (key, cat, label, prob, odd, extra = {}) => {
+    if (prob == null || prob < 60 || prob > 95) return;
+    opts.push({ key, cat, label, probability: Math.round(prob), odd: (odd && odd >= 1.01) ? odd : null, ...extra });
+  };
+
+  if (probs.moneyline) {
+    add('ml-home', 'Moneyline', `${homeName} gana`, probs.moneyline.home, best.moneyline?.home);
+    add('ml-away', 'Moneyline', `${awayName} gana`, probs.moneyline.away, best.moneyline?.away);
+  }
+  if (probs.totals?.lines) {
+    for (const [line, v] of Object.entries(probs.totals.lines)) {
+      add(`tot-o-${line}`, 'Total Carreras', `Más de ${line} carreras`, v.over, best.totals?.[line]?.over?.odd, { _line: parseFloat(line) });
+      add(`tot-u-${line}`, 'Total Carreras', `Menos de ${line} carreras`, v.under, best.totals?.[line]?.under?.odd, { _line: parseFloat(line) });
+    }
+  }
+  if (probs.runLine) {
+    add('rl-h-15', 'Run Line', `${homeName} -1.5`, probs.runLine.home_minus_1_5, best.runLine?.home_minus_1_5);
+    add('rl-a+15', 'Run Line', `${awayName} +1.5`, probs.runLine.away_plus_1_5, best.runLine?.away_plus_1_5);
+    add('rl-a-15', 'Run Line', `${awayName} -1.5`, probs.runLine.away_minus_1_5, best.runLine?.away_minus_1_5);
+    add('rl-h+15', 'Run Line', `${homeName} +1.5`, probs.runLine.home_plus_1_5, best.runLine?.home_plus_1_5);
+  }
+  if (probs.f5?.moneyline) {
+    add('f5-h', 'F5 (primeras 5)', `${homeName} F5`, probs.f5.moneyline.home, best.f5?.moneyline?.home);
+    add('f5-a', 'F5 (primeras 5)', `${awayName} F5`, probs.f5.moneyline.away, best.f5?.moneyline?.away);
+  }
+  if (probs.f5?.totals) {
+    for (const [line, v] of Object.entries(probs.f5.totals)) {
+      add(`f5t-o-${line}`, 'F5 (primeras 5)', `F5 Más de ${line}`, v.over, best.f5?.totals?.[line]?.over?.odd, { _line: parseFloat(line) });
+      add(`f5t-u-${line}`, 'F5 (primeras 5)', `F5 Menos de ${line}`, v.under, best.f5?.totals?.[line]?.under?.odd, { _line: parseFloat(line) });
+    }
+  }
+  if (probs.teamTotals?.home) {
+    for (const [line, v] of Object.entries(probs.teamTotals.home)) add(`tth-${line}`, 'Total Local', `${homeName} +${line} carreras`, v.over, best.teamTotals?.home?.[line]?.over?.odd, { _line: parseFloat(line) });
+  }
+  if (probs.teamTotals?.away) {
+    for (const [line, v] of Object.entries(probs.teamTotals.away)) add(`tta-${line}`, 'Total Visitante', `${awayName} +${line} carreras`, v.over, best.teamTotals?.away?.[line]?.over?.odd, { _line: parseFloat(line) });
+  }
+  if (probs.btts) {
+    add('btts-y', 'Ambos anotan', 'Ambos anotan 1+', probs.btts.yes, best.btts?.yes);
+    add('btts-n', 'Ambos anotan', 'Algún equipo en blanco', probs.btts.no, best.btts?.no);
   }
 
-  const markets = sels
-    .filter(s => s.probability >= 60 && s.probability <= 95 && s.odd && s.odd >= 1.20)
-    .sort((a, b) => b.probability - a.probability)
-    .map(s => ({
-      key: s.id,
-      label: s.name,
-      probability: s.probability,
-      odd: s.odd,
-      cat: categorizeMarket(s.category, s.scope),
-      _line: s._line,
-    }));
-
+  const markets = opts.sort((a, b) => b.probability - a.probability);
   if (markets.length === 0) {
-    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Ningún mercado supera filtros 60-95% / cuota ≥ 1.20.</div>;
+    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Ningún mercado entre 60-95% de probabilidad.</div>;
   }
 
   const byCat = markets.reduce((acc, m) => {
@@ -1038,7 +1078,7 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
                   <span style={{ fontWeight: 800, fontSize: '.78rem', color: m.probability >= 75 ? '#fcd34d' : m.probability >= 60 ? '#fbbf24' : '#94a3b8' }}>
                     {m.probability}%
                   </span>
-                  <span style={{ fontSize: '.7rem', color: '#fde68a', fontFamily: 'JetBrains Mono, monospace' }}>@{m.odd}</span>
+                  {m.odd && <span style={{ fontSize: '.7rem', color: '#fde68a', fontFamily: 'JetBrains Mono, monospace' }}>@{m.odd}</span>}
                 </button>
               );
             })}
