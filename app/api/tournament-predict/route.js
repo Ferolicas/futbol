@@ -51,11 +51,7 @@ const TOURNAMENT_LEAGUES = new Set([
   131,  // Copa de la Superliga
   73,   // Copa Betano (Brazil)
   241,  // Copa Colombia
-  147,  // Beker van België
-  90,   // KNVB Beker
-  156,  // Türkiye Kupası
   96,   // Taça de Portugal
-  20,   // CAF Confederation Cup
 ]);
 
 export async function GET(request) {
