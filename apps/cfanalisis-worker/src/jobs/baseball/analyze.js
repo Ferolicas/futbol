@@ -21,6 +21,7 @@ import {
   fetchMlbOddsByDate, matchMlbOdds,
   computeBaseballProbabilities, buildBaseballCombinada, scoreBaseballDataQuality,
   calibrateBaseballProbabilities, flattenProbabilitiesForStorage,
+  extractBaseballPlayerHighlights,
   supabaseAdmin, cronTargetDate,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
@@ -117,11 +118,12 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
       const homeName = game.home?.name;
       const awayName = game.away?.name;
 
-      // Datos en paralelo: pitcher matchup + stats de ambos equipos.
-      const [matchup, homeTeamRaw, awayTeamRaw] = await Promise.all([
+      // Datos en paralelo: pitcher matchup + stats de equipos + player props.
+      const [matchup, homeTeamRaw, awayTeamRaw, playerHighlights] = await Promise.all([
         getMlbPitcherMatchup(game, season).catch(() => null),
         getMlbTeamSeasonStats(game.home?.id, season, game.sportId).catch(() => null),
         getMlbTeamSeasonStats(game.away?.id, season, game.sportId).catch(() => null),
+        extractBaseballPlayerHighlights(game, season).catch(() => null),
       ]);
       const homeStats = toModelTeamStats(homeTeamRaw);
       const awayStats = toModelTeamStats(awayTeamRaw);
@@ -133,13 +135,13 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
 
       const rawProbs = computeBaseballProbabilities({
         homeStats, awayStats, homeId: game.home?.id, awayId: game.away?.id,
-        h2h: [], marketMoneyline, pitcherMatchup: matchup,
+        h2h: [], marketMoneyline, pitcherMatchup: matchup, playerHighlights,
       });
       const probs = await calibrateBaseballProbabilities(rawProbs);
       const combinada = buildBaseballCombinada(probs, bestOdds, { home: homeName, away: awayName });
       const dq = scoreBaseballDataQuality({
         homeStats, awayStats, h2h: [], odds: odds ? [odds] : [],
-        pitcherMatchup: matchup, playerHighlights: null,
+        pitcherMatchup: matchup, playerHighlights,
       });
 
       const { error: upsertErr } = await supabaseAdmin.from('baseball_match_analysis').upsert({

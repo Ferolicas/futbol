@@ -123,7 +123,6 @@ export const buildBaseballCombinada = _baseballModel.buildBaseballCombinada;
 export const scoreBaseballDataQuality = _baseballModel.scoreBaseballDataQuality;
 export const extractBestOdds = _baseballModel.extractBestOdds;
 export const extractBaseballPitcherMatchup = _baseballModel.extractBaseballPitcherMatchup;
-export const extractBaseballPlayerHighlights = _baseballModel.extractBaseballPlayerHighlights;
 
 // lib/baseball-calibration.js
 export const calibrateBaseballProbabilities = _baseballCalibration.calibrateBaseballProbabilities;
@@ -142,6 +141,12 @@ export const toModelTeamStats = _mlbStatsApi.toModelTeamStats;
 export const getMlbLiveGame = _mlbStatsApi.getMlbLiveGame;
 export const getMlbResultsByDate = _mlbStatsApi.getMlbResultsByDate;
 export const MLB_SPORT_IDS = _mlbStatsApi.MLB_SPORT_IDS;
+// Player props (game logs MLB). Sustituye al extractor legacy de baseball-model
+// (que devolvía null porque api-baseball no tiene jugadores).
+export const extractBaseballPlayerHighlights = _mlbStatsApi.extractBaseballPlayerHighlights;
+export const getMlbPitcherGameLog = _mlbStatsApi.getMlbPitcherGameLog;
+export const getMlbBatterGameLog = _mlbStatsApi.getMlbBatterGameLog;
+export const getMlbGameLineup = _mlbStatsApi.getMlbGameLineup;
 
 // lib/db.js — acceso raw pg para casos que pgAdmin no cubre (RPC, raw SQL)
 export const pgQuery = _db.pgQuery;
