@@ -22,7 +22,7 @@ import {
   computeBaseballProbabilities, buildBaseballCombinada, scoreBaseballDataQuality,
   calibrateBaseballProbabilities, flattenProbabilitiesForStorage,
   extractBaseballPlayerHighlights,
-  supabaseAdmin, cronTargetDate,
+  supabaseAdmin, cronTargetDate, bogotaToday,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 import { logger } from '../../logger.js';
@@ -55,10 +55,14 @@ function toBestOdds(odds) {
 
 /** @param {any} payload @param {any} [job] */
 export async function runBaseballAnalyze(payload = {}, job = null) {
-  // Fecha objetivo = jornada Colombia que arranca (igual que fútbol). El cron de
-  // madrugada española analiza el día Colombia 0:00-23:59 que está por empezar.
-  // Si llega `date` explícito en el payload, se respeta.
-  const date = payload.date || cronTargetDate();
+  // Fecha objetivo:
+  //  - normal (cron nocturno): cronTargetDate() = jornada Colombia que arranca.
+  //  - pre-partido (payload.today): bogotaToday() = día Colombia EN CURSO. Lo usa
+  //    el re-análisis de la tarde para capturar el lineup confirmado (props de
+  //    bateadores) de los partidos que se juegan HOY — cronTargetDate apuntaría
+  //    a mañana tras el mediodía Colombia, día equivocado para esto.
+  //  - explícito: payload.date manda.
+  const date = payload.date || (payload.today ? bogotaToday() : cronTargetDate());
   const force = payload.force === true;
   const season = Number(date.slice(0, 4));
   const startedAt = Date.now();

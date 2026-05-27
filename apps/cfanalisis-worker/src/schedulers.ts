@@ -50,7 +50,12 @@ const SCHEDULES: Sched[] = [
   { queue: 'futbol-odds',         id: 'futbol-odds-30m',         pattern: '*/30 * * * *' },
   // ── Baseball — diarios (hora España) ──
   { queue: 'baseball-fixtures',  id: 'baseball-fixtures-daily',  pattern: '5 1 * * *',  tz: TZ }, // 1:05
-  { queue: 'baseball-analyze',   id: 'baseball-analyze-daily',   pattern: '30 1 * * *', tz: TZ }, // 1:30
+  { queue: 'baseball-analyze',   id: 'baseball-analyze-daily',   pattern: '30 1 * * *', tz: TZ }, // 1:30 — jornada Colombia que arranca
+  // Re-análisis PRE-PARTIDO (force + today): captura el lineup confirmado de MLB
+  // (props de bateadores) de los juegos que se juegan HOY Colombia. Corre en la
+  // franja en que MLB publica alineaciones (tarde Colombia = 17-01 España). Odds
+  // cacheadas (3h) → no quema The Odds API; game logs cacheados (6h).
+  { queue: 'baseball-analyze',   id: 'baseball-analyze-pregame', pattern: '0 17,19,21,23,1 * * *', tz: TZ, data: { force: true, today: true } },
   // days:3 — el plan GRATUITO de api-baseball solo permite consultar los
   // últimos 3 días. La ventana de finalize se limita a eso para no pedir
   // fechas que la API rechazaría igualmente.
