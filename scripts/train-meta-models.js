@@ -1,11 +1,9 @@
 /* eslint-disable */
 // ────────────────────────────────────────────────────────────────────────
-// Entrena un META-MODELO logístico por mercado sobre los partidos finalizados
-// CON features_full. Split temporal (entrena con lo viejo, valida con lo
-// nuevo). Solo marca active=true el mercado cuyo meta-modelo SUPERA al baseline
-// (la salida actual del sistema) en logloss de validación. Los que no superan
-// quedan inactivos → el runtime sigue con la calibración isotónica. NO se
-// excluye ningún mercado: se diagnostica.
+// Paso 3 — Entrena el meta-modelo (logística regularizada) por mercado (679),
+// con ADN + H2H + excepciones POINT-IN-TIME (solo datos anteriores a la fecha
+// de cada partido → SIN leakage). Split temporal, valida vs baseline (salida
+// calibrada actual), activa solo los que superan en logloss. Versionado.
 //
 //   node --env-file=.env scripts/train-meta-models.js
 // ────────────────────────────────────────────────────────────────────────
@@ -14,54 +12,32 @@ try { require('dotenv').config({ path: '.env' }); } catch {}
 
 const { Pool } = require('pg');
 const { buildMetaFeatures, predictWithModel, MARKET_DEFS, FEATURE_ORDER } = require('../lib/meta-features');
+const { recordFromRaw, computeMetrics, shrink, filterSegment, RATE_METRICS, ALL_METRICS, FINISHED } = require('../lib/adn');
+const { meetingRecord, h2hForMarket, exceptionCause, rupturePresentToday, modalXIFromLineups } = require('../lib/h2h');
 
-const pgPool = new Pool({
+const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
   max: 5,
 });
 
-const MIN_SAMPLES = 120;     // por debajo de esto no entrenamos (queda isotónica)
-const VAL_FRACTION = 0.2;    // últimos 20% por fecha = validación
-const EPOCHS = 900;
-const LR = 0.3;
-const L2 = 0.01;
-
+const MIN_SAMPLES = 120, VAL_FRACTION = 0.2, EPOCHS = 900, LR = 0.3, L2 = 0.01;
+const PRIOR_RATE = 8, PRIOR_AVG = 6;
 const sigmoid = (z) => 1 / (1 + Math.exp(-z));
 const clamp01 = (p) => Math.max(1e-6, Math.min(1 - 1e-6, p));
 const logloss = (y, p) => { p = clamp01(p); return -(y * Math.log(p) + (1 - y) * Math.log(1 - p)); };
+const round4 = (v) => v == null ? null : Math.round(v * 10000) / 10000;
 
-// Carga perfiles de equipo en memoria: teamId → { metric → {shrunk_value, sample_n, consistency} }.
-async function loadProfiles() {
-  const { rows } = await pgPool.query(
-    `SELECT team_id, segment, metric, sample_n, shrunk_value, consistency FROM team_market_profiles WHERE sport='football'`
-  );
-  const map = {}; // teamId → segment → metric → {shrunk_value, sample_n, consistency}
-  for (const r of rows) {
-    const t = (map[r.team_id] = map[r.team_id] || {});
-    const seg = (t[r.segment] = t[r.segment] || {});
-    seg[r.metric] = { shrunk_value: r.shrunk_value, sample_n: r.sample_n, consistency: r.consistency };
-  }
-  return map;
-}
-
-// Entrena logística con descenso de gradiente + L2 sobre features estandarizadas.
 function trainLogistic(samples) {
-  const d = FEATURE_ORDER.length;
-  // Imputación: media por columna (sobre no-nulos). Luego estandarización.
-  const means = {}, stds = {};
+  const d = FEATURE_ORDER.length, means = {}, stds = {};
   for (const fn of FEATURE_ORDER) {
     const vals = samples.map(s => s.features[fn]).filter(v => v != null && isFinite(v));
     const m = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
-    const variance = vals.length ? vals.reduce((a, b) => a + (b - m) ** 2, 0) / vals.length : 0;
-    means[fn] = m; stds[fn] = Math.sqrt(variance) || 1;
+    const va = vals.length ? vals.reduce((a, b) => a + (b - m) ** 2, 0) / vals.length : 0;
+    means[fn] = m; stds[fn] = Math.sqrt(va) || 1;
   }
-  const X = samples.map(s => FEATURE_ORDER.map(fn => {
-    const raw = s.features[fn]; const v = (raw == null || !isFinite(raw)) ? means[fn] : raw;
-    return (v - means[fn]) / stds[fn];
-  }));
-  const y = samples.map(s => s.y);
-  const n = X.length;
+  const X = samples.map(s => FEATURE_ORDER.map(fn => { const r = s.features[fn]; const v = (r == null || !isFinite(r)) ? means[fn] : r; return (v - means[fn]) / stds[fn]; }));
+  const y = samples.map(s => s.y), n = X.length;
   let w = new Array(d).fill(0), b = 0;
   for (let ep = 0; ep < EPOCHS; ep++) {
     const dw = new Array(d).fill(0); let db = 0;
@@ -79,79 +55,139 @@ function trainLogistic(samples) {
 }
 
 (async () => {
-  const profiles = await loadProfiles();
-  console.log(`Perfiles cargados: ${Object.keys(profiles).length} equipos`);
+  console.log('\nCargando crudos para ADN/H2H point-in-time…');
+  const [{ rows: fxRows }, { rows: stRows }, { rows: h2hRows }, { rows: evRows }, { rows: luRows }, { rows: injRows }] = await Promise.all([
+    pool.query(`SELECT ref_id,payload FROM raw_api_payloads WHERE endpoint='fixtures'`),
+    pool.query(`SELECT ref_id,payload FROM raw_api_payloads WHERE endpoint='fixtures/statistics'`),
+    pool.query(`SELECT ref_id,sub_key,payload FROM raw_api_payloads WHERE endpoint='fixtures/headtohead'`),
+    pool.query(`SELECT ref_id,payload FROM raw_api_payloads WHERE endpoint='fixtures/events'`),
+    pool.query(`SELECT ref_id,payload FROM raw_api_payloads WHERE endpoint='fixtures/lineups'`),
+    pool.query(`SELECT ref_id,payload FROM raw_api_payloads WHERE endpoint='injuries' AND sub_key LIKE 'fx:%'`),
+  ]);
+  const stById = new Map(stRows.map(r => [Number(r.ref_id), r.payload]));
+  const ctx = {
+    events: Object.fromEntries(evRows.map(r => [Number(r.ref_id), r.payload])),
+    lineups: Object.fromEntries(luRows.map(r => [Number(r.ref_id), r.payload])),
+    injuries: Object.fromEntries(injRows.map(r => [Number(r.ref_id), r.payload])),
+  };
+  // Índices: fixtures por equipo (ordenados) + por liga + registros + meetings por par.
+  const byTeam = new Map(), byLeague = new Map(), leagueRecs = new Map(), allRecs = [];
+  const lineupsByTeam = new Map();
+  for (const r of fxRows) {
+    const f = r.payload, st = stById.get(Number(f?.fixture?.id)) || null;
+    if (f.league?.id) { if (!byLeague.has(f.league.id)) byLeague.set(f.league.id, []); byLeague.get(f.league.id).push(f); }
+    for (const tid of [f.teams?.home?.id, f.teams?.away?.id]) {
+      if (!tid) continue;
+      if (!byTeam.has(tid)) byTeam.set(tid, []); byTeam.get(tid).push(f);
+      const rec = recordFromRaw(f, st, tid);
+      if (rec) { allRecs.push(rec); if (rec.leagueId) { if (!leagueRecs.has(rec.leagueId)) leagueRecs.set(rec.leagueId, []); leagueRecs.get(rec.leagueId).push(rec); } }
+    }
+  }
+  for (const arr of byTeam.values()) arr.sort((a, b) => new Date(a.fixture.date) - new Date(b.fixture.date));
+  // modal XI por equipo (de todos los lineups disponibles).
+  for (const r of luRows) { const arr = r.payload?.response || r.payload || []; for (const l of (Array.isArray(arr) ? arr : [])) { const tid = l.team?.id; if (!tid) continue; if (!lineupsByTeam.has(tid)) lineupsByTeam.set(tid, []); lineupsByTeam.get(tid).push(r.payload); } }
+  const modalXI = new Map(); for (const [tid, lps] of lineupsByTeam) modalXI.set(tid, modalXIFromLineups(lps, tid));
+  // meetings por par (min-max).
+  const meetingsByPair = new Map();
+  for (const r of h2hRows) {
+    const a = Number(r.ref_id), b = Number(r.sub_key); const key = `${Math.min(a, b)}-${Math.max(a, b)}`;
+    const ms = (r.payload?.response || []).map(f => meetingRecord(f, stById.get(Number(f?.fixture?.id)) || null)).filter(Boolean);
+    meetingsByPair.set(key, ms);
+  }
+  // priors de liga (full-season; anclas poblacionales, no el target → uso permitido).
+  const globalPrior = computeMetrics(allRecs);
+  const leaguePrior = new Map(); for (const [lid, recs] of leagueRecs) leaguePrior.set(lid, computeMetrics(recs));
+  const priorVal = (lid, m) => leaguePrior.get(lid)?.[m]?.emp ?? globalPrior[m]?.emp ?? null;
 
-  const { rows } = await pgPool.query(
+  // ADN point-in-time del equipo (segmentos all/home/away) a fecha beforeMs.
+  function ptADN(teamId, beforeMs) {
+    const recs = (byTeam.get(teamId) || [])
+      .filter(f => new Date(f.fixture.date).getTime() < beforeMs && FINISHED.has(f.fixture?.status?.short))
+      .map(f => recordFromRaw(f, stById.get(Number(f.fixture.id)) || null, teamId)).filter(Boolean);
+    const lidCount = {}; for (const r of recs) if (r.leagueId) lidCount[r.leagueId] = (lidCount[r.leagueId] || 0) + 1;
+    const primaryLid = Number(Object.entries(lidCount).sort((a, b) => b[1] - a[1])[0]?.[0]) || null;
+    const out = {};
+    for (const seg of ['all', 'home', 'away']) {
+      const mm = computeMetrics(filterSegment(recs, seg)); const o = {};
+      for (const metric of ALL_METRICS) { const x = mm[metric]; if (!x) continue; const k = RATE_METRICS.includes(metric) ? PRIOR_RATE : PRIOR_AVG; o[metric] = { shrunk_value: shrink(x.emp, x.n, priorVal(primaryLid, metric), k), sample_n: x.n, consistency: x.n / (x.n + k) }; }
+      out[seg] = o;
+    }
+    return out;
+  }
+
+  console.log('Cargando match_predictions…');
+  const { rows: preds } = await pool.query(
     `SELECT fixture_id, kickoff, home_team, away_team, predictions_full, features_full, actuals_full
-     FROM match_predictions
-     WHERE finalized_at IS NOT NULL AND features_full IS NOT NULL AND predictions_full IS NOT NULL AND actuals_full IS NOT NULL
-     ORDER BY kickoff ASC`
-  );
-  console.log(`Partidos entrenables (con features): ${rows.length}\n`);
-  if (rows.length < MIN_SAMPLES) { console.log('Datos insuficientes para entrenar todavía.'); await pgPool.end(); return; }
+     FROM match_predictions WHERE finalized_at IS NOT NULL AND features_full IS NOT NULL AND predictions_full IS NOT NULL AND actuals_full IS NOT NULL
+     ORDER BY kickoff ASC`);
+  console.log(`Entrenables: ${preds.length}`);
+  if (preds.length < MIN_SAMPLES) { console.log('Datos insuficientes.'); await pool.end(); return; }
+
+  // Base por muestra (ADN + meetings + contexto-hoy), reutilizable entre mercados.
+  const base = preds.map(p => {
+    const homeId = p.home_team?.id, awayId = p.away_team?.id, beforeMs = new Date(p.kickoff).getTime();
+    const ff = p.features_full || {};
+    const todayCtx = {
+      knockout: !!ff.competition?.isKnockout,
+      keyInjury: ((ff.state?.home?.injuryCount || 0) + (ff.state?.away?.injuryCount || 0)) > 0,
+      rotationRisk: 0, earlyRedRisk: 0,
+    };
+    return {
+      p, homeId, awayId, beforeMs, ff,
+      homeADN: ptADN(homeId, beforeMs), awayADN: ptADN(awayId, beforeMs),
+      meetings: meetingsByPair.get(`${Math.min(homeId, awayId)}-${Math.max(homeId, awayId)}`) || [],
+      todayCtx,
+    };
+  });
 
   const allMarkets = Object.keys(MARKET_DEFS);
-  console.log(`Mercados en el catálogo: ${allMarkets.length} (escalares + over/under × líneas)\n`);
-  const summary = [];
-  let trained = 0, activated = 0, skipped = 0;
+  console.log(`Catálogo: ${allMarkets.length} mercados\n`);
+  const summary = []; let trained = 0, activated = 0, skipped = 0;
+
   for (const market of allMarkets) {
     const def = MARKET_DEFS[market];
     const samples = [];
-    for (const r of rows) {
-      if (!def.gate(r.actuals_full)) continue;
-      const mf = buildMetaFeatures({
-        featuresFull: r.features_full, predictionsFull: r.predictions_full,
-        homeProfile: profiles[r.home_team?.id], awayProfile: profiles[r.away_team?.id], market,
-      });
+    for (const sb of base) {
+      if (!def.gate(sb.p.actuals_full)) continue;
+      const h2h = h2hForMarket(sb.meetings, market, sb.homeId, sb.awayId, sb.beforeMs);
+      // Nivel 3: causa de las excepciones + ¿presente hoy?
+      let ruptureToday = 0;
+      if (h2h.exceptions.length) {
+        const agg = { earlyRed: false, knockout: false, rotation: false, keyInjury: false };
+        for (const ex of h2h.exceptions) {
+          const c = exceptionCause(ex.fixtureId, ctx, sb.homeId, modalXI.get(sb.homeId));
+          for (const k of Object.keys(agg)) agg[k] = agg[k] || c[k];
+        }
+        ruptureToday = rupturePresentToday(agg, sb.todayCtx);
+      }
+      const causal = { exceptionRate: h2h.n ? h2h.exceptions.length / h2h.n : null, ruptureToday, rotationRisk: 0 };
+      const mf = buildMetaFeatures({ featuresFull: sb.ff, predictionsFull: sb.p.predictions_full, homeProfile: sb.homeADN, awayProfile: sb.awayADN, market, h2h, causal });
       if (!mf) continue;
-      samples.push({ features: mf.features, base: mf.base, y: def.outcome(r.actuals_full) ? 1 : 0, kickoff: r.kickoff });
+      samples.push({ features: mf.features, base: mf.base, y: def.outcome(sb.p.actuals_full) ? 1 : 0 });
     }
     if (samples.length < MIN_SAMPLES) { skipped++; continue; }
     trained++;
-
-    // Split temporal
     const cut = Math.floor(samples.length * (1 - VAL_FRACTION));
-    const train = samples.slice(0, cut), val = samples.slice(cut);
-    const model = trainLogistic(train);
-
-    // Validación: meta vs baseline (prob base actual del sistema).
-    let metaLL = 0, baseLL = 0, metaBr = 0, baseBr = 0;
-    for (const s of val) {
-      const pm = predictWithModel(model, s.features);
-      metaLL += logloss(s.y, pm); baseLL += logloss(s.y, s.base);
-      metaBr += (pm - s.y) ** 2; baseBr += (s.base - s.y) ** 2;
-    }
-    const nv = val.length;
-    metaLL /= nv; baseLL /= nv; metaBr /= nv; baseBr /= nv;
-    const beats = metaLL < baseLL;
-
-    // Versionado
-    const { rows: vr } = await pgPool.query(`SELECT COALESCE(MAX(version),0) AS v FROM prediction_models WHERE sport='football' AND market_key=$1`, [market]);
-    const version = vr[0].v + 1;
-    // Desactivar versiones previas; activar esta solo si supera al baseline.
-    await pgPool.query(`UPDATE prediction_models SET active=FALSE WHERE sport='football' AND market_key=$1`, [market]);
-    await pgPool.query(
-      `INSERT INTO prediction_models (sport, market_key, version, model_type, weights, metrics, active, trained_at)
-       VALUES ('football', $1, $2, 'logistic', $3::jsonb, $4::jsonb, $5, NOW())`,
-      [market, version, JSON.stringify(model), JSON.stringify({
-        n: samples.length, n_val: nv,
-        logloss: round4(metaLL), brier: round4(metaBr),
-        base_logloss: round4(baseLL), base_brier: round4(baseBr),
-        beats_baseline: beats,
-      }), beats]
-    );
+    const tr = samples.slice(0, cut), val = samples.slice(cut);
+    const model = trainLogistic(tr);
+    let mLL = 0, bLL = 0, mBr = 0, bBr = 0;
+    for (const s of val) { const pm = predictWithModel(model, s.features); mLL += logloss(s.y, pm); bLL += logloss(s.y, s.base); mBr += (pm - s.y) ** 2; bBr += (s.base - s.y) ** 2; }
+    const nv = val.length; mLL /= nv; bLL /= nv; mBr /= nv; bBr /= nv;
+    const beats = mLL < bLL;
     if (beats) activated++;
-    summary.push(`  ${market.padEnd(26)} n=${String(samples.length).padStart(4)}  LL meta=${metaLL.toFixed(4)} base=${baseLL.toFixed(4)}  ${beats ? '✓ ACTIVO' : '· (queda isotónica)'}`);
+    const { rows: vr } = await pool.query(`SELECT COALESCE(MAX(version),0) v FROM prediction_models WHERE sport='football' AND market_key=$1`, [market]);
+    await pool.query(`UPDATE prediction_models SET active=FALSE WHERE sport='football' AND market_key=$1`, [market]);
+    await pool.query(
+      `INSERT INTO prediction_models (sport,market_key,version,model_type,weights,metrics,active,trained_at)
+       VALUES ('football',$1,$2,'logistic',$3::jsonb,$4::jsonb,$5,NOW())`,
+      [market, vr[0].v + 1, JSON.stringify(model), JSON.stringify({ n: samples.length, n_val: nv, logloss: round4(mLL), brier: round4(mBr), base_logloss: round4(bLL), base_brier: round4(bBr), beats_baseline: beats }), beats]
+    );
+    summary.push(`  ${market.padEnd(26)} n=${String(samples.length).padStart(4)}  LL meta=${mLL.toFixed(4)} base=${bLL.toFixed(4)}  Brier meta=${mBr.toFixed(4)} base=${bBr.toFixed(4)}  ${beats ? '✓ ACTIVO' : '·'}`);
   }
 
-  // Ordenar: activos primero, luego por mejora de logloss.
-  console.log('Mercados entrenados:');
-  console.log(summary.join('\n'));
+  console.log('Mercados entrenados:'); console.log(summary.join('\n'));
   console.log(`\n══ RESUMEN ══`);
-  console.log(`Catálogo: ${allMarkets.length} mercados · entrenados: ${trained} (≥${MIN_SAMPLES} muestras) · ACTIVOS: ${activated} · skip por datos: ${skipped}`);
-  console.log('✓ Guardado en prediction_models. active=true solo donde el contexto supera al baseline.');
-  await pgPool.end();
+  console.log(`Catálogo ${allMarkets.length} · entrenados ${trained} · ACTIVOS ${activated} · skip ${skipped}`);
+  console.log('✓ prediction_models actualizado (active = supera baseline).');
+  await pool.end();
 })().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
-
-function round4(v) { return v == null ? null : Math.round(v * 10000) / 10000; }
