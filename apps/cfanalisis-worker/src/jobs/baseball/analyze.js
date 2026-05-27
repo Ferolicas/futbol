@@ -148,6 +148,11 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
         pitcherMatchup: matchup, playerHighlights,
       });
 
+      const _pl = probs?.players || {};
+      console.log('[persist] fid=%s players keys=%s lens=%s', fixtureId,
+        Object.keys(_pl).join(',') || 'none',
+        Object.keys(_pl).map(k => Array.isArray(_pl[k]) ? _pl[k].length : '?').join('/') || '-');
+
       const { error: upsertErr } = await supabaseAdmin.from('baseball_match_analysis').upsert({
         fixture_id: fixtureId,
         date,

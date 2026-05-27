@@ -45,6 +45,18 @@ export async function POST(_request, { params }) {
     const awayId = game.teams?.away?.id;
     const leagueId = game.league?.id;
 
+    // NO DEGRADAR: si el cron ya escribió una análisis MLB completa (con player
+    // props / pitcher matchup), devolverla tal cual. Esta ruta usa el pipeline
+    // viejo de api-baseball (sin players ni pitcher) y sobreescribirla borraría
+    // las recomendaciones de jugadores.
+    const { data: existing } = await supabaseAdmin
+      .from('baseball_match_analysis')
+      .select('probabilities, combinada, data_quality, analysis')
+      .eq('fixture_id', fixtureId).maybeSingle();
+    if (existing && (existing.probabilities?.players || existing.analysis?.pitcherMatchup || existing.analysis?.gamePk)) {
+      return Response.json({ success: true, fixtureId, cached: true, probabilities: existing.probabilities, combinada: existing.combinada, dataQuality: existing.data_quality });
+    }
+
     const [oddsRes, h2hRes, homeStatsRes, awayStatsRes] = await Promise.allSettled([
       getBaseballOddsByGame(fixtureId),
       getBaseballH2H(homeId, awayId),

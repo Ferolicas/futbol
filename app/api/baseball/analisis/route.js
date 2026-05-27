@@ -79,6 +79,18 @@ export async function POST(request) {
           continue;
         }
 
+        // NO DEGRADAR la análisis MLB del cron (con player props / pitcher
+        // matchup). Si ya existe, devolverla sin recomputar con el pipeline
+        // viejo de api-baseball (que borraría los bateadores).
+        const { data: existing } = await supabaseAdmin
+          .from('baseball_match_analysis')
+          .select('probabilities, combinada, analysis')
+          .eq('fixture_id', fixtureId).maybeSingle();
+        if (existing && (existing.probabilities?.players || existing.analysis?.pitcherMatchup || existing.analysis?.gamePk)) {
+          analyses.push({ fixtureId, success: true, cached: true, probabilities: existing.probabilities, combinada: existing.combinada });
+          continue;
+        }
+
         const [oddsR, h2hR, hStR, aStR] = await Promise.allSettled([
           getBaseballOddsByGame(fixtureId),
           getBaseballH2H(homeId, awayId),
