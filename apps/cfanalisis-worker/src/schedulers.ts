@@ -19,7 +19,7 @@ type Sched = { queue: QueueName; id: string; pattern?: string; every?: number; t
 
 // IDs de schedulers viejos a eliminar en cada arranque (evita que sigan
 // corriendo en paralelo tras cambiar el id/cadencia de un job).
-const STALE_SCHEDULER_IDS = ['futbol-live-1m'];
+const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-odds-15m'];
 
 const SCHEDULES: Sched[] = [
   // ── Fútbol — diarios (hora España) ──
@@ -44,7 +44,10 @@ const SCHEDULES: Sched[] = [
   { queue: 'futbol-live',         id: 'futbol-live-20s',         every: 20_000 },
   { queue: 'futbol-lineups',      id: 'futbol-lineups-5m',       pattern: '*/5 * * * *' },
   { queue: 'futbol-live-corners', id: 'futbol-live-corners-30m', pattern: '*/30 * * * *' },
-  { queue: 'futbol-odds',         id: 'futbol-odds-15m',         pattern: '*/15 * * * *' },
+  // Odds: el cron dispara cada 30min pero el handler tiene PRESUPUESTO de 7
+  // llamadas/día con espaciado (primera 2h antes del 1er partido). The Odds API
+  // free son 500/mes — el cada-15min anterior las quemaba en 1-2 días.
+  { queue: 'futbol-odds',         id: 'futbol-odds-30m',         pattern: '*/30 * * * *' },
   // ── Baseball — diarios (hora España) ──
   { queue: 'baseball-fixtures',  id: 'baseball-fixtures-daily',  pattern: '5 1 * * *',  tz: TZ }, // 1:05
   { queue: 'baseball-analyze',   id: 'baseball-analyze-daily',   pattern: '30 1 * * *', tz: TZ }, // 1:30
