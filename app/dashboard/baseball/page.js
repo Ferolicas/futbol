@@ -657,6 +657,48 @@ function ScoreCenter({ live, hasScore, homeScore, awayScore, statusLabel, time, 
   );
 }
 
+// Recomendaciones de JUGADOR (player props) con foto oficial MLB.
+// players = probabilities.players: { strikeouts:[{id,name,teamName,lineProbs}], hits, homeRuns, totalBases, rbis }
+function PlayerPropsBlock({ players }) {
+  if (!players || Object.keys(players).length === 0) {
+    return <div style={{ fontSize: '.74rem', color: '#94a3b8', padding: '4px 2px' }}>Sin recomendaciones de jugador todavía (el lineup de bateadores lo publica MLB unas horas antes; los ponches del pitcher aparecen tras el análisis).</div>;
+  }
+  const cats = [
+    { key: 'strikeouts', label: 'ponches', emoji: '🔥', minProb: 55 },
+    { key: 'hits',       label: 'hits',    emoji: '🏏', minProb: 55 },
+    { key: 'totalBases', label: 'bases totales', emoji: '💥', minProb: 55 },
+    { key: 'rbis',       label: 'RBI',     emoji: '🏃', minProb: 50 },
+    { key: 'homeRuns',   label: 'home run', emoji: '⚾', minProb: 15 },
+  ];
+  const bestLine = (lineProbs, minProb) => {
+    const entries = Object.entries(lineProbs || {}).map(([l, p]) => [parseFloat(l), p]).sort((a, b) => b[0] - a[0]);
+    for (const [l, p] of entries) if (p >= minProb) return { line: Math.ceil(l), prob: p };
+    return entries.length ? { line: Math.ceil(entries[entries.length - 1][0]), prob: entries[entries.length - 1][1] } : null;
+  };
+  const rows = [];
+  for (const cat of cats) {
+    for (const pl of (players[cat.key] || [])) {
+      const best = bestLine(pl.lineProbs, cat.minProb);
+      if (best) rows.push({ id: pl.id, name: pl.name, team: pl.teamName, cat, best });
+    }
+  }
+  rows.sort((a, b) => b.best.prob - a.best.prob);
+  if (rows.length === 0) return <div style={{ fontSize: '.74rem', color: '#94a3b8' }}>Sin recomendaciones de jugador.</div>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {rows.map((r, i) => (
+        <div key={`${r.id}-${r.cat.key}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 9px', borderRadius: 9, background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.05)' }}>
+          <Image src={pitcherFace(r.id)} alt={r.name} width={28} height={28} style={{ borderRadius: '50%', objectFit: 'cover', background: 'rgba(255,255,255,.06)' }} unoptimized />
+          <span style={{ flex: 1, fontSize: '.78rem', color: '#f1f5f9', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {r.cat.emoji} {r.name} <span style={{ color: '#94a3b8' }}>— {r.best.line}+ {r.cat.label}</span>
+          </span>
+          <span style={{ fontSize: '.84rem', fontWeight: 800, color: r.best.prob >= 65 ? '#22c55e' : '#fde68a', fontFamily: 'JetBrains Mono, monospace' }}>{r.best.prob}%</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded,
                     onExpand, onSelect, onFavorite, onDismiss,
                     selectedMarkets, onToggleMarket }) {
@@ -848,6 +890,16 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
                     homeTeam={game.analysis.home_team || home?.name}
                     awayTeam={game.analysis.away_team || away?.name}
                   />
+                </SubAccordion>
+
+                <SubAccordion
+                  id="players"
+                  title="⚾ Recomendaciones de jugadores"
+                  color="#22c55e"
+                  openSub={openSub}
+                  setOpenSub={setOpenSub}
+                >
+                  <PlayerPropsBlock players={game.analysis.probabilities?.players} />
                 </SubAccordion>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
