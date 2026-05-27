@@ -663,17 +663,21 @@ function PlayerPropsBlock({ players }) {
   if (!players || Object.keys(players).length === 0) {
     return <div style={{ fontSize: '.74rem', color: '#94a3b8', padding: '4px 2px' }}>Sin recomendaciones de jugador todavía (el lineup de bateadores lo publica MLB unas horas antes; los ponches del pitcher aparecen tras el análisis).</div>;
   }
+  // Solo recomendaciones con probabilidad ≥ 80% (todas las categorías).
+  const MIN_PROB = 80;
   const cats = [
-    { key: 'strikeouts', label: 'ponches', emoji: '🔥', minProb: 55 },
-    { key: 'hits',       label: 'hits',    emoji: '🏏', minProb: 55 },
-    { key: 'totalBases', label: 'bases totales', emoji: '💥', minProb: 55 },
-    { key: 'rbis',       label: 'RBI',     emoji: '🏃', minProb: 50 },
-    { key: 'homeRuns',   label: 'home run', emoji: '⚾', minProb: 15 },
+    { key: 'strikeouts', label: 'ponches', emoji: '🔥', minProb: MIN_PROB },
+    { key: 'hits',       label: 'hits',    emoji: '🏏', minProb: MIN_PROB },
+    { key: 'totalBases', label: 'bases totales', emoji: '💥', minProb: MIN_PROB },
+    { key: 'rbis',       label: 'RBI',     emoji: '🏃', minProb: MIN_PROB },
+    { key: 'homeRuns',   label: 'home run', emoji: '⚾', minProb: MIN_PROB },
   ];
+  // Mejor línea cuya probabilidad sea ≥ minProb. SIN fallback: si ninguna línea
+  // alcanza el umbral, no se recomienda (devuelve null) → solo se muestran ≥80%.
   const bestLine = (lineProbs, minProb) => {
     const entries = Object.entries(lineProbs || {}).map(([l, p]) => [parseFloat(l), p]).sort((a, b) => b[0] - a[0]);
     for (const [l, p] of entries) if (p >= minProb) return { line: Math.ceil(l), prob: p };
-    return entries.length ? { line: Math.ceil(entries[entries.length - 1][0]), prob: entries[entries.length - 1][1] } : null;
+    return null;
   };
   const rows = [];
   for (const cat of cats) {
