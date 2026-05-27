@@ -129,7 +129,7 @@ export async function POST(request) {
           odds, best_odds: bestOdds, probabilities: probs, combinada, data_quality: dq,
           cache_version: BASEBALL_CACHE_VERSION,
           updated_at: new Date().toISOString(),
-        });
+        }, { onConflict: 'fixture_id' });
         if (upsertErr) {
           analyses.push({ fixtureId, success: false, error: `DB upsert: ${upsertErr.message}` });
           continue;
@@ -140,7 +140,7 @@ export async function POST(request) {
           home_team_id: homeId, away_team_id: awayId,
           ...flattenProbabilitiesForStorage(probs),
           updated_at: new Date().toISOString(),
-        });
+        }, { onConflict: 'fixture_id' });
         if (predErr) console.warn('[baseball:predictions]', predErr.message);  // no critico
 
         analyses.push({ fixtureId, success: true, probabilities: probs, combinada });

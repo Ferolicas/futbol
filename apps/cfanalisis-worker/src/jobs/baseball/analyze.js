@@ -173,7 +173,7 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
         data_quality: dq,
         cache_version: BASEBALL_CACHE_VERSION,
         updated_at: new Date().toISOString(),
-      });
+      }, { onConflict: 'fixture_id' });
       if (upsertErr) {
         console.error(`[baseball-analyze] PERSIST FALLÓ fid=${fixtureId}:`, upsertErr.message || upsertErr);
         return { kind: 'persist_failed', fixtureId, error: upsertErr.message || String(upsertErr) };
@@ -187,7 +187,7 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
         away_team_id: game.away?.id,
         ...flattenProbabilitiesForStorage(probs),
         updated_at: new Date().toISOString(),
-      });
+      }, { onConflict: 'fixture_id' });
       if (predErr) console.warn(`[baseball-analyze] predictions fail (no critico) ${fixtureId}: ${predErr.message}`);
 
       const pf = matchup ? `H:${matchup.home?.factor} A:${matchup.away?.factor}` : 'sin pitchers';

@@ -95,7 +95,7 @@ export async function POST(_request, { params }) {
       combinada,
       data_quality: dq,
       updated_at: new Date().toISOString(),
-    });
+    }, { onConflict: 'fixture_id' });
 
     await supabaseAdmin.from('baseball_match_predictions').upsert({
       fixture_id: fixtureId,
@@ -105,7 +105,7 @@ export async function POST(_request, { params }) {
       away_team_id: awayId,
       ...flattenProbabilitiesForStorage(probs),
       updated_at: new Date().toISOString(),
-    });
+    }, { onConflict: 'fixture_id' });
 
     return Response.json({ success: true, fixtureId, probabilities: probs, combinada, dataQuality: dq });
   } catch (e) {
