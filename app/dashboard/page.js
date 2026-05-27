@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { useAuth } from '../../components/providers';
-import { motion, AnimatePresence } from 'framer-motion';
 import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
 import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
@@ -1067,65 +1066,44 @@ export default function Dashboard() {
     .sort((a, b) => new Date(a.fixture.date) - new Date(b.fixture.date));
 
   if (splash) {
+    // Splash premium 100% CSS (sin framer-motion): orbes de fondo, logo con
+    // doble anillo giratorio + glow, marca con shimmer y barra de carga.
     return (
-      <motion.div
-        className={`splash ${splashFade ? 'fade-out' : ''}`}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        transition={{ duration: 0.6 }}
-      >
+      <div className={`splash ${splashFade ? 'fade-out' : ''}`}>
+        <div className="splash-orbs" aria-hidden="true">
+          <span className="splash-orb o1" />
+          <span className="splash-orb o2" />
+          <span className="splash-orb o3" />
+        </div>
         <div className="splash-content">
-          <motion.div
-            className="splash-logo-wrap"
-            initial={{ scale: 0.5, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
-          >
+          <div className="splash-logo-wrap">
+            <span className="splash-ring" aria-hidden="true" />
+            <span className="splash-ring r2" aria-hidden="true" />
+            <span className="splash-logo-glow" aria-hidden="true" />
             <img src="/logo.png" alt="CFanalisis" className="splash-logo" />
-          </motion.div>
-          <motion.div
-            className="splash-text"
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.5, duration: 0.5 }}
-          >
+          </div>
+          <div className="splash-text">
             <span className="splash-welcome">Bienvenido a tu casa de</span>
-            <span className="splash-brand">Analisis</span>
-          </motion.div>
-          <motion.div
-            className="splash-loader"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.8 }}
-          >
+            <span className="splash-brand">Análisis</span>
+          </div>
+          <div className="splash-loader">
             <div className="splash-bar"><div className="splash-bar-fill" /></div>
-            <span className="splash-loading">Cargando partidos...</span>
-          </motion.div>
+            <span className="splash-loading">Cargando partidos…</span>
+          </div>
           <div className="splash-dots">
             <span className="splash-dot" /><span className="splash-dot" /><span className="splash-dot" />
           </div>
         </div>
-      </motion.div>
+      </div>
     );
   }
 
   return (
     <>
-    <motion.div
-      className="app"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.4 }}
-    >
+    <div className="app app-fade-in">
       <div className="container">
         {/* HEADER */}
-        <motion.header
-          className="header"
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.4, delay: 0.1 }}
-        >
+        <header className="header header-slide-in">
           <img src="/vflogo.png" alt="CFanalisis" className="brand-logo" />
           <div className="header-right">
             {isOwner && (
@@ -1171,7 +1149,7 @@ export default function Dashboard() {
               <span className={loading || refreshingLive ? 'spin' : ''}>&#8635;</span>
             </button>
           </div>
-        </motion.header>
+        </header>
 
         {/* CONTROLS: Date + Filters */}
         <div className="controls-row">
@@ -1606,7 +1584,7 @@ export default function Dashboard() {
           <span>{visible.length} partidos</span>
         </div>
       </div>
-    </motion.div>
+    </div>
 
     {/* MODAL: Análisis completo */}
     {analysisModalId && (

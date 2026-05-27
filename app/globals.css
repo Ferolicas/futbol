@@ -112,13 +112,11 @@ body {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: var(--bg-0);
-  background-image:
-    radial-gradient(ellipse at 50% 30%, rgba(0,230,118,0.08) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 80%, rgba(68,138,255,0.05) 0%, transparent 40%);
+  background: radial-gradient(ellipse at 50% 35%, #0a1f17 0%, var(--bg-0) 60%);
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
   transition: opacity .6s ease, transform .6s ease;
 }
 .splash.fade-out {
@@ -126,11 +124,26 @@ body {
   transform: scale(1.05);
   pointer-events: none;
 }
+/* Orbes de luz que flotan en el fondo (profundidad premium). */
+.splash-orbs { position: absolute; inset: 0; pointer-events: none; }
+.splash-orb {
+  position: absolute; border-radius: 50%; filter: blur(60px); opacity: .5;
+  animation: orbFloat 9s ease-in-out infinite;
+}
+.splash-orb.o1 { width: 300px; height: 300px; top: 12%; left: 8%;  background: rgba(0,230,118,.28); }
+.splash-orb.o2 { width: 260px; height: 260px; bottom: 10%; right: 6%; background: rgba(68,138,255,.22); animation-delay: -3s; }
+.splash-orb.o3 { width: 220px; height: 220px; top: 55%; left: 40%; background: rgba(0,230,118,.14); animation-delay: -6s; }
+@keyframes orbFloat {
+  0%,100% { transform: translate(0,0) scale(1); }
+  33%     { transform: translate(24px,-30px) scale(1.08); }
+  66%     { transform: translate(-20px,20px) scale(.94); }
+}
 .splash-content {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 24px;
+  gap: 26px;
   animation: splashIn .8s var(--bounce) both;
 }
 @keyframes splashIn {
@@ -138,21 +151,46 @@ body {
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 .splash-logo-wrap {
-  width: 140px;
-  height: 140px;
+  position: relative;
+  width: 150px;
+  height: 150px;
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: logoPulse 2s ease-in-out infinite;
+  animation: fadeSlideUp .7s .15s both;
 }
-@keyframes logoPulse {
-  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 20px rgba(0,230,118,0.3)); }
-  50% { transform: scale(1.05); filter: drop-shadow(0 0 40px rgba(0,230,118,0.5)); }
+/* Glow pulsante detrás del logo. */
+.splash-logo-glow {
+  position: absolute; inset: 18px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(0,230,118,.45), transparent 70%);
+  animation: logoGlow 2.2s ease-in-out infinite;
 }
+@keyframes logoGlow {
+  0%,100% { opacity: .5; transform: scale(.92); }
+  50%     { opacity: 1;  transform: scale(1.08); }
+}
+/* Anillos cónicos giratorios alrededor del logo. */
+.splash-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0 60%, var(--green) 78%, transparent 92%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  animation: ringSpin 2.6s linear infinite;
+}
+.splash-ring.r2 {
+  inset: 12px;
+  background: conic-gradient(from 180deg, transparent 0 65%, #448aff 82%, transparent 95%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  animation: ringSpin 3.4s linear infinite reverse;
+}
+@keyframes ringSpin { to { transform: rotate(360deg); } }
 .splash-logo {
-  width: 100%;
+  position: relative; z-index: 1;
+  width: 64%;
   height: auto;
   object-fit: contain;
+  filter: drop-shadow(0 4px 14px rgba(0,0,0,.5));
 }
 .splash-text {
   display: flex;
@@ -195,23 +233,26 @@ body {
   animation: fadeSlideUp .6s .8s both;
 }
 .splash-bar {
+  position: relative;
   width: 100%;
   height: 3px;
-  background: var(--bg-3);
+  background: rgba(255,255,255,.08);
   border-radius: 4px;
   overflow: hidden;
 }
 .splash-bar-fill {
+  position: absolute;
+  top: 0; left: 0;
   height: 100%;
-  width: 30%;
-  background: linear-gradient(90deg, var(--green), #448aff);
+  width: 42%;
+  background: linear-gradient(90deg, transparent, var(--green), #448aff, transparent);
   border-radius: 4px;
-  animation: splashProgress 2s ease-in-out infinite;
+  animation: splashSweep 1.3s ease-in-out infinite;
 }
-@keyframes splashProgress {
-  0% { width: 0%; transform: translateX(0); }
-  50% { width: 70%; }
-  100% { width: 30%; transform: translateX(660%); }
+/* Barrido indeterminado limpio (en vez del width/translateX tosco anterior). */
+@keyframes splashSweep {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(360%); }
 }
 .splash-loading {
   font-size: .75rem;
@@ -238,6 +279,23 @@ body {
 @keyframes dotBounce {
   0%, 80%, 100% { transform: scale(.6); opacity: .3; }
   40% { transform: scale(1.2); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .splash-orb, .splash-ring, .splash-logo-glow, .splash-dot { animation: none; }
+  .splash-bar-fill { animation: none; transform: none; width: 60%; }
+}
+
+/* Entrada del shell/header en CSS (reemplaza framer-motion: el motion.div
+   del shell corría en el main thread JS en cada montaje). */
+.app-fade-in { animation: appFadeIn .4s ease both; }
+@keyframes appFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.header-slide-in { animation: headerSlideIn .45s ease .1s both; }
+@keyframes headerSlideIn {
+  from { opacity: 0; transform: translateY(-20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-fade-in, .header-slide-in { animation: none; }
 }
 
 .app {
