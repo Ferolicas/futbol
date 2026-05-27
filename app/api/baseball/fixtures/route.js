@@ -24,6 +24,9 @@ function localDateOf(utcIso, tz) {
   } catch { return utcIso.split('T')[0]; }
 }
 
+// Logo oficial del equipo MLB (SVG público de mlbstatic, por team id).
+const mlbLogo = (teamId) => teamId ? `https://www.mlbstatic.com/team-logos/${teamId}.svg` : null;
+
 // MLB Stats API game → shape compatible con el frontend (estilo api-baseball).
 function toFixtureShape(g) {
   const short = g.isFinal ? 'FT' : (g.isLive ? 'IN' : 'NS');
@@ -34,8 +37,8 @@ function toFixtureShape(g) {
     league: { id: 1, name: 'MLB' },
     country: { name: 'USA' },
     teams: {
-      home: { id: g.home.id, name: g.home.name, abbreviation: g.home.abbreviation },
-      away: { id: g.away.id, name: g.away.name, abbreviation: g.away.abbreviation },
+      home: { id: g.home.id, name: g.home.name, abbreviation: g.home.abbreviation, logo: mlbLogo(g.home.id) },
+      away: { id: g.away.id, name: g.away.name, abbreviation: g.away.abbreviation, logo: mlbLogo(g.away.id) },
     },
     scores: {
       home: { total: g.home.score },
