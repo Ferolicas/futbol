@@ -15,6 +15,7 @@ export const QUEUE_NAMES = [
   'futbol-live-corners',
   'futbol-odds',
   'futbol-calibrate',
+  'futbol-raw-backfill',
   // Baseball
   'baseball-fixtures',
   'baseball-analyze',
@@ -63,6 +64,7 @@ const opts: Record<QueueName, JobsOptions> = {
   'futbol-live-corners':     liveJobOpts,
   'futbol-odds':             defaultJobOpts,
   'futbol-calibrate':        defaultJobOpts,
+  'futbol-raw-backfill':     { ...defaultJobOpts, attempts: 1 },
   'baseball-fixtures':            defaultJobOpts,
   'baseball-analyze':             analyzeJobOpts,
   'baseball-analyze-all-today':   analyzeJobOpts,

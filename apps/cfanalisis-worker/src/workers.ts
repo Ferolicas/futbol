@@ -16,6 +16,7 @@ import { runLive } from './jobs/futbol/live.js';
 import { runLiveCorners } from './jobs/futbol/live-corners.js';
 import { runOdds } from './jobs/futbol/odds.js';
 import { runFutbolCalibration } from './jobs/calibration/futbol.js';
+import { runRawBackfillJob } from './jobs/futbol/raw-backfill.js';
 
 // Baseball jobs
 import { runBaseballFixtures } from './jobs/baseball/fixtures.js';
@@ -38,6 +39,7 @@ const handlers: Record<QueueName, Processor> = {
   'futbol-live-corners':     async (job) => runLiveCorners(job.data),
   'futbol-odds':             async (job) => runOdds(job.data),
   'futbol-calibrate':        async () => runFutbolCalibration(),
+  'futbol-raw-backfill':     async (job) => runRawBackfillJob(job.data),
   'baseball-fixtures':            async (job) => runBaseballFixtures(job.data),
   'baseball-analyze':             async (job) => runBaseballAnalyze(job.data, job),
   // analyze-all-today: mismo handler que analyze pero forzando force=true.
@@ -65,6 +67,7 @@ const concurrency: Record<QueueName, number> = {
   'futbol-live-corners':     1,
   'futbol-odds':             1,
   'futbol-calibrate':        1,
+  'futbol-raw-backfill':     1,
   'baseball-fixtures':            1,
   'baseball-analyze':             1,
   'baseball-analyze-all-today':   1,
@@ -89,6 +92,10 @@ const concurrency: Record<QueueName, number> = {
 type LockOpts = { lockDuration: number; stalledInterval: number; maxStalledCount: number };
 const HEAVY: LockOpts = { lockDuration: 600_000, stalledInterval: 60_000, maxStalledCount: 3 };
 const LIGHT: LockOpts = { lockDuration: 120_000, stalledInterval: 30_000, maxStalledCount: 2 };
+// Job MARATÓN (captura cruda, horas): lock de 30min (se auto-renueva mientras
+// el event loop está libre — el job es I/O-bound). attempts:1 en la cola evita
+// reintentos; idempotente igualmente.
+const MARATHON: LockOpts = { lockDuration: 1_800_000, stalledInterval: 120_000, maxStalledCount: 5 };
 
 const lockOpts: Record<QueueName, LockOpts> = {
   'futbol-fixtures':         LIGHT,
@@ -102,6 +109,7 @@ const lockOpts: Record<QueueName, LockOpts> = {
   'futbol-live-corners':     LIGHT,
   'futbol-odds':             LIGHT,
   'futbol-calibrate':        HEAVY,
+  'futbol-raw-backfill':     MARATHON,
   'baseball-fixtures':            LIGHT,
   'baseball-analyze':             HEAVY,
   'baseball-analyze-all-today':   HEAVY,

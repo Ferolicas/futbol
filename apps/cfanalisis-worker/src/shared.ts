@@ -42,6 +42,7 @@ const [
   _oddsApi,
   _db,
   _mlbStatsApi,
+  _rawBackfill,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
@@ -58,6 +59,7 @@ const [
   import(LIB + 'odds-api.js'),
   import(LIB + 'db.js'),
   import(LIB + 'mlb-stats-api.js'),
+  import(LIB + 'raw-backfill.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -110,6 +112,9 @@ export const sendPushNotification = _webpush.sendPushNotification;
 
 // lib/leagues.js
 export const ALL_LEAGUE_IDS = _leagues.ALL_LEAGUE_IDS;
+
+// lib/raw-backfill.js (captura cruda total, Camino B)
+export const runRawBackfill = _rawBackfill.runRawBackfill;
 
 // lib/calculations.js
 export const computeAllProbabilities = _calculations.computeAllProbabilities;
