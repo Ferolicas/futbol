@@ -219,14 +219,21 @@ async function processMatch(row, leagueFixtures) {
   const fixtureMeta = (leagueFixtures || []).find(f => f.fixture?.id === row.fixture_id);
 
   const table = reconstructTable(leagueFixtures, beforeTs);
-  const [homeLast5, awayLast5, injuriesResp, oddsResp] = await Promise.all([
+  const [homeLast5, awayLast5, injuriesResp] = await Promise.all([
     buildLast5(homeId, season, beforeTs),
     buildLast5(awayId, season, beforeTs),
     apiGet(`/injuries?fixture=${row.fixture_id}`),
-    apiGet(`/odds?fixture=${row.fixture_id}`),
   ]);
 
-  const matchWinner = extractMatchWinner(oddsResp);
+  // Odds: preferir las point-in-time guardadas en match_analysis. Solo si no
+  // hay, intentar /odds (probablemente purgadas para fixtures viejos).
+  let matchWinner = row.stored_odds?.matchWinner || null;
+  let oddsSource = matchWinner ? 'stored' : null;
+  if (!matchWinner) {
+    const oddsResp = await apiGet(`/odds?fixture=${row.fixture_id}`);
+    matchWinner = extractMatchWinner(oddsResp);
+    if (matchWinner) oddsSource = 'api';
+  }
 
   // analysis reconstruido point-in-time — misma forma que el de analyzeMatch.
   const analysis = {
@@ -252,6 +259,7 @@ async function processMatch(row, leagueFixtures) {
   features._source = 'backfill';
   features._coverage = {
     oddsAvailable: !!matchWinner,
+    oddsSource,
     tableReconstructed: !!(table[homeId] || table[awayId]),
     xgHome: features.causality?.home?.xgAvailable || false,
     xgAway: features.causality?.away?.xgAvailable || false,
@@ -270,10 +278,17 @@ async function processMatch(row, leagueFixtures) {
   const seasonStart = `${SEASON_MIN}-07-01`;
   console.log(`\nBackfill features_full — temporada ≥ ${SEASON_MIN}/${SEASON_MIN + 1} (kickoff ≥ ${seasonStart})`);
 
-  let q = `SELECT fixture_id, league_id, league_name, home_team, away_team, kickoff, date, home_position, away_position
-           FROM match_predictions
-           WHERE features_full IS NULL AND kickoff >= $1
-           ORDER BY league_id, kickoff`;
+  // JOIN match_analysis para recuperar las ODDS POINT-IN-TIME que el sistema ya
+  // guardó al analizar cada partido (ma.odds.matchWinner). La API purga las
+  // odds de fixtures viejos (/odds devuelve 0%), pero nuestra copia pre-partido
+  // sí existe y es la correcta temporalmente.
+  let q = `SELECT mp.fixture_id, mp.league_id, mp.league_name, mp.home_team, mp.away_team,
+                  mp.kickoff, mp.date, mp.home_position, mp.away_position,
+                  ma.odds AS stored_odds
+           FROM match_predictions mp
+           LEFT JOIN match_analysis ma ON ma.fixture_id = mp.fixture_id
+           WHERE mp.features_full IS NULL AND mp.kickoff >= $1
+           ORDER BY mp.league_id, mp.kickoff`;
   const params = [seasonStart];
   if (LIMIT) { q += ` LIMIT $2`; params.push(LIMIT); }
   const { rows } = await pgPool.query(q, params);
