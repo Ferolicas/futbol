@@ -12,7 +12,6 @@ import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/tim
 import { buildCombinada } from '../../lib/combinada';
 import { setAnalysisCache } from '../../lib/analysis-cache';
 import { fetcher } from '../../lib/fetcher';
-import VirtualFixtureList from '../../components/VirtualFixtureList';
 import { useLiveStats } from './live-stats-context';
 import { useSelectedMarkets } from './selected-markets-context';
 
@@ -1394,21 +1393,19 @@ export default function Dashboard() {
               </div>
             )}
             {sorted.length > 0 && (
-              <VirtualFixtureList
-                className="match-list"
-                items={sorted}
-                getItemKey={(m) => m.fixture.id}
-                // Acordeon expandido o card simple → altura distinta. El
-                // virtualizer mide cada fila tras render (measureElement)
-                // asi que estimateSize solo controla el primer paint y
-                // overscan; medidas reales sobreescriben pronto.
-                estimateSize={expandedMatch ? 320 : 130}
-                overscan={8}
-                renderItem={(m, i) => {
+              // Lista PLANA (sin virtualización JS). La virtualización con
+              // measureElement reposicionaba todas las filas en cada frame al
+              // expandir un acordeón → tirones. Ahora `.mcard` usa
+              // content-visibility:auto (CSS) que salta el render de lo que
+              // está fuera de pantalla de forma nativa, sin reposicionar: el
+              // acordeón expande libre y escala a cientos de partidos.
+              <div className="match-list">
+                {sorted.map((m, i) => {
                   const isMatchAnalyzed = analyzed.includes(m.fixture.id);
                   if (isMatchAnalyzed) {
                     return (
                       <AccordionCard
+                        key={m.fixture.id}
                         match={m}
                         data={analyzedData[m.fixture.id]}
                         odds={analyzedOdds[m.fixture.id]}
@@ -1429,6 +1426,7 @@ export default function Dashboard() {
                   }
                   return (
                     <MatchCard
+                      key={m.fixture.id}
                       match={m}
                       isAnalyzed={false}
                       isSelected={selected.has(m.fixture.id)}
@@ -1445,8 +1443,8 @@ export default function Dashboard() {
                       userTz={userTz}
                     />
                   );
-                }}
-              />
+                })}
+              </div>
             )}
           </>
         )}
@@ -1868,17 +1866,11 @@ function AnalysisModal({ id, onClose }) {
 
 // Toggle de sub-acordeón + revelado del header.
 //
-// POR QUÉ el scrollIntoView: la lista usa useWindowVirtualizer con
-// measureElement. El acordeón PRINCIPAL no sufre el problema porque al abrirlo
-// cambia expandedMatch (estado del padre) → el virtualizer cambia estimateSize
-// y RESERVA el espacio antes de medir. Los sub-acordeones cambian un estado
-// LOCAL del card → el virtualizer no reserva nada y depende de measureElement
-// (ResizeObserver), que remide tras el crecimiento y reposiciona el item de
-// forma que el contenido recién abierto puede quedar fuera del viewport (el
-// usuario tenía que hacer scroll hacia arriba). Tras abrir, revelamos el
-// header del sub con block:'nearest' (doble rAF = esperar a que el layout y la
-// remedición del virtualizer se asienten). 'nearest' NO mueve la vista si el
-// header ya está visible; solo lo trae de vuelta si quedó fuera.
+// POR QUÉ el scrollIntoView: al abrir un sub-acordeón el contenido crece hacia
+// abajo y el header recién pulsado puede quedar fuera del viewport. Tras abrir
+// (doble rAF = esperar a que el layout se asiente) lo traemos de vuelta con
+// block:'nearest', que NO mueve la vista si ya está visible; solo lo reencuadra
+// si quedó fuera. Mismo helper que el dashboard de baseball.
 function toggleSubAndReveal(e, open, id, setOpenSub) {
   e.stopPropagation();
   const header = e.currentTarget; // capturar antes del async (luego puede ser null)

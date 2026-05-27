@@ -594,9 +594,9 @@ body {
   50%      { box-shadow: 0 0 50px rgba(239,68,68,.65); }
 }
 .mcard {
-  /* ap2-glass exacto */
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  /* ap2-glass — SIN backdrop-filter: el blur en cada tarjeta repintaba en
+     cada frame de scroll (lo más caro en móvil). Sobre el fondo oscuro el
+     rgba translúcido + sombra estática dan el mismo look glass sin coste. */
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 24px;
@@ -605,8 +605,18 @@ body {
   overflow: hidden;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  animation: scorebox-glow 2s ease-in-out infinite;
+  /* Sombra ESTÁTICA en vez de `animation: scorebox-glow infinite`: la
+     animación de box-shadow no se compone (repinta cada frame) y corría en
+     TODAS las tarjetas a la vez → el hilo principal nunca descansaba. El glow
+     animado queda solo para .live (abajo). */
+  box-shadow: 0 4px 24px rgba(0,0,0,.28);
   transition: transform .15s var(--ease);
+  /* Las tarjetas fuera de viewport se saltan layout/paint de forma nativa.
+     Sustituye a la virtualización JS (que reposicionaba al expandir el
+     acordeón) → scroll fluido con cientos de partidos. `auto` recuerda la
+     altura real medida, así el acordeón expandido reserva su espacio. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 150px;
 }
 /* glow overlay interior — igual al del analisis */
 .mcard::before {
@@ -790,9 +800,13 @@ body {
   border-radius: 20px;
   overflow: hidden;
   transition: all .3s var(--ease);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  /* backdrop-filter removido: el gradiente ya es casi opaco, el blur no se
+     notaba y repintaba en cada frame de scroll por cada tarjeta analizada. */
   box-shadow: 0 0 20px rgba(30,135,105,.14);
+  /* Igual que .mcard: las analizadas fuera de viewport se saltan render. Son
+     las que más crecen al expandir, así que es donde más rinde. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
 }
 .acc-card.open {
   border-color: rgba(30,135,105,.6);
@@ -3305,8 +3319,7 @@ input:checked + .cb-mark::after {
 
 /* ───────────────────────────────────────────────────────────────────────────
    CAUSA del "el sub-acordeón se expande hacia arriba":
-   la lista usa useWindowVirtualizer + measureElement (ResizeObserver). Al
-   crecer un sub-acordeón, el navegador con overflow-anchor:auto (default)
+   al crecer un sub-acordeón, el navegador con overflow-anchor:auto (default)
    re-ancla el scroll para "compensar" el cambio de altura → desplaza el
    viewport y el inicio del sub queda fuera de vista arriba.
    overflow-anchor:none lo desactiva: el scroll NO se mueve cuando el
