@@ -282,15 +282,17 @@ async function processMatch(row, leagueFixtures) {
   // guardó al analizar cada partido (ma.odds.matchWinner). La API purga las
   // odds de fixtures viejos (/odds devuelve 0%), pero nuestra copia pre-partido
   // sí existe y es la correcta temporalmente.
+  const params = [seasonStart];
+  let where = `mp.features_full IS NULL AND mp.kickoff >= $1`;
+  if (args.league) { params.push(Number(args.league)); where += ` AND mp.league_id = $${params.length}`; }
   let q = `SELECT mp.fixture_id, mp.league_id, mp.league_name, mp.home_team, mp.away_team,
                   mp.kickoff, mp.date, mp.home_position, mp.away_position,
                   ma.odds AS stored_odds
            FROM match_predictions mp
            LEFT JOIN match_analysis ma ON ma.fixture_id = mp.fixture_id
-           WHERE mp.features_full IS NULL AND mp.kickoff >= $1
+           WHERE ${where}
            ORDER BY mp.league_id, mp.kickoff`;
-  const params = [seasonStart];
-  if (LIMIT) { q += ` LIMIT $2`; params.push(LIMIT); }
+  if (LIMIT) { params.push(LIMIT); q += ` LIMIT $${params.length}`; }
   const { rows } = await pgPool.query(q, params);
   console.log(`Partidos a enriquecer: ${rows.length}`);
   if (rows.length === 0) { await pgPool.end(); return; }
