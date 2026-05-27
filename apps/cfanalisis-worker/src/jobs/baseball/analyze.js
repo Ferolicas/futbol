@@ -21,7 +21,7 @@ import {
   fetchMlbOddsByDate, matchMlbOdds,
   computeBaseballProbabilities, buildBaseballCombinada, scoreBaseballDataQuality,
   calibrateBaseballProbabilities, flattenProbabilitiesForStorage,
-  supabaseAdmin,
+  supabaseAdmin, cronTargetDate,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 import { logger } from '../../logger.js';
@@ -54,11 +54,10 @@ function toBestOdds(odds) {
 
 /** @param {any} payload @param {any} [job] */
 export async function runBaseballAnalyze(payload = {}, job = null) {
-  // Fecha objetivo en hora de Bogotá (coherente con el resto del proyecto).
-  let date = payload.date;
-  if (!date) {
-    date = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
-  }
+  // Fecha objetivo = jornada Colombia que arranca (igual que fútbol). El cron de
+  // madrugada española analiza el día Colombia 0:00-23:59 que está por empezar.
+  // Si llega `date` explícito en el payload, se respeta.
+  const date = payload.date || cronTargetDate();
   const force = payload.force === true;
   const season = Number(date.slice(0, 4));
   const startedAt = Date.now();

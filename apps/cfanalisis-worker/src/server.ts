@@ -471,13 +471,23 @@ export function buildServer() {
       payload?: unknown;
       opts?: { jobId?: string; delay?: number; priority?: number };
       name?: string;
+      [k: string]: unknown;
     };
+
+    // El payload del job puede venir de DOS formas, ambas válidas:
+    //   1. envuelto:  { "payload": { date, force }, "opts": {...} }
+    //   2. directo:   { "date": "...", "force": true }   ← lo más natural por curl
+    // Si no hay `payload` explícito, el resto del body (sin payload/opts/name) ES
+    // el payload. Antes solo se leía body.payload → un body directo se perdía y
+    // el job corría con sus defaults (bug: force/date ignorados).
+    const { payload, opts, name, ...rest } = body;
+    const jobData = (payload && typeof payload === 'object') ? payload : rest;
 
     try {
       const job = await queues[queueName].add(
-        body.name || queueName,
-        body.payload ?? {},
-        body.opts ?? {},
+        name || queueName,
+        jobData,
+        opts ?? {},
       );
       return { ok: true, queue: queueName, jobId: job.id };
     } catch (e) {

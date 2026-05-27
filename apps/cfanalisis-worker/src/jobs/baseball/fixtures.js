@@ -9,13 +9,14 @@
  *
  * Payload: { date?: 'YYYY-MM-DD' }
  */
-import { getMlbScheduleByDate, bogotaToday, supabaseAdmin } from '../../shared.js';
+import { getMlbScheduleByDate, cronTargetDate, supabaseAdmin } from '../../shared.js';
 
 const SPORT_IDS = [1];
 const GAME_DURATION_MIN = 210; // ~3.5h cubre extra innings
 
 export async function runBaseballFixtures(payload = {}) {
-  const targetDate = payload.date || bogotaToday();
+  // Misma jornada Colombia objetivo que baseball-analyze (alineado con fútbol).
+  const targetDate = payload.date || cronTargetDate();
   console.log(`[job:baseball-fixtures] MLB targetDate=${targetDate}`);
 
   let games = [];

@@ -18,7 +18,7 @@
  * Source 100% PG VPS: el endpoint usa supabaseAdmin (= pgAdmin proxy).
  */
 
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
@@ -88,9 +88,18 @@ function toggleSubAndReveal(e, isOpen, id, setOpenSub) {
 export default function BaseballDashboard() {
   const router = useRouter();
 
-  const [userTz] = useState(detectTz);
+  // userTz/date arrancan en UTC (SSR) y se corrigen a la TZ REAL del navegador
+  // en el cliente (useEffect). Sin esto, el initializer corría en SSR → UTC y
+  // se quedaba en UTC para siempre → el frontend mostraba todo en horario UTC.
+  // Mismo patrón que el dashboard de fútbol.
+  const [userTz, setUserTz] = useState('UTC');
   const [tab, setTab] = useState('partidos');
-  const [date, setDate] = useState(() => todayInTz(detectTz()));
+  const [date, setDate] = useState(() => todayInTz('UTC'));
+  useEffect(() => {
+    const tz = detectTz();
+    setUserTz(tz);
+    setDate(todayInTz(tz));
+  }, []);
   const [sortBy, setSortBy] = useState('time');
   const [statusFilter, setStatusFilter] = useState('all');
   const [leagueFilter, setLeagueFilter] = useState('');
