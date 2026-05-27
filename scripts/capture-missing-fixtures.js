@@ -17,7 +17,7 @@ try { require('dotenv').config({ path: '.env' }); } catch {}
 const { Pool } = require('pg');
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = a.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] || true] : [a, true]; }));
 const RUN = !!args.run;
-const CONCURRENCY = Number(args.concurrency) || 6;
+const CONCURRENCY = Number(args.concurrency) || 4;
 
 const API_HOST = 'v3.football.api-sports.io';
 const API_KEY = process.env.FOOTBALL_API_KEY;
@@ -29,49 +29,53 @@ const pool = new Pool({
 });
 
 let calls = 0;
-async function apiGet(path, tries = 3) {
+// Devuelve { ok, json }. ok=false si error/rate-limit persistente → el caller NO
+// guarda (deja la fila para el próximo run). Reintenta el rate-limit BLANDO de
+// API-Football (HTTP 200 con errors:{rateLimit|requests}), no solo el 429.
+async function apiGet(path, tries = 5) {
   for (let i = 0; i < tries; i++) {
     try {
       calls++;
       const res = await fetch(`https://${API_HOST}${path}`, { headers: { 'x-apisports-key': API_KEY }, signal: AbortSignal.timeout(20000) });
-      if (res.status === 429) { await sleep(2000 * (i + 1)); continue; }
-      if (!res.ok) return { response: [] };
+      if (res.status === 429) { await sleep(3000 * (i + 1)); continue; }
+      if (!res.ok) { if (i === tries - 1) return { ok: false, json: { response: [] } }; await sleep(1500 * (i + 1)); continue; }
       const json = await res.json();
-      if (json.errors && Object.keys(json.errors).length) return { response: [] };
-      return json;
-    } catch (e) { if (i === tries - 1) return { response: [] }; await sleep(1000 * (i + 1)); }
+      const errs = json.errors && (Array.isArray(json.errors) ? json.errors.length : Object.keys(json.errors).length);
+      if (errs) {
+        const s = JSON.stringify(json.errors).toLowerCase();
+        if (/rate|requests|limit/.test(s)) { await sleep(4000 * (i + 1)); continue; } // límite blando → reintentar
+        return { ok: false, json }; // otro error (token, etc.) → no guardar
+      }
+      return { ok: true, json };
+    } catch (e) { if (i === tries - 1) return { ok: false, json: { response: [] } }; await sleep(1500 * (i + 1)); }
   }
-  return { response: [] };
+  return { ok: false, json: { response: [] } };
 }
-async function exists(endpoint, refId, subKey = '') {
-  const { rows } = await pool.query(`SELECT 1 FROM raw_api_payloads WHERE endpoint=$1 AND ref_id=$2 AND sub_key=$3`, [endpoint, refId, subKey]);
-  return rows.length > 0;
-}
+// Sobrescribe (DO UPDATE) para reemplazar payloads vacios/basura guardados por
+// runs previos rate-limiteados.
 async function save(endpoint, refType, refId, subKey, payload) {
   await pool.query(
     `INSERT INTO raw_api_payloads (endpoint, ref_type, ref_id, season, sub_key, payload, fetched_at)
-     VALUES ($1,$2,$3,NULL,$4,$5::jsonb,NOW()) ON CONFLICT (endpoint, ref_id, sub_key) DO NOTHING`,
+     VALUES ($1,$2,$3,NULL,$4,$5::jsonb,NOW())
+     ON CONFLICT (endpoint, ref_id, sub_key) DO UPDATE SET payload=EXCLUDED.payload, fetched_at=NOW()`,
     [endpoint, refType, refId, subKey, JSON.stringify(payload)]
   );
 }
 
 async function processFixture(fid) {
-  // 'fixtures' → guardamos el OBJETO fixture (response[0]), no el wrapper, igual
-  // que las otras tandas (backfill-actuals lee fx.teams/goals/score/fixture).
-  if (!(await exists('fixtures', fid))) {
-    const r = await apiGet(`/fixtures?id=${fid}`);
-    const obj = r?.response?.[0];
-    if (obj) await save('fixtures', 'fixture', fid, '', obj);
-  }
-  // El resto se guarda como el JSON completo (con .response), igual que el crudo existente.
+  // 'fixtures' → el OBJETO fixture (response[0]). Solo si la llamada tuvo éxito.
+  const r = await apiGet(`/fixtures?id=${fid}`);
+  const obj = r.ok ? r.json?.response?.[0] : null;
+  if (obj) await save('fixtures', 'fixture', fid, '', obj);
+  // El resto: JSON completo, solo si ok (no clavar vacíos por rate-limit).
   for (const [endpoint, path, subKey] of [
     ['fixtures/statistics', `/fixtures/statistics?fixture=${fid}`, ''],
     ['fixtures/events', `/fixtures/events?fixture=${fid}`, ''],
     ['fixtures/lineups', `/fixtures/lineups?fixture=${fid}`, ''],
     ['injuries', `/injuries?fixture=${fid}`, `fx:${fid}`],
   ]) {
-    if (await exists(endpoint, fid, subKey)) continue;
-    await save(endpoint, 'fixture', fid, subKey, await apiGet(path));
+    const resp = await apiGet(path);
+    if (resp.ok) await save(endpoint, 'fixture', fid, subKey, resp.json);
   }
 }
 
