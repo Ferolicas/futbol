@@ -28,6 +28,21 @@ const clamp01 = (p) => Math.max(1e-6, Math.min(1 - 1e-6, p));
 const logloss = (y, p) => { p = clamp01(p); return -(y * Math.log(p) + (1 - y) * Math.log(1 - p)); };
 const round4 = (v) => v == null ? null : Math.round(v * 10000) / 10000;
 
+// predictions_full o, si falta (filas viejas), sintetizado desde las columnas
+// p_* legacy (mismo criterio que build-calibration.js). Cubre los mercados
+// núcleo; los dinámicos solo existen en predictions_full → base null → skip.
+function rowToPredictions(row) {
+  if (row.predictions_full) return row.predictions_full;
+  return {
+    winner: { home: row.p_home_win, draw: row.p_draw, away: row.p_away_win },
+    btts: row.p_btts, bttsNo: row.p_btts != null ? 100 - row.p_btts : null,
+    overUnder: { over1_5: row.p_over_15, over2_5: row.p_over_25, over3_5: row.p_over_35 },
+    corners: { over8_5: row.p_corners_over_85, over9_5: row.p_corners_over_95 },
+    cards: { over2_5: row.p_cards_over_25, over3_5: row.p_cards_over_35, over4_5: row.p_cards_over_45 },
+    firstGoal: { before30: row.p_first_goal_30, before45: row.p_first_goal_45 },
+  };
+}
+
 function trainLogistic(samples) {
   const d = FEATURE_ORDER.length, means = {}, stds = {};
   for (const fn of FEATURE_ORDER) {
@@ -116,9 +131,17 @@ function trainLogistic(samples) {
   }
 
   console.log('Cargando match_predictions…');
+  // NO exigimos predictions_full: los finalizados viejos (abr-may) son anteriores
+  // a esa columna pero tienen las p_* legacy → rowToPredictions cae a ellas. Así
+  // los mercados núcleo entrenan con todo el histórico, no solo los 8 recientes.
   const { rows: preds } = await pool.query(
-    `SELECT fixture_id, kickoff, home_team, away_team, predictions_full, features_full, actuals_full
-     FROM match_predictions WHERE finalized_at IS NOT NULL AND features_full IS NOT NULL AND predictions_full IS NOT NULL AND actuals_full IS NOT NULL
+    `SELECT fixture_id, kickoff, home_team, away_team, predictions_full, features_full, actuals_full,
+            p_home_win, p_draw, p_away_win, p_btts,
+            p_over_15, p_over_25, p_over_35,
+            p_corners_over_85, p_corners_over_95,
+            p_cards_over_25, p_cards_over_35, p_cards_over_45,
+            p_first_goal_30, p_first_goal_45
+     FROM match_predictions WHERE finalized_at IS NOT NULL AND features_full IS NOT NULL AND actuals_full IS NOT NULL
      ORDER BY kickoff ASC`);
   console.log(`Entrenables: ${preds.length}`);
   if (preds.length < MIN_SAMPLES) { console.log('Datos insuficientes.'); await pool.end(); return; }
@@ -133,7 +156,7 @@ function trainLogistic(samples) {
       rotationRisk: 0, earlyRedRisk: 0,
     };
     return {
-      p, homeId, awayId, beforeMs, ff,
+      p, predsObj: rowToPredictions(p), homeId, awayId, beforeMs, ff,
       homeADN: ptADN(homeId, beforeMs), awayADN: ptADN(awayId, beforeMs),
       meetings: meetingsByPair.get(`${Math.min(homeId, awayId)}-${Math.max(homeId, awayId)}`) || [],
       todayCtx,
@@ -161,7 +184,7 @@ function trainLogistic(samples) {
         ruptureToday = rupturePresentToday(agg, sb.todayCtx);
       }
       const causal = { exceptionRate: h2h.n ? h2h.exceptions.length / h2h.n : null, ruptureToday, rotationRisk: 0 };
-      const mf = buildMetaFeatures({ featuresFull: sb.ff, predictionsFull: sb.p.predictions_full, homeProfile: sb.homeADN, awayProfile: sb.awayADN, market, h2h, causal });
+      const mf = buildMetaFeatures({ featuresFull: sb.ff, predictionsFull: sb.predsObj, homeProfile: sb.homeADN, awayProfile: sb.awayADN, market, h2h, causal });
       if (!mf) continue;
       samples.push({ features: mf.features, base: mf.base, y: def.outcome(sb.p.actuals_full) ? 1 : 0 });
     }
