@@ -601,6 +601,62 @@ function LiveDiamond({ live }) {
   );
 }
 
+// Foto oficial del jugador MLB (headshot) por su id.
+const pitcherFace = (id) => id
+  ? `https://img.mlbstatic.com/mlb-photos/image/upload/d_people:generic:headshot:67:current.png/w_120,q_auto:best/v1/people/${id}/headshot/67/current`
+  : null;
+
+// Columna de equipo: logo grande + abreviatura + pitcher abridor (foto + ERA).
+function TeamColumn({ team, pitcherName, pitcherId, era }) {
+  const short = pitcherName ? pitcherName.split(' ').slice(-1)[0] : null;
+  return (
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+      {team?.logo
+        ? <Image src={team.logo} alt={team.name} width={46} height={46} style={{ objectFit: 'contain' }} unoptimized />
+        : <div style={{ width: 46, height: 46, borderRadius: 10, background: 'rgba(255,255,255,.06)' }} />}
+      <span style={{ fontSize: '.86rem', fontWeight: 800, color: '#f1f5f9', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
+        {team?.abbreviation || team?.name}
+      </span>
+      {short && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '2px 7px 2px 2px', borderRadius: 999, background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.07)', maxWidth: '100%' }}>
+          {pitcherId
+            ? <Image src={pitcherFace(pitcherId)} alt={pitcherName} width={22} height={22} style={{ borderRadius: '50%', objectFit: 'cover', background: 'rgba(255,255,255,.08)' }} unoptimized />
+            : <span style={{ width: 22, height: 22, borderRadius: '50%', background: 'rgba(255,255,255,.08)', display: 'inline-block' }} />}
+          <span style={{ fontSize: '.6rem', color: '#cbd5e1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {short}{era ? ` · ${era}` : ''}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Marcador central / hora + badge de estado (estilo score-box de fútbol).
+function ScoreCenter({ live, hasScore, homeScore, awayScore, statusLabel, time, inningTxt }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, minWidth: 92 }}>
+      {live ? (
+        <span className="ap2-live-badge live-badge-glow" style={{ fontSize: '.62rem' }}>
+          <span className="ap2-live-dot live-dot-pulse" /> {inningTxt || 'EN VIVO'}
+        </span>
+      ) : (
+        <span style={{ padding: '3px 10px', borderRadius: 999, background: 'rgba(255,255,255,.08)', fontSize: '.62rem', fontWeight: 800, color: '#fde68a', letterSpacing: '.05em', fontFamily: 'JetBrains Mono, monospace' }}>
+          {statusLabel}
+        </span>
+      )}
+      {hasScore ? (
+        <div style={{ fontSize: 'clamp(1.7rem,6vw,2.4rem)', fontWeight: 800, color: '#f1f5f9', fontFamily: 'JetBrains Mono, monospace', lineHeight: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>{homeScore}</span>
+          <span style={{ color: 'rgba(255,255,255,.25)', fontSize: '1.2rem' }}>-</span>
+          <span>{awayScore}</span>
+        </div>
+      ) : (
+        <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fde68a', fontFamily: 'JetBrains Mono, monospace' }}>{time}</span>
+      )}
+    </div>
+  );
+}
+
 function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded,
                     onExpand, onSelect, onFavorite, onDismiss,
                     selectedMarkets, onToggleMarket }) {
@@ -635,6 +691,13 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
   const totals = game.analysis?.probabilities?.totals;
   const combinada = game.analysis?.combinada;
 
+  // Pitchers abridores (foto + ERA) y cuotas reales (moneyline) para el header.
+  const pp = game.probablePitchers || {};
+  const pm = game.analysis?.analysis?.pitcherMatchup || {};
+  const homeEra = pm.home?.stats?.era != null ? Number(pm.home.stats.era).toFixed(2) : null;
+  const awayEra = pm.away?.stats?.era != null ? Number(pm.away.stats.era).toFixed(2) : null;
+  const bestOdds = game.analysis?.best_odds || null;
+
   const handleCardClick = (e) => {
     if (e.target.closest('button')) return;
     if (isAnalyzed) onExpand();
@@ -651,49 +714,53 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
   return (
     <div className={cardClass}>
       <div className="bb-head" onClick={handleCardClick}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button
-            onClick={(e) => onFavorite(e, game.id)}
-            style={{
-              width: 26, height: 26, borderRadius: 6, border: '1px solid rgba(252,211,77,0.25)',
-              background: isFavorite ? 'rgba(252,211,77,0.20)' : 'transparent',
-              color: isFavorite ? '#fcd34d' : '#94a3b8', cursor: 'pointer', fontSize: 14,
-            }}
-          >★</button>
-
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <TeamLine team={home} score={hasScore ? homeScore : null} winner={finished && homeScore > awayScore} live={live} />
-            <TeamLine team={away} score={hasScore ? awayScore : null} winner={finished && awayScore > homeScore} live={live} />
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, minWidth: 70 }}>
-            <span style={{
-              fontSize: '.7rem', fontWeight: 800,
-              color: live ? '#fbbf24' : finished ? '#94a3b8' : '#fde68a',
-              fontFamily: 'JetBrains Mono, monospace',
-            }}>{statusText({ status: effStatusObj })}</span>
-            {!hasScore && (
-              <span style={{ fontSize: '.78rem', color: '#fde68a', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>
-                {fmtTimeInTz(game.date, userTz)}
-              </span>
-            )}
+        {/* Fila: liga + fecha + favorito */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <span style={{ fontSize: '.78rem', fontWeight: 700, color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: 6 }}>⚾ MLB</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: '.72rem', color: 'rgba(255,255,255,.55)' }}>{fmtTimeInTz(game.date, userTz)}</span>
+            <button
+              onClick={(e) => onFavorite(e, game.id)}
+              style={{
+                width: 26, height: 26, borderRadius: 6, border: '1px solid rgba(252,211,77,0.25)',
+                background: isFavorite ? 'rgba(252,211,77,0.20)' : 'transparent',
+                color: isFavorite ? '#fcd34d' : '#94a3b8', cursor: 'pointer', fontSize: 14,
+              }}
+            >★</button>
           </div>
         </div>
 
-        {ml && (
-          <div style={{ display: 'flex', gap: 4, fontSize: '.78rem', marginTop: 8, alignItems: 'center' }}>
-            <span style={{ color: '#fbbf24', fontWeight: 700, minWidth: 32 }}>{cap(ml.home).toFixed(0)}%</span>
-            <div style={{ flex: 1, height: 5, borderRadius: 3, overflow: 'hidden', display: 'flex', background: 'rgba(255,255,255,0.04)' }}>
-              <div style={{ width: `${cap(ml.home)}%`, background: 'linear-gradient(90deg,#fcd34d,#f59e0b)' }} />
-              <div style={{ width: `${cap(ml.away)}%`, background: 'linear-gradient(90deg,#b45309,#7c2d12)' }} />
-            </div>
-            <span style={{ color: '#b45309', fontWeight: 700, minWidth: 32, textAlign: 'right' }}>{cap(ml.away).toFixed(0)}%</span>
-          </div>
-        )}
+        {/* Equipos + marcador central (estilo fútbol) con pitchers MLB (foto+ERA) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <TeamColumn team={home} pitcherName={pp.home} pitcherId={pp.homeId} era={homeEra} />
+          <ScoreCenter
+            live={live} hasScore={hasScore} homeScore={homeScore} awayScore={awayScore}
+            statusLabel={statusText({ status: effStatusObj })}
+            time={fmtTimeInTz(game.date, userTz)}
+            inningTxt={live ? statusText({ status: effStatusObj }) : null}
+          />
+          <TeamColumn team={away} pitcherName={pp.away} pitcherId={pp.awayId} era={awayEra} />
+        </div>
 
-        {/* Estado EN VIVO tipo bet365 — solo cuando el juego está en curso. */}
+        {/* Estado EN VIVO: diamante de bases + conteo (solo en curso) */}
         {live && liveResult && (liveResult.inning != null || liveResult.bases) && (
           <LiveDiamond live={liveResult} />
+        )}
+
+        {/* Cuotas reales a color (moneyline) */}
+        {bestOdds?.moneyline && (bestOdds.moneyline.home != null || bestOdds.moneyline.away != null) && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'center' }}>
+            {bestOdds.moneyline.home != null && (
+              <span style={{ padding: '4px 14px', borderRadius: 8, background: 'linear-gradient(135deg,#22c55e,#16a34a)', fontWeight: 700, fontSize: '.8rem', color: '#fff' }}>
+                {home?.abbreviation || 'Local'} {Number(bestOdds.moneyline.home).toFixed(2)}
+              </span>
+            )}
+            {bestOdds.moneyline.away != null && (
+              <span style={{ padding: '4px 14px', borderRadius: 8, background: 'linear-gradient(135deg,#ef4444,#dc2626)', fontWeight: 700, fontSize: '.8rem', color: '#fff' }}>
+                {away?.abbreviation || 'Visit.'} {Number(bestOdds.moneyline.away).toFixed(2)}
+              </span>
+            )}
+          </div>
         )}
 
         <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>

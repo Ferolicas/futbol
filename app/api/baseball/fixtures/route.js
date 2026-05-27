@@ -47,6 +47,8 @@ function toFixtureShape(g) {
     probablePitchers: {
       home: g.home.probablePitcherName || null,
       away: g.away.probablePitcherName || null,
+      homeId: g.home.probablePitcherId || null,
+      awayId: g.away.probablePitcherId || null,
     },
   };
 }
