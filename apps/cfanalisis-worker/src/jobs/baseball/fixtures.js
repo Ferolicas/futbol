@@ -1,50 +1,44 @@
 // @ts-nocheck
 /**
- * Job: baseball-fixtures
- * Port of /api/cron/baseball/fixtures. Fetches MLB fixtures and saves schedule.
+ * Job: baseball-fixtures (MLB-only, MLB Stats API)
+ *
+ * Cachea el schedule del día MLB en baseball_match_schedule (cartelera + ventana
+ * de juego). El analyze y el live obtienen el schedule directo de MLB Stats API,
+ * así que esto es sobre todo para que el frontend liste rápido los juegos del
+ * día y para tener la ventana firstKickoff/lastExpectedEnd.
  *
  * Payload: { date?: 'YYYY-MM-DD' }
  */
-import { getBaseballFixturesByDate, getBaseballQuota, supabaseAdmin } from '../../shared.js';
+import { getMlbScheduleByDate, bogotaToday, supabaseAdmin } from '../../shared.js';
+
+const SPORT_IDS = [1];
+const GAME_DURATION_MIN = 210; // ~3.5h cubre extra innings
 
 export async function runBaseballFixtures(payload = {}) {
-  // MISMA LÓGICA QUE futbol/fixtures.js: UTC con anticipo a "mañana" cuando
-  // ya pasamos las 22 UTC. Esto es timezone-agnóstico para el usuario — el
-  // frontend (/api/baseball/fixtures con ?tz=) filtra después por el día
-  // local del cliente y trae cross-midnight via adjacentDates. Aquí solo
-  // garantizamos que la cartelera del día (UTC, jornada deportiva) esté
-  // poblada y persistida antes de las 02:10 España, cuando arranca el
-  // analyze (gemelo de futbol-daily).
-  //
-  // Antes: TZ Bogotá → a las 01:05 ES (=19:05 CO del día anterior) caía
-  // siempre el día N-1 → buscaba games del 24 cuando ya eran del 25 →
-  // se quedaba todo sin analizar (el bug que el usuario vio a las 7am).
-  const now = new Date();
-  const utcHour = now.getUTCHours();
-  const todayUTC    = now.toISOString().split('T')[0];
-  const tomorrowUTC = new Date(now.getTime() + 86400000).toISOString().split('T')[0];
-  const targetDate = payload.date || (utcHour >= 22 ? tomorrowUTC : todayUTC);
-  console.log(`[job:baseball-fixtures] targetDate=${targetDate} (utcHour=${utcHour})`);
+  const targetDate = payload.date || bogotaToday();
+  console.log(`[job:baseball-fixtures] MLB targetDate=${targetDate}`);
 
-  const result = await getBaseballFixturesByDate(targetDate, { forceApi: true });
-  const fixtures = result.fixtures || [];
+  let games = [];
+  for (const sid of SPORT_IDS) {
+    try { games.push(...await getMlbScheduleByDate(targetDate, sid)); }
+    catch (e) { console.warn(`[baseball-fixtures] schedule sportId=${sid}: ${e.message}`); }
+  }
 
-  const kickoffTimes = fixtures.map(f => {
-    const kickoff = new Date(f.date || f.fixture?.date).getTime();
-    return { fixtureId: f.id || f.fixture?.id, kickoff, expectedEnd: kickoff + 210 * 60 * 1000 };
-  }).sort((a, b) => a.kickoff - b.kickoff);
+  const kickoffTimes = games.map(g => {
+    const kickoff = new Date(g.dateUTC).getTime();
+    return { fixtureId: g.gamePk, kickoff, expectedEnd: kickoff + GAME_DURATION_MIN * 60 * 1000 };
+  }).filter(k => Number.isFinite(k.kickoff)).sort((a, b) => a.kickoff - b.kickoff);
 
   const scheduleData = {
     kickoffTimes,
     firstKickoff: kickoffTimes[0]?.kickoff || null,
     lastExpectedEnd: kickoffTimes.length > 0 ? Math.max(...kickoffTimes.map(k => k.expectedEnd)) : null,
-    fixtureCount: fixtures.length,
+    fixtureCount: games.length,
   };
 
   await supabaseAdmin
     .from('baseball_match_schedule')
     .upsert({ date: targetDate, schedule: scheduleData, updated_at: new Date().toISOString() });
 
-  const quota = await getBaseballQuota();
-  return { ok: true, targetDate, fixtureCount: fixtures.length, quota };
+  return { ok: true, targetDate, fixtureCount: games.length };
 }
