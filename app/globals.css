@@ -2951,6 +2951,54 @@ input:checked + .cb-mark::after {
   background:#dc2626; border:1px solid rgba(248,113,113,.4);
   font-size:.75rem; font-weight:700; color:white; letter-spacing:.05em;
 }
+/* Indicador 1T/2T/TE dentro del badge live (junto al minuto). */
+.half-tag {
+  font-size:.6rem; font-weight:800; line-height:1.5;
+  padding:0 5px; border-radius:5px;
+  background:rgba(255,255,255,.25); letter-spacing:.03em;
+}
+
+/* Marcador tragaperras: el dígito nuevo BAJA desde arriba con rebote. Solo se
+   aplica al re-montar el span (cambio de marcador), no en el primer render. */
+@keyframes score-roll {
+  0%   { transform: translateY(-65%); opacity: 0; }
+  55%  { transform: translateY(10%);  opacity: 1; }
+  78%  { transform: translateY(-4%); }
+  100% { transform: translateY(0);    opacity: 1; }
+}
+.score-roll { animation: score-roll .5s cubic-bezier(.22,1,.36,1); }
+
+/* Animación "GOL": push elegante sobre el score box (flash verde + pop+fade). */
+.goal-burst {
+  position:absolute; inset:0; z-index:6; pointer-events:none;
+  display:flex; align-items:center; justify-content:center;
+  border-radius:20px; overflow:hidden;
+}
+.goal-burst::before {
+  content:''; position:absolute; inset:0;
+  background:radial-gradient(circle at center, rgba(30,135,105,.6), rgba(30,135,105,.15) 55%, transparent 75%);
+  animation: goalFlash 2.6s ease-out forwards;
+}
+.goal-burst-txt {
+  position:relative; z-index:1;
+  font-size:clamp(1.9rem,8vw,3rem); font-weight:900; letter-spacing:.06em;
+  color:#fff; text-shadow:0 2px 16px rgba(16,185,129,.95), 0 0 4px rgba(0,0,0,.5);
+  animation: goalPop 2.6s cubic-bezier(.18,.9,.24,1.2) forwards;
+}
+@keyframes goalPop {
+  0%   { transform:scale(.25) translateY(10px); opacity:0; }
+  12%  { transform:scale(1.22); opacity:1; }
+  22%  { transform:scale(1); }
+  76%  { transform:scale(1); opacity:1; }
+  100% { transform:scale(1.08); opacity:0; }
+}
+@keyframes goalFlash {
+  0%{opacity:0;} 12%{opacity:1;} 68%{opacity:.55;} 100%{opacity:0;}
+}
+@media (prefers-reduced-motion: reduce) {
+  .score-roll { animation: none; }
+  .goal-burst-txt, .goal-burst::before { animation-duration: .01ms; }
+}
 .ap2-rdot {
   width:36px; height:36px; border-radius:8px; flex-shrink:0;
   display:inline-flex; align-items:center; justify-content:center;

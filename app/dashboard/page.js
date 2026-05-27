@@ -1624,6 +1624,7 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
   const hasScore = live || finished;
   const meta = match.leagueMeta || {};
   const flag = FLAGS[meta.country] || '';
+  const goalBurst = useGoalBurst((match.goals?.home ?? 0) + (match.goals?.away ?? 0), live);
   const homePos = matchData?.homePosition || standings?.[match.teams.home.id];
   const awayPos = matchData?.awayPosition || standings?.[match.teams.away.id];
   const homeId = match.teams.home.id;
@@ -1702,7 +1703,8 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
             (compositor GPU). backdropFilter:blur removido — era lo más caro de
             repintar y el glow ya da el efecto. */}
         <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <div className="score-box-glow" style={{ width: '100%', borderRadius: 20, background: 'linear-gradient(135deg, rgba(30,135,105,.25), rgba(0,0,9,.4), rgba(30,135,105,.15))', border: '2px solid rgba(30,135,105,.5)', padding: '16px 20px' }}>
+          <div className="score-box-glow" style={{ position: 'relative', width: '100%', borderRadius: 20, background: 'linear-gradient(135deg, rgba(30,135,105,.25), rgba(0,0,9,.4), rgba(30,135,105,.15))', border: '2px solid rgba(30,135,105,.5)', padding: '16px 20px' }}>
+            {goalBurst && <GoalBurst />}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
 
               {/* Badge de estado */}
@@ -1728,9 +1730,7 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 {hasScore ? (
                   <>
-                    <span className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }}>
-                      {match.goals.home}
-                    </span>
+                    <SlotScore value={match.goals.home} className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }} />
 
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
                       {liveStats?.corners && (
@@ -1753,9 +1753,7 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
                       )}
                     </div>
 
-                    <span style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }}>
-                      {match.goals.away}
-                    </span>
+                    <SlotScore value={match.goals.away} className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }} />
                   </>
                 ) : (
                   <div style={{ fontSize: 'clamp(1.5rem, 5vw, 2rem)', fontWeight: 700, color: '#f1f5f9' }}>
@@ -1917,6 +1915,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
   const meta = match.leagueMeta || {};
   const flag = FLAGS[meta.country] || '';
   const selCount = Object.keys(selMarkets).length;
+  const goalBurst = useGoalBurst((match.goals?.home ?? 0) + (match.goals?.away ?? 0), live);
   const homePos = data?.homePosition || standings?.[match.teams.home.id];
   const awayPos = data?.awayPosition || standings?.[match.teams.away.id];
   const winProb = data?.calculatedProbabilities?.winner;
@@ -2033,7 +2032,8 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
               en el main thread por cada card analizado visible → competían con
               la apertura de los sub-acordeones. Movido a @keyframes CSS (GPU). */}
           <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <div className="score-box-glow" style={{ width: '100%', borderRadius: 20, background: 'linear-gradient(135deg, rgba(30,135,105,.25), rgba(0,0,9,.4), rgba(30,135,105,.15))', border: '2px solid rgba(30,135,105,.5)', padding: '16px 20px' }}>
+            <div className="score-box-glow" style={{ position: 'relative', width: '100%', borderRadius: 20, background: 'linear-gradient(135deg, rgba(30,135,105,.25), rgba(0,0,9,.4), rgba(30,135,105,.15))', border: '2px solid rgba(30,135,105,.5)', padding: '16px 20px' }}>
+              {goalBurst && <GoalBurst />}
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
 
                 {/* Badge de estado */}
@@ -2059,9 +2059,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   {hasScore ? (
                     <>
-                      <span className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }}>
-                        {match.goals.home}
-                      </span>
+                      <SlotScore value={match.goals.home} className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }} />
 
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
                         {liveStats?.corners && (
@@ -2084,9 +2082,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                         )}
                       </div>
 
-                      <span style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }}>
-                        {match.goals.away}
-                      </span>
+                      <SlotScore value={match.goals.away} className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }} />
                     </>
                   ) : (
                     <div style={{ fontSize: 'clamp(1.5rem, 5vw, 2rem)', fontWeight: 700, color: '#f1f5f9' }}>
@@ -2280,6 +2276,58 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
 
 /* ======================== LIVE STATS COMPONENTS ======================== */
 
+// Marcador estilo tragaperras: cuando el número CAMBIA, el nuevo "baja" desde
+// arriba con un rebote (keyframe score-roll). Re-monta el span interior vía
+// `animKey` para reproducir la animación; en el primer render NO anima (así no
+// rueda todo al cargar la página, solo cuando llega un gol de verdad).
+function SlotScore({ value, className = '', style }) {
+  const [animKey, setAnimKey] = useState(0);
+  const prev = useRef(value);
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (mounted.current && value !== prev.current) setAnimKey(k => k + 1);
+    prev.current = value;
+    mounted.current = true;
+  }, [value]);
+  return (
+    <span className={className} style={{ ...style, display: 'inline-block', overflow: 'visible' }}>
+      <span key={animKey} className={animKey ? 'score-roll' : ''} style={{ display: 'inline-block' }}>
+        {value}
+      </span>
+    </span>
+  );
+}
+
+// Detecta gol: el total de goles SUBE estando en vivo → true por 2.6s. En el
+// primer render no dispara (guarda `mounted`), así no salta al cargar partidos
+// que ya tenían marcador. Compartido por MatchCard y AccordionCard.
+function useGoalBurst(total, live) {
+  const [burst, setBurst] = useState(false);
+  const prev = useRef(total);
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) { mounted.current = true; prev.current = total; return; }
+    if (live && total > prev.current) {
+      setBurst(true);
+      prev.current = total;
+      const t = setTimeout(() => setBurst(false), 2600);
+      return () => clearTimeout(t);
+    }
+    prev.current = total;
+  }, [total, live]);
+  return burst;
+}
+
+// Overlay "GOL" — push elegante sobre el score box (scale+fade, flash verde).
+// pointer-events:none para no bloquear el click de la tarjeta.
+function GoalBurst() {
+  return (
+    <div className="goal-burst" aria-hidden="true">
+      <span className="goal-burst-txt">⚽ GOL</span>
+    </div>
+  );
+}
+
 function MatchTimer({ elapsed, extra, status }) {
   // Minuto EXACTO de API-Football, sin interpolación ni offset local.
   //   - fixture.status.elapsed = minuto base (45/90/120).
@@ -2296,7 +2344,14 @@ function MatchTimer({ elapsed, extra, status }) {
 
   const base = Number(elapsed) || 0;
   const add  = Number(extra)   || 0;
-  return <span>{base + add}&apos;</span>;   // 91' en 90+1, 47' en 45+2
+  // Indicador de tiempo (1T/2T/TE) junto al minuto, como bet365/sofascore.
+  const half = status === '1H' ? '1T' : status === '2H' ? '2T' : status === 'ET' ? 'TE' : null;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+      {half && <span className="half-tag">{half}</span>}
+      <span>{base + add}&apos;</span>
+    </span>
+  );   // "2T 67'" en 2H 67, "1T 47'" en 45+2
 }
 
 function LiveStatsBar({ stats }) {
