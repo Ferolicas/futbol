@@ -17,6 +17,7 @@ try { require('dotenv').config({ path: '.env.local' }); } catch {}
 try { require('dotenv').config({ path: '.env' }); } catch {}
 
 const { Pool } = require('pg');
+const { isYouthTeam } = require('../lib/leagues');
 
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = a.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] || true] : [a, true]; }));
 const SEASON = Number(args.season) || 2025;
@@ -68,15 +69,23 @@ function statVal(stats, teamId, type, pct = false) {
 }
 
 async function distinctTeams() {
+  // Traemos id + nombre para poder excluir JUVENILES por patrón de nombre
+  // (API-Football no tiene campo de categoría sub/juvenil).
   const { rows } = await pgPool.query(
-    `SELECT DISTINCT team_id FROM (
-       SELECT (home_team->>'id')::int AS team_id FROM match_predictions WHERE kickoff >= $1
-       UNION
-       SELECT (away_team->>'id')::int AS team_id FROM match_predictions WHERE kickoff >= $1
-     ) t WHERE team_id IS NOT NULL`,
+    `SELECT (home_team->>'id')::int AS id, home_team->>'name' AS name FROM match_predictions WHERE kickoff >= $1 AND home_team->>'id' IS NOT NULL
+     UNION
+     SELECT (away_team->>'id')::int AS id, away_team->>'name' AS name FROM match_predictions WHERE kickoff >= $1 AND away_team->>'id' IS NOT NULL`,
     [SEASON_START]
   );
-  return rows.map(r => r.team_id);
+  const byId = new Map();
+  for (const r of rows) if (!byId.has(r.id)) byId.set(r.id, r.name);
+  const teams = []; let youth = 0;
+  for (const [id, name] of byId) {
+    if (isYouthTeam(name)) { youth++; continue; }
+    teams.push(id);
+  }
+  if (youth) console.log(`Excluidos ${youth} equipos JUVENILES (U17-U23/sub/youth/junior) — solo selecciones absolutas.`);
+  return teams;
 }
 
 async function processTeam(teamId) {
@@ -85,6 +94,9 @@ async function processTeam(teamId) {
   let saved = 0;
   for (const f of finished) {
     const isHome = f.teams?.home?.id === teamId;
+    // No contaminar el ADN con amistosos contra rivales juveniles.
+    const oppName = isHome ? f.teams?.away?.name : f.teams?.home?.name;
+    if (isYouthTeam(oppName)) continue;
     const oppId = isHome ? f.teams?.away?.id : f.teams?.home?.id;
     const gf = isHome ? f.goals.home : f.goals.away;
     const ga = isHome ? f.goals.away : f.goals.home;

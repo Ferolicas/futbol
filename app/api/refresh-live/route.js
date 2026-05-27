@@ -1,5 +1,5 @@
 import { redisGet, redisSet, KEYS, TTL } from '../../../lib/redis';
-import { ALL_LEAGUE_IDS } from '../../../lib/leagues';
+import { ALL_LEAGUE_IDS, isYouthTeam } from '../../../lib/leagues';
 
 // Force-refresh live data — direct API call, no cron chaining.
 // Rate-limited to once every 15s via Redis lock.
@@ -132,7 +132,8 @@ export async function POST(request) {
 
     const json = await res.json();
     const tracked = (json.response || []).filter(m =>
-      ALL_LEAGUE_IDS.includes(m.league.id) && !YOUTH_RE.test(m.league.name || '')
+      ALL_LEAGUE_IDS.includes(m.league.id) && !YOUTH_RE.test(m.league.name || '') &&
+      !isYouthTeam(m.teams?.home?.name) && !isYouthTeam(m.teams?.away?.name)
     );
 
     // Build fresh live data in the SAME format as cron/live (corners, yellowCards, etc.)
