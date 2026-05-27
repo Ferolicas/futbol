@@ -225,11 +225,14 @@ async function processMatch(row, leagueFixtures) {
     apiGet(`/injuries?fixture=${row.fixture_id}`),
   ]);
 
-  // Odds: preferir las point-in-time guardadas en match_analysis. Solo si no
-  // hay, intentar /odds (probablemente purgadas para fixtures viejos).
+  // Odds: solo las point-in-time guardadas en match_analysis. La API purga las
+  // odds históricas (confirmado: 0%), así que NO llamamos /odds por defecto —
+  // sería 1 llamada en vano por partido. El histórico arranca sin este feature
+  // (decisión del usuario); las filas EN VIVO sí lo traen y el retrain nocturno
+  // lo incorpora. Reactivable con --fetch-odds si algún día hiciera falta.
   let matchWinner = row.stored_odds?.matchWinner || null;
   let oddsSource = matchWinner ? 'stored' : null;
-  if (!matchWinner) {
+  if (!matchWinner && args['fetch-odds']) {
     const oddsResp = await apiGet(`/odds?fixture=${row.fixture_id}`);
     matchWinner = extractMatchWinner(oddsResp);
     if (matchWinner) oddsSource = 'api';
