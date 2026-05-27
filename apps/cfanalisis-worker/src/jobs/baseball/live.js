@@ -169,7 +169,8 @@ export async function runBaseballLive(payload = {}) {
       fixture_id: s.gamePk,
       league_id: 1,
       date: today,
-      status: s.isFinal ? 'Final' : (s.isLive ? 'Live' : s.status),
+      // Códigos compatibles con el frontend (isLive: 'IN', isFinished: 'FT').
+      status: s.isFinal ? 'FT' : (s.isLive ? 'IN' : 'NS'),
       inning: s.inning ?? null,
       inning_half: s.inningHalf ? s.inningHalf.toLowerCase() : null,
       home_score: s.home?.runs ?? null,

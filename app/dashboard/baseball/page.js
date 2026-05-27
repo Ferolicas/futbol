@@ -29,6 +29,7 @@ import {
   buildCustomBaseballCombinada,
 } from '../../../lib/baseball-combinada';
 import { fetcher } from '../../../lib/fetcher';
+import { usePusherEvent } from '../../../lib/use-pusher';
 
 // =====================================================================
 // HELPERS
@@ -123,7 +124,41 @@ export default function BaseballDashboard() {
     refreshInterval: 300_000,
   });
 
-  const games = fxData?.fixtures || [];
+  // ─── Estado EN VIVO por WebSocket ──────────────────────────────────
+  // El worker (baseball-live) emite 'baseball-live'/'update' con el estado
+  // pitch-by-pitch de cada juego MLB en curso. Lo aplicamos sobre los games
+  // del SWR para actualización instantánea (sin esperar al refresh de 60s).
+  const [liveOverrides, setLiveOverrides] = useState({});
+  usePusherEvent('baseball-live', 'update', useCallback((data) => {
+    if (!data?.games) return;
+    setLiveOverrides(prev => {
+      const next = { ...prev };
+      for (const s of data.games) {
+        if (!s?.gamePk) continue;
+        next[s.gamePk] = {
+          status: s.isFinal ? 'FT' : (s.isLive ? 'IN' : 'NS'),
+          inning: s.inning ?? null,
+          inning_half: s.inningHalf ? String(s.inningHalf).toLowerCase() : null,
+          home_score: s.home?.runs ?? s.home?.score ?? null,
+          away_score: s.away?.runs ?? s.away?.score ?? null,
+          // Estado rico para la UI en vivo (conteo, bases, pitcher/bateador).
+          outs: s.outs, balls: s.balls, strikes: s.strikes, bases: s.bases,
+          currentPitcher: s.currentPitcher, currentBatter: s.currentBatter,
+          lastPlay: s.lastPlay,
+        };
+      }
+      return next;
+    });
+  }, []));
+
+  const rawGames = fxData?.fixtures || [];
+  // Aplicar overrides en vivo sobre el liveResult de cada juego.
+  const games = Object.keys(liveOverrides).length === 0
+    ? rawGames
+    : rawGames.map(g => {
+        const ov = liveOverrides[g.id];
+        return ov ? { ...g, liveResult: { ...(g.liveResult || {}), ...ov } } : g;
+      });
   const quota = quotaData || { used: 0, limit: 100, remaining: 100 };
   const hidden = games.filter(g => g.isHidden).map(g => g.id);
   const favorites = games.filter(g => g.isFavorite).map(g => g.id);
