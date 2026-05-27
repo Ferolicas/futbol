@@ -19,7 +19,10 @@ type Sched = { queue: QueueName; id: string; pattern?: string; every?: number; t
 
 // IDs de schedulers viejos a eliminar en cada arranque (evita que sigan
 // corriendo en paralelo tras cambiar el id/cadencia de un job).
-const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-odds-15m'];
+// 'futbol-raw-backfill-half2' fue un seed one-shot (ya completado a mano). Al
+// añadirlo aquí, registerSchedulers() llama removeJobScheduler() en el arranque
+// → borra el scheduler Y su job delayed pendiente de Redis (no corre a las 4am).
+const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-odds-15m', 'futbol-raw-backfill-half2'];
 
 const SCHEDULES: Sched[] = [
   // ── Fútbol — diarios (hora España) ──
@@ -36,9 +39,6 @@ const SCHEDULES: Sched[] = [
   { queue: 'futbol-finalize',  id: 'futbol-finalize-daily',  pattern: '0 3,4 * * *', tz: TZ },
   { queue: 'futbol-calibrate', id: 'futbol-calibrate-daily', pattern: '0 5 * * *',   tz: TZ },
   { queue: 'futbol-cleanup',   id: 'futbol-cleanup-daily',   pattern: '0 3 * * *',   tz: TZ },
-  // Captura cruda total (Camino B) — TANDA 2 (mitad 2 de los equipos). La tanda
-  // 1 la corre el usuario a mano hoy. Idempotente → no repite lo de la tanda 1.
-  { queue: 'futbol-raw-backfill', id: 'futbol-raw-backfill-half2', pattern: '0 4 * * *', tz: TZ, data: { half: 2 } },
   // ── Fútbol — periódicos ──
   // Live cada 20s: el handler hace smart-skip (0 llamadas fuera de partidos),
   // así que el 3x del intervalo solo aplica durante ventanas en vivo. En plan
