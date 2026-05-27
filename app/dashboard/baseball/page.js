@@ -996,9 +996,13 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
   const awayName = game.analysis?.away_team || game.teams?.away?.name || 'Visitante';
 
   const opts = [];
+  // Combinada = apuestas REALES: solo opciones que EXISTEN en la casa (tienen
+  // cuota), con cuota ≥1.20 y probabilidad ≥80%. Sin cuota no se puede apostar
+  // → no se muestra (de nada sirve verla si no existe en la casa).
   const add = (key, cat, label, prob, odd, extra = {}) => {
-    if (prob == null || prob < 60 || prob > 95) return;
-    opts.push({ key, cat, label, probability: Math.round(prob), odd: (odd && odd >= 1.01) ? odd : null, ...extra });
+    if (prob == null || prob < 80) return;
+    if (!odd || odd < 1.20) return;
+    opts.push({ key, cat, label, probability: Math.round(prob), odd, ...extra });
   };
 
   if (probs.moneyline) {
@@ -1040,7 +1044,7 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
 
   const markets = opts.sort((a, b) => b.probability - a.probability);
   if (markets.length === 0) {
-    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Ningún mercado entre 60-95% de probabilidad.</div>;
+    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Ninguna opción apostable (cuota ≥1.20 y probabilidad ≥80%) en este partido.</div>;
   }
 
   const byCat = markets.reduce((acc, m) => {
