@@ -1,357 +1,199 @@
 // @ts-nocheck
 /**
- * Job: baseball-live
- * Port of /api/cron/baseball/live. Smart live updater with daily budget +
- * dynamic spacing. Runs every 5 minutes via cron-job.org → enqueue; the
- * handler itself decides whether to actually spend an API call.
+ * Job: baseball-live (MLB-only, MLB Stats API)
  *
- * Payload: {}
+ * Polling del estado EN VIVO de los juegos MLB del día desde la MLB Stats API
+ * (gratis, sin límite de requests → sin el budget/throttle que api-baseball
+ * obligaba). Por cada juego en vivo trae el estado pitch-by-pitch (inning,
+ * conteo bolas/strikes/outs, corredores en base, pitcher/bateador, marcador),
+ * lo persiste en baseball_match_results, lo emite por WebSocket ('baseball-live'
+ * → 'update') para la UI en vivo, y manda push de carreras a favoritos.
+ *
+ * Payload: { date?: 'YYYY-MM-DD' }
  */
-import { getBaseballLiveGames, getBaseballQuota, supabaseAdmin, redisGet, redisSet, sendPushNotification } from '../../shared.js';
+import {
+  getMlbScheduleByDate, getMlbLiveGame, triggerEvent, bogotaToday,
+  supabaseAdmin, redisGet, redisSet, sendPushNotification,
+} from '../../shared.js';
 import { mapPool } from '../../pool.js';
 
-const LIVE_BUDGET = 30;
-const SAFETY_RESERVE = 5;
-const MIN_INTERVAL_MIN = 4;
-const MAX_INTERVAL_MIN = 30;
-const PRE_KICKOFF_BUFFER_MIN = 5;
+const SPORT_IDS = [1];
+const PUSH_DEDUP_TTL_SEC = 1800; // 30 min — cubre dos ticks consecutivos
 
-// Fecha UTC con anticipo a "mañana" tras las 22 UTC — DEBE coincidir con la
-// lógica de baseball-fixtures y baseball-analyze (los 3 jobs usan la misma
-// función de fecha para que live encuentre el schedule que fixtures guardó).
-// El nombre `bogotaDate` se conserva por uso interno; ya no es Bogotá.
-const bogotaDate = () => {
-  const now = new Date();
-  const utcHour = now.getUTCHours();
-  const todayUTC    = now.toISOString().split('T')[0];
-  const tomorrowUTC = new Date(now.getTime() + 86400000).toISOString().split('T')[0];
-  return (utcHour >= 22 ? tomorrowUTC : todayUTC);
-};
-const callsKey = (d) => `baseball:live:calls:${d}`;
-const lastCallKey = 'baseball:live:last_call_at';
-
-// ────────────────────────────────────────────────────────────────────────────
-// PUSH NOTIFICATIONS — bundle por partido, dedup cross-tick por Redis.
-//
-// Mismo patrón que el live de fútbol (jobs/futbol/live.js) pero adaptado a la
-// cadencia y a los eventos de baseball:
-//
-//   - EVENTO NOTIFICADO: carreras (runs). Es el equivalente al gol: dato REAL
-//     (sabemos qué equipo anotó y el nuevo marcador) y de alta señal. La API
-//     de baseball básica (/games) NO expone play-by-play con jugador, así que
-//     NO inventamos eventos sin dato (al igual que fútbol descarta offsides).
-//   - DEDUP: clave por marcador EXACTO. `push:sent:bb:{fid}:run:home:{score}`
-//     solo se notifica una vez aunque el tick se repita. Como el marcador es
-//     monótono creciente, una clave por valor nunca produce falso duplicado.
-//   - TTL: 30 min. El live de baseball corre con espaciado dinámico (4-30 min
-//     entre llamadas reales), mucho más lento que los 20s de fútbol, así que
-//     el TTL de 90s de fútbol no sirve — usamos 1800s para cubrir el peor caso
-//     de dos ticks consecutivos sin que la clave caduque entremedias.
-//   - BUNDLE: si en un mismo tick ambos equipos anotaron, va 1 push con las 2
-//     líneas en lugar de 2 pushes.
-//   - BASELINE: si no tenemos estado previo del partido (primera vez que lo
-//     vemos), NO notificamos — evita spamear el marcador inicial al arrancar.
-//   - FAVORITOS: solo se notifica a usuarios que tienen el fixture en
-//     baseball_user_favorites (mismo modelo que fútbol con user_favorites).
-// ────────────────────────────────────────────────────────────────────────────
-const PUSH_DEDUP_TTL_SEC = 1800; // 30 min — cadencia lenta del live de baseball
-
-function bbDedupKey(fid, ...parts) {
-  return `push:sent:bb:${fid}:${parts.join(':')}`;
-}
+function bbDedupKey(fid, ...parts) { return `push:sent:bb:${fid}:${parts.join(':')}`; }
 async function bbAlreadySent(key) {
-  try {
-    const v = await redisGet(key);
-    return v !== null && v !== undefined;
-  } catch {
-    return false; // FAIL OPEN — mejor un duplicado ocasional que perder el evento
-  }
+  try { const v = await redisGet(key); return v !== null && v !== undefined; }
+  catch { return false; }
 }
-async function bbMarkSent(key) {
-  try { await redisSet(key, 1, PUSH_DEDUP_TTL_SEC); } catch {}
-}
-
+async function bbMarkSent(key) { try { await redisSet(key, 1, PUSH_DEDUP_TTL_SEC); } catch {} }
 function toSubArray(stored) {
   if (!stored) return [];
-  const parsed = typeof stored === 'string' ? JSON.parse(stored) : stored;
-  return Array.isArray(parsed) ? parsed : [parsed];
+  const p = typeof stored === 'string' ? JSON.parse(stored) : stored;
+  return Array.isArray(p) ? p : [p];
 }
 
-// Construye el bundle de carreras para un partido comparando el marcador
-// actual (g) contra el previo (prev). Devuelve null si no hay deltas o no hay
-// baseline previa. sentKeys: el caller las marca DESPUÉS de un envío OK.
-async function buildBaseballBundle(g, prev) {
-  const fid = g.id;
-  const home = g.teams?.home?.name || '?';
-  const away = g.teams?.away?.name || '?';
-  const nH = g.scores?.home?.total ?? 0;
-  const nA = g.scores?.away?.total ?? 0;
+// Bundle de carreras: compara marcador actual (estado MLB) vs previo. Dedup por
+// marcador exacto (monótono → nunca falso duplicado). Sin baseline → no notifica.
+async function buildBaseballBundle(s, prev) {
+  const fid = s.gamePk;
+  const home = s.home?.name || '?';
+  const away = s.away?.name || '?';
+  const nH = s.home?.runs ?? 0;
+  const nA = s.away?.runs ?? 0;
   const pH = prev?.home_score ?? null;
   const pA = prev?.away_score ?? null;
-
-  // Sin baseline → no notificamos (estado inicial). Tampoco si el marcador
-  // viene null (partido recién arrancado sin carreras todavía).
   if (pH == null || pA == null) return null;
 
   const lines = [];
   const sentKeys = [];
-
   if (nH > pH) {
     const k = bbDedupKey(fid, 'run', 'home', nH);
-    if (!(await bbAlreadySent(k))) {
-      const d = nH - pH;
-      lines.push(`⚾ ${d === 1 ? 'Carrera' : `${d} carreras`} · ${home} (${nH}-${nA})`);
-      sentKeys.push(k);
-    }
+    if (!(await bbAlreadySent(k))) { const d = nH - pH; lines.push(`⚾ ${d === 1 ? 'Carrera' : `${d} carreras`} · ${home} (${nH}-${nA})`); sentKeys.push(k); }
   }
   if (nA > pA) {
     const k = bbDedupKey(fid, 'run', 'away', nA);
-    if (!(await bbAlreadySent(k))) {
-      const d = nA - pA;
-      lines.push(`⚾ ${d === 1 ? 'Carrera' : `${d} carreras`} · ${away} (${nH}-${nA})`);
-      sentKeys.push(k);
-    }
+    if (!(await bbAlreadySent(k))) { const d = nA - pA; lines.push(`⚾ ${d === 1 ? 'Carrera' : `${d} carreras`} · ${away} (${nH}-${nA})`); sentKeys.push(k); }
   }
-
   if (lines.length === 0) return null;
 
-  const inning = g.status?.inning ?? '';
-  const half = (g.status?.long || '').toLowerCase();
-  const arrow = half.includes('top') ? '↑' : half.includes('bottom') ? '↓' : '';
-  const inningTxt = inning ? ` · ${arrow}${inning}` : '';
-  const title = `${home} ${nH}-${nA} ${away}${inningTxt}`;
-  const body = lines.join('\n');
-  const tag = `bb-live-${fid}-${nH}-${nA}`;
-  return { fixtureId: Number(fid), title, body, tag, sentKeys };
+  const arrow = s.inningHalf === 'Top' ? '↑' : s.inningHalf === 'Bottom' ? '↓' : '';
+  const inningTxt = s.inning ? ` · ${arrow}${s.inning}` : '';
+  return {
+    fixtureId: Number(fid),
+    title: `${home} ${nH}-${nA} ${away}${inningTxt}`,
+    body: lines.join('\n'),
+    tag: `bb-live-${fid}-${nH}-${nA}`,
+    sentKeys,
+  };
 }
 
-// Envía los bundles a los usuarios suscritos que tengan el fixture en favoritos.
-// Marca las dedup keys solo si hubo entrega OK o si nadie tenía el fixture en
-// favoritos (at-least-once: si todos los envíos fallan por un transient del
-// push server, el siguiente tick reintenta).
-async function sendBaseballPushes(liveGames, prevMap) {
+async function sendBaseballPushes(states, prevMap) {
   const LP = '[baseball-live:push]';
   const bundles = [];
-  for (const g of liveGames) {
-    const prev = prevMap[Number(g.id)];
-    const bundle = await buildBaseballBundle(g, prev);
-    if (bundle) bundles.push(bundle);
+  for (const s of states) {
+    const b = await buildBaseballBundle(s, prevMap[Number(s.gamePk)]);
+    if (b) bundles.push(b);
   }
   if (bundles.length === 0) return;
-  for (const b of bundles) {
-    console.log(`${LP} bundle fid=${b.fixtureId} "${b.title}" [${b.body.replace(/\n/g, ' | ')}]`);
-  }
 
-  const { data: subs, error: subsErr } = await supabaseAdmin
-    .from('push_subscriptions')
-    .select('user_id, subscription');
-  if (subsErr) { console.error(`${LP} error leyendo push_subscriptions:`, subsErr.message || subsErr); return; }
-  if (!subs?.length) {
-    // Nadie suscrito — marcamos dedup igual para no reconstruir el bundle.
-    for (const b of bundles) await Promise.all(b.sentKeys.map(bbMarkSent));
-    return;
-  }
+  const { data: subs, error: subsErr } = await supabaseAdmin.from('push_subscriptions').select('user_id, subscription');
+  if (subsErr) { console.error(`${LP} push_subscriptions:`, subsErr.message || subsErr); return; }
+  if (!subs?.length) { for (const b of bundles) await Promise.all(b.sentKeys.map(bbMarkSent)); return; }
 
-  // Favoritos por usuario (una sola lectura por usuario).
-  const favoritesByUser = {};
+  const favByUser = {};
   await Promise.all(subs.map(async (row) => {
-    if (favoritesByUser[row.user_id] !== undefined) return;
-    const { data: favRows } = await supabaseAdmin
-      .from('baseball_user_favorites')
-      .select('fixture_id')
-      .eq('user_id', row.user_id);
-    favoritesByUser[row.user_id] = new Set((favRows || []).map(r => Number(r.fixture_id)));
+    if (favByUser[row.user_id] !== undefined) return;
+    const { data: favRows } = await supabaseAdmin.from('baseball_user_favorites').select('fixture_id').eq('user_id', row.user_id);
+    favByUser[row.user_id] = new Set((favRows || []).map(r => Number(r.fixture_id)));
   }));
 
   const expiredByUser = {};
-  let attempted = 0, delivered = 0, failed = 0, expiredN = 0, skippedNoFav = 0;
+  let delivered = 0, failed = 0, skippedNoFav = 0;
   for (const bundle of bundles) {
-    let bundleHadDelivery = false;
-    let bundleHadSubscriberInFav = false;
-
+    let hadDelivery = false, hadSubInFav = false;
     await Promise.allSettled(subs.map(async (row) => {
-      const favs = favoritesByUser[row.user_id] || new Set();
+      const favs = favByUser[row.user_id] || new Set();
       if (!favs.has(bundle.fixtureId)) { skippedNoFav++; return; }
-      bundleHadSubscriberInFav = true;
-
-      const deviceSubs = toSubArray(row.subscription);
-      await Promise.allSettled(deviceSubs.map(async (sub) => {
+      hadSubInFav = true;
+      await Promise.allSettled(toSubArray(row.subscription).map(async (sub) => {
         if (!sub?.endpoint) return;
-        attempted++;
-        const result = await sendPushNotification(
-          sub,
-          { title: bundle.title, body: bundle.body, tag: bundle.tag },
-          { urgency: 'high' },
-        );
-        if (result === true) { delivered++; bundleHadDelivery = true; }
-        else if (result === 'expired') {
-          expiredN++;
-          if (!expiredByUser[row.user_id]) expiredByUser[row.user_id] = new Set();
-          expiredByUser[row.user_id].add(sub.endpoint);
-        } else failed++;
+        const r = await sendPushNotification(sub, { title: bundle.title, body: bundle.body, tag: bundle.tag }, { urgency: 'high' });
+        if (r === true) { delivered++; hadDelivery = true; }
+        else if (r === 'expired') { (expiredByUser[row.user_id] = expiredByUser[row.user_id] || new Set()).add(sub.endpoint); }
+        else failed++;
       }));
     }));
-
-    const shouldMark = bundleHadDelivery || !bundleHadSubscriberInFav;
-    if (shouldMark && bundle.sentKeys.length > 0) {
-      await Promise.all(bundle.sentKeys.map(bbMarkSent));
-    }
+    if ((hadDelivery || !hadSubInFav) && bundle.sentKeys.length) await Promise.all(bundle.sentKeys.map(bbMarkSent));
   }
-  console.log(`${LP} resumen: intentos=${attempted} ok=${delivered} fallo=${failed} expirados=${expiredN} sinFav=${skippedNoFav}`);
+  console.log(`${LP} ok=${delivered} fallo=${failed} sinFav=${skippedNoFav}`);
 
-  // Purga de endpoints expirados (410/404).
-  const usersWithExpired = Object.keys(expiredByUser);
-  if (usersWithExpired.length === 0) return;
-  await Promise.allSettled(usersWithExpired.map(async (userId) => {
+  const usersExpired = Object.keys(expiredByUser);
+  if (usersExpired.length === 0) return;
+  await Promise.allSettled(usersExpired.map(async (userId) => {
     try {
-      const expiredEndpoints = expiredByUser[userId];
-      const { data: row } = await supabaseAdmin
-        .from('push_subscriptions')
-        .select('subscription')
-        .eq('user_id', userId)
-        .maybeSingle();
+      const exp = expiredByUser[userId];
+      const { data: row } = await supabaseAdmin.from('push_subscriptions').select('subscription').eq('user_id', userId).maybeSingle();
       if (!row) return;
-      const remaining = toSubArray(row.subscription).filter(s => !expiredEndpoints.has(s?.endpoint));
-      if (remaining.length === 0) {
-        await supabaseAdmin.from('push_subscriptions').delete().eq('user_id', userId);
-      } else {
-        await supabaseAdmin.from('push_subscriptions').update({ subscription: remaining }).eq('user_id', userId);
-      }
-    } catch (e) {
-      console.error(`${LP} purge-expired`, userId, e.message);
-    }
+      const remaining = toSubArray(row.subscription).filter(s => !exp.has(s?.endpoint));
+      if (remaining.length === 0) await supabaseAdmin.from('push_subscriptions').delete().eq('user_id', userId);
+      else await supabaseAdmin.from('push_subscriptions').update({ subscription: remaining }).eq('user_id', userId);
+    } catch (e) { console.error(`${LP} purge`, userId, e.message); }
   }));
 }
 
 export async function runBaseballLive(payload = {}) {
-  const today = payload.date || bogotaDate();
-  const now = Date.now();
+  const today = payload.date || bogotaToday();
 
-  const { data: scheduleRow } = await supabaseAdmin
-    .from('baseball_match_schedule')
-    .select('schedule')
-    .eq('date', today)
-    .maybeSingle();
+  // 1) Schedule del día (ligero) — ver qué juegos hay y cuáles en vivo.
+  let games = [];
+  for (const sid of SPORT_IDS) {
+    try { games.push(...await getMlbScheduleByDate(today, sid)); }
+    catch (e) { console.warn(`[baseball-live] schedule sportId=${sid}: ${e.message}`); }
+  }
+  if (games.length === 0) return { ok: true, skipped: true, reason: 'no games today' };
 
-  const schedule = scheduleRow?.schedule;
-  if (!schedule || !schedule.firstKickoff || !schedule.lastExpectedEnd) {
-    return { ok: true, skipped: true, reason: 'no schedule for today' };
+  const liveGames = games.filter(g => g.isLive);
+  if (liveGames.length === 0) {
+    // No hay nada en vivo → emitimos los marcadores del schedule (para cerrar
+    // finales en la UI) y salimos sin pedir el feed detallado.
+    try {
+      await triggerEvent('baseball-live', 'update', {
+        date: today,
+        games: games.map(g => ({ gamePk: g.gamePk, status: g.status, isFinal: g.isFinal, inning: g.inning,
+          home: { name: g.home.name, runs: g.home.score }, away: { name: g.away.name, runs: g.away.score } })),
+        timestamp: new Date().toISOString(),
+      });
+    } catch {}
+    return { ok: true, skipped: true, reason: 'no live games', total: games.length };
   }
 
-  const windowStart = schedule.firstKickoff - PRE_KICKOFF_BUFFER_MIN * 60 * 1000;
-  const windowEnd = schedule.lastExpectedEnd;
-  if (now < windowStart || now > windowEnd) {
-    return { ok: true, skipped: true, reason: 'outside game window' };
-  }
+  // 2) Estado detallado en vivo de cada juego (MLB Stats API gratis → sin throttle).
+  const detailed = await mapPool(liveGames, 6, async (g) => {
+    try { return await getMlbLiveGame(g.gamePk); } catch (e) { console.warn(`[baseball-live] liveGame ${g.gamePk}: ${e.message}`); return null; }
+  });
+  const states = detailed.filter(r => r.ok && r.value).map(r => r.value);
+  if (states.length === 0) return { ok: true, skipped: true, reason: 'no live state' };
 
-  const quota = await getBaseballQuota();
-  if (quota.remaining <= SAFETY_RESERVE) {
-    return { ok: true, skipped: true, reason: `quota too low (${quota.remaining})`, quota };
-  }
-
-  const liveCallsToday = Number((await redisGet(callsKey(today))) || 0);
-  if (liveCallsToday >= LIVE_BUDGET) {
-    return { ok: true, skipped: true, reason: `live budget exhausted (${liveCallsToday}/${LIVE_BUDGET})`, liveCallsToday };
-  }
-
-  const callsRemaining = Math.max(1, LIVE_BUDGET - liveCallsToday);
-  const minutesUntilEnd = Math.max(1, (windowEnd - now) / 60000);
-  let intervalMin = minutesUntilEnd / callsRemaining;
-  intervalMin = Math.max(MIN_INTERVAL_MIN, Math.min(MAX_INTERVAL_MIN, intervalMin));
-  const intervalMs = intervalMin * 60 * 1000;
-
-  const lastCallAt = Number(await redisGet(lastCallKey)) || 0;
-  const sinceLastMs = now - lastCallAt;
-  if (lastCallAt && sinceLastMs < intervalMs) {
-    const nextEligibleAt = lastCallAt + intervalMs;
-    return {
-      ok: true,
-      skipped: true,
-      reason: 'throttled',
-      intervalMin: +intervalMin.toFixed(1),
-      nextEligibleIn: Math.round((nextEligibleAt - now) / 1000),
-      liveCallsToday,
-      callsRemaining,
-      quota,
-    };
-  }
-
-  // getBaseballLiveGames usa apiCall, que lanza ante cuota agotada (429) o
-  // error de API. Lo tratamos como skip — igual que los demás smart-skips de
-  // este handler — para no disparar alerta de Telegram cada 5 min.
-  let liveGames;
-  try {
-    liveGames = await getBaseballLiveGames();
-  } catch (e) {
-    return { ok: true, skipped: true, reason: `API sin datos (${e.message})` };
-  }
-
-  // Baseline para detectar carreras: leemos el marcador PREVIO de los partidos
-  // en juego ANTES de sobreescribirlo con el upsert. prevMap[fid] = {home_score,
-  // away_score, status}. Si un partido no está aquí (primera vez que lo vemos),
-  // buildBaseballBundle no notifica → no spamea el marcador inicial.
-  const liveFids = liveGames.map(g => Number(g.id));
+  // 3) Baseline previo (para detectar carreras nuevas) ANTES de sobreescribir.
+  const fids = states.map(s => Number(s.gamePk));
   let prevMap = {};
-  if (liveFids.length > 0) {
-    const { data: prevRows } = await supabaseAdmin
-      .from('baseball_match_results')
-      .select('fixture_id, home_score, away_score, status')
-      .in('fixture_id', liveFids);
-    prevMap = Object.fromEntries((prevRows || []).map(r => [Number(r.fixture_id), r]));
-  }
+  const { data: prevRows } = await supabaseAdmin
+    .from('baseball_match_results')
+    .select('fixture_id, home_score, away_score, status')
+    .in('fixture_id', fids);
+  prevMap = Object.fromEntries((prevRows || []).map(r => [Number(r.fixture_id), r]));
 
-  const upsertResults = await mapPool(liveGames, 8, async (g) => {
-    const fid = g.id;
-    const homeScore = g.scores?.home?.total ?? null;
-    const awayScore = g.scores?.away?.total ?? null;
-    const homeHits = g.scores?.home?.hits ?? null;
-    const awayHits = g.scores?.away?.hits ?? null;
-    const homeErrors = g.scores?.home?.errors ?? null;
-    const awayErrors = g.scores?.away?.errors ?? null;
-    const innings = g.scores?.home?.innings || g.innings || null;
-
+  // 4) Persistir resultados (marcador + estado rico).
+  await mapPool(states, 8, async (s) => {
     const { error } = await supabaseAdmin.from('baseball_match_results').upsert({
-      fixture_id: fid,
-      league_id: g.league?.id,
+      fixture_id: s.gamePk,
+      league_id: 1,
       date: today,
-      status: g.status?.short || g.status?.long,
-      inning: g.status?.inning ?? null,
-      inning_half: (g.status?.long || '').toLowerCase().includes('top') ? 'top' :
-                   (g.status?.long || '').toLowerCase().includes('bottom') ? 'bottom' : null,
-      home_score: homeScore,
-      away_score: awayScore,
-      home_hits: homeHits,
-      away_hits: awayHits,
-      home_errors: homeErrors,
-      away_errors: awayErrors,
-      innings,
+      status: s.isFinal ? 'Final' : (s.isLive ? 'Live' : s.status),
+      inning: s.inning ?? null,
+      inning_half: s.inningHalf ? s.inningHalf.toLowerCase() : null,
+      home_score: s.home?.runs ?? null,
+      away_score: s.away?.runs ?? null,
+      home_hits: s.home?.hits ?? null,
+      away_hits: s.away?.hits ?? null,
+      home_errors: s.home?.errors ?? null,
+      away_errors: s.away?.errors ?? null,
+      innings: s.innings || null,
       updated_at: new Date().toISOString(),
     });
-    if (error) throw new Error(`upsert: ${error.message || error}`);
-    return fid;
+    if (error) throw new Error(`upsert ${s.gamePk}: ${error.message || error}`);
+    return s.gamePk;
   });
-  const updated = upsertResults.filter(r => r.ok).length;
-  const upsertFails = upsertResults.length - updated;
-  if (upsertFails > 0) console.error(`[job:baseball-live] ${upsertFails}/${liveGames.length} upserts failed`);
 
-  await redisSet(callsKey(today), liveCallsToday + 1, 36 * 3600);
-  await redisSet(lastCallKey, now, 36 * 3600);
-
-  // Push de carreras a favoritos (usa prevMap capturado antes del upsert).
-  // No bloqueamos el resultado del job si el push falla — es best-effort.
+  // 5) WS para la UI en vivo (estado pitch-by-pitch completo).
   try {
-    await sendBaseballPushes(liveGames, prevMap);
-  } catch (e) {
-    console.error('[baseball-live:push] error no fatal:', e.message);
-  }
+    await triggerEvent('baseball-live', 'update', { date: today, games: states, timestamp: new Date().toISOString() });
+  } catch (e) { console.error('[baseball-live] WS:', e.message); }
 
-  return {
-    ok: true,
-    liveCount: liveGames.length,
-    updated,
-    intervalMin: +intervalMin.toFixed(1),
-    liveCallsToday: liveCallsToday + 1,
-    callsRemaining: callsRemaining - 1,
-    quota: await getBaseballQuota(),
-  };
+  // 6) Push de carreras a favoritos (best-effort).
+  try { await sendBaseballPushes(states, prevMap); }
+  catch (e) { console.error('[baseball-live:push] no fatal:', e.message); }
+
+  console.log(`[baseball-live] live=${states.length}/${games.length} emitido WS + resultados`);
+  return { ok: true, liveCount: states.length, total: games.length };
 }
