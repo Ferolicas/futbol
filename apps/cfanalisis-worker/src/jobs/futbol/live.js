@@ -722,9 +722,6 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today) {
       .eq('user_id', row.user_id);
     favoritesByUser[row.user_id] = new Set((favRows || []).map(r => Number(r.fixture_id)));
   }));
-  for (const uid of Object.keys(favoritesByUser)) {
-    console.log(`${LP} user=${uid.slice(0, 8)} favoritos=[${[...favoritesByUser[uid]].join(',')}]`);
-  }
 
   // 3. Enviar — recolectar endpoints expirados para purga al final
   const expiredByUser = {};
@@ -741,34 +738,20 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today) {
     // nunca se intenta (todos caen en el guard de favoritos). Lo logueamos para
     // distinguir "nadie lo tiene en favoritos" de "lo tienen pero falló el envío".
     const subsWithThisFav = subs.filter(r => (favoritesByUser[r.user_id] || new Set()).has(bundle.fixtureId)).length;
-    console.log(`${LP} bundle fid=${bundle.fixtureId} (typeof=${typeof bundle.fixtureId}) → suscriptores con este fixture en favoritos: ${subsWithThisFav}/${subs.length}`);
+    console.log(`${LP} bundle fid=${bundle.fixtureId} → favoritos: ${subsWithThisFav}/${subs.length} suscriptores`);
 
     await Promise.allSettled(subs.map(async (row) => {
       const favs = favoritesByUser[row.user_id] || new Set();
-      if (!favs.has(bundle.fixtureId)) {
-        skippedNoFav++;
-        console.log(`${LP} GUARD favoritos: user=${row.user_id.slice(0, 8)} NO tiene fid=${bundle.fixtureId} en favoritos=[${[...favs].join(',')}] ⇒ skip`);
-        return;
-      }
+      if (!favs.has(bundle.fixtureId)) { skippedNoFav++; return; }
       bundleHadSubscriberInFav = true;
 
       const deviceSubs = toSubArray(row.subscription);
-      console.log(`${LP} user=${row.user_id.slice(0, 8)} tiene fid=${bundle.fixtureId} en favoritos → ${deviceSubs.length} dispositivo(s)`);
-      if (deviceSubs.length === 0) {
-        console.log(`${LP} GUARD subs: user=${row.user_id.slice(0, 8)} subscription vacía/no parseable ⇒ no hay dispositivo`);
-      }
       await Promise.allSettled(deviceSubs.map(async (sub) => {
-        if (!sub?.endpoint) {
-          console.log(`${LP} GUARD endpoint: user=${row.user_id.slice(0, 8)} sub sin endpoint (keys=${sub ? Object.keys(sub).join(',') : 'null'}) ⇒ skip`);
-          return;
-        }
+        if (!sub?.endpoint) return;
         attempted++;
-        // TODOS los eventos en vivo se envían con urgency 'high' (apns-priority
-        // 10). En una app de apuestas en vivo cada evento es time-sensitive: un
-        // córner/amarilla con urgency 'normal' hacía que iOS los retuviera y los
-        // entregara TARDE o en lote ("en fila de golpe"). 'high' fuerza entrega
-        // inmediata en APNs/FCM. `bundle.urgent` se conserva solo para métricas.
-        console.log(`${LP} → invocando sendPushNotification fid=${bundle.fixtureId} user=${row.user_id.slice(0, 8)} ep=…${String(sub.endpoint).slice(-12)} urgency=high`);
+        // Todos los eventos en vivo van con urgency 'high' (apns-priority 10):
+        // cada evento es time-sensitive. Con 'normal' iOS los retenía y los
+        // entregaba tarde o en lote ("en fila de golpe").
         const result = await sendPushNotification(
           sub,
           { title: bundle.title, body: bundle.body, tag: bundle.tag },
@@ -780,7 +763,6 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today) {
           if (!expiredByUser[row.user_id]) expiredByUser[row.user_id] = new Set();
           expiredByUser[row.user_id].add(sub.endpoint);
         } else failed++;
-        console.log(`${LP} send fid=${bundle.fixtureId} user=${row.user_id.slice(0, 8)} ep=…${String(sub.endpoint).slice(-12)} → ${result}`);
       }));
     }));
 

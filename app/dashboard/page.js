@@ -538,13 +538,20 @@ export default function Dashboard() {
     }).catch(() => {});
   }, []);
 
-  // Subscribe to push notifications (reusable — called by bell toggle AND auto on favorite)
-  const subscribePush = useCallback(async () => {
+  // Subscribe to push notifications. Reutilizable:
+  //   - al marcar favorito (interactivo → muestra errores).
+  //   - al abrir la app si el permiso ya está concedido ({ silent:true } → no
+  //     molesta con mensajes; solo renueva en silencio).
+  // Si ya existe suscripción la RE-ENVÍA al servidor (renovación: recupera las
+  // que el servidor podó por 410, las que el navegador rotó con la app cerrada,
+  // o las aprobadas hace mucho que se quedaron sin guardar).
+  const subscribePush = useCallback(async (opts = {}) => {
+    const silent = !!opts.silent;
+    const fail = (msg) => { if (!silent) setPushError(msg); return false; };
     if (!pushSupported) return false;
     try {
       if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
-        setPushError('Permisos de notificación bloqueados. Habilítalos en los ajustes del navegador para este sitio.');
-        return false;
+        return fail('Permisos de notificación bloqueados. Habilítalos en los ajustes del navegador para este sitio.');
       }
       const reg = await navigator.serviceWorker.ready;
       const existing = await reg.pushManager.getSubscription();
@@ -556,17 +563,21 @@ export default function Dashboard() {
         }).catch(() => {});
         setPushEnabled(true); setPushError(null); return true;
       }
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        setPushError('Activa los permisos de notificación en tu navegador');
+      // En modo silencioso NO pedimos permiso (no hay gesto del usuario y no
+      // queremos un prompt inesperado al abrir). Solo renovamos si ya estaba
+      // concedido y por algún motivo no había suscripción.
+      if (silent && (typeof Notification === 'undefined' || Notification.permission !== 'granted')) {
         return false;
+      }
+      const permission = silent ? 'granted' : await Notification.requestPermission();
+      if (permission !== 'granted') {
+        return fail('Activa los permisos de notificación en tu navegador');
       }
       const keyRes = await fetch('/api/push/subscribe', { method: 'GET' });
       const keyJson = await keyRes.json().catch(() => ({}));
       const vapidKey = keyJson.vapidPublicKey;
       if (!vapidKey) {
-        setPushError('Servidor sin VAPID configurado. Contacta al administrador.');
-        return false;
+        return fail('Servidor sin VAPID configurado. Contacta al administrador.');
       }
       const padding = '='.repeat((4 - vapidKey.length % 4) % 4);
       const base64 = (vapidKey + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -580,18 +591,25 @@ export default function Dashboard() {
       });
       if (!saveRes.ok) {
         const msg = await saveRes.json().catch(() => ({}));
-        setPushError(msg.error || 'No se pudo guardar la suscripción en el servidor');
-        return false;
+        return fail(msg.error || 'No se pudo guardar la suscripción en el servidor');
       }
       setPushEnabled(true);
       setPushError(null);
       return true;
     } catch (e) {
       console.error('[PUSH]', e);
-      setPushError(e?.message ? `No se pudo activar: ${e.message}` : 'No se pudo activar las notificaciones');
-      return false;
+      return fail(e?.message ? `No se pudo activar: ${e.message}` : 'No se pudo activar las notificaciones');
     }
   }, [pushSupported]);
+
+  // Renovación al abrir la app: si el permiso ya está concedido, garantiza que
+  // el servidor tenga una suscripción fresca (segunda capa, junto al
+  // 'pushsubscriptionchange' del service worker). Silencioso.
+  useEffect(() => {
+    if (!pushSupported) return;
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    subscribePush({ silent: true }).catch(() => {});
+  }, [pushSupported, subscribePush]);
 
   // handlePushToggle y handlePushTest eliminados: la campanita global desapareció.
   // Las notificaciones se manejan exclusivamente via toggleFavorite. El endpoint
