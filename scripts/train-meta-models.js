@@ -34,11 +34,13 @@ const logloss = (y, p) => { p = clamp01(p); return -(y * Math.log(p) + (1 - y) *
 // Carga perfiles de equipo en memoria: teamId → { metric → {shrunk_value, sample_n, consistency} }.
 async function loadProfiles() {
   const { rows } = await pgPool.query(
-    `SELECT team_id, metric, sample_n, shrunk_value, consistency FROM team_market_profiles WHERE sport='football' AND segment='all'`
+    `SELECT team_id, segment, metric, sample_n, shrunk_value, consistency FROM team_market_profiles WHERE sport='football'`
   );
-  const map = {};
+  const map = {}; // teamId → segment → metric → {shrunk_value, sample_n, consistency}
   for (const r of rows) {
-    (map[r.team_id] = map[r.team_id] || {})[r.metric] = { shrunk_value: r.shrunk_value, sample_n: r.sample_n, consistency: r.consistency };
+    const t = (map[r.team_id] = map[r.team_id] || {});
+    const seg = (t[r.segment] = t[r.segment] || {});
+    seg[r.metric] = { shrunk_value: r.shrunk_value, sample_n: r.sample_n, consistency: r.consistency };
   }
   return map;
 }
@@ -89,8 +91,11 @@ function trainLogistic(samples) {
   console.log(`Partidos entrenables (con features): ${rows.length}\n`);
   if (rows.length < MIN_SAMPLES) { console.log('Datos insuficientes para entrenar todavía.'); await pgPool.end(); return; }
 
+  const allMarkets = Object.keys(MARKET_DEFS);
+  console.log(`Mercados en el catálogo: ${allMarkets.length} (escalares + over/under × líneas)\n`);
   const summary = [];
-  for (const market of Object.keys(MARKET_DEFS)) {
+  let trained = 0, activated = 0, skipped = 0;
+  for (const market of allMarkets) {
     const def = MARKET_DEFS[market];
     const samples = [];
     for (const r of rows) {
@@ -102,7 +107,8 @@ function trainLogistic(samples) {
       if (!mf) continue;
       samples.push({ features: mf.features, base: mf.base, y: def.outcome(r.actuals_full) ? 1 : 0, kickoff: r.kickoff });
     }
-    if (samples.length < MIN_SAMPLES) { summary.push(`  ${market.padEnd(24)} skip (n=${samples.length} < ${MIN_SAMPLES})`); continue; }
+    if (samples.length < MIN_SAMPLES) { skipped++; continue; }
+    trained++;
 
     // Split temporal
     const cut = Math.floor(samples.length * (1 - VAL_FRACTION));
@@ -135,12 +141,16 @@ function trainLogistic(samples) {
         beats_baseline: beats,
       }), beats]
     );
-    summary.push(`  ${market.padEnd(24)} n=${String(samples.length).padStart(4)}  LL meta=${metaLL.toFixed(4)} base=${baseLL.toFixed(4)}  ${beats ? '✓ ACTIVO' : '· (no supera, queda isotónica)'}`);
+    if (beats) activated++;
+    summary.push(`  ${market.padEnd(26)} n=${String(samples.length).padStart(4)}  LL meta=${metaLL.toFixed(4)} base=${baseLL.toFixed(4)}  ${beats ? '✓ ACTIVO' : '· (queda isotónica)'}`);
   }
 
-  console.log('Resultado por mercado:');
+  // Ordenar: activos primero, luego por mejora de logloss.
+  console.log('Mercados entrenados:');
   console.log(summary.join('\n'));
-  console.log('\n✓ Meta-modelos guardados en prediction_models (active = supera al baseline).');
+  console.log(`\n══ RESUMEN ══`);
+  console.log(`Catálogo: ${allMarkets.length} mercados · entrenados: ${trained} (≥${MIN_SAMPLES} muestras) · ACTIVOS: ${activated} · skip por datos: ${skipped}`);
+  console.log('✓ Guardado en prediction_models. active=true solo donde el contexto supera al baseline.');
   await pgPool.end();
 })().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
 
