@@ -913,8 +913,9 @@ export async function runLive(_payload = {}) {
   console.log(`${LL} /fixtures?live=all → ${allLive.length} partidos en vivo (todas las ligas)`);
 
   const YOUTH_RE = /\bU-?1[2-9]\b|\bU-?2[0-3]\b|\bunder[ -]?(1[2-9]|2[0-3])\b|\byouth\b|\bjunior\b|\bsub-?(1[2-9]|2[0-3])\b/i;
-  // Para NOMBRES DE EQUIPO no usamos "junior" (Junior de Barranquilla es club absoluto).
-  const YOUTH_TEAM_RE = /\bU-?1[2-9]\b|\bU-?2[0-3]\b|\bunder[ -]?(1[2-9]|2[0-3])\b|\byouth\b|\bjuvenil\b|\bsub-?(1[2-9]|2[0-3])\b/i;
+  // NOMBRES DE EQUIPO: sin "junior" (Junior de Barranquilla = club absoluto);
+  // "youth"/"juvenil" solo al final ("Qingdao Youth Island" es club, no cazar).
+  const YOUTH_TEAM_RE = /\bU-?1[2-9]\b|\bU-?2[0-3]\b|\bunder[ -]?(1[2-9]|2[0-3])\b|\bsub-?(1[2-9]|2[0-3])\b|\b(youth|juvenil)\s*$/i;
   const tracked = allLive.filter(m => ALL_LEAGUE_IDS.includes(m.league.id) && !YOUTH_RE.test(m.league.name || '') &&
     !YOUTH_TEAM_RE.test(m.teams?.home?.name || '') && !YOUTH_TEAM_RE.test(m.teams?.away?.name || ''));
   console.log(`${LL} tracked (filtrado por ALL_LEAGUE_IDS + no-youth): ${tracked.length}/${allLive.length}`);
