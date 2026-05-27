@@ -550,6 +550,48 @@ function LeagueGroup({ group, userTz, selected, favorites, analyzed, expandedMat
   );
 }
 
+// Base del diamante (rombo) posicionada en el contenedor 40x40.
+const diamondBase = (occupied, left, top) => ({
+  position: 'absolute', width: 12, height: 12, left, top,
+  transform: 'translate(-50%,-50%) rotate(45deg)', borderRadius: 2,
+  background: occupied ? '#fbbf24' : 'rgba(255,255,255,0.12)',
+  boxShadow: occupied ? '0 0 6px rgba(251,191,36,0.6)' : 'none',
+  transition: 'background .3s, box-shadow .3s',
+});
+
+// Estado EN VIVO tipo bet365: diamante de bases, conteo bolas-strikes, outs,
+// inning y pitcher/bateador actuales. Datos del WS 'baseball-live' (liveResult).
+function LiveDiamond({ live }) {
+  const b = live.bases || {};
+  const balls = live.balls ?? 0;
+  const strikes = live.strikes ?? 0;
+  const outs = live.outs ?? 0;
+  const arrow = live.inning_half === 'top' ? '↑' : live.inning_half === 'bottom' ? '↓' : '';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.16)' }}>
+      <div style={{ position: 'relative', width: 40, height: 40, flexShrink: 0 }}>
+        <span style={diamondBase(b.second, '50%', '22%')} />
+        <span style={diamondBase(b.third, '22%', '50%')} />
+        <span style={diamondBase(b.first, '78%', '50%')} />
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontFamily: 'JetBrains Mono, monospace' }}>
+        <span style={{ fontSize: '.72rem', color: '#fbbf24', fontWeight: 800 }}>
+          {arrow}{live.inning ?? ''}  ·  {balls}-{strikes}
+        </span>
+        <span style={{ fontSize: '.64rem', color: '#fcd34d', letterSpacing: 1 }}>
+          {'●'.repeat(Math.min(outs, 3))}{'○'.repeat(Math.max(0, 2 - outs))} outs
+        </span>
+      </div>
+      {(live.currentPitcher?.name || live.currentBatter?.name) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: '.62rem', color: '#94a3b8', minWidth: 0, flex: 1 }}>
+          {live.currentPitcher?.name && <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>⚾ {live.currentPitcher.name}</span>}
+          {live.currentBatter?.name && <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>🏏 {live.currentBatter.name}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded,
                     onExpand, onSelect, onFavorite, onDismiss,
                     selectedMarkets, onToggleMarket }) {
@@ -638,6 +680,11 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
             </div>
             <span style={{ color: '#b45309', fontWeight: 700, minWidth: 32, textAlign: 'right' }}>{cap(ml.away).toFixed(0)}%</span>
           </div>
+        )}
+
+        {/* Estado EN VIVO tipo bet365 — solo cuando el juego está en curso. */}
+        {live && liveResult && (liveResult.inning != null || liveResult.bases) && (
+          <LiveDiamond live={liveResult} />
         )}
 
         <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
