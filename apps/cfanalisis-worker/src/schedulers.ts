@@ -54,7 +54,7 @@ const SCHEDULES: Sched[] = [
   // days:3 — el plan GRATUITO de api-baseball solo permite consultar los
   // últimos 3 días. La ventana de finalize se limita a eso para no pedir
   // fechas que la API rechazaría igualmente.
-  { queue: 'baseball-finalize',  id: 'baseball-finalize-daily',  pattern: '0 5 * * *',  tz: TZ, data: { days: 3 } }, // 5:00
+  { queue: 'baseball-finalize',  id: 'baseball-finalize-daily',  pattern: '0 5 * * *',  tz: TZ }, // 5:00 — ventana 365d (default del job); MLB Stats API sin límite de fechas
   { queue: 'baseball-calibrate', id: 'baseball-calibrate-daily', pattern: '0 6 * * *',  tz: TZ }, // 6:00 (tras finalize)
   { queue: 'baseball-cleanup',   id: 'baseball-cleanup-weekly',  pattern: '0 3 * * 0',  tz: TZ }, // dom 3:00
   // ── Baseball — live (cada 5 min) ──

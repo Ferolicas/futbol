@@ -18,7 +18,13 @@
 import { supabaseAdmin, getMlbResultsByDate } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 
-const DEFAULT_WINDOW_DAYS = 7;
+// MLB Stats API no tiene límite de fechas (a diferencia de api-baseball free,
+// 2022-2024), así que ampliamos la ventana a 1 año: entre más resultados
+// finalizados, mejor calibra el modelo. Cap de fechas por ejecución para que el
+// job no se eternice si hay backlog — lo pendiente se termina en corridas
+// siguientes (las predicciones finalizadas ya no reaparecen).
+const DEFAULT_WINDOW_DAYS = 365;
+const MAX_DATES_PER_RUN = 200;
 const SPORT_IDS = [1];
 
 function buildActuals(r) {
@@ -62,7 +68,10 @@ export async function runBaseballFinalize(payload = {}) {
   for (const p of pending) {
     (byDate[p.date] = byDate[p.date] || new Set()).add(Number(p.fixture_id));
   }
-  const dates = Object.keys(byDate).sort();
+  // Más recientes primero (relevancia para calibración fresca). Cap por corrida.
+  const allDates = Object.keys(byDate).sort().reverse();
+  const dates = allDates.slice(0, MAX_DATES_PER_RUN);
+  const capped = allDates.length > MAX_DATES_PER_RUN;
 
   let finalized = 0, notFinal = 0, noGame = 0, apiCalls = 0;
   const errors = [];
@@ -102,6 +111,6 @@ export async function runBaseballFinalize(payload = {}) {
     });
   }
 
-  console.log(`[baseball-finalize] window=${windowDays}d pending=${pending.length} finalized=${finalized} notFinal=${notFinal} noGame=${noGame} apiCalls=${apiCalls} errors=${errors.length}`);
-  return { ok: true, windowDays, examined: pending.length, finalized, notFinal, noGame, apiCalls, errors: errors.length };
+  console.log(`[baseball-finalize] window=${windowDays}d pending=${pending.length} fechas=${dates.length}${capped ? `/${allDates.length} (capped)` : ''} finalized=${finalized} notFinal=${notFinal} noGame=${noGame} apiCalls=${apiCalls} errors=${errors.length}`);
+  return { ok: true, windowDays, examined: pending.length, datesProcessed: dates.length, capped, finalized, notFinal, noGame, apiCalls, errors: errors.length };
 }
