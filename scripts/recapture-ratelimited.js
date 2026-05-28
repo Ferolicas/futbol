@@ -26,8 +26,16 @@ const RATE = Number(args.rate) || 140;          // llamadas/min objetivo (margen
 const CONCURRENCY = Number(args.concurrency) || 3;
 const LIMIT = args.limit ? Number(args.limit) : null;
 const ALSO_REQUESTS = !!args['also-requests'];
+// --endpoint acepta CUALQUIER endpoint: nombre completo ('fixtures/players',
+// 'fixtures/headtohead', 'injuries') o corto ('players','events','statistics' →
+// se les antepone 'fixtures/'). Sin flag → events + statistics (default).
+function normEndpoint(s) {
+  if (!s || s === true) return null;
+  s = String(s).trim();
+  return s.includes('/') ? s : `fixtures/${s}`;
+}
 const ENDPOINTS = args.endpoint
-  ? [`fixtures/${args.endpoint === 'events' ? 'events' : 'statistics'}`]
+  ? [normEndpoint(args.endpoint)].filter(Boolean)
   : ['fixtures/events', 'fixtures/statistics'];
 
 const API_HOST = 'v3.football.api-sports.io';
@@ -41,9 +49,13 @@ const pool = new Pool({
 
 // Predicado de "envenenado" (rate-limit blando), NO vacío legítimo.
 const POISON = `((payload->'errors'->>'rateLimit') IS NOT NULL${ALSO_REQUESTS ? ` OR (payload->'errors'->>'requests') IS NOT NULL` : ''})`;
-const pathFor = (endpoint, fid) => endpoint === 'fixtures/events'
-  ? `/fixtures/events?fixture=${fid}`
-  : `/fixtures/statistics?fixture=${fid}`;
+// Path de API por endpoint (genérico). headtohead va por par (ref_id-sub_key);
+// injuries y el resto van por fixture (?fixture=ref_id).
+function pathFor(endpoint, refId, subKey) {
+  if (endpoint === 'fixtures/headtohead') return `/fixtures/headtohead?h2h=${refId}-${subKey}&last=8`;
+  if (endpoint === 'injuries') return `/injuries?fixture=${refId}`;
+  return `/${endpoint}?fixture=${refId}`;   // events/statistics/players/lineups/…
+}
 
 // ── Pacer global: separa el INICIO de cada llamada ≥ INTERVAL ms, sin importar
 //    la concurrencia → tasa global ≤ RATE/min. La reserva de slot es síncrona
@@ -150,7 +162,7 @@ async function coverage() {
   const t0 = Date.now();
   await mapPool(rows, CONCURRENCY, async (row) => {
     const fid = Number(row.ref_id);
-    const resp = await apiGet(pathFor(row.endpoint, fid));
+    const resp = await apiGet(pathFor(row.endpoint, fid, row.sub_key || ''));
     if (resp.ok && resp.json) { await save(row.endpoint, fid, row.sub_key || '', resp.json); saved++; }
     else stillBad++;
     if (++done % 100 === 0) {
