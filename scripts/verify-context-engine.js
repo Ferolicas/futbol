@@ -10,7 +10,7 @@ try { require('dotenv').config({ path: '.env.local' }); } catch {}
 try { require('dotenv').config({ path: '.env' }); } catch {}
 
 const { Pool } = require('pg');
-const { loadContextInputs, computeContext, scoreContext, VETO_ALPHA, VETO_TAU, CONF_N0, REC_THRESHOLD } = require('../lib/context-engine');
+const { loadContextInputs, computeContext, scoreContext, persistFixtureContext, VETO_ALPHA, VETO_TAU, CONF_N0, REC_THRESHOLD, MIN_H2H_N, MIN_ADN_CONFIDENCE } = require('../lib/context-engine');
 const { MARKET_DEFS } = require('../lib/meta-features');
 
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = a.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] || true] : [a, true]; }));
@@ -61,7 +61,9 @@ function drawRate(records, venue) {
   console.log(`Visitante: ${aInfo ? aInfo.name : awayId}  (id ${awayId}${aInfo ? `, ${aInfo.n} fixtures` : ''})`);
 
   const inputs = await loadContextInputs(pool, homeId, awayId);
-  console.log(`\nDatos cargados: local ${inputs._counts.homeFinished} partidos · visitante ${inputs._counts.awayFinished} · H2H ${inputs._counts.meetings}/${inputs._counts.meetingsRaw} cruces · lineups ${inputs._counts.lineups} · injuries ${inputs._counts.injuries}`);
+  const c = inputs._counts;
+  console.log(`\nDatos cargados: local ${c.homeFinished} partidos · visitante ${c.awayFinished} · lineups ${c.lineups} · injuries ${c.injuries}`);
+  console.log(`H2H: ${c.meetings} cruces usables  (reconstruidos del crudo de fixtures=${c.meetingsReconstructed}, del endpoint headtohead=${c.meetingsEndpoint})`);
 
   const ctxRaw = computeContext(inputs);
   // Fase 4: excepciones + veto + confianza. todayCtx base = sin condiciones adversas.
@@ -71,7 +73,7 @@ function drawRate(records, venue) {
   const nADN = keys.filter(k => ctx[k].level === 'adn').length;
   const nRec = keys.filter(k => ctx[k].recommended).length;
   console.log(`Mercados con valor: ${keys.length}/${Object.keys(MARKET_DEFS).length}  (h2h=${nH2H} · adn=${nADN} · sin datos=${Object.keys(MARKET_DEFS).length - keys.length})  ·  recomendables(≥${REC_THRESHOLD*100}%): ${nRec}`);
-  console.log(`Constantes: α=${VETO_ALPHA} · τ=${VETO_TAU} · N0(confianza)=${CONF_N0} · umbral=${REC_THRESHOLD}`);
+  console.log(`Constantes: α=${VETO_ALPHA} · τ=${VETO_TAU} · N0=${CONF_N0} · umbral=${REC_THRESHOLD} · piso H2H n≥${MIN_H2H_N} · piso ADN conf≥${MIN_ADN_CONFIDENCE}`);
 
   console.log(`\n══ ${homeName} (local) vs ${awayName} (visitante) ══`);
   console.log(`${'market'.padEnd(24)} prob  →pfin conf   rup   rec   lvl  n    hits`);
@@ -102,6 +104,19 @@ function drawRate(records, venue) {
     console.log(`  ${k.padEnd(24)} ${r ? `n=${r.n} (usa ${k.startsWith('goal_') || k.startsWith('first_') ? 'eventos/minutos' : 'score.halftime'})` : 'sin datos — ¿faltan eventos?'}`);
   }
 
+  console.log(`\n══ RECOMENDADOS DESPUÉS DEL PISO (Fase 5) ══`);
+  const recommended = keys.filter(k => ctx[k].recommended).map(k => ({ k, ...ctx[k] })).sort((a, b) => b.prob_final - a.prob_final);
+  const recH2H = recommended.filter(r => r.level === 'h2h');
+  const recADN = recommended.filter(r => r.level === 'adn');
+  console.log(`  Total recomendados: ${recommended.length}  (h2h=${recH2H.length} · adn=${recADN.length})`);
+  for (const r of recommended.slice(0, 30)) {
+    console.log(`    ${r.k.padEnd(26)} ${pct(r.prob_final)}  conf=${pct(r.confidence)}  ${r.level}  n=${r.n}`);
+  }
+  if (recommended.length > 30) console.log(`    … (+${recommended.length - 30} más)`);
+  // El red_card_any debe haber DESAPARECIDO de recomendados (ADN n bajo).
+  const rc = ctx.red_card_any;
+  if (rc) console.log(`\n  CHECK red_card_any: prob=${pct(rc.prob)} conf=${pct(rc.confidence)} n=${rc.n} level=${rc.level} → recomendado=${rc.recommended} ${rc.recommended ? '⚠️ debería ser false' : '✓ excluido por el piso'}`);
+
   console.log(`\n══ CONFIANZA POR MUESTRA (el caso "muestra chica engañosa") ══`);
   // Recomendables ordenados por confianza ASC → los de arriba son los de menor
   // soporte (n bajo) aunque su % sea alto: el caso red_card_any 100% n=8.
@@ -128,6 +143,14 @@ function drawRate(records, venue) {
     for (const x of changed.slice(0, 10)) {
       console.log(`    ${x.k.padEnd(24)} ${pct(x.base.prob)} → ${pct(x.inj.prob_final)}  rupture=${x.inj.rupture_score.toFixed(2)}  rec ${x.base.recommended}→${x.inj.recommended}`);
     }
+  }
+
+  if (args.persist) {
+    const fixtureId = Number(args.fixture) || Number(`${homeId}${awayId}`);  // sintético si no se pasa --fixture
+    const date = args.date || new Date().toISOString().slice(0, 10);
+    const res = await persistFixtureContext(pool, fixtureId, date, ctx);
+    console.log(`\n══ PERSISTENCIA ══\n  market_context_analysis ← fixture_id=${fixtureId}: ${res.written} mercados escritos (${res.recommended} recomendados).`);
+    console.log(`  (requiere haber corrido scripts/migrate-market-context.sql)`);
   }
 
   await pool.end();
