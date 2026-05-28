@@ -17,8 +17,8 @@
 const { Pool } = require('pg');
 const { MARKET_DEFS, predictWithModel } = require('../lib/meta-features');
 const { recordFromRaw, buildActuals, FINISHED } = require('../lib/adn');
-const { meetingRecord } = require('../lib/h2h');
-const { ruptureContext, buildRuptureFeatures, ML_FEATURE_ORDER } = require('../lib/context-engine');
+const { meetingRecord, modalXIFromLineups } = require('../lib/h2h');
+const { ruptureContext, buildRuptureFeatures, isKeyInjury, ML_FEATURE_ORDER } = require('../lib/context-engine');
 
 function makePool() {
   return new Pool({
@@ -66,10 +66,11 @@ async function trainMetaModels(opts = {}) {
   const ownPool = !extPool;
   try {
     console.log('\n[train] Cargando crudo (fixtures/statistics/events/lineups/injuries/halfstats)…');
-    const [{ rows: fxRows }, { rows: stRows }, { rows: evRows }, { rows: injRows }, { rows: hsRows }] = await Promise.all([
+    const [{ rows: fxRows }, { rows: stRows }, { rows: evRows }, { rows: luRows }, { rows: injRows }, { rows: hsRows }] = await Promise.all([
       pool.query(`SELECT ref_id, payload FROM raw_api_payloads WHERE endpoint='fixtures'`),
       pool.query(`SELECT ref_id, payload FROM raw_api_payloads WHERE endpoint='fixtures/statistics'`),
       pool.query(`SELECT ref_id, payload FROM raw_api_payloads WHERE endpoint='fixtures/events'`),
+      pool.query(`SELECT ref_id, payload FROM raw_api_payloads WHERE endpoint='fixtures/lineups'`),
       pool.query(`SELECT ref_id, payload FROM raw_api_payloads WHERE endpoint='injuries' AND sub_key LIKE 'fx:%'`),
       pool.query(`SELECT ref_id, payload FROM raw_api_payloads WHERE endpoint='fixtures/halfstats'`),
     ]);
@@ -77,6 +78,19 @@ async function trainMetaModels(opts = {}) {
     const evById = new Map(evRows.map(r => [Number(r.ref_id), r.payload]));
     const injById = new Map(injRows.map(r => [Number(r.ref_id), r.payload]));
     const hsById = new Map(hsRows.map(r => [Number(r.ref_id), r.payload]));
+
+    // XI habitual (modal XI) por equipo desde los lineups → para key_injury.
+    const lineupsByTeam = new Map();
+    for (const r of luRows) {
+      const arr = r.payload?.response || r.payload || [];
+      for (const l of (Array.isArray(arr) ? arr : [])) {
+        const tid = l.team?.id; if (!tid) continue;
+        if (!lineupsByTeam.has(tid)) lineupsByTeam.set(tid, []);
+        lineupsByTeam.get(tid).push(r.payload);
+      }
+    }
+    const modalXIByTeam = new Map();
+    for (const [tid, payloads] of lineupsByTeam) modalXIByTeam.set(tid, modalXIFromLineups(payloads, tid));
 
     // Fixtures por equipo (ordenados por fecha asc).
     const byTeam = new Map();
@@ -114,10 +128,10 @@ async function trainMetaModels(opts = {}) {
       const actuals = buildActuals(f, stById.get(fid) || null, evById.get(fid) || null, hsById.get(fid) || null);
       if (!actuals) continue;
       const beforeMs = new Date(f.fixture.date).getTime();
-      const inj = injById.get(fid)?.response || injById.get(fid) || [];
       const todayCtx = {
         knockout: (actuals.phase === 'knockout' || actuals.phase === 'final'),
-        keyInjury: (Array.isArray(inj) && inj.length > 0),
+        // MISMO criterio que runtime: ¿lesionado del XI habitual de su equipo?
+        keyInjury: isKeyInjury(injById.get(fid), modalXIByTeam),
       };
       const rc = ruptureContext({ homeTeamRecords: teamRecords(homeId), awayTeamRecords: teamRecords(awayId), todayCtx, beforeMs });
       samplesBase.push({ homeId, awayId, beforeMs, actuals, rc, meetings: meetingsFor(homeId, awayId) });
