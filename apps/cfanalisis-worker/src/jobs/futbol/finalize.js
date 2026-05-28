@@ -277,6 +277,83 @@ async function updatePrediction(fid, r) {
   }).eq('fixture_id', fid);
 }
 
+// ── Snapshot de stats por mitad (durable) ────────────────────────────────────
+// El live captura el total de la 1ª parte en el tick de HT (payload.firstHalf).
+// Aquí, al finalizar, escribimos el total a 90' (fullTime) y derivamos la 2ª
+// parte (fullTime − firstHalf) para córners/tiros/faltas/offsides, que la API
+// nunca da con minuto. Goles/tarjetas de 1ª parte se derivan de datos CON minuto
+// (score.halftime / eventos) → autoritativos aunque el live no capturara el HT.
+// Merge jsonb (||): conserva el firstHalf del live y añade lo de aquí.
+async function persistHalfStatsFull(fid, match, r) {
+  const af = r.actualsFull || {};
+  const pick = (o) => (o && o.total != null) ? { home: o.home ?? null, away: o.away ?? null, total: o.total } : null;
+  const ft = {
+    goals:    pick(af.goals),
+    corners:  pick(af.corners),
+    shots:    pick(af.shots),
+    sot:      (af.shots && af.shots.totalOnTarget != null)
+                ? { home: af.shots.onTargetHome ?? null, away: af.shots.onTargetAway ?? null, total: af.shots.totalOnTarget } : null,
+    fouls:    pick(af.fouls),
+    offsides: pick(af.offsides),
+    cards:    pick(af.cards),
+  };
+  // 1ª parte autoritativa de goles (score.halftime) y tarjetas (eventos ≤45').
+  const ht = match.score?.halftime || {};
+  const goals1H = (ht.home != null && ht.away != null)
+    ? { home: ht.home, away: ht.away, total: ht.home + ht.away } : null;
+  const ce = r.cardEvents || [];
+  const cards1H = ce.length
+    ? (() => {
+        const inFirst = (e) => (e.time?.elapsed ?? 99) <= 45;
+        const h = ce.filter(e => e.team?.id === r.homeId && inFirst(e)).length;
+        const a = ce.filter(e => e.team?.id === r.awayId && inFirst(e)).length;
+        return { home: h, away: a, total: h + a };
+      })()
+    : null;
+
+  // firstHalf capturado por el live (córners/tiros/faltas/offsides de la 1ª parte).
+  let firstHalf = null;
+  try {
+    const { rows } = await pgQuery(
+      `SELECT payload FROM raw_api_payloads WHERE endpoint='fixtures/halfstats' AND ref_id=$1 AND sub_key=''`,
+      [fid]);
+    firstHalf = rows?.[0]?.payload?.firstHalf || null;
+  } catch {}
+
+  const sub = (full, first) =>
+    (full && first && full.total != null && first.total != null)
+      ? { home: (full.home ?? 0) - (first.home ?? 0), away: (full.away ?? 0) - (first.away ?? 0), total: full.total - first.total }
+      : null;
+  const secondHalf = {
+    goals:    sub(ft.goals, goals1H),
+    cards:    sub(ft.cards, cards1H),
+    corners:  firstHalf ? sub(ft.corners,  firstHalf.corners)  : null,
+    shots:    firstHalf ? sub(ft.shots,    firstHalf.shots)    : null,
+    sot:      firstHalf ? sub(ft.sot,      firstHalf.sot)      : null,
+    fouls:    firstHalf ? sub(ft.fouls,    firstHalf.fouls)    : null,
+    offsides: firstHalf ? sub(ft.offsides, firstHalf.offsides) : null,
+  };
+
+  const payload = {
+    fixtureId: fid,
+    leagueId: match.league?.id ?? null,
+    season: match.league?.season ?? null,
+    teams: { home: r.homeId, away: r.awayId },
+    fullTime: ft,
+    goals1H,
+    cards1H,
+    secondHalf,
+    finalizedAt: new Date().toISOString(),
+  };
+  await pgQuery(
+    `INSERT INTO raw_api_payloads (endpoint, ref_type, ref_id, season, sub_key, payload, fetched_at)
+     VALUES ('fixtures/halfstats','fixture',$1,$2,'',$3::jsonb,NOW())
+     ON CONFLICT (endpoint, ref_id, sub_key)
+     DO UPDATE SET payload = raw_api_payloads.payload || EXCLUDED.payload,
+                   season = EXCLUDED.season, fetched_at = NOW()`,
+    [fid, payload.season, JSON.stringify(payload)]);
+}
+
 export async function runFinalize(_payload = {}) {
   const apiKey = process.env.FOOTBALL_API_KEY;
   if (!apiKey) throw new Error('FOOTBALL_API_KEY not configured');
@@ -318,6 +395,9 @@ export async function runFinalize(_payload = {}) {
           // Acumular tarjetas al arbitro — fallo aqui NO debe romper el finalize
           try { await upsertRefereeStats(match, r, today); } catch (e) {
             console.warn(`[finalize P1] upsertRefereeStats ${fid}:`, e.message);
+          }
+          try { await persistHalfStatsFull(fid, match, r); } catch (e) {
+            console.warn(`[finalize P1] persistHalfStatsFull ${fid}:`, e.message);
           }
           return { fid, status: 'finalized' };
         });
@@ -405,6 +485,9 @@ export async function runFinalize(_payload = {}) {
         }
         try { await upsertRefereeStats(match, r, date); } catch (e) {
           console.warn(`[finalize P2] upsertRefereeStats ${fid}:`, e.message);
+        }
+        try { await persistHalfStatsFull(fid, match, r); } catch (e) {
+          console.warn(`[finalize P2] persistHalfStatsFull ${fid}:`, e.message);
         }
         return { fid, status: 'finalized-from-api' };
       });

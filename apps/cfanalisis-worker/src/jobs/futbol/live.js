@@ -11,7 +11,7 @@ import {
   ALL_LEAGUE_IDS, triggerEvent,
   redisGet, redisSet, KEYS, TTL,
   incrementApiCallCount, sendPushNotification,
-  supabaseAdmin, getMatchSchedule,
+  supabaseAdmin, getMatchSchedule, pgQuery,
 } from '../../shared.js';
 
 const API_HOST = 'v3.football.api-sports.io';
@@ -162,6 +162,24 @@ function extractLiveStats(match, events, stats) {
   const aOffsidesRaw = getVal(awayStats, 'Offsides', 'Offside');
   const hOffsides = hOffsidesRaw ?? 0;
   const aOffsides = aOffsidesRaw ?? 0;
+  const offsidesAreReal = hOffsidesRaw !== null || aOffsidesRaw !== null;
+
+  // Tiros / tiros a puerta / faltas: contadores agregados (sin minuto). Igual
+  // que los córners, en el tick de HT su valor ES el total de la 1ª parte; se
+  // capturan aquí para el snapshot durable de medio tiempo (persistHalfStatsSnapshot).
+  // null explícito si la API no los reporta este tick (distinto de 0 real).
+  const hShotsRaw = getVal(homeStats, 'Total Shots', 'Shots Total');
+  const aShotsRaw = getVal(awayStats, 'Total Shots', 'Shots Total');
+  const hShots = hShotsRaw ?? 0, aShots = aShotsRaw ?? 0;
+  const shotsAreReal = hShotsRaw !== null || aShotsRaw !== null;
+  const hSotRaw = getVal(homeStats, 'Shots on Goal', 'Shots on Target');
+  const aSotRaw = getVal(awayStats, 'Shots on Goal', 'Shots on Target');
+  const hSot = hSotRaw ?? 0, aSot = aSotRaw ?? 0;
+  const sotAreReal = hSotRaw !== null || aSotRaw !== null;
+  const hFoulsRaw = getVal(homeStats, 'Fouls', 'Fouls Committed');
+  const aFoulsRaw = getVal(awayStats, 'Fouls', 'Fouls Committed');
+  const hFouls = hFoulsRaw ?? 0, aFouls = aFoulsRaw ?? 0;
+  const foulsAreReal = hFoulsRaw !== null || aFoulsRaw !== null;
 
   return {
     fixtureId: match.fixture.id,
@@ -173,7 +191,10 @@ function extractLiveStats(match, events, stats) {
     corners: { home: hCorners, away: aCorners, total: hCorners + aCorners, isReal: cornersAreReal },
     yellowCards: { home: hYellow, away: aYellow, total: hYellow + aYellow },
     redCards: { home: hRed, away: aRed, total: hRed + aRed },
-    offsides: { home: hOffsides, away: aOffsides, total: hOffsides + aOffsides },
+    offsides: { home: hOffsides, away: aOffsides, total: hOffsides + aOffsides, isReal: offsidesAreReal },
+    shots: { home: hShots, away: aShots, total: hShots + aShots, isReal: shotsAreReal },
+    sot:   { home: hSot,   away: aSot,   total: hSot + aSot,     isReal: sotAreReal },
+    fouls: { home: hFouls, away: aFouls, total: hFouls + aFouls, isReal: foulsAreReal },
     goalScorers,
     cardEvents,
     missedPenalties,
@@ -824,6 +845,53 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today) {
   }));
 }
 
+// ── Snapshot de medio tiempo (1ª parte) → raw_api_payloads ───────────────────
+// API-Football NUNCA expone córners/tiros/faltas/offsides como eventos con
+// minuto, solo como contador agregado. En el tick de HT ese contador ES el
+// total de la 1ª parte → lo persistimos durable (endpoint='fixtures/halfstats')
+// para alimentar los mercados POR MITAD del motor de contexto. Idempotente:
+// cada tick de HT reescribe el mismo firstHalf (merge jsonb ||). Fire-and-forget.
+// Solo se guarda el valor de un stat si es REAL este tick (isReal) — un 0 no
+// fiable se guarda como null para no contaminar la frecuencia con ceros falsos.
+async function persistHalfStatsSnapshot(match, data) {
+  try {
+    const fid = match.fixture?.id;
+    if (!fid) return;
+    const realOrNull = (s) => (s && s.isReal) ? { home: s.home, away: s.away, total: s.total } : null;
+    const firstHalf = {
+      goals: { home: match.goals?.home ?? null, away: match.goals?.away ?? null,
+               total: (match.goals?.home ?? 0) + (match.goals?.away ?? 0) },
+      corners:  realOrNull(data.corners),
+      shots:    realOrNull(data.shots),
+      sot:      realOrNull(data.sot),
+      fouls:    realOrNull(data.fouls),
+      offsides: realOrNull(data.offsides),
+      cards: { home: (data.yellowCards?.home ?? 0) + (data.redCards?.home ?? 0),
+               away: (data.yellowCards?.away ?? 0) + (data.redCards?.away ?? 0),
+               total: (data.yellowCards?.total ?? 0) + (data.redCards?.total ?? 0) },
+    };
+    const payload = {
+      fixtureId: fid,
+      leagueId: match.league?.id ?? null,
+      season: match.league?.season ?? null,
+      teams: { home: match.teams?.home?.id ?? null, away: match.teams?.away?.id ?? null },
+      firstHalf,
+      capturedAt: new Date().toISOString(),
+      capturedAtMinute: match.fixture?.status?.elapsed ?? null,
+    };
+    await pgQuery(
+      `INSERT INTO raw_api_payloads (endpoint, ref_type, ref_id, season, sub_key, payload, fetched_at)
+       VALUES ('fixtures/halfstats','fixture',$1,$2,'',$3::jsonb,NOW())
+       ON CONFLICT (endpoint, ref_id, sub_key)
+       DO UPDATE SET payload = raw_api_payloads.payload || EXCLUDED.payload,
+                     season = EXCLUDED.season, fetched_at = NOW()`,
+      [fid, payload.season, JSON.stringify(payload)]);
+    console.log(`[live:halfstats] HT fid=${fid} 1ªP corners=${firstHalf.corners?.total ?? 'n/a'} shots=${firstHalf.shots?.total ?? 'n/a'} fouls=${firstHalf.fouls?.total ?? 'n/a'} offsides=${firstHalf.offsides?.total ?? 'n/a'} goals=${firstHalf.goals.total}`);
+  } catch (e) {
+    console.error('[live:halfstats] HT snapshot:', e.message);
+  }
+}
+
 export async function runLive(_payload = {}) {
   const today = new Date().toISOString().split('T')[0];
   // Schedule cruzando medianoche: un partido que arrancó ~23:30 UTC del día N
@@ -1088,6 +1156,17 @@ export async function runLive(_payload = {}) {
       data.corners = { home, away, total: home + away, isReal: data.corners.isReal === true || prevC.isReal === true };
       console.log(`${LL} corners monótono fid=${fid}: tick ${ch}-${ca} → ${home}-${away} (piso por-lado, no bajar bajo prev ${ph}-${pa})`);
     }
+  }
+
+  // ── Snapshot durable de medio tiempo ──────────────────────────────────────
+  // Para los partidos en HT, el contador actual de córners/tiros/faltas/offsides
+  // ES el total de la 1ª parte (la API nunca los da con minuto). Se persiste a
+  // raw_api_payloads para los mercados por mitad. Fire-and-forget (no bloquea el
+  // tick ni los pushes). Idempotente entre ticks de HT.
+  for (const [fid, data] of Object.entries(liveDetailsMap)) {
+    if (data?.status?.short !== 'HT') continue;
+    const match = tracked.find(m => m.fixture.id === Number(fid));
+    if (match) void persistHalfStatsSnapshot(match, data);
   }
 
   // Fire-and-forget pushes — 1 bundle por fixture/tick con TODOS los deltas
