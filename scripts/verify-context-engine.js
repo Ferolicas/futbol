@@ -1,0 +1,102 @@
+/* eslint-disable */
+// ────────────────────────────────────────────────────────────────────────
+// Verificación obligatoria del motor de contexto (Fase 3) contra el crudo REAL.
+//   node --env-file=.env scripts/verify-context-engine.js
+//   flags: --home=ID --away=ID  (override; por defecto Man City vs Crystal Palace)
+//          --homeName="..." --awayName="..."
+// NO toca producción — solo lee y calcula.
+// ────────────────────────────────────────────────────────────────────────
+try { require('dotenv').config({ path: '.env.local' }); } catch {}
+try { require('dotenv').config({ path: '.env' }); } catch {}
+
+const { Pool } = require('pg');
+const { loadContextInputs, computeContext } = require('../lib/context-engine');
+const { MARKET_DEFS } = require('../lib/meta-features');
+
+const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = a.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] || true] : [a, true]; }));
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
+  max: 5,
+});
+
+async function resolveTeam(name) {
+  const { rows } = await pool.query(
+    `SELECT id, name, COUNT(*)::int n FROM (
+       SELECT (payload->'teams'->'home'->>'id')::int id, payload->'teams'->'home'->>'name' name FROM raw_api_payloads WHERE endpoint='fixtures'
+       UNION ALL
+       SELECT (payload->'teams'->'away'->>'id')::int id, payload->'teams'->'away'->>'name' name FROM raw_api_payloads WHERE endpoint='fixtures'
+     ) t WHERE name ILIKE $1 GROUP BY id, name ORDER BY n DESC LIMIT 5`,
+    [`%${name}%`]
+  );
+  return rows[0] || null;
+}
+
+const pct = (p) => (p == null ? '  —' : `${(p * 100).toFixed(0)}%`.padStart(4));
+function row(ctx, key) {
+  const r = ctx[key];
+  if (!r) return `${key.padEnd(26)}  sin datos`;
+  return `${key.padEnd(26)}  ${pct(r.prob)}   ${r.level.padEnd(4)}  n=${String(r.n).padStart(3)}  hits=${String(r.hits).padStart(3)}` +
+         (r.exceptions && r.exceptions.length ? `  exc=${r.exceptions.length}` : '');
+}
+
+// Tasa de empate "standalone" de un equipo desde sus registros (todos / casa / fuera).
+function drawRate(records, venue) {
+  const recs = venue ? records.filter(r => r.venue === venue) : records;
+  let n = 0, d = 0;
+  for (const r of recs) { if (r.actuals?.result == null) continue; n++; if (r.actuals.result === 'D') d++; }
+  return { n, d, rate: n ? d / n : null };
+}
+
+(async () => {
+  const homeName = args.homeName || 'Manchester City';
+  const awayName = args.awayName || 'Crystal Palace';
+  let homeId = args.home ? Number(args.home) : null;
+  let awayId = args.away ? Number(args.away) : null;
+  let hInfo = null, aInfo = null;
+  if (!homeId) { hInfo = await resolveTeam(homeName); homeId = hInfo?.id; }
+  if (!awayId) { aInfo = await resolveTeam(awayName); awayId = aInfo?.id; }
+  if (!homeId || !awayId) { console.error('No pude resolver los equipos. Usa --home=ID --away=ID.'); await pool.end(); process.exit(1); }
+  console.log(`\nLocal:     ${hInfo ? hInfo.name : homeId}  (id ${homeId}${hInfo ? `, ${hInfo.n} fixtures` : ''})`);
+  console.log(`Visitante: ${aInfo ? aInfo.name : awayId}  (id ${awayId}${aInfo ? `, ${aInfo.n} fixtures` : ''})`);
+
+  const inputs = await loadContextInputs(pool, homeId, awayId);
+  console.log(`\nDatos cargados: local ${inputs._counts.homeFinished} partidos · visitante ${inputs._counts.awayFinished} · H2H ${inputs._counts.meetings}/${inputs._counts.meetingsRaw} cruces`);
+
+  const ctx = computeContext(inputs);
+  const keys = Object.keys(ctx);
+  const nH2H = keys.filter(k => ctx[k].level === 'h2h').length;
+  const nADN = keys.filter(k => ctx[k].level === 'adn').length;
+  console.log(`Mercados con valor: ${keys.length}/${Object.keys(MARKET_DEFS).length}  (h2h=${nH2H} · adn=${nADN} · sin datos=${Object.keys(MARKET_DEFS).length - keys.length})`);
+
+  console.log(`\n══ ${homeName} (local) vs ${awayName} (visitante) ══`);
+  console.log(`${'market'.padEnd(26)}  prob  level  n      hits`);
+  console.log('-'.repeat(60));
+  const show = [
+    'home_win', 'draw', 'away_win',
+    'btts', 'total_goals_over2_5', 'total_corners_over9_5', 'total_cards_over4_5', 'red_card_any', 'total_offsides_over2_5',
+    'first_goal_30', 'first_goal_45',
+    'total_goals_1h_over0_5', 'total_goals_1h_over1_5', 'total_goals_2h_over0_5',
+    'winner_1h_home', 'winner_1h_draw', 'winner_1h_away',
+    'goal_0_15', 'goal_16_30', 'goal_31_45', 'goal_46_60', 'goal_61_75', 'goal_76_90',
+    'ah_home_m1_5', 'ah_away_p1_5',
+  ];
+  for (const k of show) console.log('  ' + row(ctx, k));
+
+  console.log(`\n══ VERIFICACIÓN P(empate) ══`);
+  console.log(`  draw en este partido: ${ctx.draw ? `${pct(ctx.draw.prob)} (${ctx.draw.level}, n=${ctx.draw.n})` : 'sin datos'}`);
+  const all = drawRate(inputs.awayRecords);
+  const home = drawRate(inputs.awayRecords, 'home');
+  const away = drawRate(inputs.awayRecords, 'away');
+  console.log(`  ${awayName} tasa de empate REAL — global ${pct(all.rate)} (${all.d}/${all.n}) · casa ${pct(home.rate)} (${home.d}/${home.n}) · fuera ${pct(away.rate)} (${away.d}/${away.n})`);
+  console.log(`  → debe ser ~realista (no 95%).`);
+
+  console.log(`\n══ VALIDACIÓN DE EVENTOS RECUPERADOS ══`);
+  const evMarkets = ['first_goal_30', 'goal_16_30', 'goal_46_60', 'total_goals_1h_over0_5'];
+  for (const k of evMarkets) {
+    const r = ctx[k];
+    console.log(`  ${k.padEnd(24)} ${r ? `n=${r.n} (usa ${k.startsWith('goal_') || k.startsWith('first_') ? 'eventos/minutos' : 'score.halftime'})` : 'sin datos — ¿faltan eventos?'}`);
+  }
+
+  await pool.end();
+})().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
