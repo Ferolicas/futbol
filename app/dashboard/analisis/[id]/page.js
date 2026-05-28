@@ -1357,6 +1357,7 @@ function FormationPitch({ teams }) {
 // ODDS WITH BOOKMAKER
 // ══════════════════════════════════════════
 function OddsWithBookmaker({ odds, allBookmakerOdds, userCountry }) {
+  const [logoErr, setLogoErr] = useState(false);
   const selected = selectBookmakerOdds(odds, 'matchWinner', userCountry);
   const mw = selected?.odds || odds.matchWinner;
   const bkName = selected?.bookmaker || odds.bookmaker;
@@ -1371,8 +1372,8 @@ function OddsWithBookmaker({ odds, allBookmakerOdds, userCountry }) {
           animate={{ opacity: [.6, 1, .6] }}
           transition={{ duration: 2, repeat: Infinity }}
         >
-          {bkLogo && <img src={bkLogo} alt={bkName} style={{ height: 14, objectFit: 'contain' }} />}
-          {!bkLogo && bkName}
+          {bkLogo && !logoErr && <img src={bkLogo} alt={bkName} onError={() => setLogoErr(true)} style={{ height: 14, objectFit: 'contain' }} />}
+          {(!bkLogo || logoErr) && bkName}
           <Zap size={12} style={{ color: '#fbbf24' }} />
         </motion.div>
       )}
