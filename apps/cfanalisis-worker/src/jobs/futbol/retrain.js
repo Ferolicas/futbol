@@ -24,8 +24,6 @@
 import {
   pgQuery,
   captureFinalizedFixturesRaw,
-  reenrichFeatures,
-  buildTeamProfiles,
   trainMetaModels,
 } from '../../shared.js';
 
@@ -38,14 +36,15 @@ export async function runFutbolRetrain(payload = {}) {
   const hours = Number(payload?.hours) || 30;
   const captureH2H = payload?.captureH2H !== false;
 
-  // 1) Fixtures recién finalizados (o set explícito del payload).
+  // 1) Fixtures recién finalizados (o set explícito del payload). FUENTE:
+  //    match_results — finalize.js la escribe para CADA partido terminado. (Ya
+  //    no se usa match_predictions: con el motor de contexto _savePrediction no
+  //    la puebla, así que finalized_at no se actualiza ahí.)
   let fixtureIds = Array.isArray(payload?.fixtureIds) ? payload.fixtureIds.map(Number) : null;
   if (!fixtureIds) {
     const { rows } = await pgQuery(
-      `SELECT fixture_id FROM match_predictions
-       WHERE finalized_at IS NOT NULL
-         AND finalized_at > NOW() - ($1 || ' hours')::interval
-         AND actuals_full IS NOT NULL`,
+      `SELECT fixture_id FROM match_results
+       WHERE created_at > NOW() - ($1 || ' hours')::interval`,
       [String(hours)]
     );
     fixtureIds = rows.map((r) => Number(r.fixture_id));
@@ -54,27 +53,23 @@ export async function runFutbolRetrain(payload = {}) {
 
   const result = { ok: true, fixtures: fixtureIds.length };
 
-  // 2) Captura focalizada de crudos (API). Si no hay fixtures nuevos, igual se
-  //    re-entrena con el corpus existente (los crudos ya están).
+  // 2) Captura focalizada de crudos (API): trae el crudo de los partidos recién
+  //    finalizados (fixtures detalle + statistics/events/lineups/injuries/H2H).
+  //    Imprescindible: ningún otro cron persiste raw_api_payloads. Si no hay
+  //    fixtures nuevos, igual se re-entrena con el corpus existente.
   result.capture = fixtureIds.length
     ? await captureFinalizedFixturesRaw({ fixtureIds, captureH2H })
     : { skipped: 'no-new-fixtures' };
 
-  // 3) Re-enriquecer features_full SOLO de los fixtures nuevos (incremental).
-  result.reenrich = fixtureIds.length
-    ? await reenrichFeatures({ fixtureIds })
-    : { skipped: 'no-new-fixtures' };
-
-  // 4) Reconstruir el ADN runtime con TODOS los crudos (incluidos los nuevos).
-  result.profiles = await buildTeamProfiles({});
-
-  // 5) Re-entrenar todos los mercados; activa los que superan baseline.
+  // 3) Re-entrenar el ML (detector de ruptura) DESDE EL CRUDO. (Ya NO hay pasos
+  //    reenrich/profiles: el motor de contexto calcula el ADN al vuelo desde el
+  //    crudo y el ML calcula sus features point-in-time desde el crudo — ni
+  //    features_full ni team_market_profiles se usan ya.)
   result.train = await trainMetaModels({});
 
   console.log(
     `[futbol-retrain] OK · capturados=${result.capture?.fixturesDone ?? 0} · ` +
-      `reenrich=${result.reenrich?.done ?? 0} · perfiles=${result.profiles?.rows ?? 0} · ` +
-      `entrenados=${result.train?.trained ?? 0} · activos=${result.train?.activated ?? 0}`
+      `muestras=${result.train?.samples ?? 0} · entrenados=${result.train?.trained ?? 0} · activos=${result.train?.activated ?? 0}`
   );
   return result;
 }
