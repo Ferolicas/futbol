@@ -1026,14 +1026,18 @@ export default function Dashboard() {
       const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
 
-      // Reconstruimos en vivo para incluir mercados per-team y de jugador
-      const liveComb = data.calculatedProbabilities
+      // Con el motor de contexto, data.combinada ya viene gateada (≥90% prob_final
+      // + piso + cuota ≥1.20) → se usa directo. Sin el flag (ruta DC), se
+      // reconstruye en vivo con buildCombinada y se exige ≥95%.
+      const isEngine = data?.combinada?.source === 'context-engine';
+      const liveComb = (!isEngine && data.calculatedProbabilities)
         ? buildCombinada(data.calculatedProbabilities, data.odds, data.playerHighlights, { home: homeTeam, away: awayTeam })
         : null;
       const selections = liveComb?.selections || data?.combinada?.selections || [];
+      const minProb = isEngine ? 90 : MIN_PROB;
 
       selections.forEach(sel => {
-        if (sel.probability < MIN_PROB) return;
+        if (sel.probability < minProb) return;
         if (!sel.odd || sel.odd < MIN_ODD) return;
         all.push({
           ...sel,

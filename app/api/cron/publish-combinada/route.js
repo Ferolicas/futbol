@@ -35,7 +35,10 @@ import { getAnalyzedFixtureIds, getAnalyzedMatchesFull } from '../../../../lib/s
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const MIN_PROB = 95;
+// Fase 6a: con el motor de contexto el gate es ≥90% sobre prob_final + piso de
+// confianza (ya aplicado en buildContextCombinada); sin el flag, ruta DC ≥95%.
+const CONTEXT_ENGINE_ENABLED = process.env.CONTEXT_ENGINE_ENABLED === 'true';
+const MIN_PROB = CONTEXT_ENGINE_ENABLED ? 90 : 95;
 const MIN_ODD  = 1.20;
 const VISUAL_PROB_CAP = 95; // no mostrar nunca 100% para no dar falsa certeza
 const FINISHED_STATUSES = new Set(['FT', 'AET', 'PEN', 'AWD', 'WO', 'CANC', 'PST', 'ABD', 'SUSP']);
@@ -73,18 +76,26 @@ async function handle(request) {
     // Backup defensivo por si el status venia stale: kickoff + 110min de margen.
     const kickoffMs = data.kickoff ? new Date(data.kickoff).getTime() : 0;
     if (kickoffMs > 0 && (nowMs - kickoffMs) > 110 * 60 * 1000) continue;
-    let comb;
-    try {
-      comb = buildCombinada(
-        data.calculatedProbabilities,
-        data.odds,
-        data.playerHighlights,
-        { home: data.homeTeam, away: data.awayTeam }
-      );
-    } catch {
-      continue;
+    // Con el motor de contexto, data.combinada ya viene gateada (≥90% prob_final
+    // + piso + cuota ≥1.20) por buildContextCombinada → se usa directo. Sin el
+    // flag, se reconstruye con buildCombinada (ruta DC).
+    let selections;
+    if (CONTEXT_ENGINE_ENABLED && data.combinada?.source === 'context-engine') {
+      selections = data.combinada.selections || [];
+    } else {
+      let comb;
+      try {
+        comb = buildCombinada(
+          data.calculatedProbabilities,
+          data.odds,
+          data.playerHighlights,
+          { home: data.homeTeam, away: data.awayTeam }
+        );
+      } catch {
+        continue;
+      }
+      selections = comb?.selections || [];
     }
-    const selections = comb?.selections || [];
     for (const sel of selections) {
       if (sel.probability < MIN_PROB) continue;
       if (!sel.odd || sel.odd < MIN_ODD) continue;
