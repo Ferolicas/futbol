@@ -30,14 +30,22 @@ const SCHEDULES: Sched[] = [
   //   03:00 + 04:00  finalize  → cierra resultados de los partidos de la noche
   //   05:00          calibrate → recalcula los knots isotónicos con esos
   //                              resultados frescos (escribe app_config)
+  //   06:30          retrain   → ciclo del meta-modelo CONTEXTUAL: captura los
+  //                              crudos de los partidos recién finalizados →
+  //                              reenrich features_full → reconstruye el ADN →
+  //                              re-entrena y re-activa los mercados que superan
+  //                              baseline. Va al final (tras finalize+calibrate)
+  //                              y en franja de baja actividad live (23:30
+  //                              Bogotá) para no starvear los polls al entrenar.
   //   02:05 (día sig) fixtures + 02:10 daily → el análisis del día ya usa la
-  //                              calibración generada la madrugada anterior.
-  // Así el modelo se auto-corrige cada noche sin re-análisis manual: cada
-  // recomendación diaria nace con la calibración más reciente disponible.
+  //                              calibración y los modelos generados la madrugada
+  //                              anterior.
+  // Así el modelo se auto-corrige Y aprende cada noche sin intervención manual.
   { queue: 'futbol-fixtures',  id: 'futbol-fixtures-daily',  pattern: '5 2 * * *',   tz: TZ },
   { queue: 'futbol-daily',     id: 'futbol-daily-daily',     pattern: '10 2 * * *',  tz: TZ },
   { queue: 'futbol-finalize',  id: 'futbol-finalize-daily',  pattern: '0 3,4 * * *', tz: TZ },
   { queue: 'futbol-calibrate', id: 'futbol-calibrate-daily', pattern: '0 5 * * *',   tz: TZ },
+  { queue: 'futbol-retrain',   id: 'futbol-retrain-daily',   pattern: '30 6 * * *',  tz: TZ },
   { queue: 'futbol-cleanup',   id: 'futbol-cleanup-daily',   pattern: '0 3 * * *',   tz: TZ },
   // ── Fútbol — periódicos ──
   // Live cada 20s: el handler hace smart-skip (0 llamadas fuera de partidos),

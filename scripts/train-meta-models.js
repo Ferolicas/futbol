@@ -6,20 +6,22 @@
 // calibrada actual), activa solo los que superan en logloss. Versionado.
 //
 //   node --env-file=.env scripts/train-meta-models.js
+//
+// También exportado como trainMetaModels({ pool? }) para el cron nocturno de
+// retrain (futbol-retrain).
 // ────────────────────────────────────────────────────────────────────────
-try { require('dotenv').config({ path: '.env.local' }); } catch {}
-try { require('dotenv').config({ path: '.env' }); } catch {}
-
 const { Pool } = require('pg');
 const { buildMetaFeatures, predictWithModel, MARKET_DEFS, FEATURE_ORDER } = require('../lib/meta-features');
 const { recordFromRaw, computeMetrics, shrink, filterSegment, RATE_METRICS, ALL_METRICS, FINISHED } = require('../lib/adn');
 const { meetingRecord, h2hForMarket, exceptionCause, rupturePresentToday, modalXIFromLineups } = require('../lib/h2h');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
-  max: 5,
-});
+function makePool() {
+  return new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
+    max: 5,
+  });
+}
 
 const MIN_SAMPLES = 120, VAL_FRACTION = 0.2, EPOCHS = 900, LR = 0.3, L2 = 0.01;
 const PRIOR_RATE = 8, PRIOR_AVG = 6;
@@ -69,7 +71,11 @@ function trainLogistic(samples) {
   return { bias: b, coefs, means, stds, features: FEATURE_ORDER };
 }
 
-(async () => {
+async function trainMetaModels(opts = {}) {
+  const { pool: extPool = null } = opts;
+  const pool = extPool || makePool();
+  const ownPool = !extPool;
+  try {
   console.log('\nCargando crudos para ADN/H2H point-in-time…');
   const [{ rows: fxRows }, { rows: stRows }, { rows: h2hRows }, { rows: evRows }, { rows: luRows }, { rows: injRows }] = await Promise.all([
     pool.query(`SELECT ref_id,payload FROM raw_api_payloads WHERE endpoint='fixtures'`),
@@ -144,7 +150,7 @@ function trainLogistic(samples) {
      FROM match_predictions WHERE finalized_at IS NOT NULL AND features_full IS NOT NULL AND actuals_full IS NOT NULL
      ORDER BY kickoff ASC`);
   console.log(`Entrenables: ${preds.length}`);
-  if (preds.length < MIN_SAMPLES) { console.log('Datos insuficientes.'); await pool.end(); return; }
+  if (preds.length < MIN_SAMPLES) { console.log('Datos insuficientes.'); return { trainable: preds.length, trained: 0, activated: 0, skipped: 0, insufficient: true }; }
 
   // Base por muestra (ADN + meetings + contexto-hoy), reutilizable entre mercados.
   const base = preds.map(p => {
@@ -212,5 +218,18 @@ function trainLogistic(samples) {
   console.log(`\n══ RESUMEN ══`);
   console.log(`Catálogo ${allMarkets.length} · entrenados ${trained} · ACTIVOS ${activated} · skip ${skipped}`);
   console.log('✓ prediction_models actualizado (active = supera baseline).');
-  await pool.end();
-})().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
+  return { catalog: allMarkets.length, trainable: preds.length, trained, activated, skipped };
+  } finally {
+    if (ownPool) await pool.end();
+  }
+}
+
+module.exports = { trainMetaModels };
+
+if (require.main === module) {
+  try { require('dotenv').config({ path: '.env.local' }); } catch {}
+  try { require('dotenv').config({ path: '.env' }); } catch {}
+  trainMetaModels()
+    .then(() => process.exit(0))
+    .catch(e => { console.error('FATAL:', e.message); process.exit(1); });
+}

@@ -26,6 +26,7 @@
 // Concat manual = TS solo ve `import(string)` → tipo any → cero conflicto
 // de emit. Comportamiento en runtime identico al literal.
 const LIB = '../../../lib/';
+const SCRIPTS = '../../../scripts/';
 const [
   _redis,
   _apiFootball,
@@ -43,6 +44,9 @@ const [
   _db,
   _mlbStatsApi,
   _rawBackfill,
+  _reenrich,
+  _buildProfiles,
+  _trainMeta,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
@@ -60,6 +64,12 @@ const [
   import(LIB + 'db.js'),
   import(LIB + 'mlb-stats-api.js'),
   import(LIB + 'raw-backfill.js'),
+  // Scripts del pipeline de retrain — refactorizados a funciones exportadas
+  // (CommonJS, con guard require.main para uso CLI). Se cargan vía import()
+  // dinámico igual que los lib/*; el guard NO se dispara dentro del worker.
+  import(SCRIPTS + 'reenrich-features.js'),
+  import(SCRIPTS + 'build-team-profiles.js'),
+  import(SCRIPTS + 'train-meta-models.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -115,6 +125,13 @@ export const ALL_LEAGUE_IDS = _leagues.ALL_LEAGUE_IDS;
 
 // lib/raw-backfill.js (captura cruda total, Camino B)
 export const runRawBackfill = _rawBackfill.runRawBackfill;
+// Captura focalizada por fixture (cron nocturno de retrain).
+export const captureFinalizedFixturesRaw = _rawBackfill.captureFinalizedFixturesRaw;
+
+// scripts/* del pipeline de retrain (CommonJS → import() dinámico).
+export const reenrichFeatures = _reenrich.reenrichFeatures;
+export const buildTeamProfiles = _buildProfiles.buildTeamProfiles;
+export const trainMetaModels = _trainMeta.trainMetaModels;
 
 // lib/calculations.js
 export const computeAllProbabilities = _calculations.computeAllProbabilities;

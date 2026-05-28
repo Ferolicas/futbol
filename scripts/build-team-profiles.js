@@ -5,24 +5,30 @@
 // prior de LIGA (no global). Cubre clubes y selecciones.
 //
 //   node --env-file=.env scripts/build-team-profiles.js
+//
+// También exportado como buildTeamProfiles({ pool? }) para el cron nocturno de
+// retrain (futbol-retrain).
 // ────────────────────────────────────────────────────────────────────────
-try { require('dotenv').config({ path: '.env.local' }); } catch {}
-try { require('dotenv').config({ path: '.env' }); } catch {}
-
 const { Pool } = require('pg');
 const { ALL_METRICS, RATE_METRICS, recordFromRaw, computeMetrics, shrink, filterSegment } = require('../lib/adn');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
-  max: 5,
-});
+function makePool() {
+  return new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
+    max: 5,
+  });
+}
 
 const PRIOR_RATE = 8, PRIOR_AVG = 6;
 const MIN_SEG_RECORDS = 3;  // comp/phase: solo segmentos con suficiente muestra
 const round4 = (v) => v == null ? null : Math.round(v * 10000) / 10000;
 
-(async () => {
+async function buildTeamProfiles(opts = {}) {
+  const { pool: extPool = null } = opts;
+  const pool = extPool || makePool();
+  const ownPool = !extPool;
+  try {
   console.log('\nCargando crudos (fixtures + statistics)…');
   const { rows: fxRows } = await pool.query(`SELECT ref_id, payload FROM raw_api_payloads WHERE endpoint='fixtures'`);
   const { rows: stRows } = await pool.query(`SELECT ref_id, payload FROM raw_api_payloads WHERE endpoint='fixtures/statistics'`);
@@ -105,5 +111,18 @@ const round4 = (v) => v == null ? null : Math.round(v * 10000) / 10000;
     );
   }
   console.log(`\n✓ team_market_profiles reconstruido: ${rowsOut.length} filas, ${teamRecs.size} equipos (segmentos all/home/away/comp/phase, prior de liga).`);
-  await pool.end();
-})().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
+  return { rows: rowsOut.length, teams: teamRecs.size };
+  } finally {
+    if (ownPool) await pool.end();
+  }
+}
+
+module.exports = { buildTeamProfiles };
+
+if (require.main === module) {
+  try { require('dotenv').config({ path: '.env.local' }); } catch {}
+  try { require('dotenv').config({ path: '.env' }); } catch {}
+  buildTeamProfiles()
+    .then(() => process.exit(0))
+    .catch(e => { console.error('FATAL:', e.message); process.exit(1); });
+}

@@ -6,22 +6,22 @@
 // backfill anterior. Usa el buildFeatureSnapshot existente (sin cambios).
 //
 //   node --env-file=.env scripts/reenrich-features.js [--limit=N]
+//
+// También exportado como reenrichFeatures({ pool?, limit?, fixtureIds? }) para
+// el cron nocturno de retrain (futbol-retrain). Con fixtureIds re-enriquece solo
+// esos partidos (incremental); sin él, todos.
 // ────────────────────────────────────────────────────────────────────────
-try { require('dotenv').config({ path: '.env.local' }); } catch {}
-try { require('dotenv').config({ path: '.env' }); } catch {}
-
 const { Pool } = require('pg');
 const { buildFeatureSnapshot } = require('../lib/feature-snapshot');
 const { statVal, FINISHED } = require('../lib/adn');
 
-const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = a.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] || true] : [a, true]; }));
-const LIMIT = args.limit ? Number(args.limit) : null;
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
-  max: 5,
-});
+function makePool() {
+  return new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
+    max: 5,
+  });
+}
 
 // _enriched con la forma EXACTA que espera buildFeatureSnapshot (mismo shape que
 // enrichLastFiveMatches): valores {home,away} + isHome.
@@ -65,7 +65,11 @@ function reconstructTable(leagueFixtures, beforeMs) {
   return rank;
 }
 
-(async () => {
+async function reenrichFeatures(opts = {}) {
+  const { pool: extPool = null, limit = null, fixtureIds = null } = opts;
+  const pool = extPool || makePool();
+  const ownPool = !extPool;
+  try {
   console.log('\nCargando crudos…');
   const { rows: fxRows } = await pool.query(`SELECT ref_id, payload FROM raw_api_payloads WHERE endpoint='fixtures'`);
   const { rows: stRows } = await pool.query(`SELECT ref_id, payload FROM raw_api_payloads WHERE endpoint='fixtures/statistics'`);
@@ -83,9 +87,12 @@ function reconstructTable(leagueFixtures, beforeMs) {
   for (const arr of byTeam.values()) arr.sort((a, b) => new Date(a.fixture.date) - new Date(b.fixture.date));
   console.log(`  fixtures=${fxRows.length} · stats=${stRows.length} · injuries=${injById.size} · equipos=${byTeam.size}`);
 
-  let q = `SELECT fixture_id, home_team, away_team, kickoff, league_id FROM match_predictions ORDER BY kickoff`;
-  if (LIMIT) q += ` LIMIT ${LIMIT}`;
-  const { rows: preds } = await pool.query(q);
+  let q = `SELECT fixture_id, home_team, away_team, kickoff, league_id FROM match_predictions`;
+  const qParams = [];
+  if (Array.isArray(fixtureIds) && fixtureIds.length) { q += ` WHERE fixture_id = ANY($1)`; qParams.push(fixtureIds); }
+  q += ` ORDER BY kickoff`;
+  if (limit) q += ` LIMIT ${Number(limit)}`;
+  const { rows: preds } = await pool.query(q, qParams);
   console.log(`Partidos a re-enriquecer: ${preds.length}`);
 
   const last5 = (teamId, beforeMs) => (byTeam.get(teamId) || [])
@@ -122,5 +129,19 @@ function reconstructTable(leagueFixtures, beforeMs) {
     } catch (e) { failed++; console.warn(`  fail fid=${p.fixture_id}: ${e.message}`); }
   }
   console.log(`\n✓ Re-enriquecidos: ${done}/${preds.length} (fallos: ${failed}). features_full ahora con datos crudos point-in-time.`);
-  await pool.end();
-})().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
+  return { done, failed, total: preds.length };
+  } finally {
+    if (ownPool) await pool.end();
+  }
+}
+
+module.exports = { reenrichFeatures };
+
+if (require.main === module) {
+  try { require('dotenv').config({ path: '.env.local' }); } catch {}
+  try { require('dotenv').config({ path: '.env' }); } catch {}
+  const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = a.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] || true] : [a, true]; }));
+  reenrichFeatures({ limit: args.limit ? Number(args.limit) : null })
+    .then(() => process.exit(0))
+    .catch(e => { console.error('FATAL:', e.message); process.exit(1); });
+}

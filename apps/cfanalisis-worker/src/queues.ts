@@ -16,6 +16,7 @@ export const QUEUE_NAMES = [
   'futbol-odds',
   'futbol-calibrate',
   'futbol-raw-backfill',
+  'futbol-retrain',
   // Baseball
   'baseball-fixtures',
   'baseball-analyze',
@@ -65,6 +66,10 @@ const opts: Record<QueueName, JobsOptions> = {
   'futbol-odds':             defaultJobOpts,
   'futbol-calibrate':        defaultJobOpts,
   'futbol-raw-backfill':     { ...defaultJobOpts, attempts: 1 },
+  // Ciclo nocturno de auto-mejora (capture→reenrich→profiles→train). Los 4
+  // pasos son idempotentes, así que reintentar es seguro; pero cada intento
+  // re-corre todo el ciclo pesado → tope 2 intentos.
+  'futbol-retrain':          { ...defaultJobOpts, attempts: 2 },
   'baseball-fixtures':            defaultJobOpts,
   'baseball-analyze':             analyzeJobOpts,
   'baseball-analyze-all-today':   analyzeJobOpts,
