@@ -67,7 +67,7 @@ function drawRate(records, venue) {
 
   const ctxRaw = computeContext(inputs);
   // Fase 4: excepciones + veto + confianza. todayCtx base = sin condiciones adversas.
-  const ctx = scoreContext(ctxRaw, { meetings: inputs.meetings, ctx: inputs.ctx, modalXIByTeam: inputs.modalXIByTeam, todayCtx: {}, homeId });
+  const ctx = scoreContext(ctxRaw, { meetings: inputs.meetings, ctx: inputs.ctx, modalXIByTeam: inputs.modalXIByTeam, todayCtx: {}, homeId, homeRecords: inputs.homeRecords, awayRecords: inputs.awayRecords });
   const keys = Object.keys(ctx);
   const nH2H = keys.filter(k => ctx[k].level === 'h2h').length;
   const nADN = keys.filter(k => ctx[k].level === 'adn').length;
@@ -137,7 +137,7 @@ function drawRate(records, venue) {
   console.log(`\n══ DEMO DE VETO (causa de ruptura presente hoy) ══`);
   // Re-puntúa asumiendo que HOY hay una baja clave (keyInjury) — muestra cómo el
   // veto recorta la prob de los mercados cuyas excepciones se rompían por lesión.
-  const scoredInj = scoreContext(ctxRaw, { meetings: inputs.meetings, ctx: inputs.ctx, modalXIByTeam: inputs.modalXIByTeam, todayCtx: { keyInjury: true }, homeId });
+  const scoredInj = scoreContext(ctxRaw, { meetings: inputs.meetings, ctx: inputs.ctx, modalXIByTeam: inputs.modalXIByTeam, todayCtx: { keyInjury: true }, homeId, homeRecords: inputs.homeRecords, awayRecords: inputs.awayRecords });
   const changed = keys
     .map(k => ({ k, base: ctx[k], inj: scoredInj[k] }))
     .filter(x => x.inj.rupture_score > 0 && (x.base.recommended || x.base.prob >= 0.8))

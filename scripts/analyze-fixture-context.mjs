@@ -29,18 +29,33 @@ async function resolveTeam(name) {
   return rows[0] || null;
 }
 
+async function teamNameById(id) {
+  const { rows } = await pool.query(
+    `SELECT payload->'teams'->'home'->>'name' n FROM raw_api_payloads WHERE endpoint='fixtures' AND payload->'teams'->'home'->>'id'=$1 LIMIT 1`, [String(id)]);
+  if (rows[0]?.n) return rows[0].n;
+  const { rows: r2 } = await pool.query(
+    `SELECT payload->'teams'->'away'->>'name' n FROM raw_api_payloads WHERE endpoint='fixtures' AND payload->'teams'->'away'->>'id'=$1 LIMIT 1`, [String(id)]);
+  return r2[0]?.n || `Equipo ${id}`;
+}
+
 const show = (v) => (v == null ? '—' : v);
 
 (async () => {
-  const homeName = args.homeName || 'Manchester City';
-  const awayName = args.awayName || 'Crystal Palace';
-  let homeId = args.home ? Number(args.home) : (await resolveTeam(homeName))?.id;
-  let awayId = args.away ? Number(args.away) : (await resolveTeam(awayName))?.id;
+  // Resolver ids + NOMBRES reales (arregla el título hardcodeado: si se pasan
+  // ids, igual buscamos el nombre real del equipo en el crudo).
+  let homeId, awayId, homeName, awayName;
+  if (args.home) { homeId = Number(args.home); homeName = args.homeName || await teamNameById(homeId); }
+  else { const t = await resolveTeam(args.homeName || 'Manchester City'); homeId = t?.id; homeName = t?.name; }
+  if (args.away) { awayId = Number(args.away); awayName = args.awayName || await teamNameById(awayId); }
+  else { const t = await resolveTeam(args.awayName || 'Crystal Palace'); awayId = t?.id; awayName = t?.name; }
   if (!homeId || !awayId) { console.error('No pude resolver equipos. Usa --home=ID --away=ID'); await pool.end(); process.exit(1); }
 
   const inputs = await loadContextInputs(pool, homeId, awayId);
   const todayCtx = buildTodayCtx({ leagueRound: 'Regular Season' });
-  const scored = scoreContext(computeContext(inputs), { meetings: inputs.meetings, ctx: inputs.ctx, modalXIByTeam: inputs.modalXIByTeam, todayCtx, homeId });
+  const scored = scoreContext(computeContext(inputs), {
+    meetings: inputs.meetings, ctx: inputs.ctx, modalXIByTeam: inputs.modalXIByTeam, todayCtx, homeId,
+    homeRecords: inputs.homeRecords, awayRecords: inputs.awayRecords,
+  });
   const p = buildProbabilitiesFromContext(scored, inputs, { homeTeam: homeName, awayTeam: awayName, leagueRound: 'Regular Season' });
 
   console.log(`\n══ ${homeName} (local) vs ${awayName} (visitante) — MOTOR DE CONTEXTO ══`);
