@@ -10,7 +10,7 @@ try { require('dotenv').config({ path: '.env.local' }); } catch {}
 try { require('dotenv').config({ path: '.env' }); } catch {}
 
 const { Pool } = require('pg');
-const { loadContextInputs, computeContext, scoreContext, persistFixtureContext, VETO_ALPHA, VETO_TAU, CONF_N0, REC_THRESHOLD, MIN_H2H_N, MIN_ADN_CONFIDENCE } = require('../lib/context-engine');
+const { loadContextInputs, computeContext, scoreContext, persistFixtureContext, rateFromRecords, VETO_ALPHA, VETO_TAU, CONF_N0, REC_THRESHOLD, MIN_H2H_N, MIN_ADN_CONFIDENCE } = require('../lib/context-engine');
 const { MARKET_DEFS } = require('../lib/meta-features');
 
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = a.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] || true] : [a, true]; }));
@@ -96,6 +96,15 @@ function drawRate(records, venue) {
   const away = drawRate(inputs.awayRecords, 'away');
   console.log(`  ${awayName} tasa de empate REAL — global ${pct(all.rate)} (${all.d}/${all.n}) · casa ${pct(home.rate)} (${home.d}/${home.n}) · fuera ${pct(away.rate)} (${away.d}/${away.n})`);
   console.log(`  → debe ser ~realista (no 95%).`);
+
+  console.log(`\n══ FIX DENOMINADOR — baja frecuencia, ${awayName} sobre TODOS sus partidos ══`);
+  // Denominador = partidos con statistics presentes (incluye value:0 y campo
+  // omitido). Antes red_card_any salía ~100% sobre solo los partidos con roja.
+  for (const mk of ['red_card_any', 'total_offsides_over2_5', 'total_offsides_over1_5']) {
+    const r = rateFromRecords(inputs.awayRecords, MARKET_DEFS[mk]);
+    console.log(`  ${(awayName + ' ' + mk).padEnd(40)} ${r.rate != null ? pct(r.rate) : '  —'}  n=${r.n}  hits=${r.hits}`);
+  }
+  console.log(`  → red_card_any debe dar ~realista (no 100%); n crece con la cobertura de statistics.`);
 
   console.log(`\n══ VALIDACIÓN DE EVENTOS RECUPERADOS ══`);
   const evMarkets = ['first_goal_30', 'goal_16_30', 'goal_46_60', 'total_goals_1h_over0_5'];
