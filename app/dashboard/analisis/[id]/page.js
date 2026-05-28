@@ -1372,7 +1372,7 @@ function OddsWithBookmaker({ odds, allBookmakerOdds, userCountry }) {
           animate={{ opacity: [.6, 1, .6] }}
           transition={{ duration: 2, repeat: Infinity }}
         >
-          {bkLogo && !logoErr && <img src={bkLogo} alt={bkName} onError={() => setLogoErr(true)} style={{ height: 14, objectFit: 'contain' }} />}
+          {bkLogo && !logoErr && <img src={bkLogo} alt={bkName} onError={() => setLogoErr(true)} style={{ height: 26, objectFit: 'contain' }} />}
           {(!bkLogo || logoErr) && bkName}
           <Zap size={12} style={{ color: '#fbbf24' }} />
         </motion.div>

@@ -9,6 +9,7 @@ import { usePusherEvent } from '../../lib/use-pusher';
 import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
 import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/timezone';
 import { buildCombinada } from '../../lib/combinada';
+import { marketLabel } from '../../lib/market-labels';
 import { setAnalysisCache } from '../../lib/analysis-cache';
 import { fetcher } from '../../lib/fetcher';
 import { useLiveStats } from './live-stats-context';
@@ -1041,6 +1042,9 @@ export default function Dashboard() {
         if (!sel.odd || sel.odd < MIN_ODD) return;
         all.push({
           ...sel,
+          // Selecciones del motor traen el market_key como id; traducir a nombre
+          // legible (cubre también combinadas cacheadas con la clave cruda).
+          name: sel.scope === 'context' ? marketLabel(sel.id, { home: homeTeam, away: awayTeam }) : sel.name,
           probability: Math.min(95, sel.probability),
           fixtureId: fid,
           matchName: mn,

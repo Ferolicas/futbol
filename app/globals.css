@@ -2514,19 +2514,19 @@ input:checked + .cb-mark::after {
 }
 
 .bk-logo {
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   object-fit: contain;
-  border-radius: 3px;
-  opacity: 0.7;
+  border-radius: 4px;
+  opacity: 0.85;
   flex-shrink: 0;
 }
 .bk-logo-lg {
-  width: 16px;
-  height: 16px;
+  width: 28px;
+  height: 28px;
   object-fit: contain;
-  border-radius: 3px;
-  opacity: 0.7;
+  border-radius: 4px;
+  opacity: 0.85;
   flex-shrink: 0;
 }
 

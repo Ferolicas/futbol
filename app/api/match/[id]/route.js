@@ -16,7 +16,26 @@ export async function GET(request, { params }) {
   }
 
   try {
-    const analysis = await getCachedAnalysis(id, clientDate);
+    let analysis = await getCachedAnalysis(id, clientDate);
+    // Regeneración perezosa: si la caché falta o quedó obsoleta (p.ej. tras subir
+    // MIN_CACHE_VERSION), re-analizar al vuelo con el fixture cacheado del día en
+    // vez de devolver "sin analizar". Así el motor nuevo se aplica al primer acceso.
+    if (!analysis) {
+      try {
+        const date = clientDate || new Date().toISOString().split('T')[0];
+        const fixtures = await getCachedFixtures(date);
+        const fixture = fixtures?.find(f => f.fixture.id === Number(id));
+        if (fixture) {
+          const result = await analyzeMatch(fixture, { date });
+          if (result && result.dataQuality !== 'insufficient') {
+            await cacheAnalysis(id, { ...result, date }).catch(() => {});
+            analysis = result.analysis || result;
+          }
+        }
+      } catch (e) {
+        console.error('[match:GET] lazy re-analyze failed:', e.message);
+      }
+    }
     if (!analysis) {
       return Response.json({ error: 'Match not analyzed yet', notFound: true }, { status: 404 });
     }
