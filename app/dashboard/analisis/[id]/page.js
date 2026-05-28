@@ -718,7 +718,7 @@ export default function AnalisisPage() {
                   items={[
                     { label: 'Prom. anotados', value: p.homeGoals.avgScored, color: '#4ade80' },
                     { label: 'Prom. recibidos', value: p.homeGoals.avgConceded, color: '#f87171' },
-                    { label: 'Prom. vs rival (H2H)', value: p.h2hGoals.homeAvg, color: '#67e8f9' },
+                    { label: 'Prom. vs rival (H2H)', value: p.h2hGoals?.homeAvg, color: '#67e8f9' },
                   ]}
                 />
                 <StatCard
@@ -728,7 +728,7 @@ export default function AnalisisPage() {
                   items={[
                     { label: 'Prom. anotados', value: p.awayGoals.avgScored, color: '#4ade80' },
                     { label: 'Prom. recibidos', value: p.awayGoals.avgConceded, color: '#f87171' },
-                    { label: 'Prom. vs rival (H2H)', value: p.h2hGoals.awayAvg, color: '#f472b6' },
+                    { label: 'Prom. vs rival (H2H)', value: p.h2hGoals?.awayAvg, color: '#f472b6' },
                   ]}
                 />
                 <StatCard
