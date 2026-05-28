@@ -10,7 +10,7 @@ try { require('dotenv').config({ path: '.env.local' }); } catch {}
 try { require('dotenv').config({ path: '.env' }); } catch {}
 
 const { Pool } = require('pg');
-const { loadContextInputs, computeContext } = require('../lib/context-engine');
+const { loadContextInputs, computeContext, scoreContext, VETO_ALPHA, VETO_TAU, CONF_N0, REC_THRESHOLD } = require('../lib/context-engine');
 const { MARKET_DEFS } = require('../lib/meta-features');
 
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = a.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] || true] : [a, true]; }));
@@ -35,9 +35,9 @@ async function resolveTeam(name) {
 const pct = (p) => (p == null ? '  —' : `${(p * 100).toFixed(0)}%`.padStart(4));
 function row(ctx, key) {
   const r = ctx[key];
-  if (!r) return `${key.padEnd(26)}  sin datos`;
-  return `${key.padEnd(26)}  ${pct(r.prob)}   ${r.level.padEnd(4)}  n=${String(r.n).padStart(3)}  hits=${String(r.hits).padStart(3)}` +
-         (r.exceptions && r.exceptions.length ? `  exc=${r.exceptions.length}` : '');
+  if (!r) return `${key.padEnd(24)}  sin datos`;
+  return `${key.padEnd(24)} ${pct(r.prob)} →${pct(r.prob_final)}  conf=${pct(r.confidence)}  rup=${(r.rupture_score ?? 0).toFixed(2)}  ${r.recommended ? 'REC' : '   '}  ${r.level.padEnd(4)} n=${String(r.n).padStart(3)} hits=${String(r.hits).padStart(3)}` +
+         (r.exceptions && r.exceptions.length ? ` exc=${r.exceptions.length}` : '');
 }
 
 // Tasa de empate "standalone" de un equipo desde sus registros (todos / casa / fuera).
@@ -61,17 +61,21 @@ function drawRate(records, venue) {
   console.log(`Visitante: ${aInfo ? aInfo.name : awayId}  (id ${awayId}${aInfo ? `, ${aInfo.n} fixtures` : ''})`);
 
   const inputs = await loadContextInputs(pool, homeId, awayId);
-  console.log(`\nDatos cargados: local ${inputs._counts.homeFinished} partidos · visitante ${inputs._counts.awayFinished} · H2H ${inputs._counts.meetings}/${inputs._counts.meetingsRaw} cruces`);
+  console.log(`\nDatos cargados: local ${inputs._counts.homeFinished} partidos · visitante ${inputs._counts.awayFinished} · H2H ${inputs._counts.meetings}/${inputs._counts.meetingsRaw} cruces · lineups ${inputs._counts.lineups} · injuries ${inputs._counts.injuries}`);
 
-  const ctx = computeContext(inputs);
+  const ctxRaw = computeContext(inputs);
+  // Fase 4: excepciones + veto + confianza. todayCtx base = sin condiciones adversas.
+  const ctx = scoreContext(ctxRaw, { meetings: inputs.meetings, ctx: inputs.ctx, modalXIByTeam: inputs.modalXIByTeam, todayCtx: {}, homeId });
   const keys = Object.keys(ctx);
   const nH2H = keys.filter(k => ctx[k].level === 'h2h').length;
   const nADN = keys.filter(k => ctx[k].level === 'adn').length;
-  console.log(`Mercados con valor: ${keys.length}/${Object.keys(MARKET_DEFS).length}  (h2h=${nH2H} · adn=${nADN} · sin datos=${Object.keys(MARKET_DEFS).length - keys.length})`);
+  const nRec = keys.filter(k => ctx[k].recommended).length;
+  console.log(`Mercados con valor: ${keys.length}/${Object.keys(MARKET_DEFS).length}  (h2h=${nH2H} · adn=${nADN} · sin datos=${Object.keys(MARKET_DEFS).length - keys.length})  ·  recomendables(≥${REC_THRESHOLD*100}%): ${nRec}`);
+  console.log(`Constantes: α=${VETO_ALPHA} · τ=${VETO_TAU} · N0(confianza)=${CONF_N0} · umbral=${REC_THRESHOLD}`);
 
   console.log(`\n══ ${homeName} (local) vs ${awayName} (visitante) ══`);
-  console.log(`${'market'.padEnd(26)}  prob  level  n      hits`);
-  console.log('-'.repeat(60));
+  console.log(`${'market'.padEnd(24)} prob  →pfin conf   rup   rec   lvl  n    hits`);
+  console.log('-'.repeat(78));
   const show = [
     'home_win', 'draw', 'away_win',
     'btts', 'total_goals_over2_5', 'total_corners_over9_5', 'total_cards_over4_5', 'red_card_any', 'total_offsides_over2_5',
@@ -96,6 +100,34 @@ function drawRate(records, venue) {
   for (const k of evMarkets) {
     const r = ctx[k];
     console.log(`  ${k.padEnd(24)} ${r ? `n=${r.n} (usa ${k.startsWith('goal_') || k.startsWith('first_') ? 'eventos/minutos' : 'score.halftime'})` : 'sin datos — ¿faltan eventos?'}`);
+  }
+
+  console.log(`\n══ CONFIANZA POR MUESTRA (el caso "muestra chica engañosa") ══`);
+  // Recomendables ordenados por confianza ASC → los de arriba son los de menor
+  // soporte (n bajo) aunque su % sea alto: el caso red_card_any 100% n=8.
+  const rec = keys.filter(k => ctx[k].recommended).map(k => ({ k, ...ctx[k] })).sort((a, b) => a.confidence - b.confidence);
+  console.log(`  Recomendables con MENOR confianza (vigilar — % alto pero n bajo):`);
+  for (const r of rec.slice(0, 8)) console.log(`    ${r.k.padEnd(24)} prob=${pct(r.prob)}  conf=${pct(r.confidence)}  n=${r.n}  ${r.level}`);
+  if (ctx.red_card_any) console.log(`  → red_card_any: prob=${pct(ctx.red_card_any.prob)} n=${ctx.red_card_any.n} confianza=${pct(ctx.red_card_any.confidence)} (n bajo ⇒ confianza baja, no se confía igual que un n alto)`);
+
+  console.log(`\n══ DEMO DE VETO (causa de ruptura presente hoy) ══`);
+  // Re-puntúa asumiendo que HOY hay una baja clave (keyInjury) — muestra cómo el
+  // veto recorta la prob de los mercados cuyas excepciones se rompían por lesión.
+  const scoredInj = scoreContext(ctxRaw, { meetings: inputs.meetings, ctx: inputs.ctx, modalXIByTeam: inputs.modalXIByTeam, todayCtx: { keyInjury: true }, homeId });
+  const changed = keys
+    .map(k => ({ k, base: ctx[k], inj: scoredInj[k] }))
+    .filter(x => x.inj.rupture_score > 0 && (x.base.recommended || x.base.prob >= 0.8))
+    .sort((a, b) => b.inj.rupture_score - a.inj.rupture_score);
+  if (changed.length === 0) {
+    console.log(`  Ningún mercado H2H de este partido tiene excepciones atribuibles a lesión`);
+    console.log(`  (las excepciones requieren injuries capturadas por cruce). El mecanismo`);
+    console.log(`  está validado con el test sintético: prob 92% → 36.8% (rupture 1.0) cuando`);
+    console.log(`  la baja clave que rompía el patrón está presente hoy.`);
+  } else {
+    console.log(`  Con baja clave HOY, estos mercados se recortan (prob → prob_final):`);
+    for (const x of changed.slice(0, 10)) {
+      console.log(`    ${x.k.padEnd(24)} ${pct(x.base.prob)} → ${pct(x.inj.prob_final)}  rupture=${x.inj.rupture_score.toFixed(2)}  rec ${x.base.recommended}→${x.inj.recommended}`);
+    }
   }
 
   await pool.end();
