@@ -985,23 +985,7 @@ export default function AnalisisPage() {
                   hasOdd(o.corners1x22H?.away) && p.mostCorners.secondHalf && { label: `2ª Parte — ${a.awayTeam}`, value: p.mostCorners.secondHalf.away },
                 ].filter(Boolean),
               },
-              // Asian Handicap — itera por las claves disponibles en odds
-              p.asianHandicap && o.asianHandicap && {
-                title: 'Hándicap Asiático',
-                items: Object.keys(o.asianHandicap).map(oddKey => {
-                  if (!hasOdd(o.asianHandicap[oddKey])) return null;
-                  const m = oddKey.match(/^(home|away)_([mp])(\d+(?:_\d+)?)$/);
-                  if (!m) return null;
-                  const side = m[1];
-                  const sign = m[2] === 'm' ? -1 : 1;
-                  const lineNum = sign * parseFloat(m[3].replace('_', '.'));
-                  const probKey = `h${oddKey.slice(oddKey.indexOf('_') + 1)}`;
-                  const prob = p.asianHandicap[side]?.[probKey];
-                  if (prob == null) return null;
-                  const teamName = side === 'home' ? a.homeTeam : a.awayTeam;
-                  return { label: `${teamName} ${lineNum > 0 ? '+' : ''}${lineNum}`, value: prob };
-                }).filter(Boolean),
-              },
+              // (Hándicap asiático eliminado del catálogo.)
             ].filter(Boolean).filter(c => c.items.length > 0);
 
             if (cats.length === 0) return null;

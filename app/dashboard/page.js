@@ -2514,20 +2514,7 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
       hasOdd(o.corners1x2?.draw) && p.mostCorners.fullMatch && { label: 'Empate', value: p.mostCorners.fullMatch.draw },
       hasOdd(o.corners1x2?.away) && p.mostCorners.fullMatch && { label: awayTeam, value: p.mostCorners.fullMatch.away },
     ].filter(Boolean) },
-    p.asianHandicap && o.asianHandicap && { title: 'Hándicap asiático', group: 'handicap',
-      items: Object.keys(o.asianHandicap).map(oddKey => {
-        if (!hasOdd(o.asianHandicap[oddKey])) return null;
-        const m = oddKey.match(/^(home|away)_([mp])(\d+(?:_\d+)?)$/);
-        if (!m) return null;
-        const side = m[1];
-        const sign = m[2] === 'm' ? -1 : 1;
-        const lineNum = sign * parseFloat(m[3].replace('_', '.'));
-        const probKey = `h${oddKey.slice(oddKey.indexOf('_') + 1)}`;
-        const prob = p.asianHandicap[side]?.[probKey];
-        if (prob == null) return null;
-        const teamName = side === 'home' ? homeTeam : awayTeam;
-        return { label: `${teamName} ${lineNum > 0 ? '+' : ''}${lineNum}`, value: prob };
-      }).filter(Boolean) },
+    // (Hándicap asiático eliminado del catálogo.)
   ].filter(Boolean).filter(c => c.items && c.items.length > 0);
 
   return [
@@ -2536,7 +2523,6 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
     { key: 'tarjetas', label: '🟨 Tarjetas',          color: '#f59e0b' },
     { key: 'tiros',    label: '🎯 Tiros',             color: '#3b82f6' },
     { key: 'faltas',   label: '⚠️ Faltas',            color: '#fb923c' },
-    { key: 'handicap', label: '🎰 Hándicap asiático', color: '#a78bfa' },
   ].map(g => ({ ...g, cats: allCats.filter(c => c.group === g.key) }))
    .filter(g => g.cats.length > 0);
   }, [p, odds, homeTeam, awayTeam]);

@@ -17,7 +17,7 @@ const KEY = process.env.FOOTBALL_API_KEY || process.env.NEXT_PUBLIC_API_FOOTBALL
 const fixtureId = process.argv[2];
 const bkFilter = (process.argv[3] || '').toLowerCase();
 
-const ALLOWED = ['bwin', 'bet365', '1xbet', 'betano'];
+const ALLOWED = ['bet365', 'bwin'];
 const normBk = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[\s.\-_]/g, '');
 const isAllowed = (name) => { const n = normBk(name); return ALLOWED.find(a => n.includes(a)) || null; };
 
