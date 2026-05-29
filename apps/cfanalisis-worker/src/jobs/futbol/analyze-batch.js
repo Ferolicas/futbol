@@ -78,7 +78,7 @@ async function markComplete(date, fixtureCount) {
 
 /** @param {any} payload @param {any} [job] */
 export async function runAnalyzeBatch(payload = {}, job = null) {
-  const { date } = payload;
+  const { date, force = false } = payload;
   // UnrecoverableError → BullMQ marca el job como failed inmediatamente sin
   // consumir los 5 attempts configurados en analyzeJobOpts. Reintentar un
   // payload invalido nunca lo arregla: es bug del caller, no fallo transitorio.
@@ -129,7 +129,7 @@ export async function runAnalyzeBatch(payload = {}, job = null) {
 
   const results = await mapPool(allFixtures, ANALYZE_CONCURRENCY, async (fixture) => {
     const fid = Number(fixture.fixture.id);
-    const result = await analyzeMatch(fixture, { date });
+    const result = await analyzeMatch(fixture, { date, force });
     if (!result) return { fid, skipped: true };
 
     const a = result.analysis || result;
