@@ -1910,13 +1910,13 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
   // exactamente la misma selecciones que la "Combinada Auto" — un unico
   // sitio donde mantener el catalogo de mercados.
   const markets = useMemo(() => {
-    // Motor de contexto = fuente única: data.combinada.selections YA viene con
-    // cuota real ≥1.20 y bookmaker atribuido (allBookmakerOdds). Sin recomputar en
-    // cliente (eso reintroducía cuotas fantasma sin bookmaker). Fallback a
-    // buildCombinada solo si por alguna razón no hubiera combinada del motor.
+    // "Selecciona para tu combinada": usa data.combinada.SELECTABLE — TODA línea con
+    // prob≥70% y cuota real ≥1.20 (bet365/bwin, con equivalencia de línea entera). NO
+    // el gate ≥90% de la "Combinada del Día" (eso es `selections`). Fallback a
+    // selections (combinadas viejas sin selectable) o buildCombinada (no-engine).
     const isEngine = data?.combinada?.source === 'context-engine';
     const sels = isEngine
-      ? (data.combinada.selections || [])
+      ? (data.combinada.selectable || data.combinada.selections || [])
       : (data?.calculatedProbabilities
           ? (buildCombinada(data.calculatedProbabilities, data.odds, data.playerHighlights, { home: match.teams.home.name, away: match.teams.away.name })?.selections || [])
           : []);
