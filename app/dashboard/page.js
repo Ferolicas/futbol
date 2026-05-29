@@ -6,7 +6,7 @@ import useSWR from 'swr';
 import { useAuth } from '../../components/providers';
 import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
-import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
+import { BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
 import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/timezone';
 import { buildCombinada } from '../../lib/combinada';
 import { marketLabel } from '../../lib/market-labels';
@@ -1910,14 +1910,16 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
   // exactamente la misma selecciones que la "Combinada Auto" — un unico
   // sitio donde mantener el catalogo de mercados.
   const markets = useMemo(() => {
-    if (!data?.calculatedProbabilities) return [];
-    const comb = buildCombinada(
-      data.calculatedProbabilities,
-      data.odds,
-      data.playerHighlights,
-      { home: match.teams.home.name, away: match.teams.away.name },
-    );
-    const sels = comb?.selections || [];
+    // Motor de contexto = fuente única: data.combinada.selections YA viene con
+    // cuota real ≥1.20 y bookmaker atribuido (allBookmakerOdds). Sin recomputar en
+    // cliente (eso reintroducía cuotas fantasma sin bookmaker). Fallback a
+    // buildCombinada solo si por alguna razón no hubiera combinada del motor.
+    const isEngine = data?.combinada?.source === 'context-engine';
+    const sels = isEngine
+      ? (data.combinada.selections || [])
+      : (data?.calculatedProbabilities
+          ? (buildCombinada(data.calculatedProbabilities, data.odds, data.playerHighlights, { home: match.teams.home.name, away: match.teams.away.name })?.selections || [])
+          : []);
     return sels
       // P6: filtro 1.20 mínimo (alineado con MIN_DISPLAY_ODDS en lib/constants.js)
       .filter(s => s.odd && s.odd >= 1.20 && s.probability >= 70 && s.probability <= 95)
@@ -1926,6 +1928,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
         name: s.name,
         probability: s.probability,
         odd: s.odd,
+        bookmaker: s.bookmaker || null,   // bookmaker real atribuido por el motor
         // cat se mantiene para los logos del bookmaker (catMap mas abajo)
         cat: s.scope === 'player' ? 'Player'
            : s.category?.includes('corners') ? 'Corners'
@@ -2116,12 +2119,11 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                 <div className="markets-grid">
                   {markets.map(mkt => {
                     const checked = !!selMarkets[mkt.id];
-                    const bkInfo = (() => {
-                      if (!mkt.odd || !data?.odds) return null; // no logo for markets without real odds
-                      const country = detectCountry();
-                      const catMap = { 'BTTS': 'btts', 'Ganador': 'matchWinner', 'Goles': 'overUnder', 'Corners': 'corners', 'Tarjetas': 'cards' };
-                      return selectBookmakerOdds(data.odds, catMap[mkt.cat] || mkt.cat, country);
-                    })();
+                    // Logo del bookmaker REAL atribuido por el motor (allBookmakerOdds).
+                    // Si no hay bookmaker → sin logo (cuota fantasma no debería llegar aquí).
+                    const bkLogo = mkt.bookmaker
+                      ? (BOOKMAKER_LOGOS[mkt.bookmaker.toLowerCase()] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => mkt.bookmaker.toLowerCase().includes(k))?.[1])
+                      : null;
                     return (
                       <button
                         key={mkt.id}
@@ -2133,10 +2135,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                         <div className="mkt-nums">
                           <span className="mkt-pct">{cap(mkt.probability)}%</span>
                           {mkt.odd && <span className="mkt-odd">{mkt.odd.toFixed(2)}</span>}
-                          {bkInfo && (() => {
-                            const logo = BOOKMAKER_LOGOS[bkInfo.bookmaker?.toLowerCase()] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => bkInfo.bookmaker?.toLowerCase()?.includes(k))?.[1];
-                            return logo ? <span className="mkt-bk"><img src={logo} alt="" className="bk-logo-lg" onError={(e) => { e.target.style.display = 'none'; }} /></span> : null;
-                          })()}
+                          {bkLogo && <span className="mkt-bk" title={mkt.bookmaker}><img src={bkLogo} alt={mkt.bookmaker} className="bk-logo-lg" onError={(e) => { e.target.style.display = 'none'; }} /></span>}
                           {checked && <span className="mkt-chk">&#10003;</span>}
                         </div>
                       </button>
