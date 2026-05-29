@@ -48,7 +48,6 @@ const TOURNAMENT_LEAGUES = new Set([
   137,  // Coppa Italia
   66,   // Coupe de France
   130,  // Copa Argentina
-  131,  // Copa de la Superliga
   73,   // Copa Betano (Brazil)
   241,  // Copa Colombia
   96,   // Taça de Portugal
