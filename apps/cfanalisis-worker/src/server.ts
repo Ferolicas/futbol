@@ -9,7 +9,6 @@ import { bullConnection } from './redis.js';
 import { logger } from './logger.js';
 import { notifyError } from './notifier.js';
 import { wsManager } from './ws/wsManager.js';
-import { runFutbolCalibration } from './jobs/calibration/futbol.js';
 import { runBaseballCalibration } from './jobs/calibration/baseball.js';
 
 const SECRET = process.env.WORKER_SECRET || '';
@@ -415,15 +414,15 @@ export function buildServer() {
   // ~30s when the predictions table is large.
   app.post('/admin/calibrate', async (req, reply) => {
     if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
-    const sport = ((req.query as { sport?: string }).sport || 'futbol').toLowerCase();
-    if (sport !== 'futbol' && sport !== 'baseball') {
-      return reply.code(400).send({ error: 'sport must be futbol|baseball' });
+    // Fútbol ya no usa calibración isotónica (Dixon-Coles purgado; el motor de
+    // contexto + ML no requiere calibración global). Solo baseball.
+    const sport = ((req.query as { sport?: string }).sport || 'baseball').toLowerCase();
+    if (sport !== 'baseball') {
+      return reply.code(400).send({ error: 'calibración solo disponible para baseball' });
     }
     const startedAt = Date.now();
     try {
-      const result = sport === 'baseball'
-        ? await runBaseballCalibration()
-        : await runFutbolCalibration();
+      const result = await runBaseballCalibration();
       return { ok: true, durationMs: Date.now() - startedAt, ...result };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

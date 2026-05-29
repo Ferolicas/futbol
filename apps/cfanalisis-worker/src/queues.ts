@@ -14,7 +14,6 @@ export const QUEUE_NAMES = [
   'futbol-live',
   'futbol-live-corners',
   'futbol-odds',
-  'futbol-calibrate',
   'futbol-raw-backfill',
   'futbol-retrain',
   // Baseball
@@ -64,7 +63,6 @@ const opts: Record<QueueName, JobsOptions> = {
   'futbol-live':             liveJobOpts,
   'futbol-live-corners':     liveJobOpts,
   'futbol-odds':             defaultJobOpts,
-  'futbol-calibrate':        defaultJobOpts,
   'futbol-raw-backfill':     { ...defaultJobOpts, attempts: 1 },
   // Ciclo nocturno de auto-mejora (capture→reenrich→profiles→train). Los 4
   // pasos son idempotentes, así que reintentar es seguro; pero cada intento

@@ -15,7 +15,6 @@ import { runLineups } from './jobs/futbol/lineups.js';
 import { runLive } from './jobs/futbol/live.js';
 import { runLiveCorners } from './jobs/futbol/live-corners.js';
 import { runOdds } from './jobs/futbol/odds.js';
-import { runFutbolCalibration } from './jobs/calibration/futbol.js';
 import { runRawBackfillJob } from './jobs/futbol/raw-backfill.js';
 import { runFutbolRetrain } from './jobs/futbol/retrain.js';
 
@@ -39,7 +38,6 @@ const handlers: Record<QueueName, Processor> = {
   'futbol-live':             async (job) => runLive(job.data),
   'futbol-live-corners':     async (job) => runLiveCorners(job.data),
   'futbol-odds':             async (job) => runOdds(job.data),
-  'futbol-calibrate':        async () => runFutbolCalibration(),
   'futbol-raw-backfill':     async (job) => runRawBackfillJob(job.data),
   'futbol-retrain':          async (job) => runFutbolRetrain(job.data),
   'baseball-fixtures':            async (job) => runBaseballFixtures(job.data),
@@ -68,7 +66,6 @@ const concurrency: Record<QueueName, number> = {
   'futbol-live':             1,
   'futbol-live-corners':     1,
   'futbol-odds':             1,
-  'futbol-calibrate':        1,
   'futbol-raw-backfill':     1,
   'futbol-retrain':          1,
   'baseball-fixtures':            1,
@@ -111,7 +108,6 @@ const lockOpts: Record<QueueName, LockOpts> = {
   'futbol-live':             LIGHT,
   'futbol-live-corners':     LIGHT,
   'futbol-odds':             LIGHT,
-  'futbol-calibrate':        HEAVY,
   'futbol-raw-backfill':     MARATHON,
   // Ciclo capture(API)→reenrich(CPU)→profiles(CPU)→train(CPU pesado). Puede
   // tardar 10-20 min; lock MARATÓN para que no lo marquen stalled.

@@ -36,7 +36,6 @@ const [
   _sanityCache,
   _webpush,
   _leagues,
-  _calculations,
   _combinada,
   _baseballModel,
   _baseballCalibration,
@@ -56,7 +55,6 @@ const [
   import(LIB + 'sanity-cache.js'),
   import(LIB + 'webpush.js'),
   import(LIB + 'leagues.js'),
-  import(LIB + 'calculations.js'),
   import(LIB + 'combinada.js'),
   import(LIB + 'baseball-model.js'),
   import(LIB + 'baseball-calibration.js'),
@@ -132,9 +130,6 @@ export const captureFinalizedFixturesRaw = _rawBackfill.captureFinalizedFixtures
 export const reenrichFeatures = _reenrich.reenrichFeatures;
 export const buildTeamProfiles = _buildProfiles.buildTeamProfiles;
 export const trainMetaModels = _trainMeta.trainMetaModels;
-
-// lib/calculations.js
-export const computeAllProbabilities = _calculations.computeAllProbabilities;
 
 // lib/combinada.js
 export const buildCombinada = _combinada.buildCombinada;

@@ -9,7 +9,7 @@
  */
 import {
   getCachedAnalysis, cacheAnalysis, incrementApiCallCount,
-  computeAllProbabilities, buildCombinada, triggerEvent,
+  triggerEvent,
   redisGet, redisSet, KEYS, getMatchSchedule,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
@@ -191,10 +191,9 @@ export async function runLineups(_payload = {}, _job = null) {
         awayMissing: awayMissing.missing,
         checkedAt: new Date().toISOString(),
       };
-      const probs = computeAllProbabilities(updatedAnalysis);
-      updatedAnalysis.calculatedProbabilities = probs;
-      const teamNames = { home: updatedAnalysis.homeTeam, away: updatedAnalysis.awayTeam };
-      updatedAnalysis.combinada = buildCombinada(probs, updatedAnalysis.odds, updatedAnalysis.playerHighlights, teamNames);
+      // Dixon-Coles purgado: NO recalculamos probabilidades aquí. Conservamos las
+      // del motor de contexto (calculatedProbabilities + combinada) ya en `existing`
+      // y solo refrescamos la metadata de alineación (lineupImpact/lineupCheck).
       await cacheAnalysis(fixtureId, updatedAnalysis);
       updated++;
       updatedFixtureIds.push(fixtureId);

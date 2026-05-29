@@ -8,8 +8,6 @@ import {
   Users, BarChart3, Percent, History, Scale, Target, Crosshair,
   ChevronDown, Clock, Flag, Check,
 } from 'lucide-react';
-import { computeAllProbabilities } from '../../../../lib/calculations';
-import { buildCombinada } from '../../../../lib/combinada';
 import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../../../lib/bookmakers';
 import { getAnalysisCache, setAnalysisCache } from '../../../../lib/analysis-cache';
 import { useLiveStats } from '../../live-stats-context';
@@ -50,12 +48,10 @@ export default function AnalisisPage() {
   // from the dashboard — then revalidate in background via fetch.
   const initialCached = typeof window !== 'undefined' ? getAnalysisCache(fixtureId) : null;
   const initialAnalysis = initialCached?.analysis || null;
-  const initialProbs    = initialAnalysis?.calculatedProbabilities
-    ? initialAnalysis.calculatedProbabilities
-    : (initialAnalysis ? computeAllProbabilities(initialAnalysis) : null);
-  const initialCombinada = initialAnalysis
-    ? (initialAnalysis.combinada || (initialProbs ? buildCombinada(initialProbs, initialAnalysis.odds, initialAnalysis.playerHighlights, { home: initialAnalysis.homeTeam, away: initialAnalysis.awayTeam }) : null))
-    : null;
+  // Motor de contexto = única ruta: el análisis SIEMPRE trae calculatedProbabilities
+  // y combinada. Sin fallback Dixon-Coles en cliente.
+  const initialProbs     = initialAnalysis?.calculatedProbabilities || null;
+  const initialCombinada = initialAnalysis?.combinada || null;
 
   const [analysis, setAnalysis] = useState(initialAnalysis);
   const [loading, setLoading] = useState(!initialAnalysis);
@@ -101,11 +97,8 @@ export default function AnalisisPage() {
       setNotAnalyzed(false);
       setAnalysis(data.analysis);
       if (data.quota) setQuota(data.quota);
-      const probs = data.analysis.calculatedProbabilities || computeAllProbabilities(data.analysis);
-      setProbabilities(probs);
-      const teamNames = { home: data.analysis.homeTeam, away: data.analysis.awayTeam };
-      const combo = data.analysis.combinada || buildCombinada(probs, data.analysis.odds, data.analysis.playerHighlights, teamNames);
-      setCombinada(combo);
+      setProbabilities(data.analysis.calculatedProbabilities || null);
+      setCombinada(data.analysis.combinada || null);
     } catch (e) {
       setError(e.message || 'Error al analizar');
     } finally {
@@ -125,11 +118,8 @@ export default function AnalisisPage() {
       if (data.error) { setError(data.error); return; }
       setAnalysis(data.analysis);
       if (data.quota) setQuota(data.quota);
-      const probs = data.analysis.calculatedProbabilities || computeAllProbabilities(data.analysis);
-      setProbabilities(probs);
-      const teamNames = { home: data.analysis.homeTeam, away: data.analysis.awayTeam };
-      const combo = data.analysis.combinada || buildCombinada(probs, data.analysis.odds, data.analysis.playerHighlights, teamNames);
-      setCombinada(combo);
+      setProbabilities(data.analysis.calculatedProbabilities || null);
+      setCombinada(data.analysis.combinada || null);
       // Refresh the hand-off cache so a quick back-and-forth uses the fresher data
       setAnalysisCache(fixtureId, { analysis: data.analysis });
     } catch (e) {
