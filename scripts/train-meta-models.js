@@ -18,7 +18,7 @@ const { Pool } = require('pg');
 const { MARKET_DEFS, predictWithModel } = require('../lib/meta-features');
 const { recordFromRaw, buildActuals, FINISHED } = require('../lib/adn');
 const { meetingRecord, modalXIFromLineups } = require('../lib/h2h');
-const { ruptureContext, buildRuptureFeatures, isKeyInjury, ML_FEATURE_ORDER, ADVERSE_FEATURE_ORDER } = require('../lib/context-engine');
+const { ruptureContext, buildRuptureFeatures, isKeyInjury, ML_FEATURE_ORDER, marketGroup } = require('../lib/context-engine');
 
 function makePool() {
   return new Pool({
@@ -33,12 +33,30 @@ const sigmoid = (z) => 1 / (1 + Math.exp(-z));
 const clamp01 = (p) => Math.max(1e-6, Math.min(1 - 1e-6, p));
 const logloss = (y, p) => { p = clamp01(p); return -(y * Math.log(p) + (1 - y) * Math.log(1 - p)); };
 const round4 = (v) => v == null ? null : Math.round(v * 10000) / 10000;
-// Uplift de error esperado al activar una señal adversa (forma en su media, resto
-// en baseline 0). MISMO contrafactual que el runtime (adverseRupture).
-function upliftFor(model, overrides) {
-  const base = predictWithModel(model, { key_injury: 0, knockout: 0 });
-  const on = predictWithModel(model, { key_injury: 0, knockout: 0, ...overrides });
-  return (base == null || on == null) ? null : Math.max(0, on - base);
+
+// ── Modelos DIRECCIONALES por familia+sentido ──
+// Constantes: tamaño mínimo de la celda base (ki=0,ko=0) por mercado para tener
+// offset estable; exposición mínima de la señal en el grupo para confiar en β.
+const FAM_MIN_CELL = 30, FAM_MIN_EXPO = 200, FAM_EPOCHS = 3000, FAM_LR = 1.0, FAM_L2 = 0.002;
+// Logística binomial AGRUPADA con offset por mercado: estima βki, βko (mismo signo
+// dentro del grupo, no se cancelan). rows = [{off, cells[ki][ko]={n,y}}].
+function fitGroupShift(rows) {
+  let bki = 0, bko = 0;
+  for (let ep = 0; ep < FAM_EPOCHS; ep++) {
+    let gki = 0, gko = 0, N = 0;
+    for (const r of rows) {
+      for (let ki = 0; ki < 2; ki++) for (let ko = 0; ko < 2; ko++) {
+        const c = r.cells[ki][ko]; if (!c.n) continue;
+        const p = sigmoid(r.off + bki * ki + bko * ko);
+        const resid = c.n * p - c.y; // gradiente binomial agrupado
+        gki += resid * ki; gko += resid * ko; N += c.n;
+      }
+    }
+    if (!N) break;
+    bki -= FAM_LR * (gki / N + FAM_L2 * bki);
+    bko -= FAM_LR * (gko / N + FAM_L2 * bko);
+  }
+  return { bki, bko };
 }
 
 function trainLogistic(samples, F = ML_FEATURE_ORDER) {
@@ -141,7 +159,7 @@ async function trainMetaModels(opts = {}) {
         keyInjury: isKeyInjury(injById.get(fid), modalXIByTeam),
       };
       const rc = ruptureContext({ homeTeamRecords: teamRecords(homeId), awayTeamRecords: teamRecords(awayId), todayCtx, beforeMs });
-      samplesBase.push({ homeId, awayId, beforeMs, actuals, rc, meetings: meetingsFor(homeId, awayId), errSum: 0, errCnt: 0 });
+      samplesBase.push({ homeId, awayId, beforeMs, actuals, rc, meetings: meetingsFor(homeId, awayId) });
     }
     console.log(`[train] Muestras (fixtures finalizados con datos): ${samplesBase.length}`);
     if (samplesBase.length < MIN_SAMPLES) {
@@ -153,6 +171,8 @@ async function trainMetaModels(opts = {}) {
     console.log(`[train] Catálogo: ${allMarkets.length} mercados · entrenando…`);
     let trained = 0, activated = 0, skipped = 0, processed = 0;
     const t0 = Date.now();
+    // Buckets para los modelos direccionales por familia+sentido (offset por mercado).
+    const groupBuckets = new Map();
 
     for (const market of allMarkets) {
       const def = MARKET_DEFS[market];
@@ -161,6 +181,22 @@ async function trainMetaModels(opts = {}) {
         if (!def.gate(sb.actuals)) continue;
         const features = buildRuptureFeatures({ def, market, rc: sb.rc, meetings: sb.meetings, homeId: sb.homeId, awayId: sb.awayId, beforeMs: sb.beforeMs });
         samples.push({ features, y: def.outcome(sb.actuals) ? 1 : 0, sb });
+      }
+      // Tabla de contingencia 2×2 (ki × ko) del mercado → alimenta su grupo
+      // direccional. Offset = log-odds de la celda base (ki=0,ko=0) del mercado.
+      {
+        const cells = [[{ n: 0, y: 0 }, { n: 0, y: 0 }], [{ n: 0, y: 0 }, { n: 0, y: 0 }]];
+        for (const s of samples) {
+          const ki = s.sb.rc.key_injury ? 1 : 0, ko = s.sb.rc.knockout ? 1 : 0;
+          cells[ki][ko].n++; cells[ki][ko].y += s.y;
+        }
+        const base = cells[0][0];
+        if (base.n >= FAM_MIN_CELL) {
+          const base0 = clamp01(base.y / base.n);
+          const g = marketGroup(market);
+          if (!groupBuckets.has(g)) groupBuckets.set(g, []);
+          groupBuckets.get(g).push({ off: Math.log(base0 / (1 - base0)), cells });
+        }
       }
       // Progreso cada 100 mercados (para que la corrida no parezca colgada).
       if (++processed % 100 === 0) console.log(`  …${processed}/${allMarkets.length} mercados · entrenados=${trained} activos=${activated} · ${Math.round((Date.now() - t0) / 1000)}s`);
@@ -175,15 +211,6 @@ async function trainMetaModels(opts = {}) {
       const nv = val.length || 1; mLL /= nv; bLL /= nv;
       const beats = mLL < bLL;
       if (beats) activated++;
-      // Acumula el error |y−pred| del modelo ACTIVO por fixture → alimenta el
-      // modelo agregado de contexto adverso (fiabilidad a nivel partido).
-      if (beats) {
-        for (const s of samples) {
-          const pm = predictWithModel(model, s.features);
-          if (pm == null || !isFinite(pm)) continue;
-          s.sb.errSum += Math.abs(s.y - pm); s.sb.errCnt++;
-        }
-      }
       const { rows: vr } = await pool.query(`SELECT COALESCE(MAX(version),0) v FROM prediction_models WHERE sport='football' AND market_key=$1`, [market]);
       await pool.query(`UPDATE prediction_models SET active=FALSE WHERE sport='football' AND market_key=$1`, [market]);
       await pool.query(
@@ -193,45 +220,47 @@ async function trainMetaModels(opts = {}) {
       );
     }
 
-    // ── MODELO AGREGADO de contexto adverso (key_injury / knockout) ──
-    // Una sola logística (fraccional) sobre TODOS los partidos: target = error
-    // medio de los modelos activos en ese partido; predictores = forma + señales
-    // adversas. β bien estimado con las 943/685 muestras agrupadas, no 1/mercado.
-    const advSamples = samplesBase
-      .filter(sb => sb.errCnt > 0)
-      .map(sb => ({
-        features: { home_ppg: sb.rc.home_ppg, away_ppg: sb.rc.away_ppg, knockout: sb.rc.knockout, key_injury: sb.rc.key_injury },
-        y: sb.errSum / sb.errCnt,
-      }));
-    let adverse = null;
-    if (advSamples.length >= MIN_SAMPLES) {
-      adverse = trainLogistic(advSamples, ADVERSE_FEATURE_ORDER);
-      const kiP = advSamples.filter(s => s.features.key_injury === 1).length;
-      const koP = advSamples.filter(s => s.features.knockout === 1).length;
-      // Uplift implícito (contrafactual ki/ko=0) → cuánto sube el error esperado.
-      const upliftKi = upliftFor(adverse, { key_injury: 1 });
-      const upliftKo = upliftFor(adverse, { knockout: 1 });
-      const { rows: av } = await pool.query(`SELECT COALESCE(MAX(version),0) v FROM prediction_models WHERE sport='football' AND market_key='__adverse__'`);
-      await pool.query(`UPDATE prediction_models SET active=FALSE WHERE sport='football' AND market_key='__adverse__'`);
+    // ── MODELOS DIRECCIONALES por FAMILIA+SENTIDO (key_injury / knockout) ──
+    // Por grupo (familia+sentido) estimamos el desplazamiento de log-odds CON SIGNO.
+    // Mercados del mismo grupo se mueven igual → no se cancelan (a diferencia del
+    // error agregado). Solo confiamos en β si hay exposición suficiente de la señal.
+    await pool.query(`UPDATE prediction_models SET active=FALSE WHERE sport='football' AND model_type='family-directional'`);
+    let famStored = 0; const famTop = [];
+    for (const [group, rows] of groupBuckets) {
+      let nki = 0, nko = 0, nbase = 0;
+      for (const r of rows) {
+        nki += r.cells[1][0].n + r.cells[1][1].n;
+        nko += r.cells[0][1].n + r.cells[1][1].n;
+        nbase += r.cells[0][0].n;
+      }
+      if (nki < FAM_MIN_EXPO && nko < FAM_MIN_EXPO) continue; // sin señal suficiente
+      const { bki, bko } = fitGroupShift(rows);
+      // Anula el coef de la señal sin exposición mínima (no inventamos efecto).
+      const ki = nki >= FAM_MIN_EXPO ? round4(bki) : 0;
+      const ko = nko >= FAM_MIN_EXPO ? round4(bko) : 0;
+      if (ki === 0 && ko === 0) continue;
+      // pp de desplazamiento en p=0.5 (referencia legible).
+      const ppKi = round4(sigmoid(ki) - 0.5), ppKo = round4(sigmoid(ko) - 0.5);
+      const { rows: gv } = await pool.query(`SELECT COALESCE(MAX(version),0) v FROM prediction_models WHERE sport='football' AND market_key=$1`, [group]);
       await pool.query(
         `INSERT INTO prediction_models (sport,market_key,version,model_type,weights,metrics,active,trained_at)
-         VALUES ('football','__adverse__',$1,'adverse-aggregate',$2::jsonb,$3::jsonb,TRUE,NOW())`,
-        [av[0].v + 1, JSON.stringify(adverse), JSON.stringify({
-          n: advSamples.length, ki_pos: kiP, ko_pos: koP,
-          coef_key_injury: round4(adverse.coefs.key_injury), coef_knockout: round4(adverse.coefs.knockout),
-          uplift_key_injury: round4(upliftKi), uplift_knockout: round4(upliftKo),
-        })]
+         VALUES ('football',$1,$2,'family-directional',$3::jsonb,$4::jsonb,TRUE,NOW())`,
+        [group, gv[0].v + 1, JSON.stringify({ ki, ko }), JSON.stringify({ markets: rows.length, n_ki: nki, n_ko: nko, n_base: nbase, shift_ki_pp_at50: ppKi, shift_ko_pp_at50: ppKo })]
       );
-      console.log(`[train] Modelo AGREGADO adverso: n=${advSamples.length} (ki+=${kiP}, ko+=${koP}) · coef ki=${round4(adverse.coefs.key_injury)} ko=${round4(adverse.coefs.knockout)} · uplift ki=${round4(upliftKi)} ko=${round4(upliftKo)}`);
-    } else {
-      console.log(`[train] Modelo agregado adverso OMITIDO (muestras ${advSamples.length} < ${MIN_SAMPLES})`);
+      famStored++;
+      famTop.push({ group, ki, ko, ppKi, ppKo, nki, nko });
+    }
+    famTop.sort((a, b) => (Math.abs(b.ki) + Math.abs(b.ko)) - (Math.abs(a.ki) + Math.abs(a.ko)));
+    console.log(`\n[train] Modelos DIRECCIONALES por familia: ${famStored} grupos guardados (de ${groupBuckets.size})`);
+    for (const f of famTop.slice(0, 15)) {
+      console.log(`  ${f.group.padEnd(22)} βki=${String(f.ki).padStart(8)} (${f.ppKi >= 0 ? '+' : ''}${(100 * f.ppKi).toFixed(1)}pp)  βko=${String(f.ko).padStart(8)} (${f.ppKo >= 0 ? '+' : ''}${(100 * f.ppKo).toFixed(1)}pp)  nki=${f.nki} nko=${f.nko}`);
     }
 
     console.log(`\n══ RESUMEN (ML desde el crudo) ══`);
-    console.log(`Muestras del crudo: ${samplesBase.length} · catálogo ${allMarkets.length} · entrenados ${trained} · activos ${activated} · skip ${skipped} · ${Math.round((Date.now() - t0) / 1000)}s`);
+    console.log(`Muestras del crudo: ${samplesBase.length} · catálogo ${allMarkets.length} · entrenados ${trained} · activos ${activated} · skip ${skipped} · familias direccionales ${famStored} · ${Math.round((Date.now() - t0) / 1000)}s`);
     return {
       source: 'raw', samples: samplesBase.length, catalog: allMarkets.length, trained, activated, skipped,
-      adverse: adverse ? { n: advSamples.length, coef_key_injury: round4(adverse.coefs.key_injury), coef_knockout: round4(adverse.coefs.knockout) } : null,
+      family_models: famStored,
     };
   } finally {
     if (ownPool) await pool.end();

@@ -17,8 +17,7 @@ try { require('dotenv').config({ path: '.env' }); } catch {}
 const { Pool } = require('pg');
 const { MARKET_DEFS } = require('../lib/meta-features');
 const { phaseOf, FINISHED } = require('../lib/adn');
-const { ruptureContext, buildRuptureFeatures, ML_FEATURE_ORDER, adverseRupture } = require('../lib/context-engine');
-const { predictWithModel } = require('../lib/meta-features');
+const { ruptureContext, buildRuptureFeatures, ML_FEATURE_ORDER } = require('../lib/context-engine');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -90,26 +89,24 @@ const pool = new Pool({
   console.log(`\n  Lectura: si key_injury≈100% (casi siempre hay ALGUNA lesión) es señal POBRE`);
   console.log(`  (no distingue "falta el goleador" de "falta un suplente") → el ML le da poco peso (correcto).`);
 
-  // ── 4) MODELO AGREGADO de contexto adverso ──
-  console.log('\n══ 4) MODELO AGREGADO DE CONTEXTO ADVERSO (key_injury / knockout) ══');
-  const { rows: advRows } = await pool.query(
-    `SELECT weights, metrics, version, trained_at FROM prediction_models
-     WHERE sport='football' AND active=TRUE AND model_type='adverse-aggregate'
-     ORDER BY version DESC LIMIT 1`
+  // ── 4) MODELOS DIRECCIONALES por familia+sentido ──
+  console.log('\n══ 4) MODELOS DIRECCIONALES POR FAMILIA+SENTIDO (key_injury / knockout) ══');
+  const { rows: famRows } = await pool.query(
+    `SELECT market_key, weights, metrics FROM prediction_models
+     WHERE sport='football' AND active=TRUE AND model_type='family-directional'`
   );
-  if (!advRows.length) {
-    console.log('  ✗ No hay modelo agregado activo. Re-entrena (train-meta-models.js) para generarlo.');
+  if (!famRows.length) {
+    console.log('  ✗ No hay modelos direccionales activos. Re-entrena (train-meta-models.js) para generarlos.');
   } else {
-    const adv = advRows[0].weights, mt = advRows[0].metrics || {};
-    console.log(`  v${advRows[0].version} · n=${mt.n} muestras (ki+=${mt.ki_pos}, ko+=${mt.ko_pos}) · entrenado ${new Date(advRows[0].trained_at).toISOString().slice(0,10)}`);
-    console.log(`  coef key_injury = ${(adv.coefs?.key_injury ?? 0).toFixed(4)}   (estandarizado, sobre el error del modelo por-mercado)`);
-    console.log(`  coef knockout   = ${(adv.coefs?.knockout ?? 0).toFixed(4)}`);
-    // Uplift de ruptura que inyecta cada señal (lo que verá el runtime).
-    const upKi = adverseRupture(adv, { home_ppg: null, away_ppg: null, knockout: 0, key_injury: 1 });
-    const upKo = adverseRupture(adv, { home_ppg: null, away_ppg: null, knockout: 1, key_injury: 0 });
-    const upBoth = adverseRupture(adv, { home_ppg: null, away_ppg: null, knockout: 1, key_injury: 1 });
-    console.log(`  → rupture_adverse inyectado:  key_injury=1 → +${upKi.toFixed(4)}   knockout=1 → +${upKo.toFixed(4)}   ambos → +${upBoth.toFixed(4)}`);
-    console.log(`     (este uplift se aplica a TODOS los mercados del partido, no solo los que tienen modelo)`);
+    const fmt = (b) => { const pp = (1 / (1 + Math.exp(-b)) - 0.5) * 100; return `β=${b.toFixed(4)} (${pp >= 0 ? '+' : ''}${pp.toFixed(1)}pp@50%)`; };
+    const list = famRows.map(r => ({ g: r.market_key, ki: r.weights?.ki || 0, ko: r.weights?.ko || 0, m: r.metrics || {} }))
+      .sort((a, b) => (Math.abs(b.ki) + Math.abs(b.ko)) - (Math.abs(a.ki) + Math.abs(a.ko)));
+    console.log(`  ${famRows.length} grupos activos (orden por |efecto|):`);
+    console.log(`  ${'grupo'.padEnd(22)} ${'key_injury'.padEnd(26)} ${'knockout'.padEnd(26)} expo`);
+    for (const f of list) {
+      console.log(`  ${f.g.padEnd(22)} ${fmt(f.ki).padEnd(26)} ${fmt(f.ko).padEnd(26)} ki=${f.m.n_ki ?? '?'} ko=${f.m.n_ko ?? '?'}`);
+    }
+    console.log(`  (+pp = la señal SUBE la prob del mercado; −pp la BAJA. El runtime aplica el signo tal cual.)`);
   }
 
   await pool.end();
