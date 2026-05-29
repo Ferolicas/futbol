@@ -39,10 +39,8 @@ const BET_NAMES = {
   cornersTotal1H: ['Total Corners (1st Half)'], cornersTotal2H: ['Total Corners (2nd Half)'],
   scorer: ['Anytime Goal Scorer', 'Anytime Goalscorer', 'Player Anytime Goalscorer', 'Anytime Scorer', 'Home Anytime Goal Scorer', 'Away Anytime Goal Scorer'],
 };
-const ALL_MAPPED = new Set(Object.values(BET_NAMES).flat());
 const familyOf = (name) => { for (const [fam, list] of Object.entries(BET_NAMES)) if (list.includes(name)) return fam; return null; };
-// ¿El nombre sugiere un mercado de LÍNEAS que nos interesa? (para resaltar lo no mapeado)
-const looksRich = (name) => /corner|card|booking|goal|shot|foul|over|under|total|line|handicap/i.test(name);
+const isHandicap = (name) => /handicap/i.test(name || '');
 
 (async () => {
   if (!KEY) { console.error('Falta FOOTBALL_API_KEY.'); process.exit(1); }
@@ -60,22 +58,21 @@ const looksRich = (name) => /corner|card|booking|goal|shot|foul|over|under|total
     const bets = bk.bets || [];
     console.log(`\n══ ${bk.name} (id=${bk.id}) ${allowedAs ? `[autorizada: ${allowedAs}]` : '[NO autorizada]'} · ${bets.length} mercados ══`);
 
-    const mapped = [], unmappedRich = [], other = [];
+    const mapped = [], extra = [], excluded = [];
     for (const bet of bets) {
-      const fam = familyOf(bet.name);
       const row = `  id=${String(bet.id).padStart(3)} "${bet.name}" (${(bet.values || []).length} values)`;
-      if (fam) mapped.push(`${row}  → ${fam}`);
-      else if (looksRich(bet.name)) unmappedRich.push(`${row}  ✗ SIN MAPEAR · ej: ${(bet.values || []).slice(0, 4).map(v => `${v.value}=${v.odd}`).join(' | ')}`);
-      else other.push(row);
+      if (isHandicap(bet.name)) { excluded.push(row); continue; }
+      const fam = familyOf(bet.name);
+      if (fam) mapped.push(`${row}  → familia ${fam} (puede entrar a combinada si el motor lo predice)`);
+      else extra.push(`${row}  → extraMarkets (informativo)`);
     }
-    console.log(` ── MAPEADOS (${mapped.length}) ──`);
+    console.log(` ── MAPEADOS a familia (${mapped.length}) — cuota usable por la combinada ──`);
     mapped.forEach(r => console.log(r));
-    console.log(` ── RICOS SIN MAPEAR (${unmappedRich.length}) — candidatos a agregar a BET_NAMES ──`);
-    unmappedRich.forEach(r => console.log(r));
-    console.log(` ── OTROS (${other.length}) ──`);
-    other.slice(0, 12).forEach(r => console.log(r));
-    if (other.length > 12) console.log(`   …(+${other.length - 12} más)`);
+    console.log(` ── EXTRA / informativo (${extra.length}) — se guardan en allBookmakerOdds[bk].extraMarkets ──`);
+    extra.forEach(r => console.log(r));
+    console.log(` ── EXCLUIDOS: hándicap (${excluded.length}) — NO se extraen (regla del usuario) ──`);
+    excluded.forEach(r => console.log(r));
   }
-  console.log('\nLeyenda: "RICOS SIN MAPEAR" = bets de líneas (corners/goles/tarjetas/etc.) que el');
-  console.log('extractor IGNORA porque su nombre no está en BET_NAMES. Pásame esa lista y los agrego.');
+  console.log('\nAhora TODO mercado de bet365/bwin excepto hándicap queda capturado: los de familia');
+  console.log('en allBookmakerOdds[bk].<familia>, el resto en allBookmakerOdds[bk].extraMarkets.');
 })().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
