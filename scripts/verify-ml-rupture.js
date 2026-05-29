@@ -15,7 +15,7 @@ try { require('dotenv').config({ path: '.env.local' }); } catch {}
 try { require('dotenv').config({ path: '.env' }); } catch {}
 
 const { Pool } = require('pg');
-const { loadContextInputs, computeContext, scoreContext, loadRuptureModels } = require('../lib/context-engine');
+const { loadContextInputs, computeContext, scoreContext, loadRuptureModels, loadAdverseModel } = require('../lib/context-engine');
 
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = a.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] || true] : [a, true]; }));
 const pool = new Pool({
@@ -52,6 +52,7 @@ const r2 = (v) => (v == null ? '0.00' : v.toFixed(2));
 
   const inputs = await loadContextInputs(pool, homeId, awayId);
   const mlModels = await loadRuptureModels(pool);
+  const adverseModel = await loadAdverseModel(pool);
   const todayCtx = { knockout: !!args.knockout, keyInjury: !!args.injury };
   const ctxRaw = computeContext(inputs);
   const common = {
@@ -60,7 +61,13 @@ const r2 = (v) => (v == null ? '0.00' : v.toFixed(2));
     homeTeamRecords: inputs.homeTeamRecords, awayTeamRecords: inputs.awayTeamRecords,
   };
   const base = scoreContext(ctxRaw, { ...common, mlEnabled: false });
-  const withMl = scoreContext(ctxRaw, { ...common, mlModels, mlEnabled: true });
+  const withMl = scoreContext(ctxRaw, { ...common, mlModels, adverseModel, mlEnabled: true });
+  if (adverseModel) {
+    const m = adverseModel.coefs || {};
+    console.log(`\n[adverse] modelo agregado activo · coef key_injury=${(m.key_injury ?? 0).toFixed(4)} knockout=${(m.knockout ?? 0).toFixed(4)}`);
+  } else {
+    console.log(`\n[adverse] NO hay modelo agregado activo (re-entrena para generarlo)`);
+  }
 
   const keys = Object.keys(ctxRaw);
   const withModel = keys.filter(k => mlModels.has(k));
@@ -68,17 +75,17 @@ const r2 = (v) => (v == null ? '0.00' : v.toFixed(2));
   console.log(`H2H usables: ${inputs._counts.meetings} · modelos activos cargados: ${mlModels.size} · mercados del partido con modelo: ${withModel.length}/${keys.length}`);
   console.log(`todayCtx: knockout=${todayCtx.knockout} keyInjury=${todayCtx.keyInjury}  (usa --knockout/--injury para simular)`);
 
-  // Mercados donde el ML modula (rupture_ml > 0), ordenados por impacto.
-  const modulated = keys.filter(k => (withMl[k].rupture_ml || 0) > 0)
+  // Mercados donde el ML modula (rupture_ml o rupture_adverse > 0), por impacto.
+  const modulated = keys.filter(k => ((withMl[k].rupture_ml || 0) > 0) || ((withMl[k].rupture_adverse || 0) > 0))
     .map(k => ({ k, b: base[k], m: withMl[k], drop: base[k].prob_final - withMl[k].prob_final }))
     .sort((a, b) => b.drop - a.drop);
 
-  console.log(`\n── DONDE EL ML MODULA (rupture_ml>0): ${modulated.length} mercados ──`);
-  console.log(`${'market'.padEnd(26)} prob   rup_h2h rup_ml  rup_comb  pfinal_base→ml   rec`);
-  console.log('-'.repeat(82));
+  console.log(`\n── DONDE EL ML MODULA (rupture_ml o rupture_adverse>0): ${modulated.length} mercados ──`);
+  console.log(`${'market'.padEnd(26)} prob   rup_h2h rup_ml  rup_adv rup_comb  pfinal_base→ml   rec`);
+  console.log('-'.repeat(90));
   for (const x of modulated.slice(0, 30)) {
     const flip = x.b.recommended !== x.m.recommended ? `  ${x.b.recommended ? 'REC→no' : 'no→REC'}` : '';
-    console.log(`  ${x.k.padEnd(24)} ${pct(x.m.prob)}   ${r2(x.m.rupture_h2h)}    ${r2(x.m.rupture_ml)}    ${r2(x.m.rupture_score)}     ${pct(x.b.prob_final)} → ${pct(x.m.prob_final)}   ${x.m.recommended ? 'sí' : 'no'}${flip}`);
+    console.log(`  ${x.k.padEnd(24)} ${pct(x.m.prob)}   ${r2(x.m.rupture_h2h)}    ${r2(x.m.rupture_ml)}    ${r2(x.m.rupture_adverse)}   ${r2(x.m.rupture_score)}     ${pct(x.b.prob_final)} → ${pct(x.m.prob_final)}   ${x.m.recommended ? 'sí' : 'no'}${flip}`);
   }
   if (!modulated.length) console.log('  (ningún mercado con modelo activo + prob>0 en este partido)');
 

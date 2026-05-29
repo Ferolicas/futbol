@@ -18,7 +18,7 @@ const { Pool } = require('pg');
 const { MARKET_DEFS, predictWithModel } = require('../lib/meta-features');
 const { recordFromRaw, buildActuals, FINISHED } = require('../lib/adn');
 const { meetingRecord, modalXIFromLineups } = require('../lib/h2h');
-const { ruptureContext, buildRuptureFeatures, isKeyInjury, ML_FEATURE_ORDER } = require('../lib/context-engine');
+const { ruptureContext, buildRuptureFeatures, isKeyInjury, ML_FEATURE_ORDER, ADVERSE_FEATURE_ORDER } = require('../lib/context-engine');
 
 function makePool() {
   return new Pool({
@@ -33,9 +33,16 @@ const sigmoid = (z) => 1 / (1 + Math.exp(-z));
 const clamp01 = (p) => Math.max(1e-6, Math.min(1 - 1e-6, p));
 const logloss = (y, p) => { p = clamp01(p); return -(y * Math.log(p) + (1 - y) * Math.log(1 - p)); };
 const round4 = (v) => v == null ? null : Math.round(v * 10000) / 10000;
+// Uplift de error esperado al activar una señal adversa (forma en su media, resto
+// en baseline 0). MISMO contrafactual que el runtime (adverseRupture).
+function upliftFor(model, overrides) {
+  const base = predictWithModel(model, { key_injury: 0, knockout: 0 });
+  const on = predictWithModel(model, { key_injury: 0, knockout: 0, ...overrides });
+  return (base == null || on == null) ? null : Math.max(0, on - base);
+}
 
-function trainLogistic(samples) {
-  const F = ML_FEATURE_ORDER, d = F.length, means = {}, stds = {};
+function trainLogistic(samples, F = ML_FEATURE_ORDER) {
+  const d = F.length, means = {}, stds = {};
   for (const fn of F) {
     const vals = samples.map(s => s.features[fn]).filter(v => v != null && isFinite(v));
     const m = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
@@ -134,7 +141,7 @@ async function trainMetaModels(opts = {}) {
         keyInjury: isKeyInjury(injById.get(fid), modalXIByTeam),
       };
       const rc = ruptureContext({ homeTeamRecords: teamRecords(homeId), awayTeamRecords: teamRecords(awayId), todayCtx, beforeMs });
-      samplesBase.push({ homeId, awayId, beforeMs, actuals, rc, meetings: meetingsFor(homeId, awayId) });
+      samplesBase.push({ homeId, awayId, beforeMs, actuals, rc, meetings: meetingsFor(homeId, awayId), errSum: 0, errCnt: 0 });
     }
     console.log(`[train] Muestras (fixtures finalizados con datos): ${samplesBase.length}`);
     if (samplesBase.length < MIN_SAMPLES) {
@@ -153,7 +160,7 @@ async function trainMetaModels(opts = {}) {
       for (const sb of samplesBase) {
         if (!def.gate(sb.actuals)) continue;
         const features = buildRuptureFeatures({ def, market, rc: sb.rc, meetings: sb.meetings, homeId: sb.homeId, awayId: sb.awayId, beforeMs: sb.beforeMs });
-        samples.push({ features, y: def.outcome(sb.actuals) ? 1 : 0 });
+        samples.push({ features, y: def.outcome(sb.actuals) ? 1 : 0, sb });
       }
       // Progreso cada 100 mercados (para que la corrida no parezca colgada).
       if (++processed % 100 === 0) console.log(`  …${processed}/${allMarkets.length} mercados · entrenados=${trained} activos=${activated} · ${Math.round((Date.now() - t0) / 1000)}s`);
@@ -168,6 +175,15 @@ async function trainMetaModels(opts = {}) {
       const nv = val.length || 1; mLL /= nv; bLL /= nv;
       const beats = mLL < bLL;
       if (beats) activated++;
+      // Acumula el error |y−pred| del modelo ACTIVO por fixture → alimenta el
+      // modelo agregado de contexto adverso (fiabilidad a nivel partido).
+      if (beats) {
+        for (const s of samples) {
+          const pm = predictWithModel(model, s.features);
+          if (pm == null || !isFinite(pm)) continue;
+          s.sb.errSum += Math.abs(s.y - pm); s.sb.errCnt++;
+        }
+      }
       const { rows: vr } = await pool.query(`SELECT COALESCE(MAX(version),0) v FROM prediction_models WHERE sport='football' AND market_key=$1`, [market]);
       await pool.query(`UPDATE prediction_models SET active=FALSE WHERE sport='football' AND market_key=$1`, [market]);
       await pool.query(
@@ -177,9 +193,46 @@ async function trainMetaModels(opts = {}) {
       );
     }
 
+    // ── MODELO AGREGADO de contexto adverso (key_injury / knockout) ──
+    // Una sola logística (fraccional) sobre TODOS los partidos: target = error
+    // medio de los modelos activos en ese partido; predictores = forma + señales
+    // adversas. β bien estimado con las 943/685 muestras agrupadas, no 1/mercado.
+    const advSamples = samplesBase
+      .filter(sb => sb.errCnt > 0)
+      .map(sb => ({
+        features: { home_ppg: sb.rc.home_ppg, away_ppg: sb.rc.away_ppg, knockout: sb.rc.knockout, key_injury: sb.rc.key_injury },
+        y: sb.errSum / sb.errCnt,
+      }));
+    let adverse = null;
+    if (advSamples.length >= MIN_SAMPLES) {
+      adverse = trainLogistic(advSamples, ADVERSE_FEATURE_ORDER);
+      const kiP = advSamples.filter(s => s.features.key_injury === 1).length;
+      const koP = advSamples.filter(s => s.features.knockout === 1).length;
+      // Uplift implícito (contrafactual ki/ko=0) → cuánto sube el error esperado.
+      const upliftKi = upliftFor(adverse, { key_injury: 1 });
+      const upliftKo = upliftFor(adverse, { knockout: 1 });
+      const { rows: av } = await pool.query(`SELECT COALESCE(MAX(version),0) v FROM prediction_models WHERE sport='football' AND market_key='__adverse__'`);
+      await pool.query(`UPDATE prediction_models SET active=FALSE WHERE sport='football' AND market_key='__adverse__'`);
+      await pool.query(
+        `INSERT INTO prediction_models (sport,market_key,version,model_type,weights,metrics,active,trained_at)
+         VALUES ('football','__adverse__',$1,'adverse-aggregate',$2::jsonb,$3::jsonb,TRUE,NOW())`,
+        [av[0].v + 1, JSON.stringify(adverse), JSON.stringify({
+          n: advSamples.length, ki_pos: kiP, ko_pos: koP,
+          coef_key_injury: round4(adverse.coefs.key_injury), coef_knockout: round4(adverse.coefs.knockout),
+          uplift_key_injury: round4(upliftKi), uplift_knockout: round4(upliftKo),
+        })]
+      );
+      console.log(`[train] Modelo AGREGADO adverso: n=${advSamples.length} (ki+=${kiP}, ko+=${koP}) · coef ki=${round4(adverse.coefs.key_injury)} ko=${round4(adverse.coefs.knockout)} · uplift ki=${round4(upliftKi)} ko=${round4(upliftKo)}`);
+    } else {
+      console.log(`[train] Modelo agregado adverso OMITIDO (muestras ${advSamples.length} < ${MIN_SAMPLES})`);
+    }
+
     console.log(`\n══ RESUMEN (ML desde el crudo) ══`);
     console.log(`Muestras del crudo: ${samplesBase.length} · catálogo ${allMarkets.length} · entrenados ${trained} · activos ${activated} · skip ${skipped} · ${Math.round((Date.now() - t0) / 1000)}s`);
-    return { source: 'raw', samples: samplesBase.length, catalog: allMarkets.length, trained, activated, skipped };
+    return {
+      source: 'raw', samples: samplesBase.length, catalog: allMarkets.length, trained, activated, skipped,
+      adverse: adverse ? { n: advSamples.length, coef_key_injury: round4(adverse.coefs.key_injury), coef_knockout: round4(adverse.coefs.knockout) } : null,
+    };
   } finally {
     if (ownPool) await pool.end();
   }
