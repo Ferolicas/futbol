@@ -2414,14 +2414,21 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
   const o = odds || {};
   const hasOdd = (v) => isFinite(parseFloat(v)) && parseFloat(v) > 1;
 
+  // Iterado por las líneas que el bookmaker REALMENTE ofrece (oddObj.Over_N_5 con
+  // cuota real), con prob del motor en cualquier convención (over7_5 nueva o over75
+  // legacy). Así expone TODAS las líneas del motor sin romper análisis viejos.
   const adaptiveCat = (probObj, oddObj, namePrefix) => {
     if (!probObj || !oddObj) return [];
-    return (probObj._lines || []).map(line => {
-      const key = `over${String(line).replace('.', '_')}`;
-      const oddKey = `Over_${String(line).replace('.', '_')}`;
-      if (!hasOdd(oddObj[oddKey]) || probObj[key] == null) return null;
-      return { label: `${namePrefix} ${line}`, value: probObj[key] };
-    }).filter(Boolean);
+    const out = [];
+    for (const oddKey of Object.keys(oddObj)) {
+      const m = oddKey.match(/^Over_(\d+)_5$/);
+      if (!m || !hasOdd(oddObj[oddKey])) continue;
+      const n = m[1];
+      const prob = probObj[`over${n}_5`] ?? probObj[`over${n}5`];
+      if (prob == null) continue;
+      out.push({ line: parseFloat(`${n}.5`), label: `${namePrefix} ${n}.5`, value: prob });
+    }
+    return out.sort((a, b) => a.line - b.line).map(({ label, value }) => ({ label, value }));
   };
 
   const allCats = [
@@ -2434,21 +2441,10 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
       hasOdd(o.matchWinner?.draw) && { label: 'Empate',  value: p.winner?.draw },
       hasOdd(o.matchWinner?.away) && { label: awayTeam, value: p.winner?.away },
     ].filter(Boolean) },
-    { title: 'Goles totales', group: 'goles', subtitle: p.overUnder?.expectedTotal != null ? `Esperado: ${p.overUnder.expectedTotal} goles` : null, items: [
-      hasOdd(o.overUnder?.Over_1_5) && { label: 'Más de 1.5', value: p.overUnder?.over15 },
-      hasOdd(o.overUnder?.Over_2_5) && { label: 'Más de 2.5', value: p.overUnder?.over25 },
-      hasOdd(o.overUnder?.Over_3_5) && { label: 'Más de 3.5', value: p.overUnder?.over35 },
-    ].filter(Boolean) },
-    { title: 'Goles 1ª parte', group: 'goles', subtitle: p.halfGoals?.firstHalf?.expected != null ? `Esperado: ${p.halfGoals.firstHalf.expected}` : null, items: [
-      hasOdd(o.goals1H?.Over_0_5) && p.halfGoals?.firstHalf && { label: 'Más de 0.5', value: p.halfGoals.firstHalf.over05 },
-      hasOdd(o.goals1H?.Over_1_5) && p.halfGoals?.firstHalf && { label: 'Más de 1.5', value: p.halfGoals.firstHalf.over15 },
-      hasOdd(o.goals1H?.Over_2_5) && p.halfGoals?.firstHalf && { label: 'Más de 2.5', value: p.halfGoals.firstHalf.over25 },
-    ].filter(Boolean) },
-    { title: 'Goles 2ª parte', group: 'goles', subtitle: p.halfGoals?.secondHalf?.expected != null ? `Esperado: ${p.halfGoals.secondHalf.expected}` : null, items: [
-      hasOdd(o.goals2H?.Over_0_5) && p.halfGoals?.secondHalf && { label: 'Más de 0.5', value: p.halfGoals.secondHalf.over05 },
-      hasOdd(o.goals2H?.Over_1_5) && p.halfGoals?.secondHalf && { label: 'Más de 1.5', value: p.halfGoals.secondHalf.over15 },
-      hasOdd(o.goals2H?.Over_2_5) && p.halfGoals?.secondHalf && { label: 'Más de 2.5', value: p.halfGoals.secondHalf.over25 },
-    ].filter(Boolean) },
+    { title: 'Goles totales', group: 'goles', subtitle: p.overUnder?.expectedTotal != null ? `Esperado: ${p.overUnder.expectedTotal} goles` : null,
+      items: adaptiveCat(p.overUnder, o.overUnder, 'Más de') },
+    { title: 'Goles 1ª parte', group: 'goles', items: adaptiveCat(p.halfGoals?.firstHalf, o.goals1H, 'Más de') },
+    { title: 'Goles 2ª parte', group: 'goles', items: adaptiveCat(p.halfGoals?.secondHalf, o.goals2H, 'Más de') },
     { title: 'Ganador 1ª parte', group: 'goles', items: [
       hasOdd(o.winner1H?.home) && p.halfWinner?.firstHalf && { label: homeTeam, value: p.halfWinner.firstHalf.home },
       hasOdd(o.winner1H?.draw) && p.halfWinner?.firstHalf && { label: 'Empate', value: p.halfWinner.firstHalf.draw },
@@ -2459,46 +2455,14 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
       hasOdd(o.winner2H?.draw) && p.halfWinner?.secondHalf && { label: 'Empate', value: p.halfWinner.secondHalf.draw },
       hasOdd(o.winner2H?.away) && p.halfWinner?.secondHalf && { label: awayTeam, value: p.halfWinner.secondHalf.away },
     ].filter(Boolean) },
-    { title: `Goles — ${homeTeam}`, group: 'goles', items: [
-      hasOdd(o.homeGoals?.Over_0_5) && p.perTeam?.home?.goals && { label: 'Más de 0.5', value: p.perTeam.home.goals.over05 },
-      hasOdd(o.homeGoals?.Over_1_5) && p.perTeam?.home?.goals && { label: 'Más de 1.5', value: p.perTeam.home.goals.over15 },
-      hasOdd(o.homeGoals?.Over_2_5) && p.perTeam?.home?.goals && { label: 'Más de 2.5', value: p.perTeam.home.goals.over25 },
-    ].filter(Boolean) },
-    { title: `Goles — ${awayTeam}`, group: 'goles', items: [
-      hasOdd(o.awayGoals?.Over_0_5) && p.perTeam?.away?.goals && { label: 'Más de 0.5', value: p.perTeam.away.goals.over05 },
-      hasOdd(o.awayGoals?.Over_1_5) && p.perTeam?.away?.goals && { label: 'Más de 1.5', value: p.perTeam.away.goals.over15 },
-      hasOdd(o.awayGoals?.Over_2_5) && p.perTeam?.away?.goals && { label: 'Más de 2.5', value: p.perTeam.away.goals.over25 },
-    ].filter(Boolean) },
-    { title: 'Córners totales', group: 'corners', items: [
-      hasOdd(o.corners?.Over_8_5)  && { label: 'Más de 8.5',  value: p.corners?.over85 },
-      hasOdd(o.corners?.Over_9_5)  && { label: 'Más de 9.5',  value: p.corners?.over95 },
-      hasOdd(o.corners?.Over_10_5) && { label: 'Más de 10.5', value: p.corners?.over105 },
-    ].filter(Boolean) },
-    { title: `Córners — ${homeTeam}`, group: 'corners', items: [
-      hasOdd(o.homeCorners?.Over_3_5) && p.perTeam?.home?.corners && { label: 'Más de 3.5', value: p.perTeam.home.corners.over35 },
-      hasOdd(o.homeCorners?.Over_4_5) && p.perTeam?.home?.corners && { label: 'Más de 4.5', value: p.perTeam.home.corners.over45 },
-      hasOdd(o.homeCorners?.Over_5_5) && p.perTeam?.home?.corners && { label: 'Más de 5.5', value: p.perTeam.home.corners.over55 },
-    ].filter(Boolean) },
-    { title: `Córners — ${awayTeam}`, group: 'corners', items: [
-      hasOdd(o.awayCorners?.Over_3_5) && p.perTeam?.away?.corners && { label: 'Más de 3.5', value: p.perTeam.away.corners.over35 },
-      hasOdd(o.awayCorners?.Over_4_5) && p.perTeam?.away?.corners && { label: 'Más de 4.5', value: p.perTeam.away.corners.over45 },
-      hasOdd(o.awayCorners?.Over_5_5) && p.perTeam?.away?.corners && { label: 'Más de 5.5', value: p.perTeam.away.corners.over55 },
-    ].filter(Boolean) },
-    { title: 'Tarjetas totales', group: 'tarjetas', items: [
-      hasOdd(o.cards?.Over_2_5) && { label: 'Más de 2.5', value: p.cards?.over25 },
-      hasOdd(o.cards?.Over_3_5) && { label: 'Más de 3.5', value: p.cards?.over35 },
-      hasOdd(o.cards?.Over_4_5) && { label: 'Más de 4.5', value: p.cards?.over45 },
-    ].filter(Boolean) },
-    { title: `Tarjetas — ${homeTeam}`, group: 'tarjetas', items: [
-      hasOdd(o.homeCards?.Over_0_5) && p.perTeam?.home?.cards && { label: 'Más de 0.5', value: p.perTeam.home.cards.over05 },
-      hasOdd(o.homeCards?.Over_1_5) && p.perTeam?.home?.cards && { label: 'Más de 1.5', value: p.perTeam.home.cards.over15 },
-      hasOdd(o.homeCards?.Over_2_5) && p.perTeam?.home?.cards && { label: 'Más de 2.5', value: p.perTeam.home.cards.over25 },
-    ].filter(Boolean) },
-    { title: `Tarjetas — ${awayTeam}`, group: 'tarjetas', items: [
-      hasOdd(o.awayCards?.Over_0_5) && p.perTeam?.away?.cards && { label: 'Más de 0.5', value: p.perTeam.away.cards.over05 },
-      hasOdd(o.awayCards?.Over_1_5) && p.perTeam?.away?.cards && { label: 'Más de 1.5', value: p.perTeam.away.cards.over15 },
-      hasOdd(o.awayCards?.Over_2_5) && p.perTeam?.away?.cards && { label: 'Más de 2.5', value: p.perTeam.away.cards.over25 },
-    ].filter(Boolean) },
+    { title: `Goles — ${homeTeam}`, group: 'goles', items: adaptiveCat(p.perTeam?.home?.goals, o.homeGoals, 'Más de') },
+    { title: `Goles — ${awayTeam}`, group: 'goles', items: adaptiveCat(p.perTeam?.away?.goals, o.awayGoals, 'Más de') },
+    { title: 'Córners totales', group: 'corners', items: adaptiveCat(p.corners, o.corners, 'Más de') },
+    { title: `Córners — ${homeTeam}`, group: 'corners', items: adaptiveCat(p.perTeam?.home?.corners, o.homeCorners, 'Más de') },
+    { title: `Córners — ${awayTeam}`, group: 'corners', items: adaptiveCat(p.perTeam?.away?.corners, o.awayCorners, 'Más de') },
+    { title: 'Tarjetas totales', group: 'tarjetas', items: adaptiveCat(p.cards, o.cards, 'Más de') },
+    { title: `Tarjetas — ${homeTeam}`, group: 'tarjetas', items: adaptiveCat(p.perTeam?.home?.cards, o.homeCards, 'Más de') },
+    { title: `Tarjetas — ${awayTeam}`, group: 'tarjetas', items: adaptiveCat(p.perTeam?.away?.cards, o.awayCards, 'Más de') },
     p.shots && { title: 'Tiros totales', group: 'tiros', subtitle: p.shots._mean ? `Esperado: ${p.shots._mean}` : null,
       items: adaptiveCat(p.shots, o.shots, 'Más de') },
     p.sot && { title: 'Tiros a puerta', group: 'tiros', subtitle: p.sot._mean ? `Esperado: ${p.sot._mean}` : null,
