@@ -1,13 +1,12 @@
 /* eslint-disable */
 // ────────────────────────────────────────────────────────────────────────
-// Diagnóstico con DATO REAL de API-Football (no sintético). Llama al endpoint
-// /odds del fixture, vuelca CADA bet (id + nombre + values) que contenga
-// "handicap" por bookmaker, y muestra cómo el classifyAH del extractor los
-// enruta a full / 1H / 2H. Sirve para confirmar el bug de colisión AH con el
-// dato exacto que devuelve la API (nombres/ids reales).
+// Diagnóstico con DATO REAL de API-Football. Vuelca TODOS los bets (id + nombre +
+// nº values + ejemplos) que ofrece cada bookmaker autorizado para un fixture, y
+// marca cuáles NO están mapeados en BET_NAMES (= mercados ricos que se pierden).
+// Sirve para identificar, con el catálogo real, qué bets agregar al extractor.
 //
-//   node --env-file=.env scripts/diagnose-odds-raw.js 1542333
-//   node --env-file=.env scripts/diagnose-odds-raw.js 1542333 1xbet
+//   node --env-file=.env scripts/diagnose-odds-raw.js 1545409
+//   node --env-file=.env scripts/diagnose-odds-raw.js 1545409 bet365
 // ────────────────────────────────────────────────────────────────────────
 try { require('dotenv').config({ path: '.env.local' }); } catch {}
 try { require('dotenv').config({ path: '.env' }); } catch {}
@@ -21,26 +20,32 @@ const ALLOWED = ['bet365', 'bwin'];
 const normBk = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[\s.\-_]/g, '');
 const isAllowed = (name) => { const n = normBk(name); return ALLOWED.find(a => n.includes(a)) || null; };
 
-// MISMO classifyAH/ahKey que lib/api-football.js (copiados para diagnóstico standalone).
-const ahKey = v => {
-  const raw = (v.value || '').toString().trim();
-  const m = raw.match(/^(Home|Away)\s*([+-]?\d+(?:\.\d+)?)$/i);
-  if (!m) return null;
-  const side = m[1].toLowerCase();
-  const num = m[2].replace('-', 'm').replace('+', 'p').replace('.', '_');
-  return `${side}_${num.startsWith('m') || num.startsWith('p') ? num : 'p' + num}`;
+// Espejo de BET_NAMES (lib/api-football.js) — para marcar qué bets YA están mapeados.
+const BET_NAMES = {
+  matchWinner: ['Match Winner', 'Full Time Result', '1X2'],
+  overUnder: ['Goals Over/Under', 'Over/Under', 'Total Goals', 'Goal Line'],
+  btts: ['Both Teams Score', 'Both Teams To Score'],
+  cornersTotal: ['Total - Corners', 'Corners Over Under', 'Corners Over/Under', 'Total Corners', 'Corners 2-Way', 'Total Corners (3 way)', 'Total Corners (2 way)'],
+  cardsTotal: ['Total - Cards', 'Cards Over Under', 'Cards Over/Under', 'Total Cards', 'Total Bookings'],
+  homeCorners: ['Total Corners - Home', 'Home Team Total Corners', 'Home Corners Over/Under', 'Home Team Corners'],
+  awayCorners: ['Total Corners - Away', 'Away Team Total Corners', 'Away Corners Over/Under', 'Away Team Corners'],
+  homeCards: ['Total Bookings - Home', 'Home Team Cards', 'Home Cards Over/Under', 'Home Team Bookings', 'Home Team Total Cards'],
+  awayCards: ['Total Bookings - Away', 'Away Team Cards', 'Away Cards Over/Under', 'Away Team Bookings', 'Away Team Total Cards'],
+  homeGoals: ['Home Total Goals', 'Home Team Total Goals', 'Total - Home', 'Home Team Goals Over/Under'],
+  awayGoals: ['Away Total Goals', 'Away Team Total Goals', 'Total - Away', 'Away Team Goals Over/Under'],
+  shotsTotal: ['Total Shots'], sotTotal: ['Total ShotOnGoal', 'Total Shots On Target'],
+  foulsTotal: ['Fouls. Total', 'Total Fouls'],
+  goalsOu1H: ['Goals Over/Under First Half'], goalsOu2H: ['Goals Over/Under - Second Half'],
+  cornersTotal1H: ['Total Corners (1st Half)'], cornersTotal2H: ['Total Corners (2nd Half)'],
+  scorer: ['Anytime Goal Scorer', 'Anytime Goalscorer', 'Player Anytime Goalscorer', 'Anytime Scorer', 'Home Anytime Goal Scorer', 'Away Anytime Goal Scorer'],
 };
-const classifyAH = (betName) => {
-  const n = (betName || '').toLowerCase();
-  if (!n.includes('handicap')) return null;
-  if (/(1st|first)\s*half|half\s*(1st|first)|\(1st half\)/.test(n)) return 'h1';
-  if (/(2nd|second)\s*half|half\s*(2nd|second)|\(2nd half\)/.test(n)) return 'h2';
-  if (n.includes('half')) return null;
-  return 'full';
-};
+const ALL_MAPPED = new Set(Object.values(BET_NAMES).flat());
+const familyOf = (name) => { for (const [fam, list] of Object.entries(BET_NAMES)) if (list.includes(name)) return fam; return null; };
+// ¿El nombre sugiere un mercado de LÍNEAS que nos interesa? (para resaltar lo no mapeado)
+const looksRich = (name) => /corner|card|booking|goal|shot|foul|over|under|total|line|handicap/i.test(name);
 
 (async () => {
-  if (!KEY) { console.error('Falta FOOTBALL_API_KEY en el entorno.'); process.exit(1); }
+  if (!KEY) { console.error('Falta FOOTBALL_API_KEY.'); process.exit(1); }
   if (!fixtureId) { console.error('Uso: node scripts/diagnose-odds-raw.js <fixtureId> [bookmaker]'); process.exit(1); }
 
   const res = await fetch(`https://${API_HOST}/odds?fixture=${fixtureId}`, { headers: { 'x-apisports-key': KEY } });
@@ -51,27 +56,26 @@ const classifyAH = (betName) => {
 
   for (const bk of bookmakers) {
     const allowedAs = isAllowed(bk.name);
-    if (bkFilter && !normBk(bk.name).includes(normBk(bkFilter))) continue;
-    if (!bkFilter && !allowedAs) continue;
+    if (bkFilter ? !normBk(bk.name).includes(normBk(bkFilter)) : !allowedAs) continue;
+    const bets = bk.bets || [];
+    console.log(`\n══ ${bk.name} (id=${bk.id}) ${allowedAs ? `[autorizada: ${allowedAs}]` : '[NO autorizada]'} · ${bets.length} mercados ══`);
 
-    const ahBets = (bk.bets || []).filter(b => (b.name || '').toLowerCase().includes('handicap'));
-    if (!ahBets.length) continue;
-    console.log(`\n══ ${bk.name} (id=${bk.id}) ${allowedAs ? `[autorizada: ${allowedAs}]` : '[NO autorizada]'} ══`);
-    const routed = { full: {}, h1: {}, h2: {} };
-    for (const bet of ahBets) {
-      const cls = classifyAH(bet.name);
-      console.log(`  bet id=${bet.id} name="${bet.name}"  → classifyAH=${cls}`);
-      for (const v of bet.values || []) {
-        const k = ahKey(v);
-        console.log(`      value="${v.value}" odd=${v.odd}  → key=${k ?? '(no parsea)'}`);
-        if (cls && k) { const tgt = cls === 'full' ? routed.full : cls === 'h1' ? routed.h1 : routed.h2; const o = parseFloat(v.odd); if (isFinite(o) && o > 1 && (!tgt[k] || o > tgt[k])) tgt[k] = o; }
-      }
+    const mapped = [], unmappedRich = [], other = [];
+    for (const bet of bets) {
+      const fam = familyOf(bet.name);
+      const row = `  id=${String(bet.id).padStart(3)} "${bet.name}" (${(bet.values || []).length} values)`;
+      if (fam) mapped.push(`${row}  → ${fam}`);
+      else if (looksRich(bet.name)) unmappedRich.push(`${row}  ✗ SIN MAPEAR · ej: ${(bet.values || []).slice(0, 4).map(v => `${v.value}=${v.odd}`).join(' | ')}`);
+      else other.push(row);
     }
-    console.log(`  → asianHandicap (full): ${JSON.stringify(routed.full)}`);
-    console.log(`  → asianHandicap1H     : ${JSON.stringify(routed.h1)}`);
-    console.log(`  → asianHandicap2H     : ${JSON.stringify(routed.h2)}`);
-    console.log(`  VERIFICA: away_p3_5 full = ${routed.full.away_p3_5 ?? '(no existe)'}  ·  2H away_p3_5 = ${routed.h2.away_p3_5 ?? '(no existe)'}`);
+    console.log(` ── MAPEADOS (${mapped.length}) ──`);
+    mapped.forEach(r => console.log(r));
+    console.log(` ── RICOS SIN MAPEAR (${unmappedRich.length}) — candidatos a agregar a BET_NAMES ──`);
+    unmappedRich.forEach(r => console.log(r));
+    console.log(` ── OTROS (${other.length}) ──`);
+    other.slice(0, 12).forEach(r => console.log(r));
+    if (other.length > 12) console.log(`   …(+${other.length - 12} más)`);
   }
-  console.log('\nSi algún bet de 2ª mitad tiene name SIN token de mitad (p.ej. "Asian Handicap" duplicado),');
-  console.log('classifyAH lo marcará "full" y habrá que enrutar por bet.id. Eso se ve arriba en los nombres reales.');
+  console.log('\nLeyenda: "RICOS SIN MAPEAR" = bets de líneas (corners/goles/tarjetas/etc.) que el');
+  console.log('extractor IGNORA porque su nombre no está en BET_NAMES. Pásame esa lista y los agrego.');
 })().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
