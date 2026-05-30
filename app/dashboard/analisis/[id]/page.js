@@ -173,6 +173,27 @@ export default function AnalisisPage() {
     loadStats();
   }, [fixtureId, !!analysis]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Live polling: refresca stats (córners/tarjetas/scorers) cada 15s mientras
+  // el partido está en vivo. Se detiene automáticamente al finalizar.
+  useEffect(() => {
+    const liveStatuses = ['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'INT'];
+    if (!liveStatuses.includes(liveStatusShort)) return;
+
+    const pollLiveStats = async () => {
+      try {
+        const res = await fetch(`/api/live-poll?fixtureId=${fixtureId}`);
+        const data = await res.json();
+        const matchStats = data.liveStats?.find(s => Number(s.fixtureId) === Number(fixtureId));
+        if (matchStats) {
+          setLiveStats(prev => ({ ...prev, [fixtureId]: matchStats }));
+        }
+      } catch {}
+    };
+
+    const intervalId = setInterval(pollLiveStats, 15000);
+    return () => clearInterval(intervalId);
+  }, [fixtureId, liveStatusShort, setLiveStats]);
+
   useEffect(() => {
     const stats = allLiveStats[fixtureId];
     if (!stats?.status) return;
