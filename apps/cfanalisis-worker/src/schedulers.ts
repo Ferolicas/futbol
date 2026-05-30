@@ -22,7 +22,7 @@ type Sched = { queue: QueueName; id: string; pattern?: string; every?: number; t
 // 'futbol-raw-backfill-half2' fue un seed one-shot (ya completado a mano). Al
 // añadirlo aquí, registerSchedulers() llama removeJobScheduler() en el arranque
 // → borra el scheduler Y su job delayed pendiente de Redis (no corre a las 4am).
-const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-odds-15m', 'futbol-raw-backfill-half2'];
+const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-odds-15m', 'futbol-raw-backfill-half2', 'baseball-live-5m'];
 
 const SCHEDULES: Sched[] = [
   // ── Fútbol — diarios (hora España) ──
@@ -71,11 +71,17 @@ const SCHEDULES: Sched[] = [
   { queue: 'baseball-finalize',  id: 'baseball-finalize-daily',  pattern: '0 5 * * *',  tz: TZ }, // 5:00
   { queue: 'baseball-calibrate', id: 'baseball-calibrate-daily', pattern: '0 6 * * *',  tz: TZ }, // 6:00 (tras finalize)
   { queue: 'baseball-cleanup',   id: 'baseball-cleanup-weekly',  pattern: '0 3 * * 0',  tz: TZ }, // dom 3:00
-  // ── Baseball — live (cada 5 min) ──
-  // El handler hace smart-skip: solo gasta API dentro de la ventana de juego,
-  // con presupuesto de 30 llamadas/día y throttle dinámico 4-30 min. Fuera de
-  // partidos en vivo no consume nada.
-  { queue: 'baseball-live', id: 'baseball-live-5m', pattern: '*/5 * * * *' },
+  // Gemelo del cron del fútbol — reanaliza HOY (Bogotá) con force=true a las
+  // 02:10 España, justo después del cron base (`baseball-analyze-daily` 01:30),
+  // para refrescar lineups confirmados y odds del bloque madrugada.
+  { queue: 'baseball-analyze-all-today', id: 'baseball-analyze-all-today-daily', pattern: '10 2 * * *', tz: TZ },
+  // ── Baseball — live (cada 1 min) ──
+  // MLB Stats API es gratuita y sin límite, así que polleamos al mismo ritmo
+  // que la app de fútbol. El handler emite el WS update y, si hay juegos en
+  // vivo, pide el feed pitch-by-pitch (concurrency 6) para detectar carreras,
+  // home runs, K dorado y cambio de inning. Sin juegos en vivo: 1 schedule
+  // call y exit (~unas decenas de ms).
+  { queue: 'baseball-live', id: 'baseball-live-1m', every: 60_000 },
 ];
 
 export async function registerSchedulers(): Promise<void> {
