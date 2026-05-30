@@ -38,6 +38,8 @@ const [
   _combinada,
   _baseballModel,
   _baseballCalibration,
+  _baseballFeatures,
+  _baseballMl,
   _oddsApi,
   _db,
   _mlbStatsApi,
@@ -45,6 +47,8 @@ const [
   _reenrich,
   _buildProfiles,
   _trainMeta,
+  _reenrichBaseball,
+  _trainBaseballMeta,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
@@ -56,6 +60,8 @@ const [
   import(LIB + 'combinada.js'),
   import(LIB + 'baseball-model.js'),
   import(LIB + 'baseball-calibration.js'),
+  import(LIB + 'baseball-features.js'),
+  import(LIB + 'baseball-ml.js'),
   import(LIB + 'odds-api.js'),
   import(LIB + 'db.js'),
   import(LIB + 'mlb-stats-api.js'),
@@ -66,6 +72,8 @@ const [
   import(SCRIPTS + 'reenrich-features.js'),
   import(SCRIPTS + 'build-team-profiles.js'),
   import(SCRIPTS + 'train-meta-models.js'),
+  import(SCRIPTS + 'reenrich-baseball.js'),
+  import(SCRIPTS + 'train-baseball-meta-models.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -122,6 +130,11 @@ export const reenrichFeatures = _reenrich.reenrichFeatures;
 export const buildTeamProfiles = _buildProfiles.buildTeamProfiles;
 export const trainMetaModels = _trainMeta.trainMetaModels;
 
+// scripts/reenrich-baseball.js + scripts/train-baseball-meta-models.js —
+// se invocan desde el cron baseball-retrain. Mismo guard CLI que los de fútbol.
+export const reenrichBaseball         = _reenrichBaseball.reenrichBaseball;
+export const trainBaseballMetaModels  = _trainBaseballMeta.trainBaseballMetaModels;
+
 // lib/combinada.js
 export const buildCombinada = _combinada.buildCombinada;
 
@@ -134,6 +147,17 @@ export const extractBestOdds = _baseballModel.extractBestOdds;
 // lib/baseball-calibration.js
 export const calibrateBaseballProbabilities = _baseballCalibration.calibrateBaseballProbabilities;
 export const flattenProbabilitiesForStorage = _baseballCalibration.flattenProbabilitiesForStorage;
+
+// lib/baseball-features.js — feature engineering point-in-time compartido
+// entre el cron retrain (reenrich + train) y el runtime de analyze.
+export const BASEBALL_FEATURE_ORDER         = _baseballFeatures.BASEBALL_FEATURE_ORDER;
+export const buildBaseballFeatureIndex      = _baseballFeatures.buildBaseballFeatureIndex;
+export const computeBaseballFeaturesForGame = _baseballFeatures.computeBaseballFeaturesForGame;
+
+// lib/baseball-ml.js — runtime de inferencia ML (carga modelos activos +
+// aplica overrides sobre los 3 mercados entrenados).
+export const loadActiveBaseballModels = _baseballMl.loadActiveBaseballModels;
+export const applyMlOverrides         = _baseballMl.applyMlOverrides;
 
 // lib/odds-api.js
 export const fetchOddsForFixtures = _oddsApi.fetchOddsForFixtures;
@@ -157,6 +181,7 @@ export const getMlbGameLineup = _mlbStatsApi.getMlbGameLineup;
 
 // lib/db.js — acceso raw pg para casos que pgAdmin no cubre (RPC, raw SQL)
 export const pgQuery = _db.pgQuery;
+export const pgPool  = _db.pgPool;   // Pool singleton (requerido por lib/baseball-features.js y baseball-ml.js)
 
 // ────────────────────────────────────────────────────────────────────────────
 // FECHAS DE LOS JOBS — TODO en hora de Bogotá (America/Bogota).

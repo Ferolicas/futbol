@@ -252,14 +252,16 @@ function computeFeatures(game, teamHistory, pitcherStarts, pitcherSeasonEra, tea
 }
 
 // ── MAIN ────────────────────────────────────────────────────────────────
-(async () => {
+async function reenrichBaseball(opts = {}) {
+  const { pool: extPool = null, limit = LIMIT, concurrency = CONCURRENCY } = opts;
   console.log('================================================');
   console.log('  reenrich-baseball — features point-in-time');
   console.log('================================================');
-  console.log(`Concurrency: ${CONCURRENCY}${LIMIT ? `  Limit: ${LIMIT}` : ''}`);
+  console.log(`Concurrency: ${concurrency}${limit ? `  Limit: ${limit}` : ''}`);
   console.log('');
 
-  const pool = makePool();
+  const pool = extPool || makePool();
+  const ownPool = !extPool;
   const tStart = Date.now();
   try {
     // 1) Equipos (division + park_factor).
@@ -366,14 +368,14 @@ function computeFeatures(game, teamHistory, pitcherStarts, pitcherSeasonEra, tea
     console.log(`[index] pitcherStarts: ${pitcherStarts.size} pitchers`);
 
     // 8) Calcular features + UPSERT en features_baseball.
-    const target = LIMIT ? games.slice(0, LIMIT) : games;
+    const target = limit ? games.slice(0, limit) : games;
     console.log(`\n[compute] procesando ${target.length} games…`);
     const t0 = Date.now();
     let inserted = 0, updated = 0, skippedNoTeam = 0, nullCounts = {
       win10: 0, runs30: 0, era5: 0,
     };
 
-    await mapPool(target, CONCURRENCY, async (g, idx) => {
+    await mapPool(target, concurrency, async (g, idx) => {
       if (!teamMeta.has(g.homeId) || !teamMeta.has(g.awayId)) {
         skippedNoTeam++;
         return;
@@ -458,11 +460,19 @@ function computeFeatures(game, teamHistory, pitcherStarts, pitcherSeasonEra, tea
     console.log(`  Park factor avg:     ${c.avg_pf}`);
     console.log('──────────────────────────────────────────────');
     console.log(`✓ DONE in ${elapsed}s`);
+    return { ok: true, processed: target.length, inserted, updated, skippedNoTeam, totalInTable: c.total };
   } catch (e) {
     console.error('\nFATAL:', e.message);
     console.error(e.stack);
     process.exitCode = 1;
+    throw e;
   } finally {
-    await pool.end();
+    if (ownPool) await pool.end();
   }
-})();
+}
+
+if (require.main === module) {
+  reenrichBaseball().catch(() => process.exit(1));
+}
+
+module.exports = { reenrichBaseball };

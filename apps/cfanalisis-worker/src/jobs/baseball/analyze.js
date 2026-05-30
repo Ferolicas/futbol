@@ -22,6 +22,8 @@ import {
   computeBaseballProbabilities, buildBaseballCombinada, scoreBaseballDataQuality,
   calibrateBaseballProbabilities, flattenProbabilitiesForStorage,
   extractBaseballPlayerHighlights,
+  loadActiveBaseballModels, buildBaseballFeatureIndex, computeBaseballFeaturesForGame, applyMlOverrides,
+  pgPool,
   supabaseAdmin, cronTargetDate, bogotaToday,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
@@ -97,7 +99,35 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
     console.warn(`[baseball-analyze] fetchMlbOddsByDate: ${e.message}`);
   }
 
-  let analyzed = 0, skipped = 0, failed = 0, processed = 0, persistFailed = 0;
+  // ── ML overrides ─────────────────────────────────────────────────────
+  // Cargamos los modelos activos (sport='baseball') Y el index de features
+  // point-in-time UNA VEZ por run. El index se construye desde raw_api_payloads
+  // (~5-15 MB en RAM) y se reutiliza para todos los games del día. Si la BD no
+  // tiene modelos entrenados (primera vez tras backfill), `mlModels` queda {}
+  // y aplica el fallback Poisson sin tocar nada — analyze sigue funcionando.
+  let mlModels = {}, featureIndex = null;
+  try {
+    mlModels = await loadActiveBaseballModels(pgPool);
+    const activeKeys = Object.keys(mlModels);
+    if (activeKeys.length > 0) {
+      console.log(`[baseball-analyze:ml] modelos activos: ${activeKeys.join(', ')}`);
+      try {
+        const tIdx = Date.now();
+        featureIndex = await buildBaseballFeatureIndex(pgPool);
+        console.log(`[baseball-analyze:ml] feature index: ${featureIndex.games.length} games · ${featureIndex.teamHistory.size} equipos · ${featureIndex.pitcherStarts.size} pitchers · ${((Date.now() - tIdx) / 1000).toFixed(1)}s`);
+      } catch (e) {
+        console.warn(`[baseball-analyze:ml] no se pudo construir feature index: ${e.message} — desactivo ML para este run`);
+        mlModels = {};
+      }
+    } else {
+      console.log('[baseball-analyze:ml] ningún modelo activo — usando solo Poisson');
+    }
+  } catch (e) {
+    console.warn(`[baseball-analyze:ml] loadActiveBaseballModels: ${e.message} — desactivo ML para este run`);
+    mlModels = {};
+  }
+
+  let analyzed = 0, skipped = 0, failed = 0, processed = 0, persistFailed = 0, mlAppliedCount = 0;
   const errors = [];
 
   await reportProgress({ phase: 'analyzing', processed: 0, total: games.length, analyzed: 0, skipped: 0, failed: 0, startedAt });
@@ -141,6 +171,31 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
         homeStats, awayStats, homeId: game.home?.id, awayId: game.away?.id,
         h2h: [], marketMoneyline, pitcherMatchup: matchup, playerHighlights,
       });
+
+      // ── ML override (selectivo por mercado entrenado) ──────────────────
+      // Solo si hay modelos activos Y el index se construyó OK. Si fallan,
+      // queda el Poisson tal cual (degradación grácil).
+      let mlMeta = null;
+      if (featureIndex && Object.keys(mlModels).length > 0) {
+        try {
+          const features = computeBaseballFeaturesForGame({
+            dateStr: date,
+            season,
+            homeId: game.home?.id,
+            awayId: game.away?.id,
+            homeStarterId: matchup?.home?.stats ? game.home?.probablePitcherId : (game.home?.probablePitcherId || null),
+            awayStarterId: matchup?.away?.stats ? game.away?.probablePitcherId : (game.away?.probablePitcherId || null),
+          }, featureIndex);
+          const { mlApplied } = applyMlOverrides(rawProbs, mlModels, features);
+          if (mlApplied.length > 0) {
+            mlMeta = { applied: mlApplied, features };
+            mlAppliedCount++;
+          }
+        } catch (e) {
+          console.warn(`[baseball-analyze:ml] override fallo fid=${fixtureId}: ${e.message}`);
+        }
+      }
+
       const probs = await calibrateBaseballProbabilities(rawProbs);
       const combinada = buildBaseballCombinada(probs, bestOdds, { home: homeName, away: awayName });
       const dq = scoreBaseballDataQuality({
@@ -165,7 +220,7 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
         away_team: awayName,
         status: game.status || (game.isFinal ? 'Final' : 'Scheduled'),
         start_time: game.dateUTC,
-        analysis: { homeStats, awayStats, pitcherMatchup: matchup, gamePk: game.gamePk },
+        analysis: { homeStats, awayStats, pitcherMatchup: matchup, gamePk: game.gamePk, ml: mlMeta },
         odds: odds ? [odds] : [],
         best_odds: bestOdds,
         probabilities: probs,
@@ -216,8 +271,8 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
   const totalFails = failed + persistFailed;
   await reportProgress({ phase: totalFails > 0 ? 'failed' : 'complete', processed: games.length, total: games.length, analyzed, skipped, failed: totalFails, startedAt, durationSec: Number(durationSec) });
 
-  logger.info({ summary: 'baseball-analyze', date, total: games.length, analyzed, skipped, failed, persistFailed, durationSec: Number(durationSec), firstErrors: errors.slice(0, 5) },
-    `baseball-analyze (MLB) done — ${analyzed} ok, ${skipped} skipped, ${failed} failed, ${persistFailed} persist-failed in ${durationSec}s`);
+  logger.info({ summary: 'baseball-analyze', date, total: games.length, analyzed, skipped, failed, persistFailed, mlAppliedCount, durationSec: Number(durationSec), firstErrors: errors.slice(0, 5) },
+    `baseball-analyze (MLB) done — ${analyzed} ok, ${skipped} skipped, ${failed} failed, ${persistFailed} persist-failed, ${mlAppliedCount} con ML override en ${durationSec}s`);
 
   if (totalFails > 0) {
     throw new Error(`baseball-analyze incomplete: ${failed} análisis + ${persistFailed} persist failures of ${games.length}`);
