@@ -87,17 +87,11 @@ CREATE INDEX IF NOT EXISTS idx_features_baseball_away_team
 
 COMMENT ON TABLE public.features_baseball IS 'Features point-in-time por fixture MLB. Calculadas con datos ANTERIORES a game_date — input ML. Una fila por gamePk.';
 
--- RLS (alineado con el resto de baseball_* tablas)
-ALTER TABLE public.equipos_mlb        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.features_baseball  ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "service role all equipos_mlb" ON public.equipos_mlb;
-CREATE POLICY "service role all equipos_mlb" ON public.equipos_mlb FOR ALL TO service_role USING (true) WITH CHECK (true);
-DROP POLICY IF EXISTS "public read equipos_mlb" ON public.equipos_mlb;
-CREATE POLICY "public read equipos_mlb" ON public.equipos_mlb FOR SELECT USING (true);
-
-DROP POLICY IF EXISTS "service role all features_baseball" ON public.features_baseball;
-CREATE POLICY "service role all features_baseball" ON public.features_baseball FOR ALL TO service_role USING (true) WITH CHECK (true);
+-- (RLS omitido a propósito: el VPS Postgres no usa Supabase, no existe el rol
+--  service_role. El acceso a estas tablas se hace siempre con el usuario
+--  `cfanalisis` que tiene permisos completos. Si alguna vez se vuelve a
+--  Supabase, añadir aquí las policies equivalentes a las del resto de
+--  baseball_*.)
 
 COMMIT;
 
