@@ -1,28 +1,66 @@
 /**
  * POST /api/baseball/analisis
- * Batch-analyze multiple baseball games en una sola peticion. Mantiene
- * sincronia con el job baseball-analyze del worker (cache_version,
- * teamNames, pitcher matchup stub, etc.) para que el upsert sea
- * exactamente equivalente.
  *
- * Body: { fixtures: [{ id, teams, league, country, date, status }], date }
+ * Batch-analyze on-demand de juegos MLB. Espejo del job `baseball-analyze` del
+ * worker (apps/cfanalisis-worker/src/jobs/baseball/analyze.js) pero invocable
+ * desde el dashboard. Usa MLB Stats API como fuente única (pitcher matchup,
+ * team stats, player highlights) + The Odds API para cuotas (filtradas a
+ * bet365/bwin en lib/odds-api.js).
  *
- * Respuesta:
- *   { success, analyzedCount, failedCount, analyses:[...], quota }
- *   Si analyzedCount === 0 → tambien retorna `error` top-level para que
- *   el frontend muestre razon clara al usuario.
+ * Body: { fixtures: [{ id }], date?: 'YYYY-MM-DD' }
+ *   Solo necesitamos `id` (gamePk MLB). El resto se reconstruye desde MLB Stats
+ *   API (single source of truth), evitando inconsistencias con lo que mande la UI.
+ *
+ * Respuesta: { success, analyses:[...], analyzedCount, failedCount, quota, error? }
+ *   Shape sin cambios respecto a la versión legacy con api-sports.
  */
-import { getBaseballOddsByGame, getBaseballTeamStats, getBaseballH2H, getBaseballQuota } from '../../../../lib/api-baseball';
-import { computeBaseballProbabilities, buildBaseballCombinada, scoreBaseballDataQuality, extractBestOdds } from '../../../../lib/baseball-model';
-import { calibrateBaseballProbabilities, flattenProbabilitiesForStorage } from '../../../../lib/baseball-calibration';
+import {
+  getMlbScheduleByDate,
+  getMlbPitcherMatchup,
+  getMlbTeamSeasonStats,
+  toModelTeamStats,
+  extractBaseballPlayerHighlights,
+} from '../../../../lib/mlb-stats-api';
+import {
+  computeBaseballProbabilities,
+  buildBaseballCombinada,
+  scoreBaseballDataQuality,
+} from '../../../../lib/baseball-model';
+import {
+  calibrateBaseballProbabilities,
+  flattenProbabilitiesForStorage,
+} from '../../../../lib/baseball-calibration';
+import { fetchMlbOddsByDate, matchMlbOdds } from '../../../../lib/odds-api';
+import { redisGet } from '../../../../lib/redis';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-// Sincronizado con apps/cfanalisis-worker/src/jobs/baseball/analyze.js
-const BASEBALL_CACHE_VERSION = 2;
+// Sync con apps/cfanalisis-worker/src/jobs/baseball/analyze.js — cuando se
+// cambie allí, cambiar acá. v3 = MLB Stats API + pitcher matchup + player props.
+const BASEBALL_CACHE_VERSION = 3;
+const ODDS_DAILY_CAP = 15;
+
+function bestOddsShape(odds) {
+  if (!odds) return { moneyline: null, totals: {}, runLine: null };
+  const totals = {};
+  for (const [line, v] of Object.entries(odds.totals || {})) {
+    totals[line] = {
+      over:  v.over  != null ? { odd: v.over }  : null,
+      under: v.under != null ? { odd: v.under } : null,
+    };
+  }
+  return { moneyline: odds.moneyline || null, totals, runLine: odds.runLine || null };
+}
+
+async function readOddsQuota() {
+  const date = new Date().toISOString().split('T')[0];
+  let used = 0;
+  try { used = Number(await redisGet(`theodds:req:${date}`)) || 0; } catch {}
+  return { used, limit: ODDS_DAILY_CAP, remaining: Math.max(0, ODDS_DAILY_CAP - used), date, source: 'the-odds-api' };
+}
 
 export async function POST(request) {
   try {
@@ -43,90 +81,105 @@ export async function POST(request) {
     const date = body.date || new Date().toISOString().split('T')[0];
     if (fixtures.length === 0) return Response.json({ error: 'No fixtures' }, { status: 400 });
 
-    // Pre-check de quota: si no hay margen para al menos un partido completo
-    // (4 calls: odds + h2h + 2x stats), abortamos con error claro.
-    const quotaPre = await getBaseballQuota();
-    if (quotaPre.remaining < 4) {
-      return Response.json({
-        success: false,
-        error: `Cuota diaria de la API de baseball agotada (${quotaPre.used}/${quotaPre.limit}). Vuelve a intentar mañana cuando se reinicie.`,
-        quota: quotaPre,
-      }, { status: 429 });
+    const season = Number(date.slice(0, 4));
+
+    // Mapa fixtureId → MLB game completo. Pedimos el schedule del día UNA vez
+    // (cubre cross-midnight: si el cliente manda un id de día anterior con un
+    // live activo, MLB lo devuelve aún en su schedule). Si quedan ids sin
+    // encontrar, pedimos día siguiente/anterior.
+    const wantedIds = new Set(fixtures.map(f => Number(f.id)).filter(Boolean));
+    const gamesById = new Map();
+    const dayOffsets = [0, -1, 1];
+    for (const off of dayOffsets) {
+      if (gamesById.size >= wantedIds.size) break;
+      const d = new Date(date + 'T12:00:00Z');
+      d.setUTCDate(d.getUTCDate() + off);
+      const dStr = d.toISOString().split('T')[0];
+      try {
+        const games = await getMlbScheduleByDate(dStr, 1);
+        for (const g of games) {
+          if (wantedIds.has(Number(g.gamePk)) && !gamesById.has(Number(g.gamePk))) {
+            gamesById.set(Number(g.gamePk), g);
+          }
+        }
+      } catch {}
+    }
+
+    // Cuotas del día (1 sola llamada con cache 3h en redis).
+    let oddsByTeams = {};
+    try {
+      const r = await fetchMlbOddsByDate();
+      oddsByTeams = r.byTeams || {};
+    } catch (e) {
+      console.warn('[api/baseball/analisis] fetchMlbOddsByDate:', e.message);
     }
 
     const analyses = [];
-    for (const game of fixtures) {
-      const fixtureId = game.id;
+    for (const fx of fixtures) {
+      const fixtureId = Number(fx.id);
       if (!fixtureId) {
         analyses.push({ fixtureId: null, success: false, error: 'Fixture sin id' });
         continue;
       }
+
       try {
-        const quota = await getBaseballQuota();
-        if (quota.remaining < 4) {
-          analyses.push({ fixtureId, success: false, error: `Cuota baja (${quota.remaining}/${quota.limit})` });
-          break;
-        }
-
-        const homeId = game.teams?.home?.id;
-        const awayId = game.teams?.away?.id;
-        const leagueId = game.league?.id;
-        const homeName = game.teams?.home?.name;
-        const awayName = game.teams?.away?.name;
-
-        if (!homeId || !awayId || !leagueId) {
-          analyses.push({ fixtureId, success: false, error: `Fixture incompleto: home=${homeId} away=${awayId} league=${leagueId}` });
-          continue;
-        }
-
-        // NO DEGRADAR la análisis MLB del cron (con player props / pitcher
-        // matchup). Si ya existe, devolverla sin recomputar con el pipeline
-        // viejo de api-baseball (que borraría los bateadores).
+        // NO degradar: si el cron ya escribió un análisis MLB completo
+        // (player props, pitcher matchup), devolverlo cacheado.
         const { data: existing } = await supabaseAdmin
           .from('baseball_match_analysis')
-          .select('probabilities, combinada, analysis')
+          .select('probabilities, combinada, cache_version, analysis')
           .eq('fixture_id', fixtureId).maybeSingle();
-        if (existing && (existing.probabilities?.players || existing.analysis?.pitcherMatchup || existing.analysis?.gamePk)) {
+        const versionOk = (existing?.cache_version || 0) >= BASEBALL_CACHE_VERSION;
+        if (existing && versionOk && (existing.probabilities?.players || existing.analysis?.pitcherMatchup || existing.analysis?.gamePk)) {
           analyses.push({ fixtureId, success: true, cached: true, probabilities: existing.probabilities, combinada: existing.combinada });
           continue;
         }
 
-        const [oddsR, h2hR, hStR, aStR] = await Promise.allSettled([
-          getBaseballOddsByGame(fixtureId),
-          getBaseballH2H(homeId, awayId),
-          getBaseballTeamStats(homeId, leagueId),
-          getBaseballTeamStats(awayId, leagueId),
-        ]);
-        const odds = oddsR.status === 'fulfilled' ? oddsR.value.odds : [];
-        const h2h = h2hR.status === 'fulfilled' ? h2hR.value.h2h : [];
-        const homeStats = hStR.status === 'fulfilled' ? hStR.value.stats : null;
-        const awayStats = aStR.status === 'fulfilled' ? aStR.value.stats : null;
+        const game = gamesById.get(fixtureId);
+        if (!game) {
+          analyses.push({ fixtureId, success: false, error: 'Game not found in MLB Stats API schedule (±1 day window)' });
+          continue;
+        }
 
-        // pitcherMatchup y playerHighlights se dejan null por ahora — el modelo
-        // cae al fallback de team-level pitching strength. Cuando se conecte
-        // MLB Stats API se llenaran via los stubs en lib/baseball-model.js.
+        const homeName = game.home?.name;
+        const awayName = game.away?.name;
+        const homeId = game.home?.id;
+        const awayId = game.away?.id;
+
+        const [matchup, homeTeamRaw, awayTeamRaw, playerHighlights] = await Promise.all([
+          getMlbPitcherMatchup(game, season).catch(() => null),
+          getMlbTeamSeasonStats(homeId, season, 1).catch(() => null),
+          getMlbTeamSeasonStats(awayId, season, 1).catch(() => null),
+          extractBaseballPlayerHighlights(game, season).catch(() => null),
+        ]);
+        const homeStats = toModelTeamStats(homeTeamRaw);
+        const awayStats = toModelTeamStats(awayTeamRaw);
+
+        const odds = matchMlbOdds(oddsByTeams, homeName, awayName);
+        const bestOdds = bestOddsShape(odds);
+
         const rawProbs = computeBaseballProbabilities({
-          homeStats, awayStats, homeId, awayId, h2h,
-          marketOdds: odds,
-          pitcherMatchup: null,
-          playerHighlights: null,
+          homeStats, awayStats, homeId, awayId,
+          h2h: [], marketMoneyline: odds?.moneyline || null,
+          pitcherMatchup: matchup, playerHighlights,
         });
         const probs = await calibrateBaseballProbabilities(rawProbs);
-        const bestOdds = extractBestOdds(odds);
-        // Pasar teamNames para que combinada.selections tengan los nombres
-        // reales ("Yankees gana") en vez de placeholders ("Home gana").
         const combinada = buildBaseballCombinada(probs, bestOdds, { home: homeName, away: awayName });
-        const dq = scoreBaseballDataQuality({ homeStats, awayStats, h2h, odds, pitcherMatchup: null, playerHighlights: null });
+        const dq = scoreBaseballDataQuality({
+          homeStats, awayStats, h2h: [], odds: odds ? [odds] : [],
+          pitcherMatchup: matchup, playerHighlights,
+        });
 
         const { error: upsertErr } = await supabaseAdmin.from('baseball_match_analysis').upsert({
-          fixture_id: fixtureId, date, league_id: leagueId,
-          league_name: game.league?.name, country: game.country?.name,
+          fixture_id: fixtureId, date,
+          league_id: 1, league_name: 'MLB', country: 'USA',
           home_team_id: homeId, away_team_id: awayId,
           home_team: homeName, away_team: awayName,
-          status: game.status?.short || 'NS',
-          start_time: game.date,
-          analysis: { homeStats, awayStats, h2h: h2h.slice(0, 10), pitcherMatchup: null, playerHighlights: null },
-          odds, best_odds: bestOdds, probabilities: probs, combinada, data_quality: dq,
+          status: game.status || (game.isFinal ? 'Final' : 'Scheduled'),
+          start_time: game.dateUTC,
+          analysis: { homeStats, awayStats, pitcherMatchup: matchup, gamePk: game.gamePk },
+          odds: odds ? [odds] : [], best_odds: bestOdds,
+          probabilities: probs, combinada, data_quality: dq,
           cache_version: BASEBALL_CACHE_VERSION,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'fixture_id' });
@@ -136,12 +189,12 @@ export async function POST(request) {
         }
 
         const { error: predErr } = await supabaseAdmin.from('baseball_match_predictions').upsert({
-          fixture_id: fixtureId, date, league_id: leagueId,
+          fixture_id: fixtureId, date, league_id: 1,
           home_team_id: homeId, away_team_id: awayId,
           ...flattenProbabilitiesForStorage(probs),
           updated_at: new Date().toISOString(),
         }, { onConflict: 'fixture_id' });
-        if (predErr) console.warn('[baseball:predictions]', predErr.message);  // no critico
+        if (predErr) console.warn('[api/baseball/analisis] predictions fail (no critico):', predErr.message);
 
         analyses.push({ fixtureId, success: true, probabilities: probs, combinada });
       } catch (e) {
@@ -149,13 +202,10 @@ export async function POST(request) {
       }
     }
 
-    const quota = await getBaseballQuota();
+    const quota = await readOddsQuota();
     const analyzedCount = analyses.filter(a => a.success).length;
     const failedCount = analyses.filter(a => !a.success).length;
 
-    // Si TODOS fallaron, devolver error top-level claro al frontend.
-    // Antes: respuesta era success:true aunque todos los items fallaran,
-    // el dashboard solo leia `data.error` y el usuario veia "no pasa nada".
     const response = { success: analyzedCount > 0, analyses, analyzedCount, failedCount, quota };
     if (analyzedCount === 0) {
       const firstError = analyses.find(a => !a.success)?.error || 'Ningún partido pudo ser analizado';
