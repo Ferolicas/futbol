@@ -127,7 +127,7 @@ jobs:
             # apps/cfanalisis-worker/src/shared.ts. Si cambia una lib que
             # el worker NO usa (ej lib/stripe.js, lib/zeptomail.js), no
             # disparamos restart del worker.
-            WORKER_RE='^(apps/cfanalisis-worker/|lib/(api-football|api-baseball|combinada|baseball-model|baseball-calibration|odds-api|redis|sanity-cache|supabase|supabase-cache|db|webpush|leagues|context-engine|context-probabilities|meta-features|adn|h2h|market-labels|descriptive-stats)\.js$)'
+            WORKER_RE='^(apps/cfanalisis-worker/|lib/(api-football|mlb-stats-api|combinada|baseball-model|baseball-calibration|odds-api|redis|sanity-cache|supabase|supabase-cache|db|webpush|leagues|context-engine|context-probabilities|meta-features|adn|h2h|market-labels|descriptive-stats)\.js$)'
             if echo "$CHANGED" | grep -qE "$WORKER_RE"; then
               echo ""
               echo "▶ Worker changed — rebuilding worker"

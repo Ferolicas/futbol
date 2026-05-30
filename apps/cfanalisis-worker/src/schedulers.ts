@@ -66,10 +66,9 @@ const SCHEDULES: Sched[] = [
   // franja en que MLB publica alineaciones (tarde Colombia = 17-01 España). Odds
   // cacheadas (3h) → no quema The Odds API; game logs cacheados (6h).
   { queue: 'baseball-analyze',   id: 'baseball-analyze-pregame', pattern: '0 17,19,21,23,1 * * *', tz: TZ, data: { force: true, today: true } },
-  // days:3 — el plan GRATUITO de api-baseball solo permite consultar los
-  // últimos 3 días. La ventana de finalize se limita a eso para no pedir
-  // fechas que la API rechazaría igualmente.
-  { queue: 'baseball-finalize',  id: 'baseball-finalize-daily',  pattern: '0 5 * * *',  tz: TZ }, // 5:00 — ventana 365d (default del job); MLB Stats API sin límite de fechas
+  // ventana 365d (default del job). MLB Stats API es gratuita y sin límite de
+  // fechas, así que rellenamos resultados retroactivos sin penalización.
+  { queue: 'baseball-finalize',  id: 'baseball-finalize-daily',  pattern: '0 5 * * *',  tz: TZ }, // 5:00
   { queue: 'baseball-calibrate', id: 'baseball-calibrate-daily', pattern: '0 6 * * *',  tz: TZ }, // 6:00 (tras finalize)
   { queue: 'baseball-cleanup',   id: 'baseball-cleanup-weekly',  pattern: '0 3 * * 0',  tz: TZ }, // dom 3:00
   // ── Baseball — live (cada 5 min) ──
