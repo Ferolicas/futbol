@@ -24,6 +24,7 @@ export const QUEUE_NAMES = [
   'baseball-finalize',
   'baseball-cleanup',
   'baseball-calibrate',
+  'baseball-retrain',
 ] as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[number];
@@ -75,6 +76,8 @@ const opts: Record<QueueName, JobsOptions> = {
   'baseball-finalize':            analyzeJobOpts,
   'baseball-cleanup':             defaultJobOpts,
   'baseball-calibrate':           defaultJobOpts,
+  // Retrain ML — reenrich + train, idempotente. attempts:2 acotado.
+  'baseball-retrain':             { ...defaultJobOpts, attempts: 2 },
 };
 
 export const queues: Record<QueueName, Queue> = Object.fromEntries(

@@ -24,6 +24,7 @@ import { runBaseballAnalyze } from './jobs/baseball/analyze.js';
 import { runBaseballLive } from './jobs/baseball/live.js';
 import { runBaseballFinalize } from './jobs/baseball/finalize.js';
 import { runBaseballCleanup } from './jobs/baseball/cleanup.js';
+import { runBaseballRetrain } from './jobs/baseball/retrain.js';
 import { runBaseballCalibration } from './jobs/calibration/baseball.js';
 
 const handlers: Record<QueueName, Processor> = {
@@ -50,6 +51,8 @@ const handlers: Record<QueueName, Processor> = {
   'baseball-finalize':            async (job) => runBaseballFinalize(job.data),
   'baseball-cleanup':             async (job) => runBaseballCleanup(job.data),
   'baseball-calibrate':           async () => runBaseballCalibration(),
+  // Reenrich + train ML, CPU + I/O heavy → MARATHON lock.
+  'baseball-retrain':             async (job) => runBaseballRetrain(job.data),
 };
 
 // Concurrency tuning per queue. Most are I/O bound (HTTP to API-Football,
@@ -75,6 +78,7 @@ const concurrency: Record<QueueName, number> = {
   'baseball-finalize':            1,
   'baseball-cleanup':             1,
   'baseball-calibrate':           1,
+  'baseball-retrain':             1,
 };
 
 // Lock / stall tuning per queue.
@@ -119,6 +123,8 @@ const lockOpts: Record<QueueName, LockOpts> = {
   'baseball-finalize':            HEAVY,
   'baseball-cleanup':             LIGHT,
   'baseball-calibrate':           HEAVY,
+  // reenrich + train pueden tardar 5-15 min con dataset completo.
+  'baseball-retrain':             MARATHON,
 };
 
 export function startWorkers(): Worker[] {

@@ -70,6 +70,11 @@ const SCHEDULES: Sched[] = [
   // fechas, así que rellenamos resultados retroactivos sin penalización.
   { queue: 'baseball-finalize',  id: 'baseball-finalize-daily',  pattern: '0 5 * * *',  tz: TZ }, // 5:00
   { queue: 'baseball-calibrate', id: 'baseball-calibrate-daily', pattern: '0 6 * * *',  tz: TZ }, // 6:00 (tras finalize)
+  // Retrain ML nocturno: reenrichBaseball() + trainBaseballMetaModels(). 07:30
+  // España = 00:30 Bogotá (día siguiente). Va DESPUÉS de calibrate (06:00) y
+  // ANTES del próximo baseball-analyze (01:30 día sig.), así el análisis
+  // matutino siempre usa modelos recién entrenados.
+  { queue: 'baseball-retrain',   id: 'baseball-retrain-daily',   pattern: '30 7 * * *', tz: TZ }, // 7:30
   { queue: 'baseball-cleanup',   id: 'baseball-cleanup-weekly',  pattern: '0 3 * * 0',  tz: TZ }, // dom 3:00
   // Gemelo del cron del fútbol — reanaliza HOY (Bogotá) con force=true a las
   // 02:10 España, justo después del cron base (`baseball-analyze-daily` 01:30),
