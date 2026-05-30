@@ -30,7 +30,6 @@ const SCRIPTS = '../../../scripts/';
 const [
   _redis,
   _apiFootball,
-  _apiBaseball,
   _supabase,
   _supabaseCache,
   _sanityCache,
@@ -49,7 +48,6 @@ const [
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
-  import(LIB + 'api-baseball.js'),
   import(LIB + 'supabase.js'),
   import(LIB + 'supabase-cache.js'),
   import(LIB + 'sanity-cache.js'),
@@ -87,15 +85,8 @@ export const getFixtures = _apiFootball.getFixtures;
 export const analyzeMatch = _apiFootball.analyzeMatch;
 export const getQuota = _apiFootball.getQuota;
 
-// lib/api-baseball.js
-export const getBaseballFixturesByDate = _apiBaseball.getBaseballFixturesByDate;
-export const getBaseballOddsByGame = _apiBaseball.getBaseballOddsByGame;
-export const getBaseballTeamStats = _apiBaseball.getBaseballTeamStats;
-export const getBaseballH2H = _apiBaseball.getBaseballH2H;
-export const getBaseballQuota = _apiBaseball.getBaseballQuota;
-export const getBaseballLiveGames = _apiBaseball.getBaseballLiveGames;
-export const getBaseballFixturePlayers = _apiBaseball.getBaseballFixturePlayers;
-export const getBaseballPlayerStats = _apiBaseball.getBaseballPlayerStats;
+// (api-baseball.js purgado — baseball es 100% MLB Stats API + The Odds API,
+//  ver lib/mlb-stats-api.js y lib/odds-api.js)
 
 // lib/supabase.js
 export const supabaseAdmin = _supabase.supabaseAdmin;
@@ -139,7 +130,6 @@ export const computeBaseballProbabilities = _baseballModel.computeBaseballProbab
 export const buildBaseballCombinada = _baseballModel.buildBaseballCombinada;
 export const scoreBaseballDataQuality = _baseballModel.scoreBaseballDataQuality;
 export const extractBestOdds = _baseballModel.extractBestOdds;
-export const extractBaseballPitcherMatchup = _baseballModel.extractBaseballPitcherMatchup;
 
 // lib/baseball-calibration.js
 export const calibrateBaseballProbabilities = _baseballCalibration.calibrateBaseballProbabilities;
