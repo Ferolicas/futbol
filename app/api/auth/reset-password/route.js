@@ -17,8 +17,8 @@ export async function POST(request) {
     if (!token?.trim()) {
       return Response.json({ error: 'Token requerido' }, { status: 400 });
     }
-    if (!password || password.length < 6) {
-      return Response.json({ error: 'La contrasena debe tener al menos 6 caracteres' }, { status: 400 });
+    if (!password || password.length < 8) {
+      return Response.json({ error: 'La contrasena debe tener al menos 8 caracteres' }, { status: 400 });
     }
 
     // Token en Redis (puesto por forgot-password con TTL 1h)

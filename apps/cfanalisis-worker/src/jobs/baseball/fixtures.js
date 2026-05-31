@@ -39,7 +39,7 @@ export async function runBaseballFixtures(payload = {}) {
 
   await supabaseAdmin
     .from('baseball_match_schedule')
-    .upsert({ date: targetDate, schedule: scheduleData, updated_at: new Date().toISOString() });
+    .upsert({ date: targetDate, schedule: scheduleData, updated_at: new Date().toISOString() }, { onConflict: 'date' });
 
   return { ok: true, targetDate, fixtureCount: games.length };
 }

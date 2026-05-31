@@ -1,6 +1,7 @@
 import { stripe, createPostPaymentSubscription } from '../../../lib/stripe';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { sendPlanActivatedEmail } from '../../../lib/zeptomail';
+import { redisGet, redisSet } from '../../../lib/redis';
 
 async function findUserByCustomer(customerId, userId) {
   // 1. By stripe_customer_id in user_profiles
@@ -67,16 +68,34 @@ export async function POST(request) {
   const sig = request.headers.get('stripe-signature');
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+  // R3 FIX: firma SIEMPRE obligatoria. Antes, sin secret/sig se hacía
+  // JSON.parse(body) y se procesaba el evento → cualquiera podía POSTear un
+  // payment_intent.succeeded falso y activarse un plan gratis. Ahora, sin
+  // verificación criptográfica de Stripe, se rechaza.
+  if (!webhookSecret || !sig) {
+    console.error('[webhook] Rechazado: falta STRIPE_WEBHOOK_SECRET o stripe-signature');
+    return Response.json({ error: 'Webhook signature required' }, { status: 400 });
+  }
+
   let event;
   try {
-    if (webhookSecret && sig) {
-      event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
-    } else {
-      event = JSON.parse(body);
-    }
+    event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
   } catch (err) {
     console.error('[webhook] Signature failed:', err.message);
     return Response.json({ error: 'Webhook signature failed' }, { status: 400 });
+  }
+
+  // R4 FIX: idempotencia. Stripe reentrega eventos (y ante el 500 que devolvemos
+  // en error). Sin dedup, payment_intent.succeeded reactivaba el plan, reenviaba
+  // el email y RE-CREABA la suscripción (doble cobro). Marcamos cada event.id en
+  // Redis (TTL 24h) y saltamos los ya procesados.
+  if (event.id) {
+    const dedupKey = `stripe-event:${event.id}`;
+    const seen = await redisGet(dedupKey);
+    if (seen) {
+      return Response.json({ received: true, deduped: true });
+    }
+    await redisSet(dedupKey, '1', 24 * 3600);
   }
 
   try {

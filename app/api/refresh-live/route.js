@@ -1,5 +1,6 @@
 import { redisGet, redisSet, KEYS, TTL } from '../../../lib/redis';
 import { ALL_LEAGUE_IDS, isYouthTeam } from '../../../lib/leagues';
+import { getCurrentUser } from '../../../lib/auth-pg';
 
 // Force-refresh live data — direct API call, no cron chaining.
 // Rate-limited to once every 15s via Redis lock.
@@ -80,6 +81,10 @@ async function apiFetchFixture(apiKey, fixtureId) {
 
 export async function POST(request) {
   try {
+    // R9 FIX: dispara llamadas a API-Football (quema cuota) → exigir sesión.
+    if (!(await getCurrentUser())) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     let body = {};
     try { body = await request.json(); } catch {}
     const viewDate = body.date || null;

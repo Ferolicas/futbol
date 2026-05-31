@@ -23,7 +23,7 @@ export async function POST(request) {
   } else {
     if (!date) return Response.json({ error: 'Missing date' }, { status: 400 });
     await supabaseAdmin.from('baseball_user_hidden')
-      .upsert({ user_id: user.id, fixture_id: fixtureId, date, created_at: new Date().toISOString() });
+      .upsert({ user_id: user.id, fixture_id: fixtureId, date, created_at: new Date().toISOString() }, { onConflict: 'user_id,fixture_id' });
   }
   return Response.json({ success: true });
 }

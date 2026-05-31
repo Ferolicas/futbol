@@ -77,7 +77,13 @@ export async function GET(request) {
 // ─── POST — start (session) or continue batch (internal) ─────────────────────
 
 export async function POST(request) {
-  const isInternal = request.headers.get('x-internal-trigger') === 'true';
+  // R17 FIX: el auto-encadenado interno se autentica con CRON_SECRET (no con el
+  // header `x-internal-trigger` forjable, que permitía a cualquiera saltarse la
+  // sesión de owner y disparar el reanálisis batch — quema cuota).
+  const { searchParams } = new URL(request.url);
+  const internalSecret = searchParams.get('secret')
+    || request.headers.get('authorization')?.replace('Bearer ', '');
+  const isInternal = !!process.env.CRON_SECRET && internalSecret === process.env.CRON_SECRET;
 
   // Internal batch calls skip session auth
   if (!isInternal) {
@@ -89,7 +95,6 @@ export async function POST(request) {
     }
   }
 
-  const { searchParams } = new URL(request.url);
   const date   = searchParams.get('date') || new Date().toISOString().split('T')[0];
   const offset = parseInt(searchParams.get('offset') || '0', 10);
 
@@ -129,10 +134,11 @@ export async function POST(request) {
     };
     await redisSet(`reanalyze-progress:${date}`, progress, PROGRESS_TTL);
 
-    // Fire first internal batch (fire-and-forget — browser can close)
-    fetch(`${getBaseUrl()}/api/admin/reanalyze?date=${date}&offset=0`, {
+    // Fire first internal batch (fire-and-forget — browser can close).
+    // R17: el chain se autentica con CRON_SECRET en la query (no header forjable).
+    const _sec = encodeURIComponent(process.env.CRON_SECRET || '');
+    fetch(`${getBaseUrl()}/api/admin/reanalyze?date=${date}&offset=0&secret=${_sec}`, {
       method: 'POST',
-      headers: { 'x-internal-trigger': 'true' },
     }).catch(e => console.error('[reanalyze] Failed to start chain:', e.message));
 
     return Response.json({ started: true, total: fixtures.length });
@@ -241,10 +247,11 @@ export async function POST(request) {
     return Response.json({ success: true, ...updatedProg });
   }
 
-  // Chain next batch (fire-and-forget — this function returns immediately)
-  fetch(`${getBaseUrl()}/api/admin/reanalyze?date=${date}&offset=${nextOffset}`, {
+  // Chain next batch (fire-and-forget — this function returns immediately).
+  // R17: autenticación del chain con CRON_SECRET en la query.
+  const _sec = encodeURIComponent(process.env.CRON_SECRET || '');
+  fetch(`${getBaseUrl()}/api/admin/reanalyze?date=${date}&offset=${nextOffset}&secret=${_sec}`, {
     method: 'POST',
-    headers: { 'x-internal-trigger': 'true' },
   }).catch(e => console.error(`[reanalyze] Chain to offset ${nextOffset} failed:`, e.message));
 
   return Response.json({ success: true, ...updatedProg });

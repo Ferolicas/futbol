@@ -84,12 +84,17 @@ export async function POST(request) {
       throw error;
     }
 
-    await triggerEvent(`chat-${userId}`, 'new-message', { id: row.id, message: message.trim(), sender, created_at: new Date().toISOString() });
-
+    // R6 FIX: broadcasts en PARALELO (antes 2 await secuenciales bloqueaban la
+    // respuesta del POST; cada uno es un round-trip HTTP al worker).
+    const ts = new Date().toISOString();
+    const broadcasts = [
+      triggerEvent(`chat-${userId}`, 'new-message', { id: row.id, message: message.trim(), sender, created_at: ts }),
+    ];
     if (sender === 'user') {
-      await triggerEvent('chat-admin', 'new-message', { userId, userName: profile?.name, message: message.trim(), created_at: new Date().toISOString() });
+      broadcasts.push(triggerEvent('chat-admin', 'new-message', { userId, userName: profile?.name, message: message.trim(), created_at: ts }));
       sendChatNotification({ userName: profile?.name || user.email, userEmail: profile?.email || user.email, message: message.trim() }).catch(() => {});
     }
+    await Promise.all(broadcasts);
 
     return Response.json({ success: true, id: row.id });
   } catch (error) {

@@ -175,11 +175,15 @@ export async function runBaseballCalibration() {
     });
   }
 
+  // onConflict OBLIGATORIO: sin él, pgAdmin hace ON CONFLICT DO NOTHING y el
+  // guardado es no-op tras el primer build → la calibración quedaba CONGELADA
+  // (el panel decía "recalibrado" pero el valor nunca cambiaba). Con onConflict
+  // 'key' los knots nuevos sobrescriben los viejos en cada corrida.
   const { error: saveErr } = await supabaseAdmin.from('app_config').upsert({
     key: KEY,
     value: calibration,
     updated_at: new Date().toISOString(),
-  });
+  }, { onConflict: 'key' });
   if (saveErr) throw new Error(`persist: ${saveErr.message}`);
 
   return {

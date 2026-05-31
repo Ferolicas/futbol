@@ -15,7 +15,11 @@ import { useEffect, useRef, useState } from 'react';
  */
 
 const WS_URL = process.env.NEXT_PUBLIC_WORKER_WS_URL;
-const WS_SECRET = process.env.NEXT_PUBLIC_WORKER_SECRET;
+// C1 FIX: usar NEXT_PUBLIC_WS_TOKEN (token público solo-WS, DISTINTO de
+// WORKER_SECRET). Fallback transicional a NEXT_PUBLIC_WORKER_SECRET para no romper
+// el realtime antes de configurar el nuevo token. Una vez configurado
+// NEXT_PUBLIC_WS_TOKEN, el navegador deja de exponer el secreto admin.
+const WS_SECRET = process.env.NEXT_PUBLIC_WS_TOKEN || process.env.NEXT_PUBLIC_WORKER_SECRET;
 
 class WorkerSocket {
   constructor() {

@@ -11,8 +11,9 @@ function verifyAuth(request) {
   const { searchParams } = new URL(request.url);
   const secret = searchParams.get('secret')
     || request.headers.get('authorization')?.replace('Bearer ', '');
+  // R17 FIX: eliminado el bypass por header `x-internal-trigger` (cualquiera podía
+  // ponerlo y saltarse el CRON_SECRET). Los triggers internos ahora pasan el secret.
   return secret === process.env.CRON_SECRET
-    || request.headers.get('x-internal-trigger') === 'true'
     || process.env.NODE_ENV !== 'production';
 }
 
