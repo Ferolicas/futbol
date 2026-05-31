@@ -42,6 +42,7 @@ export default function FerneyDashboard({ user }) {
   const [calibrationResult, setCalibrationResult] = useState(null);
   const [vpsStats, setVpsStats]   = useState(null);
   const [vpsError, setVpsError]   = useState(null);
+  const [clientsOpen, setClientsOpen] = useState(false);
 
   const fetchOnce = useCallback(async () => {
     try {
@@ -293,6 +294,10 @@ export default function FerneyDashboard({ user }) {
           background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.3); color: #f59e0b;
         }
         .fw-action-btn.yellow:hover:not(:disabled) { background: rgba(245,158,11,0.14); }
+        .fw-action-btn.violet {
+          background: rgba(167,139,250,0.1); border-color: rgba(167,139,250,0.35); color: #c4b5fd;
+        }
+        .fw-action-btn.violet:hover:not(:disabled) { background: rgba(167,139,250,0.18); }
         .fw-action-msg {
           font-size: 0.8rem; padding: 7px 14px; border-radius: 8px; border: 1px solid;
         }
@@ -537,6 +542,43 @@ export default function FerneyDashboard({ user }) {
         .fw-modal-close:hover { background: var(--bg-4); color: var(--t1); }
         .fw-modal-body { padding: 24px; display: flex; flex-direction: column; gap: 20px; }
         .fw-modal-note { font-size: 0.75rem; color: var(--t3); }
+
+        /* ── clientes ── */
+        .fw-cli-search {
+          width: 100%; background: var(--bg-2); border: 1px solid var(--brd);
+          color: var(--t1); border-radius: 8px; padding: 8px 12px;
+          font-size: 0.85rem; outline: none; transition: border-color .2s;
+        }
+        .fw-cli-search:focus { border-color: var(--accent-cyan); }
+        .fw-cli-group-title {
+          font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
+          letter-spacing: .06em; color: var(--t3);
+          display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+        }
+        .fw-cli-list { display: flex; flex-direction: column; gap: 8px; }
+        .fw-cli-row {
+          display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+          background: var(--bg-2); border: 1px solid var(--brd);
+          border-radius: 12px; padding: 12px 16px;
+        }
+        .fw-cli-info { min-width: 0; flex: 1 1 200px; }
+        .fw-cli-name { font-size: 0.88rem; font-weight: 600; color: var(--t1); }
+        .fw-cli-email { font-size: 0.76rem; color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .fw-cli-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .fw-cli-select {
+          background: var(--bg-3); border: 1px solid var(--brd); color: var(--t1);
+          border-radius: 8px; padding: 6px 10px; font-size: 0.8rem; outline: none;
+        }
+        .fw-cli-select:focus { border-color: var(--accent-cyan); }
+        .fw-cli-btn {
+          border-radius: 8px; padding: 6px 14px; font-size: 0.78rem; font-weight: 600;
+          cursor: pointer; border: 1px solid; white-space: nowrap; transition: all .15s;
+        }
+        .fw-cli-btn:disabled { opacity: .5; cursor: not-allowed; }
+        .fw-cli-btn.assign { background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.35); color: #6ee7b7; }
+        .fw-cli-btn.assign:hover:not(:disabled) { background: rgba(16,185,129,0.2); }
+        .fw-cli-btn.revoke { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.3); color: #fca5a5; }
+        .fw-cli-btn.revoke:hover:not(:disabled) { background: rgba(239,68,68,0.18); }
       `}</style>
 
       <div className="fw-page">
@@ -581,6 +623,10 @@ export default function FerneyDashboard({ user }) {
 
           {/* ── Acciones ── */}
           <div className="fw-actions">
+            <button onClick={() => setClientsOpen(true)} className="fw-action-btn violet">
+              <span>👥</span>
+              <span>Clientes</span>
+            </button>
             <button onClick={onReanalyze} disabled={!!actionBusy} className="fw-action-btn green">
               <span>{actionBusy === 'reanalyze' ? '⏳' : '↻'}</span>
               <span>{actionBusy === 'reanalyze' ? 'Encolando…' : `Re-analizar fútbol ${date}`}</span>
@@ -919,6 +965,9 @@ export default function FerneyDashboard({ user }) {
           </div>
         </main>
 
+        {/* ── Modal clientes ── */}
+        {clientsOpen && <ClientsModal onClose={() => setClientsOpen(false)} />}
+
         {/* ── Modal calibración ── */}
         {calibrationResult && (
           <div className="fw-overlay">
@@ -1102,6 +1151,207 @@ function KpiCard({ label, value, accent, valueColor, sub, icon }) {
       <div className="fw-kpi-label">{label}</div>
       <div className="fw-kpi-value" style={{ color: valueColor }}>{value ?? '—'}</div>
       {sub && <div className="fw-kpi-sub">{sub}</div>}
+    </div>
+  );
+}
+
+// ── Clientes modal ─────────────────────────────────────────────────────────────
+
+const PLAN_LABELS = {
+  semanal: 'Semanal',
+  mensual: 'Mensual',
+  trimestral: 'Trimestral',
+  semestral: 'Semestral',
+  anual: 'Anual',
+};
+
+function ClientsModal({ onClose }) {
+  const [data, setData]       = useState(null);
+  const [err, setErr]         = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy]       = useState(null);   // userId mutándose
+  const [msg, setMsg]         = useState(null);
+  const [q, setQ]             = useState('');
+  const [sel, setSel]         = useState({});     // userId → plan elegido
+
+  const load = useCallback(async () => {
+    try {
+      const res  = await fetch('/api/admin/clients', { cache: 'no-store' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) setErr(body.error || `HTTP ${res.status}`);
+      else { setData(body); setErr(null); }
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const plans = data?.plans?.length ? data.plans : Object.keys(PLAN_LABELS);
+  const planFor = (u) => sel[u.id] || u.plan || 'mensual';
+
+  const mutate = async (userId, action, plan) => {
+    setBusy(userId); setMsg(null);
+    try {
+      const res  = await fetch('/api/admin/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, userId, plan }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.ok) {
+        setMsg({ kind: 'bad', text: body.error || `HTTP ${res.status}` });
+      } else {
+        setMsg({
+          kind: 'ok',
+          text: action === 'set-plan'
+            ? `Plan ${PLAN_LABELS[plan] || plan} asignado a ${body.user.email}.`
+            : `Acceso revocado a ${body.user.email}.`,
+        });
+        await load();
+      }
+    } catch (e) {
+      setMsg({ kind: 'bad', text: e.message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const norm  = (s) => (s || '').toLowerCase();
+  const match = (u) => !q || norm(u.email).includes(norm(q)) || norm(u.name).includes(norm(q));
+
+  const allActive = data?.active || [];
+  const staff     = allActive.filter((u) => ['admin', 'owner'].includes(u.role));
+  const active    = allActive.filter((u) => !['admin', 'owner'].includes(u.role)).filter(match);
+  const pending   = (data?.pending || []).filter(match);
+
+  return (
+    <div className="fw-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="fw-modal">
+        <div className="fw-modal-header">
+          <h3 className="fw-modal-title">
+            Clientes{data ? ` · ${active.length} activos · ${pending.length} inactivos` : ''}
+          </h3>
+          <button onClick={onClose} className="fw-modal-close">✕ Cerrar</button>
+        </div>
+        <div className="fw-modal-body">
+          {err && <div className="fw-error"><span>⚠</span> {err}</div>}
+          {msg && (
+            <div className={`fw-action-msg ${msg.kind}`}>
+              {msg.kind === 'ok' ? '✓' : '✗'} {msg.text}
+            </div>
+          )}
+          <input
+            className="fw-cli-search"
+            placeholder="Buscar por email o nombre…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+
+          {loading ? (
+            <div className="fw-empty-card">Cargando clientes…</div>
+          ) : (
+            <>
+              {/* Activos */}
+              <div>
+                <div className="fw-cli-group-title">
+                  <span className="fw-badge green">Activos</span> {active.length}
+                </div>
+                <div className="fw-cli-list">
+                  {active.length === 0 && <div className="fw-empty-card">Sin clientes activos.</div>}
+                  {active.map((u) => (
+                    <div key={u.id} className="fw-cli-row">
+                      <div className="fw-cli-info">
+                        <div className="fw-cli-name">
+                          {u.name || '(sin nombre)'}{' '}
+                          <span className="fw-badge cyan" style={{ marginLeft: 4 }}>{(u.plan || '—').toUpperCase()}</span>
+                        </div>
+                        <div className="fw-cli-email">
+                          {u.email} · próx. pago {u.next_payment_at ? fmtDateTime(u.next_payment_at) : '—'}
+                        </div>
+                      </div>
+                      <div className="fw-cli-controls">
+                        <select
+                          className="fw-cli-select"
+                          value={planFor(u)}
+                          onChange={(e) => setSel((s) => ({ ...s, [u.id]: e.target.value }))}
+                        >
+                          {plans.map((p) => <option key={p} value={p}>{PLAN_LABELS[p] || p}</option>)}
+                        </select>
+                        <button
+                          className="fw-cli-btn assign"
+                          disabled={busy === u.id}
+                          onClick={() => mutate(u.id, 'set-plan', planFor(u))}
+                        >
+                          {busy === u.id ? '…' : 'Cambiar'}
+                        </button>
+                        <button
+                          className="fw-cli-btn revoke"
+                          disabled={busy === u.id}
+                          onClick={() => { if (confirm(`¿Revocar acceso a ${u.email}?`)) mutate(u.id, 'revoke'); }}
+                        >
+                          Revocar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Inactivos */}
+              <div>
+                <div className="fw-cli-group-title">
+                  <span className="fw-badge amber">Inactivos</span> {pending.length}
+                </div>
+                <div className="fw-cli-list">
+                  {pending.length === 0 && <div className="fw-empty-card">Sin clientes inactivos.</div>}
+                  {pending.map((u) => (
+                    <div key={u.id} className="fw-cli-row">
+                      <div className="fw-cli-info">
+                        <div className="fw-cli-name">
+                          {u.name || '(sin nombre)'}{' '}
+                          <span className="fw-badge zinc" style={{ marginLeft: 4 }}>{(u.subscription_status || 'sin pago').toUpperCase()}</span>
+                        </div>
+                        <div className="fw-cli-email">
+                          {u.email} · registrado {u.created_at ? fmtDateTime(u.created_at) : '—'}
+                        </div>
+                      </div>
+                      <div className="fw-cli-controls">
+                        <select
+                          className="fw-cli-select"
+                          value={planFor(u)}
+                          onChange={(e) => setSel((s) => ({ ...s, [u.id]: e.target.value }))}
+                        >
+                          {plans.map((p) => <option key={p} value={p}>{PLAN_LABELS[p] || p}</option>)}
+                        </select>
+                        <button
+                          className="fw-cli-btn assign"
+                          disabled={busy === u.id}
+                          onClick={() => mutate(u.id, 'set-plan', planFor(u))}
+                        >
+                          {busy === u.id ? '…' : 'Activar'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {staff.length > 0 && (
+                <p className="fw-modal-note">
+                  {staff.length} cuenta(s) de staff (admin/owner) con acceso por rol no se gestionan aquí.
+                </p>
+              )}
+              <p className="fw-modal-note">
+                «Activar / Cambiar» asigna el plan manualmente (acceso inmediato, sin cobro). «Revocar» quita
+                el acceso y cancela la suscripción de Stripe si existe.
+              </p>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

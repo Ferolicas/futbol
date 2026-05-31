@@ -1,12 +1,20 @@
-import { stripe } from '../../../../lib/stripe';
+import { z } from 'zod';
+import { stripe, isValidPlan, PLAN_IDS } from '../../../../lib/stripe';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { getUserProfile } from '../../../../lib/supabase-auth';
+import { logAction } from '../../../../lib/audit';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+async function requireAdmin() {
   const profile = await getUserProfile();
-  if (!profile || !['admin', 'owner'].includes(profile.role)) {
+  if (!profile || !['admin', 'owner'].includes(profile.role)) return null;
+  return profile;
+}
+
+export async function GET() {
+  const profile = await requireAdmin();
+  if (!profile) {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -90,5 +98,109 @@ export async function GET() {
       created_at: u.created_at,
     })),
     counts: { active: active.length, pending: pending.length },
+    plans: PLAN_IDS,
+  });
+}
+
+// ── POST: asignar o revocar plan manualmente (override de admin) ──────────────
+//
+// Body:
+//   { action: 'set-plan', userId, plan }  → da acceso con el plan elegido
+//                                            (subscription_status = 'active')
+//   { action: 'revoke',   userId }        → revoca el acceso
+//                                            (subscription_status = 'inactive',
+//                                             plan = null) y cancela cualquier
+//                                             suscripción viva en Stripe para que
+//                                             deje de cobrar.
+//
+// Solo aplica a cuentas con role 'user' — las cuentas de staff (admin/owner)
+// tienen acceso por rol y no se gestionan desde aquí.
+const bodySchema = z.object({
+  action: z.enum(['set-plan', 'revoke']),
+  userId: z.string().min(1, 'userId requerido'),
+  plan: z.string().optional(),
+});
+
+export async function POST(request) {
+  const admin = await requireAdmin();
+  if (!admin) return Response.json({ error: 'Forbidden' }, { status: 403 });
+
+  const raw = await request.json().catch(() => null);
+  const parsed = bodySchema.safeParse(raw);
+  if (!parsed.success) {
+    return Response.json({ error: 'Datos inválidos', details: parsed.error.flatten() }, { status: 400 });
+  }
+  const { action, userId, plan } = parsed.data;
+
+  if (action === 'set-plan' && !isValidPlan(plan)) {
+    return Response.json({ error: `Plan inválido. Opciones: ${PLAN_IDS.join(', ')}` }, { status: 400 });
+  }
+
+  // Cargar el usuario destino
+  const { data: target, error: targetErr } = await supabaseAdmin
+    .from('user_profiles')
+    .select('id, email, name, role, plan, subscription_status, stripe_customer_id')
+    .eq('id', userId)
+    .maybeSingle();
+  if (targetErr) return Response.json({ error: targetErr.message }, { status: 500 });
+  if (!target) return Response.json({ error: 'Usuario no encontrado' }, { status: 404 });
+
+  if (['admin', 'owner'].includes(target.role)) {
+    return Response.json(
+      { error: 'No aplica a cuentas de staff (admin/owner): ya tienen acceso por rol.' },
+      { status: 400 },
+    );
+  }
+
+  let update;
+  if (action === 'set-plan') {
+    update = { plan, subscription_status: 'active', updated_at: new Date().toISOString() };
+  } else {
+    // revoke — best-effort: cancelar suscripciones vivas en Stripe para cortar el cobro
+    if (stripe && target.stripe_customer_id) {
+      try {
+        const subs = await stripe.subscriptions.list({
+          customer: target.stripe_customer_id,
+          status: 'all',
+          limit: 10,
+        });
+        await Promise.all(
+          subs.data
+            .filter((s) => ['active', 'trialing', 'past_due', 'unpaid'].includes(s.status))
+            .map((s) => stripe.subscriptions.cancel(s.id).catch((e) =>
+              console.error('[admin/clients] cancel sub', s.id, e.message))),
+        );
+      } catch (e) {
+        console.error('[admin/clients] stripe cancel', target.email, e.message);
+      }
+    }
+    update = { plan: null, subscription_status: 'inactive', updated_at: new Date().toISOString() };
+  }
+
+  const { error: updErr } = await supabaseAdmin
+    .from('user_profiles')
+    .update(update)
+    .eq('id', userId);
+  if (updErr) return Response.json({ error: updErr.message }, { status: 500 });
+
+  logAction({
+    userId: admin.id,
+    userEmail: admin.email,
+    action: action === 'set-plan' ? 'client-set-plan' : 'client-revoke',
+    entity: 'user_profile',
+    entityId: userId,
+    payload: { targetEmail: target.email, plan: action === 'set-plan' ? plan : null },
+    request,
+  }).catch(() => {});
+
+  return Response.json({
+    ok: true,
+    user: {
+      id: target.id,
+      email: target.email,
+      name: target.name,
+      plan: update.plan,
+      subscription_status: update.subscription_status,
+    },
   });
 }

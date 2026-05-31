@@ -1,6 +1,6 @@
 import { stripe, createPostPaymentSubscription } from '../../../lib/stripe';
 import { supabaseAdmin } from '../../../lib/supabase';
-import { sendWelcomeEmail } from '../../../lib/resend-email';
+import { sendPlanActivatedEmail } from '../../../lib/zeptomail';
 
 async function findUserByCustomer(customerId, userId) {
   // 1. By stripe_customer_id in user_profiles
@@ -48,14 +48,13 @@ async function activateUser(profile, plan, customerId) {
   if (_err1) console.error('[webhook:activate]', _err1.message);
 
   try {
-    await sendWelcomeEmail({
+    await sendPlanActivatedEmail({
       to: profile.email,
       name: profile.name,
       plan: plan || 'mensual',
-      password: '(la contrasena que elegiste al registrarte)',
     });
   } catch (e) {
-    console.error('[webhook] Welcome email failed:', e.message);
+    console.error('[webhook] Plan activated email failed:', e.message);
   }
 }
 

@@ -14,8 +14,8 @@ export async function POST(request) {
     if (!name || !email || !password) {
       return Response.json({ error: 'Nombre, email y contrasena son obligatorios' }, { status: 400 });
     }
-    if (password.length < 6) {
-      return Response.json({ error: 'La contrasena debe tener al menos 6 caracteres' }, { status: 400 });
+    if (password.length < 8) {
+      return Response.json({ error: 'La contrasena debe tener al menos 8 caracteres' }, { status: 400 });
     }
 
     const emailLower = email.toLowerCase().trim();
