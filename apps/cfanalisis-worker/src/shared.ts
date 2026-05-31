@@ -85,6 +85,8 @@ export const redisGet = _redis.redisGet;
 export const redisSet = _redis.redisSet;
 export const redisIncr = _redis.redisIncr;
 export const redisDel = _redis.redisDel;
+export const redisListPush = _redis.redisListPush;
+export const redisListRange = _redis.redisListRange;
 export const KEYS = _redis.KEYS;
 export const TTL = _redis.TTL;
 

@@ -14,7 +14,7 @@ function verifyAuth(request) {
   const { searchParams } = new URL(request.url);
   const secret = searchParams.get('secret')
     || request.headers.get('authorization')?.replace('Bearer ', '');
-  return secret === process.env.CRON_SECRET || process.env.NODE_ENV !== 'production';
+  return secret === process.env.CRON_SECRET; // R18: sin bypass NODE_ENV
 }
 
 export async function POST(request) {

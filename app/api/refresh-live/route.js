@@ -1,6 +1,7 @@
 import { redisGet, redisSet, KEYS, TTL } from '../../../lib/redis';
 import { ALL_LEAGUE_IDS, isYouthTeam } from '../../../lib/leagues';
 import { getCurrentUser } from '../../../lib/auth-pg';
+import { statLookup, STAT_ALIASES } from '../../../lib/match-stats';
 
 // Force-refresh live data — direct API call, no cron chaining.
 // Rate-limited to once every 15s via Redis lock.
@@ -24,10 +25,8 @@ function extractLiveStats(match) {
   const homeStats = (match.statistics || []).find(s => s.team?.id === homeId);
   const awayStats = (match.statistics || []).find(s => s.team?.id === awayId);
 
-  const getVal = (teamStats, type) => {
-    const stat = (teamStats?.statistics || []).find(s => s.type === type);
-    return stat?.value || 0;
-  };
+  // AF1 FIX: statLookup compartido (aliases + null-safe), igual que el worker.
+  const getVal = (teamStats, ...names) => statLookup(teamStats, ...names) ?? 0;
 
   const goalScorers = [], cardEvents = [], missedPenalties = [];
   for (const ev of (match.events || [])) {
@@ -43,12 +42,12 @@ function extractLiveStats(match) {
     }
   }
 
-  const hCorners = getVal(homeStats, 'Corner Kicks');
-  const aCorners = getVal(awayStats, 'Corner Kicks');
-  const hYellow = getVal(homeStats, 'Yellow Cards') || cardEvents.filter(e => e.teamId === homeId && e.type === 'Yellow Card').length;
-  const aYellow = getVal(awayStats, 'Yellow Cards') || cardEvents.filter(e => e.teamId === awayId && e.type === 'Yellow Card').length;
-  const hRed = getVal(homeStats, 'Red Cards') || cardEvents.filter(e => e.teamId === homeId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
-  const aRed = getVal(awayStats, 'Red Cards') || cardEvents.filter(e => e.teamId === awayId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
+  const hCorners = getVal(homeStats, ...STAT_ALIASES.corners);
+  const aCorners = getVal(awayStats, ...STAT_ALIASES.corners);
+  const hYellow = getVal(homeStats, ...STAT_ALIASES.yellow) || cardEvents.filter(e => e.teamId === homeId && e.type === 'Yellow Card').length;
+  const aYellow = getVal(awayStats, ...STAT_ALIASES.yellow) || cardEvents.filter(e => e.teamId === awayId && e.type === 'Yellow Card').length;
+  const hRed = getVal(homeStats, ...STAT_ALIASES.red) || cardEvents.filter(e => e.teamId === homeId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
+  const aRed = getVal(awayStats, ...STAT_ALIASES.red) || cardEvents.filter(e => e.teamId === awayId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
 
   return {
     fixtureId: match.fixture.id,
@@ -214,12 +213,18 @@ export async function POST(request) {
     // Pass 1: stale entries in merged (from liveStats cache, 2h TTL)
     // Any match that was live but is no longer in ?live=all needs its real status fetched.
     // No time gate — the time gate was causing matches with elapsed<85 to be missed.
-    for (const [fid, entry] of Object.entries(merged)) {
-      if (!LIVE_STATUSES.includes(entry.status?.short)) continue;
-      if (freshFids.has(fid)) continue;
+    // M8 FIX: fetches en PARALELO (antes secuenciales → N×RTT). Pre-filtramos los
+    // elegibles y los resolvemos con Promise.all. Cada item escribe su propio
+    // merged[fid] (sin colisión; JS es mono-hilo).
+    const pass1Eligible = Object.entries(merged).filter(([fid, entry]) => {
+      if (!LIVE_STATUSES.includes(entry.status?.short)) return false;
+      if (freshFids.has(fid)) return false;
       // Skip if kicked off in the last 5 min — may not have appeared in live feed yet
       const kickoff = kickoffMap[fid] || 0;
-      if (kickoff && (now - kickoff) < 5 * 60 * 1000) continue;
+      if (kickoff && (now - kickoff) < 5 * 60 * 1000) return false;
+      return true;
+    });
+    await Promise.all(pass1Eligible.map(async ([fid, entry]) => {
       const full = await apiFetchFixture(apiKey, Number(fid));
       apiCalls++;
       if (full && FINISHED_STATUSES.includes(full.fixture.status.short)) {
@@ -234,7 +239,7 @@ export async function POST(request) {
       }
       // else: API confirms still live — keep current status
       staleFixed++;
-    }
+    }));
 
     // Pass 2: stale entries visible in fixtures cache but NOT in liveStats.
     // Root cause: liveStats TTL is 2h, fixtures cache TTL is 26h — after liveStats expires,
@@ -251,11 +256,15 @@ export async function POST(request) {
           && !freshFids.has(fid)
           && !FINISHED_STATUSES.includes(merged[fid]?.status?.short);
       });
-      for (const f of staleInFixtures) {
-        const fid = f.fixture.id;
-        // Skip if kicked off in the last 5 min
+      // M8 FIX: Pass 2 también en paralelo (Promise.all). El skip de "kickoff <5min"
+      // se aplica en el filtro previo.
+      const pass2Eligible = staleInFixtures.filter(f => {
         const kickoff = f.fixture.date ? new Date(f.fixture.date).getTime() : 0;
-        if (kickoff && (now - kickoff) < 5 * 60 * 1000) continue;
+        return !(kickoff && (now - kickoff) < 5 * 60 * 1000);
+      });
+      await Promise.all(pass2Eligible.map(async (f) => {
+        const fid = f.fixture.id;
+        const kickoff = f.fixture.date ? new Date(f.fixture.date).getTime() : 0;
         const full = await apiFetchFixture(apiKey, fid);
         apiCalls++;
         if (full) {
@@ -291,7 +300,7 @@ export async function POST(request) {
           merged[String(fid)] = { fixtureId: fid, status: { short: 'FT', long: 'Match Finished', elapsed: 90 }, goals: f.goals, date: today };
           staleFixed++;
         }
-      }
+      }));
     }
 
     // Also update fixtures:{date} cache so fixture cards show correct status

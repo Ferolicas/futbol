@@ -2,11 +2,18 @@ import crypto from 'crypto';
 import { pgQuery } from '../../../../lib/db';
 import { redisSet } from '../../../../lib/redis';
 import { sendPasswordResetEmail } from '../../../../lib/zeptomail';
+import { redisRateLimit, clientIp } from '../../../../lib/ratelimit-redis';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
   try {
+    // A2: rate-limit compartido (Redis) — 5/min/IP anti enumeración/spam de emails.
+    const rl = await redisRateLimit('forgot', clientIp(request), 5, 60);
+    if (!rl.success) {
+      return Response.json({ error: 'Demasiados intentos. Espera un momento.' }, { status: 429 });
+    }
+
     const { email } = await request.json();
     if (!email?.trim()) {
       return Response.json({ error: 'Email requerido' }, { status: 400 });

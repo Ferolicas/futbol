@@ -3,11 +3,19 @@
 // fallidos, crea sesión (cookie JWT httpOnly). Reemplaza el login client-side
 // que antes hacía supabase.auth.signInWithPassword en el browser.
 import { loginUser } from '../../../../lib/auth-pg';
+import { redisRateLimit, clientIp } from '../../../../lib/ratelimit-redis';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
   try {
+    // A2: rate-limit COMPARTIDO (Redis) anti fuerza-bruta — 10/min/IP. Complementa
+    // el limiter in-memory del middleware (per-proceso).
+    const rl = await redisRateLimit('login', clientIp(request), 10, 60);
+    if (!rl.success) {
+      return Response.json({ error: 'Demasiados intentos. Espera un momento.' }, { status: 429 });
+    }
+
     const { email, password } = await request.json();
     if (!email || !password) {
       return Response.json({ error: 'Email y contraseña requeridos' }, { status: 400 });

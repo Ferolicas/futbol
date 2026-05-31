@@ -5,6 +5,7 @@
 import bcrypt from 'bcryptjs';
 import { pgQuery } from '../../../../lib/db';
 import { redisGet, redisDel } from '../../../../lib/redis';
+import { redisRateLimit, clientIp } from '../../../../lib/ratelimit-redis';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +13,12 @@ const BCRYPT_ROUNDS = 10;
 
 export async function POST(request) {
   try {
+    // A2: rate-limit compartido (Redis) — 20/min/IP anti fuerza-bruta de tokens.
+    const rl = await redisRateLimit('reset', clientIp(request), 20, 60);
+    if (!rl.success) {
+      return Response.json({ error: 'Demasiados intentos. Espera un momento.' }, { status: 429 });
+    }
+
     const { token, password } = await request.json();
 
     if (!token?.trim()) {

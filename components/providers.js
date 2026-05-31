@@ -1,5 +1,5 @@
 'use client';
-import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 
 const AuthContext = createContext(null);
 
@@ -53,7 +53,9 @@ export default function Providers({ children }) {
 
   // Shim con la misma forma que el cliente Supabase: `supabase.auth.signOut()`.
   // Internamente hace POST /api/auth/logout (borra sesión PG + cookie).
-  const supabase = {
+  // F5 FIX: useMemo para no recrear el shim en CADA render (antes era un objeto
+  // nuevo por render → todos los consumidores del contexto re-renderizaban).
+  const supabase = useMemo(() => ({
     auth: {
       signOut: async () => {
         try {
@@ -65,10 +67,17 @@ export default function Providers({ children }) {
       getSession: async () => ({ data: { session: user ? { user } : null } }),
       getUser: async () => ({ data: { user } }),
     },
-  };
+  }), [user]);
+
+  // El value del provider también memoizado (evita re-render de consumidores
+  // por identidad del objeto value en cada render).
+  const ctxValue = useMemo(
+    () => ({ user, loading, supabase, refreshSession }),
+    [user, loading, supabase, refreshSession],
+  );
 
   return (
-    <AuthContext.Provider value={{ user, loading, supabase, refreshSession }}>
+    <AuthContext.Provider value={ctxValue}>
       {user && <TimezoneSync />}
       {children}
     </AuthContext.Provider>

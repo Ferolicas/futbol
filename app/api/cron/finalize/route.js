@@ -12,8 +12,8 @@ function verifyAuth(request) {
   const secret = searchParams.get('secret')
     || request.headers.get('authorization')?.replace('Bearer ', '');
   // R17 FIX: eliminado el bypass forjable por header `x-internal-trigger`.
-  return secret === process.env.CRON_SECRET
-    || process.env.NODE_ENV !== 'production';
+  // R18 FIX: eliminado el bypass `NODE_ENV !== 'production'`. Siempre CRON_SECRET.
+  return secret === process.env.CRON_SECRET;
 }
 
 export async function GET(request) {
