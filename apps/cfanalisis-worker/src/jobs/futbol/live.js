@@ -734,15 +734,20 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today) {
     return;
   }
 
+  // W1 FIX: antes 1 query de favoritos POR usuario (N+1, cada 20s). Ahora UNA
+  // sola query con IN y agrupación en memoria.
   const favoritesByUser = {};
-  await Promise.all(subs.map(async (row) => {
-    if (favoritesByUser[row.user_id] !== undefined) return;
+  const userIds = [...new Set(subs.map(r => r.user_id).filter(Boolean))];
+  for (const uid of userIds) favoritesByUser[uid] = new Set();
+  if (userIds.length > 0) {
     const { data: favRows } = await supabaseAdmin
       .from('user_favorites')
-      .select('fixture_id')
-      .eq('user_id', row.user_id);
-    favoritesByUser[row.user_id] = new Set((favRows || []).map(r => Number(r.fixture_id)));
-  }));
+      .select('user_id, fixture_id')
+      .in('user_id', userIds);
+    for (const r of (favRows || [])) {
+      (favoritesByUser[r.user_id] ||= new Set()).add(Number(r.fixture_id));
+    }
+  }
 
   // 3. Enviar — recolectar endpoints expirados para purga al final
   const expiredByUser = {};
@@ -1019,6 +1024,34 @@ export async function runLive(_payload = {}) {
       })();
     }
   }
+
+  // NT8: broadcast TEMPRANO del marcador (del feed principal /fixtures?live=all)
+  // ANTES de los fetches de detalle (needsEvents/needsStats/stale), que pueden
+  // tardar varios segundos. Así la UI ve el gol/marcador por WS lo antes posible;
+  // el broadcast final (con córners/stats enriquecidos) va igual al terminar el tick.
+  // Fire-and-forget — no bloquea el tick.
+  try {
+    const earlyUpdates = tracked.map(m => {
+      const d = liveDetailsMap[m.fixture.id];
+      return {
+        fixtureId: m.fixture.id,
+        status: m.fixture.status,
+        goals: m.goals,
+        score: m.score,
+        corners: d?.corners?.total > 0 ? d.corners : null,
+        yellowCards: d?.yellowCards || null,
+        redCards: d?.redCards || null,
+        goalScorers: d?.goalScorers || [],
+        missedPenalties: d?.missedPenalties || [],
+      };
+    });
+    if (earlyUpdates.length > 0) {
+      triggerEvent('live-scores', 'update', {
+        date: today, liveCount: tracked.length, matches: earlyUpdates,
+        timestamp: new Date().toISOString(), partial: true,
+      }).catch(() => {});
+    }
+  } catch (e) { console.error(`${LL} early broadcast fallo:`, e.message); }
 
   const existingLive = (await redisGet(KEYS.liveStats(today))) || {};
 
@@ -1305,7 +1338,7 @@ export async function runLive(_payload = {}) {
     });
   }
 
-  for (let i = 0; i < apiCalls; i++) await incrementApiCallCount();
+  if (apiCalls > 0) await incrementApiCallCount(apiCalls); // NT7: 1 INCRBY en vez de N INCR
 
   console.log(`${LL} ✓ done en ${Date.now() - t0}ms — tracked=${tracked.length} totalLive=${allLive.length} staleFixed=${staleFixedCount} apiCalls=${apiCalls}`);
 

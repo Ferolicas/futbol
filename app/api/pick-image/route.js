@@ -28,12 +28,27 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
 export const runtime = 'nodejs';
+// Usa request.url (query params) → siempre dinámico. El Cache-Control de la
+// respuesta sigue permitiendo cache en CDN/navegador por URL.
+export const dynamic = 'force-dynamic';
 
 const W = 800;
 const H = 1422;
 
+// R25 FIX (anti-SSRF): solo se permiten los hosts de logos oficiales. Antes se
+// hacía fetch a CUALQUIER URL del query param → un atacante podía apuntar a
+// servicios internos del VPS o endpoints de metadata.
+const ALLOWED_IMG_HOSTS = new Set([
+  'media.api-sports.io',
+  'www.mlbstatic.com',
+  'mlbstatic.com',
+]);
+
 async function toBase64(url) {
   try {
+    let host;
+    try { host = new URL(url).hostname; } catch { return null; }
+    if (!ALLOWED_IMG_HOSTS.has(host)) return null;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
     const res = await fetch(url, { signal: controller.signal });
@@ -295,8 +310,11 @@ export async function GET(req) {
       .png({ quality: 100, compressionLevel: 3 })
       .toBuffer();
 
+    // R25 FIX: la imagen es función pura de los query params → cacheable. Antes
+    // 'no-store' regeneraba (satori+sharp, CPU pesado) en CADA request → DoS fácil
+    // en un endpoint público. Cache 24h reduce el coste a 1 render por variante.
     return new Response(png, {
-      headers: { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' },
+      headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400, immutable' },
     });
 
   } catch (err) {

@@ -65,8 +65,10 @@ export async function POST(request) {
       return Response.json({ error: 'Message required' }, { status: 400 });
     }
 
-    const { count } = await supabaseAdmin.from('tickets').select('*', { count: 'exact', head: true }).then(r => r).catch(() => ({ count: 0 }));
-    const ticketId = `CFA_${1000 + (count || 0)}`;
+    // R26 FIX: antes el id era `CFA_${1000+count(*)}` → (a) full scan por ticket,
+    // (b) race: dos creaciones simultáneas obtenían el mismo count → mismo id →
+    // choque con el UNIQUE. Ahora un id único sin escaneo (timestamp base36 + sufijo).
+    const ticketId = `CFA_${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
 
     const { error } = await supabaseAdmin.from('tickets').insert({
       ticket_id: ticketId,

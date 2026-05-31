@@ -248,7 +248,7 @@ export async function runLineups(_payload = {}, _job = null) {
     }
   }
 
-  for (let i = 0; i < apiCalls; i++) await incrementApiCallCount();
+  if (apiCalls > 0) await incrementApiCallCount(apiCalls); // NT7: 1 INCRBY en vez de N INCR
 
   if (updatedFixtureIds.length > 0) {
     await triggerEvent('match-updates', 'lineups-ready', { fixtureIds: updatedFixtureIds, date: today, timestamp: new Date().toISOString() });

@@ -4,11 +4,18 @@
 import { signupUser } from '../../../lib/auth-pg';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { sendWelcomeEmail } from '../../../lib/zeptomail';
+import { redisRateLimit, clientIp } from '../../../lib/ratelimit-redis';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
   try {
+    // A2: rate-limit compartido (Redis) — 5/min/IP anti abuso de registro.
+    const rl = await redisRateLimit('register', clientIp(request), 5, 60);
+    if (!rl.success) {
+      return Response.json({ error: 'Demasiados intentos. Espera un momento.' }, { status: 429 });
+    }
+
     const { name, email, password, country, plan } = await request.json();
 
     if (!name || !email || !password) {

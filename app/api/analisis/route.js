@@ -10,6 +10,10 @@ export async function POST(request) {
     const supabase = createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     const userId = user?.id || null;
+    // R22 FIX: antes se leía el user pero NO se exigía → cualquiera podía
+    // POSTear fixtures y disparar analyzeMatch (quema cuota API-Football +
+    // CPU) sin sesión. Ahora se requiere sesión.
+    if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { fixtures, date: clientDate } = await request.json();
 

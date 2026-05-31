@@ -2,11 +2,11 @@
 /**
  * Job: futbol-odds
  *
- * Trae cuotas de The Odds API con PRESUPUESTO DIARIO de 7 llamadas (no cada
- * 15 min — eso quemaba los 500/mes en 1-2 días). Distribución:
+ * Trae cuotas de The Odds API con PRESUPUESTO DIARIO acotado (ODDS_BUDGET=2
+ * ejecuciones/día; el tope DURO real son créditos región×mercado en
+ * lib/odds-api.js). Distribución:
  *   - Primera llamada: 2 horas ANTES del primer partido del día.
- *   - Resto: repartidas uniformemente hasta el último partido (spacing
- *     dinámico), hasta agotar el presupuesto de 7.
+ *   - Resto: repartidas uniformemente hasta el último partido (spacing dinámico).
  *
  * El cron invoca este handler cada 30 min, pero el handler decide si gasta:
  * smart-skip si ya agotó el presupuesto, si aún no entra la ventana (2h pre

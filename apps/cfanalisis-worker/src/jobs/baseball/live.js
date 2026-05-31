@@ -201,12 +201,19 @@ async function sendBaseballPushes(states, prevMap) {
     return;
   }
 
+  // W1 FIX: una sola query de favoritos (antes N+1 por usuario).
   const favByUser = {};
-  await Promise.all(subs.map(async (row) => {
-    if (favByUser[row.user_id] !== undefined) return;
-    const { data: favRows } = await supabaseAdmin.from('baseball_user_favorites').select('fixture_id').eq('user_id', row.user_id);
-    favByUser[row.user_id] = new Set((favRows || []).map(r => Number(r.fixture_id)));
-  }));
+  const bbUserIds = [...new Set(subs.map(r => r.user_id).filter(Boolean))];
+  for (const uid of bbUserIds) favByUser[uid] = new Set();
+  if (bbUserIds.length > 0) {
+    const { data: favRows } = await supabaseAdmin
+      .from('baseball_user_favorites')
+      .select('user_id, fixture_id')
+      .in('user_id', bbUserIds);
+    for (const r of (favRows || [])) {
+      (favByUser[r.user_id] ||= new Set()).add(Number(r.fixture_id));
+    }
+  }
 
   const expiredByUser = {};
   let delivered = 0, failed = 0, skippedNoFav = 0;
@@ -309,7 +316,7 @@ export async function runBaseballLive(payload = {}) {
       away_errors: s.away?.errors ?? null,
       innings: s.innings || null,
       updated_at: new Date().toISOString(),
-    });
+    }, { onConflict: 'fixture_id' });
     if (error) throw new Error(`upsert ${s.gamePk}: ${error.message || error}`);
     return s.gamePk;
   });

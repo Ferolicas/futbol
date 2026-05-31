@@ -10,9 +10,11 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 10;
 
 function verifyAuth(request) {
-  const isInternal = request.headers.get('x-internal-trigger') === 'true';
-  const secret = request.headers.get('authorization')?.replace('Bearer ', '');
-  return isInternal || secret === process.env.CRON_SECRET || process.env.NODE_ENV !== 'production';
+  // R17 FIX: eliminado el bypass forjable `x-internal-trigger`.
+  const { searchParams } = new URL(request.url);
+  const secret = searchParams.get('secret')
+    || request.headers.get('authorization')?.replace('Bearer ', '');
+  return secret === process.env.CRON_SECRET; // R18: sin bypass NODE_ENV
 }
 
 export async function POST(request) {

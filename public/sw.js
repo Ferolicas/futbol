@@ -18,17 +18,32 @@ function urlBase64ToUint8Array(base64String) {
 
 self.addEventListener('push', event => {
   const data = (() => { try { return event.data?.json() || {}; } catch { return {}; } })();
-  event.waitUntil(
-    self.registration.showNotification(data.title || 'CFanalisis', {
+  const tag = data.tag || 'goal';
+  event.waitUntil((async () => {
+    await self.registration.showNotification(data.title || 'CFanalisis', {
       body: data.body || '',
       icon: '/vflogo.png',
       badge: '/vflogo.png',
-      tag: data.tag || 'goal',
+      tag,
       renotify: true,
       vibrate: [200, 100, 200],
       data: { url: data.url || '/dashboard' },
-    })
-  );
+    });
+    // NT2: telemetría detección→pantalla. El tag de eventos de fútbol en vivo es
+    // `live-{fid}-{minuto}-{nEventos}`. Reportamos la hora de pintado para medir
+    // la latencia real gol→pantalla en /admin/eventlog. Best-effort (no bloquea).
+    const m = /^live-(\d+)-(.+)-\d+$/.exec(tag);
+    if (m) {
+      try {
+        await fetch('/api/telemetry/live-shown', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fid: Number(m[1]), minute: m[2], shownAt: new Date().toISOString() }),
+          keepalive: true,
+        });
+      } catch {}
+    }
+  })());
 });
 
 self.addEventListener('notificationclick', event => {

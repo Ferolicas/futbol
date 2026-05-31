@@ -7,7 +7,7 @@
  * the dashboard. We use Upstash (not the local Redis behind BullMQ) so the
  * data is the same source-of-truth as the rest of the app cache.
  */
-import { redisGet, redisSet } from './shared.js';
+import { redisListPush, redisListRange } from './shared.js';
 
 const KEY = (date) => `errors:${date}:list`;
 const MAX_ENTRIES = 500;
@@ -30,19 +30,14 @@ const TTL_SECONDS = 7 * 24 * 3600; // 7 days
  */
 export async function logError(date, entry) {
   if (!date || !entry?.error) return;
-  try {
-    const existing = (await redisGet(KEY(date))) || [];
-    const arr = Array.isArray(existing) ? existing : [];
-    arr.unshift({
-      ts: new Date().toISOString(),
-      ...entry,
-      error: String(entry.error).slice(0, 500),
-    });
-    if (arr.length > MAX_ENTRIES) arr.length = MAX_ENTRIES;
-    await redisSet(KEY(date), arr, TTL_SECONDS);
-  } catch (e) {
-    console.error('[errors-log] failed to persist:', e.message);
-  }
+  // EL1 FIX: LPUSH atómico (+ LTRIM al cap + EXPIRE) en vez de get-array → push →
+  // set, que perdía entradas bajo la concurrencia 8 de analyze-batch.
+  await redisListPush(
+    KEY(date),
+    { ts: new Date().toISOString(), ...entry, error: String(entry.error).slice(0, 500) },
+    MAX_ENTRIES,
+    TTL_SECONDS,
+  );
 }
 
 /**
@@ -50,10 +45,5 @@ export async function logError(date, entry) {
  */
 export async function getErrors(date) {
   if (!date) return [];
-  try {
-    const data = await redisGet(KEY(date));
-    return Array.isArray(data) ? data : [];
-  } catch {
-    return [];
-  }
+  return redisListRange(KEY(date), 0, MAX_ENTRIES - 1);
 }

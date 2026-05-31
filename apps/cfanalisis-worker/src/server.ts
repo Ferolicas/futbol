@@ -12,15 +12,32 @@ import { wsManager } from './ws/wsManager.js';
 import { runBaseballCalibration } from './jobs/calibration/baseball.js';
 
 const SECRET = process.env.WORKER_SECRET || '';
+// C1 FIX: token SOLO para el WebSocket de clientes (read-only realtime). DEBE ser
+// DISTINTO de WORKER_SECRET y es el único que viaja al navegador (NEXT_PUBLIC_WS_TOKEN).
+// Antes el navegador llevaba WORKER_SECRET → cualquiera lo extraía y llamaba
+// /admin, /enqueue, /broadcast. requireAuth (privilegiado) SIEMPRE exige WORKER_SECRET;
+// el WS acepta WS_PUBLIC_TOKEN. Mientras no se configure WS_PUBLIC_TOKEN, el WS cae a
+// WORKER_SECRET (transición) — configúralo para cerrar C1 del todo.
+const WS_TOKEN = process.env.WS_PUBLIC_TOKEN || '';
 
 if (!SECRET && process.env.NODE_ENV === 'production') {
   throw new Error('[server] WORKER_SECRET must be set in production');
 }
 
+// Auth PRIVILEGIADA (admin/status, retry, calibrate, enqueue, broadcast): SIEMPRE
+// WORKER_SECRET (server-only, nunca expuesto al cliente).
 function requireAuth(req): boolean {
   const auth = req.headers['authorization'];
   const token = typeof auth === 'string' ? auth.replace(/^Bearer\s+/i, '') : '';
   return !SECRET || token === SECRET;
+}
+
+// Auth del WebSocket de clientes: WS_PUBLIC_TOKEN si está configurado; si no,
+// fallback transicional a WORKER_SECRET para no romper el realtime antes de
+// configurar el nuevo token. NUNCA da acceso a los endpoints privilegiados.
+function wsAuthOk(token: string | undefined): boolean {
+  if (WS_TOKEN) return token === WS_TOKEN || token === SECRET; // transición
+  return !!SECRET && token === SECRET;
 }
 
 async function collectQueueOverview() {
@@ -270,7 +287,8 @@ export function buildServer() {
       // attach() peta con "Cannot read properties of undefined (reading 'on')".
       instance.get('/ws', { websocket: true }, (socket, req) => {
         const query = req.query as { secret?: string; topics?: string };
-        if (!SECRET || query.secret !== SECRET) {
+        // C1 FIX: el WS usa wsAuthOk (WS_PUBLIC_TOKEN), no el secreto admin.
+        if (!wsAuthOk(query.secret)) {
           try { socket.send(JSON.stringify({ type: 'error', code: 'unauthorized' })); } catch {}
           try { socket.close(4401, 'unauthorized'); } catch {}
           return;
@@ -302,11 +320,18 @@ export function buildServer() {
     let events: any[] = (await redisGet(`eventlog:${date}`)) || [];
     if (q.fid) events = events.filter((e) => String(e.fid) === String(q.fid));
     if (q.type) events = events.filter((e) => e.type === q.type);
-    const withLatency = events.map((e) => ({
-      ...e,
-      latencyPushMs: e.tDetected && e.tPush ? Date.parse(e.tPush) - Date.parse(e.tDetected) : null,
-      latencyShownMs: e.tDetected && e.tShown ? Date.parse(e.tShown) - Date.parse(e.tDetected) : null,
-    }));
+    // NT2: mapa de "mostrado en pantalla" reportado por el Service Worker vía
+    // /api/telemetry/live-shown → { "<fid>:<min>": shownAtISO }. Rellena tShown.
+    const shownMap: Record<string, string> = (await redisGet(`eventlog:shown:${date}`)) || {};
+    const withLatency = events.map((e) => {
+      const tShown = e.tShown || shownMap[`${e.fid}:${e.min}`] || null;
+      return {
+        ...e,
+        tShown,
+        latencyPushMs: e.tDetected && e.tPush ? Date.parse(e.tPush) - Date.parse(e.tDetected) : null,
+        latencyShownMs: e.tDetected && tShown ? Date.parse(tShown) - Date.parse(e.tDetected) : null,
+      };
+    });
     return { date, count: withLatency.length, events: withLatency };
   });
 

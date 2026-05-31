@@ -414,7 +414,11 @@ export async function GET(request) {
         // force=true para que el worker ignore un `started` huérfano y
         // re-encole de verdad (si no, daily volvería a ver el flag stale).
         const forceParam = startedStale ? '&force=true' : '';
-        fetch(`${baseUrl}/api/cron/daily?date=${date}${forceParam}`, {
+        // R19 FIX: cron/daily exige CRON_SECRET. Antes este trigger mandaba el
+        // header `x-internal-trigger` (que cron/daily NO lee) y sin secret → 401
+        // en prod → la "red de seguridad" NUNCA se disparaba. Ahora pasa el secret.
+        const secretParam = process.env.CRON_SECRET ? `&secret=${encodeURIComponent(process.env.CRON_SECRET)}` : '';
+        fetch(`${baseUrl}/api/cron/daily?date=${date}${forceParam}${secretParam}`, {
           headers: { 'x-internal-trigger': 'true' },
         }).catch(() => {});
       }

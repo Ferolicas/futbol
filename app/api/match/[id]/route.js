@@ -2,6 +2,7 @@ import { getQuota, refreshLineups, refreshInjuries, fetchMatchStats, analyzeMatc
 import { getCachedAnalysis, cacheAnalysis, getCachedFixtures } from '../../../../lib/sanity-cache';
 import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
 import { supabaseAdmin } from '../../../../lib/supabase';
+import { getCurrentUser } from '../../../../lib/auth-pg';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -13,6 +14,12 @@ export async function GET(request, { params }) {
 
   if (!id) {
     return Response.json({ error: 'fixture id required' }, { status: 400 });
+  }
+
+  // R8 FIX: contenido premium + acciones que gastan cuota (analyzeMatch inline,
+  // refresh-stats/lineups) estaban SIN auth. Exigimos sesión.
+  if (!(await getCurrentUser())) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
@@ -91,6 +98,11 @@ export async function GET(request, { params }) {
 // POST: refresh lineups or injuries
 export async function POST(request, { params }) {
   const { id } = params;
+  // R8 FIX: las acciones analyze/refresh-stats/refresh-lineups gastan cuota
+  // API-Football → exigir sesión.
+  if (!(await getCurrentUser())) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
   const { action, date } = await request.json();
 
   try {

@@ -11,7 +11,7 @@ function verifyAuth(request) {
   const secret = request.headers.get('x-cron-secret')
     || request.headers.get('authorization')?.replace('Bearer ', '')
     || new URL(request.url).searchParams.get('secret');
-  return secret === process.env.CRON_SECRET || process.env.NODE_ENV !== 'production';
+  return secret === process.env.CRON_SECRET; // R18: sin bypass NODE_ENV
 }
 
 async function run(request) {

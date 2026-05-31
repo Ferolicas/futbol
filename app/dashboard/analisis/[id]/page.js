@@ -13,6 +13,7 @@ import { getAnalysisCache, setAnalysisCache } from '../../../../lib/analysis-cac
 import { useLiveStats } from '../../live-stats-context';
 import { useSelectedMarkets } from '../../selected-markets-context';
 import { getUserTz, fmtTimeInTz, todayInTz } from '../../../../lib/timezone';
+import { useWorkerSocketState } from '../../../../hooks/useWorkerSocket';
 
 function detectCountry() {
   try {
@@ -68,6 +69,10 @@ export default function AnalisisPage() {
   const [userCountry, setUserCountry] = useState('default');
   const { liveStats: allLiveStats, setLiveStats, isPopulated } = useLiveStats();
   const liveStats = allLiveStats[fixtureId];
+  // F1: estado del WebSocket. El marcador/stats en vivo llegan por WS vía el
+  // contexto live-stats (suscripción global a 'live-scores'). El poll HTTP de 15s
+  // solo se usa como FALLBACK cuando el WS NO está conectado.
+  const wsState = useWorkerSocketState();
   const [, tickLive] = useState(0);
 
   useEffect(() => { setUserCountry(detectCountry()); }, []);
@@ -173,11 +178,14 @@ export default function AnalisisPage() {
     loadStats();
   }, [fixtureId, !!analysis]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Live polling: refresca stats (córners/tarjetas/scorers) cada 15s mientras
-  // el partido está en vivo. Se detiene automáticamente al finalizar.
+  // F1: poll de stats (córners/tarjetas/scorers) cada 15s SOLO COMO FALLBACK
+  // cuando el WebSocket NO está conectado. Con el WS conectado, el contexto
+  // live-stats recibe los updates en tiempo real (a los ~ms del tick de 20s del
+  // worker) y este poll queda desactivado → 0 tráfico redundante.
   useEffect(() => {
     const liveStatuses = ['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'INT'];
     if (!liveStatuses.includes(liveStatusShort)) return;
+    if (wsState === 'connected') return; // WS activo → no hace falta poll
 
     const pollLiveStats = async () => {
       try {
@@ -190,9 +198,10 @@ export default function AnalisisPage() {
       } catch {}
     };
 
+    pollLiveStats(); // primer fetch inmediato al perder el WS
     const intervalId = setInterval(pollLiveStats, 15000);
     return () => clearInterval(intervalId);
-  }, [fixtureId, liveStatusShort, setLiveStats]);
+  }, [fixtureId, liveStatusShort, setLiveStats, wsState]);
 
   useEffect(() => {
     const stats = allLiveStats[fixtureId];

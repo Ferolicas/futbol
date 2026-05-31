@@ -27,6 +27,7 @@
 
 import { supabaseAdmin } from '../../../lib/supabase';
 import { simulateBracket } from '../../../lib/tournament-bracket';
+import { getCurrentUser } from '../../../lib/auth-pg';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -54,10 +55,15 @@ const TOURNAMENT_LEAGUES = new Set([
 ]);
 
 export async function GET(request) {
+  // R12 FIX: Monte Carlo CPU-bound (hasta 50k iter) → exigir sesión para evitar DoS anónimo.
+  if (!(await getCurrentUser())) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
   const { searchParams } = new URL(request.url);
   const leagueId   = Number(searchParams.get('league'));
   const seasonArg  = searchParams.get('season');
-  const iterations = Math.min(50000, Math.max(1000, Number(searchParams.get('iterations')) || 10000));
+  // R12: cap de iteraciones reducido (20k) para acotar el coste por request.
+  const iterations = Math.min(20000, Math.max(1000, Number(searchParams.get('iterations')) || 10000));
 
   if (!leagueId) {
     return Response.json({ error: 'league param required' }, { status: 400 });

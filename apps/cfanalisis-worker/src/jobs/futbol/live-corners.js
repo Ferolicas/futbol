@@ -64,8 +64,13 @@ export async function runLiveCorners(_payload = {}) {
     const homeStats = stats.find(s => s.team?.id === homeId);
     const awayStats = stats.find(s => s.team?.id === awayId);
 
-    const hCorners = getVal(homeStats, 'Corner Kicks');
-    const aCorners = getVal(awayStats, 'Corner Kicks');
+    // LC1 FIX: piso monótono por-lado (mismo criterio que live.js). El endpoint
+    // dedicado a veces trae un lado en null → getVal lo daba como 0 y pisaba un
+    // valor mayor ya guardado (ej. 8-3 → 8-0) → el córner "retrocedía" en pantalla.
+    // Nunca bajar por debajo del último valor conocido.
+    const prevC = existing?.corners || {};
+    const hCorners = Math.max(getVal(homeStats, 'Corner Kicks'), prevC.home ?? 0);
+    const aCorners = Math.max(getVal(awayStats, 'Corner Kicks'), prevC.away ?? 0);
     const corners = { home: hCorners, away: aCorners, total: hCorners + aCorners };
 
     liveData[fid] = { ...existing, corners };
@@ -79,7 +84,7 @@ export async function runLiveCorners(_payload = {}) {
     });
   }
 
-  for (let i = 0; i < apiCalls; i++) await incrementApiCallCount();
+  if (apiCalls > 0) await incrementApiCallCount(apiCalls); // NT7: 1 INCRBY en vez de N INCR
 
   return { ok: true, checkedMatches: liveFixtureIds.length, updatedMatches: pusherUpdates.length, apiCalls };
 }

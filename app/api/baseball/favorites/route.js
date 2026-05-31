@@ -33,7 +33,7 @@ export async function POST(request) {
       .eq('fixture_id', fixtureId);
   } else {
     await supabaseAdmin.from('baseball_user_favorites')
-      .upsert({ user_id: user.id, fixture_id: fixtureId, created_at: new Date().toISOString() });
+      .upsert({ user_id: user.id, fixture_id: fixtureId, created_at: new Date().toISOString() }, { onConflict: 'user_id,fixture_id' });
   }
   return Response.json({ success: true });
 }
