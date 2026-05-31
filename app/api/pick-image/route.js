@@ -28,6 +28,9 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
 export const runtime = 'nodejs';
+// Usa request.url (query params) → siempre dinámico. El Cache-Control de la
+// respuesta sigue permitiendo cache en CDN/navegador por URL.
+export const dynamic = 'force-dynamic';
 
 const W = 800;
 const H = 1422;

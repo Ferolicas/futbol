@@ -6,6 +6,7 @@ import useSWR from 'swr';
 import { useAuth } from '../../components/providers';
 import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
+import { useWorkerSocketState } from '../../hooks/useWorkerSocket';
 import { BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
 import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/timezone';
 import { buildCombinada } from '../../lib/combinada';
@@ -82,6 +83,10 @@ export default function Dashboard() {
   const [savingComb, setSavingComb] = useState(false);
   // Live match stats — shared context: dashboard + detail page use the same data
   const { liveStats, setLiveStats, isPopulated } = useLiveStats();
+  // F2/F6/F7: estado del WS. Patrón realtime tipo baseball — WS instantáneo como
+  // fuente primaria + SWR 60s de respaldo. El poll de 30s a /api/refresh-live solo
+  // se activa como FALLBACK cuando el WS NO está conectado (mata el polling redundante).
+  const wsState = useWorkerSocketState();
   // Owner re-analyze state
   const [reanalyzing, setReanalyzing] = useState(false);
   const [reanalyzeDone, setReanalyzeDone] = useState(false);
@@ -488,13 +493,17 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Live polling fallback (30s) when there are live matches — supplements Pusher
+  // F2/F6/F7: poll de 30s SOLO como fallback cuando el WS está caído. Con el WS
+  // conectado, los eventos 'live-scores' del worker actualizan en tiempo real vía
+  // el contexto live-stats → el poll a /api/refresh-live (que quema cuota) no corre.
   useEffect(() => {
     const hasLive = fixtures.some(f => isLive(f.fixture.status.short));
     if (!hasLive) return;
+    if (wsState === 'connected') return; // WS activo → sin poll redundante
+    refreshLiveData();
     const poll = setInterval(refreshLiveData, 30000);
     return () => clearInterval(poll);
-  }, [fixtures, refreshLiveData]);
+  }, [fixtures, refreshLiveData, wsState]);
 
   // Load saved combinadas per-user on mount
   useEffect(() => {

@@ -1025,6 +1025,34 @@ export async function runLive(_payload = {}) {
     }
   }
 
+  // NT8: broadcast TEMPRANO del marcador (del feed principal /fixtures?live=all)
+  // ANTES de los fetches de detalle (needsEvents/needsStats/stale), que pueden
+  // tardar varios segundos. Así la UI ve el gol/marcador por WS lo antes posible;
+  // el broadcast final (con córners/stats enriquecidos) va igual al terminar el tick.
+  // Fire-and-forget — no bloquea el tick.
+  try {
+    const earlyUpdates = tracked.map(m => {
+      const d = liveDetailsMap[m.fixture.id];
+      return {
+        fixtureId: m.fixture.id,
+        status: m.fixture.status,
+        goals: m.goals,
+        score: m.score,
+        corners: d?.corners?.total > 0 ? d.corners : null,
+        yellowCards: d?.yellowCards || null,
+        redCards: d?.redCards || null,
+        goalScorers: d?.goalScorers || [],
+        missedPenalties: d?.missedPenalties || [],
+      };
+    });
+    if (earlyUpdates.length > 0) {
+      triggerEvent('live-scores', 'update', {
+        date: today, liveCount: tracked.length, matches: earlyUpdates,
+        timestamp: new Date().toISOString(), partial: true,
+      }).catch(() => {});
+    }
+  } catch (e) { console.error(`${LL} early broadcast fallo:`, e.message); }
+
   const existingLive = (await redisGet(KEYS.liveStats(today))) || {};
 
   const needsEventsFetchCandidates = tracked.filter(m => {

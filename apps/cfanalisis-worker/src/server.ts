@@ -320,11 +320,18 @@ export function buildServer() {
     let events: any[] = (await redisGet(`eventlog:${date}`)) || [];
     if (q.fid) events = events.filter((e) => String(e.fid) === String(q.fid));
     if (q.type) events = events.filter((e) => e.type === q.type);
-    const withLatency = events.map((e) => ({
-      ...e,
-      latencyPushMs: e.tDetected && e.tPush ? Date.parse(e.tPush) - Date.parse(e.tDetected) : null,
-      latencyShownMs: e.tDetected && e.tShown ? Date.parse(e.tShown) - Date.parse(e.tDetected) : null,
-    }));
+    // NT2: mapa de "mostrado en pantalla" reportado por el Service Worker vía
+    // /api/telemetry/live-shown → { "<fid>:<min>": shownAtISO }. Rellena tShown.
+    const shownMap: Record<string, string> = (await redisGet(`eventlog:shown:${date}`)) || {};
+    const withLatency = events.map((e) => {
+      const tShown = e.tShown || shownMap[`${e.fid}:${e.min}`] || null;
+      return {
+        ...e,
+        tShown,
+        latencyPushMs: e.tDetected && e.tPush ? Date.parse(e.tPush) - Date.parse(e.tDetected) : null,
+        latencyShownMs: e.tDetected && tShown ? Date.parse(tShown) - Date.parse(e.tDetected) : null,
+      };
+    });
     return { date, count: withLatency.length, events: withLatency };
   });
 
