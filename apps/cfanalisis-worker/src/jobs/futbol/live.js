@@ -9,7 +9,7 @@
  */
 import {
   ALL_LEAGUE_IDS, triggerEvent,
-  redisGet, redisSet, KEYS, TTL,
+  redisGet, redisSet, redisDel, KEYS, TTL,
   incrementApiCallCount, sendPushNotification,
   supabaseAdmin, getMatchSchedule, pgQuery,
 } from '../../shared.js';
@@ -266,6 +266,33 @@ function evKey(ev) {
   return `${ev.player ?? ''}|${ev.teamId ?? ''}|${ev.detail ?? ev.kind ?? ev.type ?? ''}`;
 }
 
+// Identidad de una SUSTITUCIÓN. Un objeto subst es {playerIn, playerOut,
+// teamId,...} y NO tiene `player`/`detail`/`kind`/`type`, así que evKey() lo
+// colapsaba a `|{teamId}|` → la MISMA clave para todos los cambios de un equipo
+// (solo el primero notificaba; el resto quedaba deduplicado para siempre). La
+// identidad real de un cambio son sus dos jugadores (sale→entra) + equipo. Sin
+// minuto (la API lo corrige entre ticks).
+function subKey(s) {
+  return `${s.playerOut ?? ''}|${s.playerIn ?? ''}|${s.teamId ?? ''}`;
+}
+
+// Identidad de un evento VAR (no-gol). NO incluimos `player`: en eventos VAR la
+// atribución de jugador oscila entre null y nombre tick a tick, y cada variante
+// generaba una clave nueva → el mismo VAR se notificaba 10+ veces. Identidad
+// estable = equipo + detalle normalizado (sin minuto). El "gol anulado" NO pasa
+// por aquí: se deriva del descenso del marcador (ver handleGoalSide).
+function varKey(v) {
+  const detail = (v.detail ?? '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
+  return `${v.teamId ?? ''}|${detail}`;
+}
+
+// ¿El detalle de un evento VAR se refiere a un GOL (confirmado/anulado)? Esos se
+// gestionan por el marcador autoritativo (subida = gol, bajada = gol anulado),
+// no por el array VAR, para no duplicar ni heredar su inestabilidad de player.
+function isGoalVarDetail(detail) {
+  return /goal/i.test((detail ?? '').toString());
+}
+
 // ─── Deduplicación cross-tick por Redis ────────────────────────────────────
 // PROBLEMA QUE RESUELVE: el mismo evento se notificaba 2-3 veces en ticks
 // consecutivos de 20s. Causa: `existingLive` se lee de Redis al inicio del
@@ -279,33 +306,39 @@ function evKey(ev) {
 // FIX: en lugar de confiar solo en `existingLive` para evitar repeticiones,
 // marcamos en Redis con TTL=90s (3 ticks de 20s + buffer) una clave por
 // EVENTO ya notificado:
-//   push:sent:{fid}:goal:home:{count}        — gol home cuando contador llega a N
-//   push:sent:{fid}:corner:home:{count}      — cada córner home en valor exacto
-//   push:sent:{fid}:yellow:{teamId}:{count}  — amarilla por equipo y valor
-//   push:sent:{fid}:red:{teamId}:{count}
-//   push:sent:{fid}:subst:{evKey}            — eventos de lista por su evKey
-//   push:sent:{fid}:penalty:{evKey}
-//   push:sent:{fid}:var:{evKey}
+//   push:sent:{fid}:goal:{side}:{N}          — gol cuando el marcador llega a N
+//   push:sent:{fid}:goalcancel:{side}:{N}    — gol anulado: marcador revertido DESDE N
+//   push:sent:{fid}:corner:{side}:{N}        — cada córner en su valor exacto
+//   push:sent:{fid}:yellow:{side}:{N}        — amarilla por lado y valor
+//   push:sent:{fid}:red:{side}:{N}
+//   push:sent:{fid}:subst:{subKey}           — cambio por (sale|entra|equipo)
+//   push:sent:{fid}:penalty:{evKey}          — penalti por (player|equipo|kind)
+//   push:sent:{fid}:var:{varKey}             — VAR no-gol por (equipo|detalle)
 //
 // Antes de añadir la línea al bundle, comprobamos cada clave. Si existe →
 // skip. Las claves quedan en Redis con TTL y desaparecen solas; el evento
 // (que es estrictamente posterior a "ese contador en ese valor") nunca se
 // repetirá dentro de esa ventana.
 //
-// TTL POR TIPO DE EVENTO: eventos "de una vez" en el partido (gol, amarilla,
-// roja, cambio, penalti) usan 7200s (2h) para que NO se re-notifiquen aunque
-// la API reordene/reenvíe el evento mucho después. Eventos de contador que
-// suben varias veces (córner) o decisiones puntuales (VAR) mantienen el TTL
-// corto de 90s: su clave ya incluye el valor exacto del contador / evKey, así
-// que un TTL largo no aporta y un valor nuevo (otro córner) debe poder
-// notificarse en cuanto ocurra.
-const DEDUP_TTL_SEC = 90; // default (córner, VAR)
+// TTL POR TIPO DE EVENTO:
+//  - Eventos "de una vez" en el partido (gol, amarilla, roja, cambio, penalti,
+//    VAR no-gol, gol anulado) usan 7200s (2h) para disparo único: no se
+//    re-notifican aunque la API reordene/reenvíe el evento mucho después.
+//  - Córner: TTL corto (90s, default). Su clave incluye el valor exacto del
+//    contador monótono; cada córner nuevo es un valor nuevo que debe poder
+//    notificarse en cuanto ocurra, y nunca baja (Math.max).
+//  - goal y goalcancel además se LIMPIAN activamente (redisDel) cuando el
+//    marcador autoritativo sube/baja, para que un gol re-anotado al mismo valor
+//    y una segunda anulación de un gol distinto vuelvan a notificar.
+const DEDUP_TTL_SEC = 90; // default (córner)
 const DEDUP_TTL_BY_TYPE = {
   goal: 7200,
+  goalcancel: 7200,
   yellow: 7200,
   red: 7200,
   subst: 7200,
   penalty: 7200,
+  var: 7200,
 };
 
 function dedupKey(fid, ...parts) {
@@ -426,36 +459,54 @@ async function buildEventBundle(fid, data, prev) {
   // detail puede ser: 'Normal Goal', 'Penalty', 'Own Goal'. Lo expone.
   const pHG = prev.goals?.home ?? 0, pAG = prev.goals?.away ?? 0;
   const nHG = data.goals?.home ?? 0, nAG = data.goals?.away ?? 0;
-  if (nHG > pHG) {
-    const k = dedupKey(fid, 'goal', 'home', nHG);
-    if (!(await alreadySent(k))) {
-      // Tomamos el ÚLTIMO gol del equipo correcto (no slice(-1) ciego, que
-      // podía dar el del otro equipo si la API los devuelve mezclados).
-      const last = (data.goalScorers || []).filter(g => g.teamName === home).slice(-1)[0];
-      const who = last?.player ? ` - ${last.player}` : '';
-      lines.push(`⚽ ${home}${who} (${nHG}-${nAG})${goalTypeSuffix(last)}`);
-      sentKeys.push(k);
-      urgent = true;
-      console.log(`${DP} fid=${fid} GOL home delta ${pHG}→${nHG} ⇒ línea añadida`);
-    } else {
-      skipReasons.push(`goal-home(${nHG}):dedup-ya-enviado`);
-      console.log(`${DP} fid=${fid} GOL home delta ${pHG}→${nHG} pero dedup key ya marcada ⇒ SKIP`);
+
+  // Maneja un lado del marcador autoritativo (match.goals):
+  //  · SUBE (gol) → notifica "⚽" (dedup por valor goal:{side}:{N}). Antes de
+  //    notificar, limpia cualquier goalcancel:{side}:{N} pendiente: si este
+  //    valor se anuló antes y ahora se re-anota, una FUTURA anulación debe poder
+  //    volver a avisar.
+  //  · BAJA (gol anulado por VAR/corrección) → notifica "📺 Gol anulado" UNA vez
+  //    (dedup goalcancel:{side}:{valor del que se revirtió}). Una segunda
+  //    anulación de un gol distinto revierte otro valor → otra clave → vuelve a
+  //    notificar. Además limpia goal:{side}:{v} de los valores revertidos
+  //    (Tipo A) para que re-anotarlos cuente como gol nuevo.
+  // El marcador mostrado en cada línea es SIEMPRE el actual (nHG-nAG).
+  async function handleGoalSide(side, teamLabel, prevG, nowG) {
+    if (nowG > prevG) {
+      await redisDel(dedupKey(fid, 'goalcancel', side, nowG));
+      const k = dedupKey(fid, 'goal', side, nowG);
+      if (!(await alreadySent(k))) {
+        // ÚLTIMO gol del equipo correcto (no slice(-1) ciego, que podía dar el
+        // del otro equipo si la API los devuelve mezclados).
+        const last = (data.goalScorers || []).filter(g => g.teamName === teamLabel).slice(-1)[0];
+        const who = last?.player ? ` - ${last.player}` : '';
+        lines.push(`⚽ ${teamLabel}${who} (${nHG}-${nAG})${goalTypeSuffix(last)}`);
+        sentKeys.push(k);
+        urgent = true;
+        console.log(`${DP} fid=${fid} GOL ${side} delta ${prevG}→${nowG} ⇒ línea añadida`);
+      } else {
+        skipReasons.push(`goal-${side}(${nowG}):dedup-ya-enviado`);
+        console.log(`${DP} fid=${fid} GOL ${side} delta ${prevG}→${nowG} pero dedup key ya marcada ⇒ SKIP`);
+      }
+    } else if (nowG < prevG) {
+      // Tipo A: liberar las claves de los valores revertidos (re-anotar re-notifica).
+      for (let v = nowG + 1; v <= prevG; v++) {
+        await redisDel(dedupKey(fid, 'goal', side, v));
+      }
+      const k = dedupKey(fid, 'goalcancel', side, prevG);
+      if (!(await alreadySent(k))) {
+        lines.push(`📺 Gol anulado · ${teamLabel} (${nHG}-${nAG})`);
+        sentKeys.push(k);
+        urgent = true;
+        console.log(`${DP} fid=${fid} GOL ANULADO ${side} marcador ${prevG}→${nowG} ⇒ línea añadida (clave goalcancel:${side}:${prevG})`);
+      } else {
+        skipReasons.push(`goalcancel-${side}(${prevG}):dedup-ya-enviado`);
+        console.log(`${DP} fid=${fid} GOL ANULADO ${side} ${prevG}→${nowG} pero dedup key ya marcada ⇒ SKIP`);
+      }
     }
   }
-  if (nAG > pAG) {
-    const k = dedupKey(fid, 'goal', 'away', nAG);
-    if (!(await alreadySent(k))) {
-      const last = (data.goalScorers || []).filter(g => g.teamName === away).slice(-1)[0];
-      const who = last?.player ? ` - ${last.player}` : '';
-      lines.push(`⚽ ${away}${who} (${nHG}-${nAG})${goalTypeSuffix(last)}`);
-      sentKeys.push(k);
-      urgent = true;
-      console.log(`${DP} fid=${fid} GOL away delta ${pAG}→${nAG} ⇒ línea añadida`);
-    } else {
-      skipReasons.push(`goal-away(${nAG}):dedup-ya-enviado`);
-      console.log(`${DP} fid=${fid} GOL away delta ${pAG}→${nAG} pero dedup key ya marcada ⇒ SKIP`);
-    }
-  }
+  await handleGoalSide('home', home, pHG, nHG);
+  await handleGoalSide('away', away, pAG, nAG);
 
   // ── Córners ── REAL: pasó un córner, sabemos qué equipo lo lanza.
   // API-Football NO expone córners como events con jugador (solo el contador
@@ -587,8 +638,8 @@ async function buildEventBundle(fid, data, prev) {
   // ── Sustituciones (lista) ── REAL: API da player (sale) y assist (entra)
   // como evento type='subst'. Si por algún motivo falta uno de los dos, NO
   // notificamos — "🔄 Equipo · ? → ?" sería ruido sin información.
-  const prevSubKeys = new Set((prev.substitutions || []).map(evKey));
-  const newSubs = (data.substitutions || []).filter(s => !prevSubKeys.has(evKey(s)));
+  const prevSubKeys = new Set((prev.substitutions || []).map(subKey));
+  const newSubs = (data.substitutions || []).filter(s => !prevSubKeys.has(subKey(s)));
   if (newSubs.length > 0) console.log(`${DP} fid=${fid} CAMBIO ${newSubs.length} evento(s) nuevo(s) vs baseline`);
   for (const s of newSubs) {
     if (!s.playerOut || !s.playerIn) {
@@ -596,7 +647,7 @@ async function buildEventBundle(fid, data, prev) {
       console.log(`${DP} fid=${fid} CAMBIO incompleto (out=${s.playerOut || '?'} in=${s.playerIn || '?'}) ⇒ SKIP`);
       continue; // saltar sustituciones incompletas
     }
-    const k = dedupKey(fid, 'subst', evKey(s));
+    const k = dedupKey(fid, 'subst', subKey(s));
     if (await alreadySent(k)) {
       skipReasons.push(`subst:dedup-ya-enviado`);
       console.log(`${DP} fid=${fid} CAMBIO ${s.playerOut}→${s.playerIn} dedup ya marcada ⇒ SKIP`);
@@ -637,12 +688,17 @@ async function buildEventBundle(fid, data, prev) {
     console.log(`${DP} fid=${fid} PENALTI ${verb} ${p.teamName} ⇒ línea añadida`);
   }
 
-  // ── VAR (gol anulado / penalti anulado / decisión cambiada) ──
-  const prevVarKeys = new Set((prev.varEvents || []).map(evKey));
-  const newVars = (data.varEvents || []).filter(v => !prevVarKeys.has(evKey(v)));
-  if (newVars.length > 0) console.log(`${DP} fid=${fid} VAR ${newVars.length} evento(s) nuevo(s) vs baseline`);
+  // ── VAR (penalti anulado/confirmado / tarjeta revisada / decisión cambiada) ──
+  // El "gol anulado" NO se emite aquí: se deriva del DESCENSO del marcador
+  // autoritativo (handleGoalSide). Esto evita el bug del mismo gol anulado
+  // notificado 10+ veces por la inestabilidad de `player` en el evento VAR.
+  // Aquí solo entran las decisiones VAR que NO son de gol, con identidad estable
+  // equipo+detalle (varKey, sin player ni minuto) y disparo único (TTL 2h).
+  const prevVarKeys = new Set((prev.varEvents || []).filter(v => !isGoalVarDetail(v.detail)).map(varKey));
+  const newVars = (data.varEvents || []).filter(v => !isGoalVarDetail(v.detail) && !prevVarKeys.has(varKey(v)));
+  if (newVars.length > 0) console.log(`${DP} fid=${fid} VAR ${newVars.length} evento(s) no-gol nuevo(s) vs baseline`);
   for (const v of newVars) {
-    const k = dedupKey(fid, 'var', evKey(v));
+    const k = dedupKey(fid, 'var', varKey(v));
     if (await alreadySent(k)) {
       skipReasons.push(`var:dedup-ya-enviado`);
       console.log(`${DP} fid=${fid} VAR ${v.detail} dedup ya marcada ⇒ SKIP`);
@@ -1100,25 +1156,15 @@ export async function runLive(_payload = {}) {
   }
 
   const alreadyFetched = new Set(needsEventsFetch.map(m => m.fixture.id));
-  const needsStatsFetchCandidates = tracked.filter(m => {
-    const fid = m.fixture.id;
-    if (alreadyFetched.has(fid)) return false;
-    const elapsed = m.fixture?.status?.elapsed || 0;
-    if (elapsed < 10) return false;
-    // CLAVE para córners cada 20s: NO basta con que `statistics` venga
-    // (array no vacío). Muchas ligas (BK Häcken/Allsvenskan, etc.) devuelven
-    // el array de stats con OTROS campos pero el córner en null → extractor
-    // marca corners.isReal=false. Antes saltábamos el fetch dedicado si
-    // `hasStats` (array no vacío) y nos quedábamos con corners no reales hasta
-    // que /fixtures?live=all casualmente los traía (cada ~3 min) → córners cada
-    // 3 min. Ahora la condición de skip es: stats inline Y córners YA reales
-    // este tick. Si los córners NO son reales, pedimos el endpoint dedicado
-    // /fixtures/statistics que sí los expone, para tenerlos frescos cada tick.
-    const cornersReal = liveDetailsMap[fid]?.corners?.isReal === true;
-    const hasStats = (m.statistics || []).length > 0;
-    if (hasStats && cornersReal) return false;
-    return true;
-  });
+  // PARTE 1: una sola pasada por tick (20s) trae goles + córners + stats juntos.
+  // /fixtures/statistics?fixture=X es LA fuente fiable de córners, así que lo
+  // pedimos para TODOS los partidos en vivo cada tick — sin gatear por elapsed
+  // ni por "el feed principal ya trajo córners reales". El plan de cuota
+  // (150k/día) lo permite de sobra (~16 partidos × 3/min × 24h ≈ 69k/día).
+  // Única exclusión: los fixtures que ESTE tick ya pidieron /fixtures?id=X para
+  // el goleador — esa respuesta ya trae statistics, y volver a extraer aquí
+  // (con un array sin events) pisaría el goleador recién obtenido.
+  const needsStatsFetchCandidates = tracked.filter(m => !alreadyFetched.has(m.fixture.id));
 
   // Throttle anti-solape: máx 1 stats-fetch por fixture cada 15s. El cron de
   // live corre cada 20s, así que con TTL 15s (< 20s) cada tick legítimo SÍ
@@ -1137,33 +1183,38 @@ export async function runLive(_payload = {}) {
   }
 
   if (needsStatsFetch.length > 0) {
+    // AISLAMIENTO DE ERRORES (PARTE 1): cada fetch de stats va en su propio
+    // try/catch. /fixtures/statistics es LA fuente fiable de córners, pero si
+    // falla en UN partido (fetch failed / rate puntual / payload raro) NO debe
+    // tumbar el tick: los goles ya se extrajeron del feed principal ANTES de
+    // este bloque y el push se construye igual más abajo (sendBundledPushes).
+    // Prioridad goles: nunca se pierden por un fallo de stats. Si un partido
+    // falla, se conserva su extract previo (con sus goles) y el córner se
+    // recoge en el siguiente tick de 20s.
     await Promise.all(needsStatsFetch.map(async (match) => {
       const fid = match.fixture.id;
-      // BUG FIX córners (confirmado por medición 2026-05-26):
-      // /fixtures?live=all NO trae córners para muchísimas ligas (devolvía stats
-      // con posesión/tiros pero córners vacíos), mientras /fixtures/statistics SÍ
-      // los tiene frescos. El código anterior pedía /fixtures?id=X y solo caía al
-      // dedicado si NO había NINGUNA stat — como sí había otras stats, nunca pedía
-      // el dedicado → córners 2min+ tarde o nunca.
-      //
-      // Ahora vamos DIRECTO al endpoint dedicado /fixtures/statistics: es LA fuente
-      // fiable de córners (y demás stats), 1 sola llamada por tick (antes 2). Los
-      // events (goleador, tarjetas, cambios) ya vienen del feed principal /
-      // needsEventsFetch — aquí solo refrescamos las estadísticas. Si el dedicado
-      // viniera vacío (liga sin cobertura), caemos a las stats del feed principal.
-      const dedicated = await apiFetch(`/fixtures/statistics?fixture=${fid}`);
-      apiCalls++;
-      const statsArr = (Array.isArray(dedicated) && dedicated.length > 0)
-        ? dedicated
-        : (match.statistics || []);
-      if (Array.isArray(dedicated) && dedicated.length > 0) {
-        console.log(`[live] stats dedicado fid=${fid} (${dedicated.length} equipos) — córners frescos`);
-      } else {
-        console.log(`[live] sin stats dedicado para fid=${fid} — liga sin cobertura statistics`);
+      try {
+        // Vamos DIRECTO al endpoint dedicado /fixtures/statistics: /fixtures?live=all
+        // NO trae córners para muchísimas ligas. 1 llamada por tick. Si viene vacío
+        // (liga sin cobertura), caemos a las stats del feed principal.
+        const dedicated = await apiFetch(`/fixtures/statistics?fixture=${fid}`);
+        apiCalls++;
+        const statsArr = (Array.isArray(dedicated) && dedicated.length > 0)
+          ? dedicated
+          : (match.statistics || []);
+        if (Array.isArray(dedicated) && dedicated.length > 0) {
+          console.log(`[live] stats dedicado fid=${fid} (${dedicated.length} equipos) — córners frescos`);
+        } else {
+          console.log(`[live] sin stats dedicado para fid=${fid} — liga sin cobertura statistics`);
+        }
+        const fullData = extractLiveStats(match, match.events || [], statsArr);
+        fullData.date = today;
+        liveDetailsMap[fid] = fullData;
+      } catch (e) {
+        // Conserva liveDetailsMap[fid] del feed principal (con sus goles). Solo
+        // se pierde el refresco de córners de ESTE tick; el siguiente lo recoge.
+        console.error(`[live] stats fetch aislado: fallo fid=${fid} ⇒ se conserva extract del feed principal:`, e.message);
       }
-      const fullData = extractLiveStats(match, match.events || [], statsArr);
-      fullData.date = today;
-      liveDetailsMap[fid] = fullData;
     }));
   }
 
