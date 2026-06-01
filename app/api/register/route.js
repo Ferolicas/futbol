@@ -3,7 +3,7 @@
 // lib/auth-pg.js: bcrypt + tabla `users` + sesión inmediata (cookie JWT).
 import { signupUser } from '../../../lib/auth-pg';
 import { supabaseAdmin } from '../../../lib/supabase';
-import { sendWelcomeEmail } from '../../../lib/zeptomail';
+import { sendWelcomeEmail } from '../../../lib/email';
 import { redisRateLimit, clientIp } from '../../../lib/ratelimit-redis';
 
 export const dynamic = 'force-dynamic';

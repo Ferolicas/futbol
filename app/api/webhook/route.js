@@ -1,6 +1,6 @@
 import { stripe, createPostPaymentSubscription } from '../../../lib/stripe';
 import { supabaseAdmin } from '../../../lib/supabase';
-import { sendPlanActivatedEmail } from '../../../lib/zeptomail';
+import { sendPlanActivatedEmail } from '../../../lib/email';
 import { redisGet, redisSet } from '../../../lib/redis';
 
 async function findUserByCustomer(customerId, userId) {
