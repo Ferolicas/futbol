@@ -31,6 +31,12 @@ const ONLY_FAM = (args.find(a => a.startsWith('--family=')) || '').split('=')[1]
 // tocar runtime. k puede ser por-familia: --k=8 global, o defaults internos.
 const USE_SHRINK = args.includes('--shrink');
 const K_GLOBAL = Number((args.find(a => a.startsWith('--k=')) || '').split('=')[1]) || null;
+// --recency: pondera el ADN (L2) por antigüedad — partidos recientes pesan más.
+// Peso = 0.5^(díasDeAntigüedad / halfLife). --hl=N fija la vida media en días
+// (default 180). refMs = fecha del fixture (point-in-time). El H2H (L1) NO se
+// pondera (la historia mutua es atemporal). Mide el efecto sobre la calibración.
+const USE_RECENCY = args.includes('--recency');
+const RECENCY_HALFLIFE = Number((args.find(a => a.startsWith('--hl=')) || '').split('=')[1]) || 180;
 // Defaults por familia (categóricos = shrink fuerte; conteo = suave). Override con --k.
 // El shrink REAL lo aplica scoreContext (lib/context-engine) con SHRINK_K_BY_FAMILY.
 // Aquí solo se usa para la ETIQUETA del reporte → importado para que no derive.
@@ -92,6 +98,22 @@ async function main() {
     if (a) actualsByFid.set(fid, a);
   }
 
+  // Records POR EQUIPO en shape de RUNTIME ({venue, actuals, date}) — igual que
+  // loadContextInputs.recOf. IMPRESCINDIBLE: hace que L2 (ADN) dispare en el
+  // backtest como en producción (rateFromRecords lee r.actuals). Antes se pasaban
+  // records recordFromRaw planos (sin .actuals) → L2 nunca disparaba → el backtest
+  // solo medía L1/H2H. Ahora mide el path completo L1+L2 del runtime.
+  const recAxCache = new Map();
+  const teamActualsRecords = (tid) => {
+    if (recAxCache.has(tid)) return recAxCache.get(tid);
+    const recs = (byTeam.get(tid) || []).map(f => {
+      const fid = Number(f.fixture.id); const a = actualsByFid.get(fid); if (!a) return null;
+      return { venue: f.teams?.home?.id === tid ? 'home' : 'away', actuals: a, date: f.fixture?.date };
+    }).filter(Boolean);
+    recAxCache.set(tid, recs);
+    return recs;
+  };
+
   // Tasa base por mercado (prior del shrink) = frecuencia REAL del mercado sobre
   // TODOS los fixtures terminados, medida con el MISMO def.gate/outcome del
   // backtest. Es por-CLAVE, no por-familia: cada línea tiene su propia base
@@ -118,10 +140,11 @@ async function main() {
     if (!actuals) continue;
     const beforeMs = new Date(f.fixture.date).getTime();
     const pit = (recs) => recs.filter(x => x && x.date && new Date(x.date).getTime() < beforeMs);
-    const homeRecs = pit(teamRecords(homeId)), awayRecs = pit(teamRecords(awayId));
+    const homeRecs = pit(teamActualsRecords(homeId)), awayRecs = pit(teamActualsRecords(awayId));
     const meetings = meetingsPIT(homeId, awayId, beforeMs);
     if (!homeRecs.length && !awayRecs.length && !meetings.length) continue;
-    const ctxOut = computeContext({ homeId, awayId, meetings, homeRecords: homeRecs, awayRecords: awayRecs });
+    const recency = USE_RECENCY ? { halfLifeDays: RECENCY_HALFLIFE, refMs: beforeMs } : null;
+    const ctxOut = computeContext({ homeId, awayId, meetings, homeRecords: homeRecs, awayRecords: awayRecs, recency });
     if (!Object.keys(ctxOut).length) continue;
     const todayCtx = { knockout: (actuals.phase === 'knockout' || actuals.phase === 'final'), keyInjury: isKeyInjury(injById.get(fid), modalXIByTeam) };
     // baseRates → scoreContext aplica el shrink INTERNAMENTE (path REAL de runtime).
@@ -149,7 +172,7 @@ async function main() {
     }
   }
 
-  console.log(`\n[backtest] fixtures evaluados: ${nFix} · ML: ${USE_ML ? 'ON' : 'off (motor empírico base)'}${USE_SHRINK ? ' · SHRINK ON' : ''}\n`);
+  console.log(`\n[backtest] fixtures evaluados: ${nFix} · ML: ${USE_ML ? 'ON' : 'off (motor empírico base)'}${USE_SHRINK ? ' · SHRINK ON' : ''}${USE_RECENCY ? ` · RECENCY ON (hl=${RECENCY_HALFLIFE}d)` : ''} · L1+L2\n`);
   const eceOf = (F) => { let e = 0; for (const b of F.buckets) { if (b.n) e += (b.n / F.n) * Math.abs(b.sp / b.n - b.sy / b.n); } return e; };
   const fams = Object.keys(fam).sort();
   let gBrier = 0, gN = 0, gECE = 0, gBrierS = 0, gECES = 0;
