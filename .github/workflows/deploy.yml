@@ -140,8 +140,21 @@ jobs:
               # Compile TS → dist/
               npm run build
 
-              # Reload pm2
-              pm2 reload cfanalisis-worker --update-env
+              # Reload pm2 — recarga el worker sea cual sea su topología:
+              #   · monolito  → cfanalisis-worker        (pre Fase 1)
+              #   · partido   → cfanalisis-rt + cfanalisis-heavy (Fase 1 activa)
+              # `|| true` evita que `set -e` aborte el deploy si alguno no existe
+              # (según si ya migraste a la topología partida en el VPS).
+              WORKER_RELOADED=0
+              for proc in cfanalisis-rt cfanalisis-heavy cfanalisis-worker; do
+                if pm2 reload "$proc" --update-env 2>/dev/null; then
+                  echo "  ✓ pm2 reload $proc"
+                  WORKER_RELOADED=1
+                fi
+              done
+              if [ "$WORKER_RELOADED" = "0" ]; then
+                echo "  ⚠ ningún proceso worker recargado — revisa 'pm2 list' (nombres esperados: cfanalisis-rt/cfanalisis-heavy o cfanalisis-worker)"
+              fi
 
               cd /apps/futbol
               echo "✓ Worker redeployed"

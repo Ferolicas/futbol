@@ -127,9 +127,27 @@ const lockOpts: Record<QueueName, LockOpts> = {
   'baseball-retrain':             MARATHON,
 };
 
-export function startWorkers(): Worker[] {
+export type WorkerRole = 'all' | 'realtime' | 'heavy';
+
+// Colas que corren en el proceso "realtime": pollers en vivo de alta frecuencia
+// + sus broadcasts WS. Deben ir AISLADAS de los jobs CPU-bound (daily, analyze,
+// retrain) que bloquean el event loop. Todo lo que NO esté aquí = "heavy".
+// Esta es la línea divisoria de la Fase 1: un retrain de 20 min en 'heavy' ya
+// no puede congelar el tick de 20s de 'futbol-live' ni el /health en 'realtime'.
+const REALTIME_QUEUES: QueueName[] = ['futbol-live', 'baseball-live'];
+
+function queuesForRole(role: WorkerRole): QueueName[] {
+  const all = Object.keys(handlers) as QueueName[];
+  if (role === 'realtime') return all.filter((q) => REALTIME_QUEUES.includes(q));
+  if (role === 'heavy')    return all.filter((q) => !REALTIME_QUEUES.includes(q));
+  return all; // 'all' = monolito (comportamiento previo a la Fase 1)
+}
+
+export function startWorkers(role: WorkerRole = 'all'): Worker[] {
   const workers: Worker[] = [];
-  for (const [name, handler] of Object.entries(handlers) as [QueueName, Processor][]) {
+  const names = queuesForRole(role);
+  for (const name of names) {
+    const handler = handlers[name];
     const lo = lockOpts[name];
     const w = new Worker(name, handler, {
       connection: bullConnection,
@@ -152,6 +170,6 @@ export function startWorkers(): Worker[] {
     });
     workers.push(w);
   }
-  logger.info({ count: workers.length }, 'workers started');
+  logger.info({ count: workers.length, role, queues: names }, 'workers started');
   return workers;
 }

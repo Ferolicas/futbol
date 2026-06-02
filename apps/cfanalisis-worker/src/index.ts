@@ -17,24 +17,43 @@ import { queues } from './queues.js';
 
 const PORT = Number(process.env.PORT || 8080);
 
+// WORKER_ROLE define qué hace este proceso (Fase 1 — aislamiento):
+//   'realtime' → servidor HTTP/WS + pollers live (futbol-live, baseball-live)
+//   'heavy'    → el resto de colas (daily, analyze, retrain, finalize, …), SIN servidor
+//   'all'      → monolito: servidor + todas las colas (comportamiento previo)
+// Default 'all' para que, sin configurar nada en pm2, el proceso siga
+// comportándose EXACTAMENTE como antes de la Fase 1.
+const ROLE = ((process.env.WORKER_ROLE || 'all').toLowerCase()) as 'all' | 'realtime' | 'heavy';
+const HAS_SERVER = ROLE === 'all' || ROLE === 'realtime';
+
 async function main() {
+  logger.info({ role: ROLE, hasServer: HAS_SERVER }, 'worker boot');
 
-  // Start HTTP enqueue server
-  const app = buildServer();
-  await app.listen({ port: PORT, host: '0.0.0.0' });
-  logger.info({ port: PORT }, 'HTTP server listening');
+  // El servidor HTTP (/health, /ws, /enqueue, /broadcast, /admin) solo vive en
+  // el proceso con servidor. El proceso 'heavy' no lo levanta: así un puerto no
+  // colisiona y el realtime queda como único dueño del :8080 que ve Caddy.
+  const app = HAS_SERVER ? buildServer() : null;
+  if (app) {
+    await app.listen({ port: PORT, host: '0.0.0.0' });
+    logger.info({ port: PORT }, 'HTTP server listening');
+  }
 
-  // Start all BullMQ workers
-  const workers = startWorkers();
+  // Workers de las colas que correspondan al rol.
+  const workers = startWorkers(ROLE);
 
-  // Register native cron schedulers (replaces cron-job.org triggering)
-  await registerSchedulers();
+  // Los schedulers (templates de cron) se registran UNA vez en Redis desde el
+  // proceso con servidor (realtime/all) y persisten ahí; los Workers de cada
+  // cola —estén en el proceso que estén— promueven sus jobs repetibles. 'heavy'
+  // NO registra para evitar doble registro/carrera en el arranque.
+  if (HAS_SERVER) {
+    await registerSchedulers();
+  }
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'received signal, shutting down…');
     try {
-      await app.close();
+      if (app) await app.close();
       await Promise.all(workers.map((w) => w.close()));
       await Promise.all(Object.values(queues).map((q) => q.close()));
       await bullConnection.quit();

@@ -21,6 +21,8 @@
  * llamada, solo el transporte.
  */
 
+import { makeRedisClient } from '../redis.js';
+
 type Socket = {
   readyState: number;
   send: (data: string) => void;
@@ -131,12 +133,71 @@ class WSManager {
 
 export const wsManager = new WSManager();
 
+// ────────────────────────────────────────────────────────────────────────────
+// Fan-out cross-proceso vía Redis pub/sub
+//
+// PROBLEMA: wsManager vive en la MEMORIA del proceso que tiene el servidor /ws
+// (el proceso "realtime"). Al partir el worker en realtime + heavy (Fase 1),
+// los jobs pesados (analyze, lineups, odds) corren en OTRO proceso y su
+// triggerEvent local no alcanza a los sockets conectados en realtime.
+//
+// SOLUCIÓN: cada broadcast se publica en un canal Redis (`ws:fanout`); cada
+// proceso tiene un suscriptor que reentrega a SUS sockets locales. Para no
+// duplicar en el proceso de origen (que ya entregó local), el mensaje lleva su
+// ORIGIN y el suscriptor ignora los propios.
+//
+// DEGRADACIÓN SEGURA: si el pub/sub no inicializa, triggerEvent sigue
+// entregando local (idéntico al monolito de hoy). En modo monolítico ('all')
+// el origen entrega local y se auto-ignora en el canal → exactamente una
+// entrega, sin cambio de comportamiento.
+// ────────────────────────────────────────────────────────────────────────────
+const FANOUT_CHANNEL = 'ws:fanout';
+const ORIGIN = `${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
+
+let fanoutPub: ReturnType<typeof makeRedisClient> | null = null;
+try {
+  fanoutPub = makeRedisClient();
+  fanoutPub.on('error', (e: Error) => console.error('[ws:pub] error:', e.message));
+
+  const fanoutSub = makeRedisClient();
+  fanoutSub.on('error', (e: Error) => console.error('[ws:sub] error:', e.message));
+  fanoutSub.subscribe(FANOUT_CHANNEL).catch((e: Error) =>
+    console.error('[ws:sub] subscribe failed:', e.message));
+  fanoutSub.on('message', (_channel: string, raw: string) => {
+    try {
+      const msg = JSON.parse(raw);
+      // Mensaje propio → ya se entregó local en el origen. No re-entregar.
+      if (!msg || msg.origin === ORIGIN) return;
+      wsManager.broadcast(msg.topic, msg.event, msg.data);
+    } catch (e) {
+      console.error('[ws:sub] message handler:', (e as Error).message);
+    }
+  });
+  console.log(`[ws] fan-out pub/sub activo (origin=${ORIGIN}, canal=${FANOUT_CHANNEL})`);
+} catch (e) {
+  console.error('[ws] fan-out pub/sub no disponible — modo solo-local:', (e as Error).message);
+  fanoutPub = null;
+}
+
 // Drop-in replacement de lib/pusher.js triggerEvent(channel, event, data).
 // Los jobs siguen llamando triggerEvent(...) — solo cambia el transporte.
 export async function triggerEvent(channel: string, event: string, data: unknown) {
+  // 1) Entrega LOCAL inmediata (sockets de ESTE proceso). Camino crítico de los
+  //    eventos live (corren en el mismo proceso que el WS) y NO depende de
+  //    Redis: si el pub/sub cae, esto sigue funcionando.
   try {
     wsManager.broadcast(channel, event, data);
   } catch (e) {
-    console.error(`[ws] broadcast ${channel}/${event} failed:`, (e as Error).message);
+    console.error(`[ws] broadcast local ${channel}/${event}:`, (e as Error).message);
+  }
+  // 2) Publica para los OTROS procesos (heavy → realtime). Best-effort y
+  //    fire-and-forget: NO se await-ea para que el camino caliente (broadcasts
+  //    de live) no dependa ni en latencia del round-trip a Redis. Si falla,
+  //    solo se pierde el cruce entre procesos de ESE evento; la entrega local
+  //    del paso 1 ya ocurrió.
+  if (fanoutPub) {
+    fanoutPub
+      .publish(FANOUT_CHANNEL, JSON.stringify({ origin: ORIGIN, topic: channel, event, data }))
+      .catch((e: Error) => console.error(`[ws] publish ${channel}/${event}:`, e.message));
   }
 }
