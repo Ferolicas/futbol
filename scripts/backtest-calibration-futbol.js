@@ -20,7 +20,7 @@ const { Pool } = require('pg');
 const { MARKET_DEFS } = require('../lib/meta-features');
 const { recordFromRaw, buildActuals, FINISHED } = require('../lib/adn');
 const { meetingRecord, modalXIFromLineups } = require('../lib/h2h');
-const { computeContext, scoreContext, isKeyInjury, marketFamily, rateFromRecords } = require('../lib/context-engine');
+const { computeContext, scoreContext, isKeyInjury, marketFamily, rateFromRecords, SHRINK_K_BY_FAMILY } = require('../lib/context-engine');
 
 const args = process.argv.slice(2);
 const USE_ML = args.includes('--ml');
@@ -32,7 +32,9 @@ const ONLY_FAM = (args.find(a => a.startsWith('--family=')) || '').split('=')[1]
 const USE_SHRINK = args.includes('--shrink');
 const K_GLOBAL = Number((args.find(a => a.startsWith('--k=')) || '').split('=')[1]) || null;
 // Defaults por familia (categóricos = shrink fuerte; conteo = suave). Override con --k.
-const K_BY_FAMILY = { resultado: 14, resultado_1h: 14, resultado_2h: 14, btts: 12, primer_gol: 12, timing_gol: 12, most_x: 10, roja: 8 };
+// El shrink REAL lo aplica scoreContext (lib/context-engine) con SHRINK_K_BY_FAMILY.
+// Aquí solo se usa para la ETIQUETA del reporte → importado para que no derive.
+const K_BY_FAMILY = SHRINK_K_BY_FAMILY;
 const kFor = (fam) => K_GLOBAL != null ? K_GLOBAL : (K_BY_FAMILY[fam] ?? 5);
 
 function makePool() {
@@ -122,26 +124,27 @@ async function main() {
     const ctxOut = computeContext({ homeId, awayId, meetings, homeRecords: homeRecs, awayRecords: awayRecs });
     if (!Object.keys(ctxOut).length) continue;
     const todayCtx = { knockout: (actuals.phase === 'knockout' || actuals.phase === 'final'), keyInjury: isKeyInjury(injById.get(fid), modalXIByTeam) };
-    const scored = scoreContext(ctxOut, { meetings, ctx: {}, modalXIByTeam, todayCtx, homeId, awayId, homeRecords: homeRecs, awayRecords: awayRecs, homeTeamRecords: teamRecords(homeId), awayTeamRecords: teamRecords(awayId), mlEnabled: USE_ML });
+    // baseRates → scoreContext aplica el shrink INTERNAMENTE (path REAL de runtime).
+    // Expone prob_final (calibrado) y prob_final_raw (sin shrink) → medimos ambos
+    // de UNA sola corrida, sin math externa que pueda divergir del motor.
+    const scored = scoreContext(ctxOut, { meetings, ctx: {}, modalXIByTeam, todayCtx, homeId, awayId, homeRecords: homeRecs, awayRecords: awayRecs, homeTeamRecords: teamRecords(homeId), awayTeamRecords: teamRecords(awayId), mlEnabled: USE_ML, baseRates: USE_SHRINK ? baseRate : null, shrinkK: K_GLOBAL });
     nFix++;
     for (const [key, sc] of Object.entries(scored)) {
       const def = MARKET_DEFS[key]; if (!def) continue;
       if (!def.gate(actuals)) continue;
-      const p = sc.prob_final; if (p == null || !isFinite(p)) continue;
+      const pf = sc.prob_final; if (pf == null || !isFinite(pf)) continue;
       const ff = marketFamily(key); if (ONLY_FAM && ff !== ONLY_FAM) continue;
       const y = def.outcome(actuals) ? 1 : 0;
+      const praw = (sc.prob_final_raw != null && isFinite(sc.prob_final_raw)) ? sc.prob_final_raw : pf;
       const F = ensure(ff);
-      const bi = Math.min(9, Math.max(0, Math.floor(p * 10)));
-      F.buckets[bi].sp += p; F.buckets[bi].sy += y; F.buckets[bi].n++;
-      F.brier += (p - y) * (p - y); F.ll += -(y * Math.log(c01(p)) + (1 - y) * Math.log(1 - c01(p))); F.n++; F.sumy += y;
+      const bi = Math.min(9, Math.max(0, Math.floor(praw * 10)));
+      F.buckets[bi].sp += praw; F.buckets[bi].sy += y; F.buckets[bi].n++;
+      F.brier += (praw - y) * (praw - y); F.ll += -(y * Math.log(c01(praw)) + (1 - y) * Math.log(1 - c01(praw))); F.n++; F.sumy += y;
       if (USE_SHRINK) {
-        const base = baseRate[key] != null ? baseRate[key] : 0.5;
-        const nn = sc.n || 1, k = kFor(ff);
-        const ps = (nn * p + k * base) / (nn + k);
         const S = ensureS(ff);
-        const bj = Math.min(9, Math.max(0, Math.floor(ps * 10)));
-        S.buckets[bj].sp += ps; S.buckets[bj].sy += y; S.buckets[bj].n++;
-        S.brier += (ps - y) * (ps - y); S.ll += -(y * Math.log(c01(ps)) + (1 - y) * Math.log(1 - c01(ps))); S.n++; S.sumy += y;
+        const bj = Math.min(9, Math.max(0, Math.floor(pf * 10)));
+        S.buckets[bj].sp += pf; S.buckets[bj].sy += y; S.buckets[bj].n++;
+        S.brier += (pf - y) * (pf - y); S.ll += -(y * Math.log(c01(pf)) + (1 - y) * Math.log(1 - c01(pf))); S.n++; S.sumy += y;
       }
     }
   }
