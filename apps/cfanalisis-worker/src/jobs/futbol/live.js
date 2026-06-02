@@ -953,22 +953,24 @@ async function persistHalfStatsSnapshot(match, data) {
   }
 }
 
-// ── Red de seguridad anti-"pegado en vivo" (con DATOS REALES) ───────────────
-// Un partido marcado LIVE en liveStats cuyo expectedEnd ya pasó hace rato puede
-// quedar congelado "en vivo" si el tick se salta (window-skip), si se perdió su
-// transición a FT, o si cruzó medianoche (liveStats se indexa por día UTC). Esta
-// pasada corre SIEMPRE (antes del window-skip), recorre liveStats de HOY y AYER y
-// despega cualquier entrada LIVE vencida.
+// ── Red de seguridad: datos REALES de partidos vencidos / sin confirmar ─────
+// Corre SIEMPRE (antes del window-skip), sobre liveStats de HOY y AYER. Dos casos:
+//   1) LIVE vencido (expectedEnd+30min pasó, o sin schedule >40min sin tocarse):
+//      el tick se saltó / se perdió su FT / cruzó medianoche → hay que despegarlo.
+//   2) FT SIN confirmar (realFinal!=true): partido ya marcado FT pero cuyo
+//      marcador NO se confirmó contra la API — típicamente un force-finish
+//      API-free previo (o legado de una versión vieja) que dejó el ÚLTIMO
+//      marcador congelado en vez del real. Se re-consulta para corregirlo.
 //
-// IMPORTANTE: para que el partido aparezca con el RESULTADO REAL (no el último
-// marcador congelado), aquí SÍ pedimos /fixtures?id=X (throttle 2min/fid; son
-// pocos partidos, coste acotado) y escribimos marcador/córners/goleadores reales.
-// Solo si la API no concluye (falla o insiste "en vivo" de forma absurda) caemos
-// al desatasco API-free conservando lo último conocido (el finalize lo corrige).
-// Devuelve los cierres aplicados (para broadcastear y corregir fixtures:{d}).
+// En ambos casos pedimos /fixtures?id=X (throttle 2min/fid; cap de re-confirmación
+// por tick para acotar el burst) y escribimos marcador/córners/goleadores REALES,
+// marcando realFinal=true para no re-consultarlo nunca más. Si la API no concluye:
+// caso 1 → desatasco API-free (sin realFinal → reintenta); caso 2 → se deja igual.
 const FORCE_FINISH_GRACE_MS = 30 * 60 * 1000; // overdue vs expectedEnd del schedule
 const FORCE_FINISH_STALE_MS = 40 * 60 * 1000; // sin schedule: tiempo sin actualizarse
 const FORCE_FINISH_HARD_MS  = 60 * 60 * 1000; // si la API insiste "live" tras esto → FT igual
+const RECONCILE_WINDOW_MS   = 18 * 3600 * 1000; // solo re-confirmar FT recientes (no historia)
+const MAX_RECONCILE_PER_TICK = 15;              // cap del burst de re-confirmación FT
 async function forceFinishOverdueLive(allKickoffs, now, dates) {
   const expectedEndByFid = new Map(
     (allKickoffs || []).map(m => [Number(m.fixtureId), Number(m.expectedEnd)]));
@@ -979,44 +981,57 @@ async function forceFinishOverdueLive(allKickoffs, now, dates) {
     try { ls = await redisGet(KEYS.liveStats(d)); } catch { ls = null; }
     if (!ls || typeof ls !== 'object') continue;
 
-    // Detectar entradas LIVE vencidas.
-    const overdueFids = [];
+    const liveOverdue = [];   // {fid, ee} — LIVE vencidos → forzar FT
+    const ftUnconfirmed = []; // fid — FT sin datos reales confirmados → re-fetch
     for (const [fid, m] of Object.entries(ls)) {
-      if (!m || !LIVE_STATUSES.includes(m.status?.short)) continue;
-      const ee = expectedEndByFid.get(Number(fid));
-      const lastTouch = m.updatedAt ? Date.parse(m.updatedAt) : 0;
-      const overdue = (Number.isFinite(ee) && now > ee + FORCE_FINISH_GRACE_MS) ||
-                      (!Number.isFinite(ee) && lastTouch && now - lastTouch > FORCE_FINISH_STALE_MS);
-      if (overdue) overdueFids.push({ fid: Number(fid), ee });
+      if (!m) continue;
+      const short = m.status?.short;
+      if (LIVE_STATUSES.includes(short)) {
+        const ee = expectedEndByFid.get(Number(fid));
+        const lastTouch = m.updatedAt ? Date.parse(m.updatedAt) : 0;
+        const overdue = (Number.isFinite(ee) && now > ee + FORCE_FINISH_GRACE_MS) ||
+                        (!Number.isFinite(ee) && lastTouch && now - lastTouch > FORCE_FINISH_STALE_MS);
+        if (overdue) liveOverdue.push({ fid: Number(fid), ee });
+      } else if (FINISHED_STATUSES.includes(short) && m.realFinal !== true) {
+        // FT pero sin confirmar contra la API. Solo recientes (evita re-pedir
+        // historia entera): si no hay timestamp, lo tratamos como reciente.
+        const stamp = Date.parse(m.savedAt || m.updatedAt || '') || 0;
+        if (!stamp || now - stamp < RECONCILE_WINDOW_MS) ftUnconfirmed.push(Number(fid));
+      }
     }
-    if (overdueFids.length === 0) continue;
+    const ftPick = ftUnconfirmed.slice(0, MAX_RECONCILE_PER_TICK);
+    const targets = [
+      ...liveOverdue.map(x => ({ ...x, kind: 'live' })),
+      ...ftPick.map(fid => ({ fid, ee: expectedEndByFid.get(fid), kind: 'ft' })),
+    ];
+    if (targets.length === 0) continue;
 
     let changed = false;
-    await Promise.all(overdueFids.map(async ({ fid, ee }) => {
+    await Promise.all(targets.map(async ({ fid, ee, kind }) => {
       const m = ls[fid];
       const ftStatus = { short: 'FT', long: 'Match Finished', elapsed: 90 };
 
-      // Throttle por fid (2 min): si la API se empeña en "live", no re-pedimos
-      // cada 20s. Al escribir FT con datos reales deja de ser overdue y no vuelve.
-      let real = null;
+      // Throttle por fid (2 min) compartido por ambos casos.
       const tkey = `live:forcefinish:${fid}`;
-      if (!(await alreadySent(tkey))) {
-        await markSentTTL(tkey, 120);
-        try { const data = await apiFetch(`/fixtures?id=${fid}`); apiCalls++; real = data?.[0] || null; } catch {}
-        // Rescate de stats para ligas exóticas (igual que stale/finalize).
-        if (real && (!Array.isArray(real.statistics) || real.statistics.length === 0)) {
-          try {
-            const ded = await apiFetch(`/fixtures/statistics?fixture=${fid}`); apiCalls++;
-            if (Array.isArray(ded) && ded.length > 0) real.statistics = ded;
-          } catch {}
-        }
+      if (await alreadySent(tkey)) return;
+      await markSentTTL(tkey, 120);
+
+      let real = null;
+      try { const data = await apiFetch(`/fixtures?id=${fid}`); apiCalls++; real = data?.[0] || null; } catch {}
+      if (real && (!Array.isArray(real.statistics) || real.statistics.length === 0)) {
+        try {
+          const ded = await apiFetch(`/fixtures/statistics?fixture=${fid}`); apiCalls++;
+          if (Array.isArray(ded) && ded.length > 0) real.statistics = ded;
+        } catch {}
       }
 
       if (real && FINISHED_STATUSES.includes(real.fixture?.status?.short)) {
-        // ✓ DATOS REALES: marcador + córners + goleadores reales del partido.
+        // ✓ DATOS REALES: marcador + córners + goleadores reales. realFinal=true
+        // → no se vuelve a re-consultar.
         const stats = extractLiveStats(real, real.events || [], real.statistics || []);
         stats.date = d;
         stats.savedAt = new Date().toISOString();
+        stats.realFinal = true;
         ls[fid] = stats;
         changed = true;
         try { await redisSet(KEYS.fixtureStats(fid), stats, TTL.yesterday); } catch {}
@@ -1029,15 +1044,14 @@ async function forceFinishOverdueLive(allKickoffs, now, dates) {
           corners: stats.corners, yellowCards: stats.yellowCards, redCards: stats.redCards,
           goalScorers: stats.goalScorers || [], missedPenalties: stats.missedPenalties || [],
         });
-        console.log(`[live:force-finish] fid=${fid} (${d}) → FT con DATOS REALES (${real.goals?.home}-${real.goals?.away})`);
-      } else if (real && LIVE_STATUSES.includes(real.fixture?.status?.short) &&
+        console.log(`[live:force-finish] fid=${fid} (${d}) [${kind}] → FT DATOS REALES (${real.goals?.home}-${real.goals?.away})`);
+      } else if (kind === 'live' && real && LIVE_STATUSES.includes(real.fixture?.status?.short) &&
                  !(Number.isFinite(ee) && now > ee + FORCE_FINISH_HARD_MS)) {
-        // La API dice que SIGUE en vivo y no es absurdamente tarde → respetar
-        // (prórroga larga, etc.). Se re-evaluará tras el throttle.
+        // Sigue en vivo de verdad y no es absurdamente tarde → respetar.
         console.log(`[live:force-finish] fid=${fid} (${d}) la API lo reporta aún en vivo (${real.fixture?.status?.short}) — se respeta`);
-      } else {
-        // API no concluyente / fallo / absurdamente tarde → desatasco API-free
-        // conservando lo último conocido (el finalize rellena el real luego).
+      } else if (kind === 'live') {
+        // LIVE vencido + API no concluyente → desatasco API-free (sin realFinal,
+        // reintentará tras el throttle hasta confirmar el real).
         ls[fid] = { ...m, status: ftStatus, savedAt: new Date().toISOString() };
         changed = true;
         finished.push({
@@ -1045,8 +1059,9 @@ async function forceFinishOverdueLive(allKickoffs, now, dates) {
           corners: m.corners, yellowCards: m.yellowCards, redCards: m.redCards,
           goalScorers: m.goalScorers || [], missedPenalties: m.missedPenalties || [],
         });
-        console.log(`[live:force-finish] fid=${fid} (${d}) → FT sin datos reales (fetch ${real ? 'live-insistente' : 'falló'}) — último conocido`);
+        console.log(`[live:force-finish] fid=${fid} (${d}) [live] → FT sin datos reales (fetch ${real ? 'live-insistente' : 'falló'}) — reintentará`);
       }
+      // kind==='ft' sin poder confirmar → se deja como está; reintenta tras throttle.
     }));
 
     if (changed) {
@@ -1207,6 +1222,7 @@ export async function runLive(_payload = {}) {
 
     if (FINISHED_STATUSES.includes(match.fixture.status.short)) {
       liveData.savedAt = new Date().toISOString();
+      liveData.realFinal = true; // capturado del feed con status FINISHED → dato real confirmado
       await redisSet(KEYS.fixtureStats(fid), liveData, TTL.yesterday);
       // Fire-and-forget Supabase write. PostgrestFilterBuilder is thenable
       // but not a real Promise — wrap in async IIFE to get proper try/catch.
@@ -1458,6 +1474,7 @@ export async function runLive(_payload = {}) {
           const fullStats = extractLiveStats(fresh, fresh.events || [], statsArr);
           fullStats.date = today;
           fullStats.savedAt = new Date().toISOString();
+          fullStats.realFinal = true; // stale-detection confirmó FT contra la API → dato real
           await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
           // Fire-and-forget Supabase write. PostgrestFilterBuilder is thenable
           // but not a real Promise — wrap in async IIFE to get proper try/catch.
