@@ -4,6 +4,7 @@ import { redisGet, redisSet, KEYS, TTL } from '../../../lib/redis';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { filterFixturesByLocalDate } from '../../../lib/timezone';
+import { esTeam } from '../../../lib/team-names-es';
 
 const FT_STATS_FIELDS = ['corners', 'yellowCards', 'redCards', 'goalScorers', 'cardEvents', 'missedPenalties'];
 
@@ -580,6 +581,21 @@ export async function GET(request) {
             selections: a.combinada.selections.filter(s => s?.odd && s.odd >= minOdds),
           };
         }
+      }
+    }
+
+    // Localización ES: nombres de selecciones nacionales en español para las
+    // tarjetas (Belgium→Bélgica, Wales→Gales…). Clubes no mapeados quedan igual.
+    // Se aplica SOLO a la respuesta (las escrituras a Redis ya ocurrieron arriba
+    // con el nombre canónico inglés, que el matching de odds server-side usa).
+    for (const f of fixtures) {
+      if (f?.teams?.home?.name) f.teams.home.name = esTeam(f.teams.home.name);
+      if (f?.teams?.away?.name) f.teams.away.name = esTeam(f.teams.away.name);
+    }
+    if (analyzedData && typeof analyzedData === 'object') {
+      for (const a of Object.values(analyzedData)) {
+        if (a?.homeTeam) a.homeTeam = esTeam(a.homeTeam);
+        if (a?.awayTeam) a.awayTeam = esTeam(a.awayTeam);
       }
     }
 
