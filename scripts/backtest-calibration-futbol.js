@@ -20,11 +20,20 @@ const { Pool } = require('pg');
 const { MARKET_DEFS } = require('../lib/meta-features');
 const { recordFromRaw, buildActuals, FINISHED } = require('../lib/adn');
 const { meetingRecord, modalXIFromLineups } = require('../lib/h2h');
-const { computeContext, scoreContext, isKeyInjury, marketFamily } = require('../lib/context-engine');
+const { computeContext, scoreContext, isKeyInjury, marketFamily, rateFromRecords } = require('../lib/context-engine');
 
 const args = process.argv.slice(2);
 const USE_ML = args.includes('--ml');
 const ONLY_FAM = (args.find(a => a.startsWith('--family=')) || '').split('=')[1] || null;
+// --shrink: aplica shrink bayesiano hacia la tasa base del mercado, ponderado por
+// muestra: p_shrunk = (n·p + k·base)/(n+k). k = fuerza del prior (cuántos partidos
+// "ficticios" en la base). Reporta raw vs shrunk lado a lado para tunear k SIN
+// tocar runtime. k puede ser por-familia: --k=8 global, o defaults internos.
+const USE_SHRINK = args.includes('--shrink');
+const K_GLOBAL = Number((args.find(a => a.startsWith('--k=')) || '').split('=')[1]) || null;
+// Defaults por familia (categóricos = shrink fuerte; conteo = suave). Override con --k.
+const K_BY_FAMILY = { resultado: 14, resultado_1h: 14, resultado_2h: 14, btts: 12, primer_gol: 12, timing_gol: 12, most_x: 10, roja: 8 };
+const kFor = (fam) => K_GLOBAL != null ? K_GLOBAL : (K_BY_FAMILY[fam] ?? 5);
 
 function makePool() {
   const url = process.env.DATABASE_URL;
@@ -65,7 +74,19 @@ async function main() {
 
   const fam = {};
   const ensure = (f) => { if (!fam[f]) fam[f] = { buckets: Array.from({ length: 10 }, () => ({ sp: 0, sy: 0, n: 0 })), brier: 0, ll: 0, n: 0, sumy: 0 }; return fam[f]; };
+  const famShrunk = {};
+  const ensureS = (f) => { if (!famShrunk[f]) famShrunk[f] = { buckets: Array.from({ length: 10 }, () => ({ sp: 0, sy: 0, n: 0 })), brier: 0, ll: 0, n: 0, sumy: 0 }; return famShrunk[f]; };
   const c01 = (p) => Math.max(1e-6, Math.min(1 - 1e-6, p));
+
+  // Tasa base por mercado (prior del shrink) = frecuencia global del mercado sobre
+  // una muestra pooled de registros de todos los equipos. Read-only.
+  const baseRate = {};
+  if (USE_SHRINK) {
+    const pool = []; const CAP = 12000;
+    for (const tid of byTeam.keys()) { for (const rec of teamRecords(tid)) { pool.push(rec); } if (pool.length >= CAP) break; }
+    for (const key of Object.keys(MARKET_DEFS)) { const { rate } = rateFromRecords(pool, MARKET_DEFS[key]); if (rate != null) baseRate[key] = rate; }
+    console.log(`[backtest] shrink ON · tasas base de ${Object.keys(baseRate).length} mercados (pool=${pool.length} registros) · k=${K_GLOBAL != null ? K_GLOBAL : 'por-familia'}`);
+  }
 
   let nFix = 0;
   for (const r of fxRows) {
@@ -95,22 +116,39 @@ async function main() {
       const bi = Math.min(9, Math.max(0, Math.floor(p * 10)));
       F.buckets[bi].sp += p; F.buckets[bi].sy += y; F.buckets[bi].n++;
       F.brier += (p - y) * (p - y); F.ll += -(y * Math.log(c01(p)) + (1 - y) * Math.log(1 - c01(p))); F.n++; F.sumy += y;
+      if (USE_SHRINK) {
+        const base = baseRate[key] != null ? baseRate[key] : 0.5;
+        const nn = sc.n || 1, k = kFor(ff);
+        const ps = (nn * p + k * base) / (nn + k);
+        const S = ensureS(ff);
+        const bj = Math.min(9, Math.max(0, Math.floor(ps * 10)));
+        S.buckets[bj].sp += ps; S.buckets[bj].sy += y; S.buckets[bj].n++;
+        S.brier += (ps - y) * (ps - y); S.ll += -(y * Math.log(c01(ps)) + (1 - y) * Math.log(1 - c01(ps))); S.n++; S.sumy += y;
+      }
     }
   }
 
-  console.log(`\n[backtest] fixtures evaluados: ${nFix} · ML: ${USE_ML ? 'ON' : 'off (motor empírico base)'}\n`);
+  console.log(`\n[backtest] fixtures evaluados: ${nFix} · ML: ${USE_ML ? 'ON' : 'off (motor empírico base)'}${USE_SHRINK ? ' · SHRINK ON' : ''}\n`);
+  const eceOf = (F) => { let e = 0; for (const b of F.buckets) { if (b.n) e += (b.n / F.n) * Math.abs(b.sp / b.n - b.sy / b.n); } return e; };
   const fams = Object.keys(fam).sort();
-  let gBrier = 0, gN = 0, gECE = 0;
+  let gBrier = 0, gN = 0, gECE = 0, gBrierS = 0, gECES = 0;
   for (const ff of fams) {
     const F = fam[ff]; if (!F.n) continue;
-    const brier = F.brier / F.n, ll = F.ll / F.n, base = F.sumy / F.n;
-    let ece = 0; for (const b of F.buckets) { if (b.n) ece += (b.n / F.n) * Math.abs(b.sp / b.n - b.sy / b.n); }
+    const brier = F.brier / F.n, ll = F.ll / F.n, base = F.sumy / F.n, ece = eceOf(F);
     gBrier += F.brier; gN += F.n; gECE += ece * F.n;
-    console.log(`── ${ff}  n=${F.n} base=${(base * 100).toFixed(1)}% Brier=${brier.toFixed(3)} logloss=${ll.toFixed(3)} ECE=${(ece * 100).toFixed(1)}%`);
-    for (let i = 0; i < 10; i++) { const b = F.buckets[i]; if (!b.n) continue; const pred = b.sp / b.n * 100, act = b.sy / b.n * 100, gap = pred - act; console.log(`     [${String(i * 10).padStart(2)}-${i * 10 + 10}%] pred ${pred.toFixed(0).padStart(3)}%  real ${act.toFixed(0).padStart(3)}%  n=${String(b.n).padStart(5)}  gap ${gap >= 0 ? '+' : ''}${gap.toFixed(0)}${Math.abs(gap) >= 10 ? '  <- desfase' : ''}`); }
+    if (USE_SHRINK && famShrunk[ff]) {
+      const S = famShrunk[ff], eceS = eceOf(S);
+      gBrierS += S.brier; gECES += eceS * S.n;
+      console.log(`── ${ff}  n=${F.n} base=${(base * 100).toFixed(1)}%  | RAW: Brier ${brier.toFixed(3)} ECE ${(ece * 100).toFixed(1)}%  →  SHRUNK(k=${kFor(ff)}): Brier ${(S.brier / S.n).toFixed(3)} ECE ${(eceS * 100).toFixed(1)}%`);
+      for (let i = 0; i < 10; i++) { const b = S.buckets[i]; if (!b.n) continue; const pred = b.sp / b.n * 100, act = b.sy / b.n * 100, gap = pred - act; console.log(`     shrunk[${String(i * 10).padStart(2)}-${i * 10 + 10}%] pred ${pred.toFixed(0).padStart(3)}%  real ${act.toFixed(0).padStart(3)}%  n=${String(b.n).padStart(5)}  gap ${gap >= 0 ? '+' : ''}${gap.toFixed(0)}${Math.abs(gap) >= 10 ? '  <- aún desfase' : ''}`); }
+    } else {
+      console.log(`── ${ff}  n=${F.n} base=${(base * 100).toFixed(1)}% Brier=${brier.toFixed(3)} logloss=${ll.toFixed(3)} ECE=${(ece * 100).toFixed(1)}%`);
+      for (let i = 0; i < 10; i++) { const b = F.buckets[i]; if (!b.n) continue; const pred = b.sp / b.n * 100, act = b.sy / b.n * 100, gap = pred - act; console.log(`     [${String(i * 10).padStart(2)}-${i * 10 + 10}%] pred ${pred.toFixed(0).padStart(3)}%  real ${act.toFixed(0).padStart(3)}%  n=${String(b.n).padStart(5)}  gap ${gap >= 0 ? '+' : ''}${gap.toFixed(0)}${Math.abs(gap) >= 10 ? '  <- desfase' : ''}`); }
+    }
   }
-  console.log(`\n=== GLOBAL  Brier=${(gBrier / gN).toFixed(3)}  ECE=${(gECE / gN * 100).toFixed(1)}%  muestras=${gN} ===`);
-  console.log('gap + = SOBRECONFIADO (dice más de lo que ocurre). El objetivo de la calibración: acercar pred↔real (gap→0) sin isotónica.');
+  console.log(`\n=== GLOBAL RAW  Brier=${(gBrier / gN).toFixed(3)}  ECE=${(gECE / gN * 100).toFixed(1)}% ===`);
+  if (USE_SHRINK) console.log(`=== GLOBAL SHRUNK  Brier=${(gBrierS / gN).toFixed(3)}  ECE=${(gECES / gN * 100).toFixed(1)}%  (menor = mejor calibrado) ===`);
+  console.log('gap + = SOBRECONFIADO. Objetivo del shrink: acercar pred↔real sin isotónica, ponderando por muestra.');
   await pool.end();
 }
 main().catch(e => { console.error(e); process.exit(1); });
