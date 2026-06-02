@@ -23,8 +23,10 @@
  */
 import {
   pgQuery,
+  pgPool,
   captureFinalizedFixturesRaw,
   trainMetaModels,
+  computeMarketBaseRates,
 } from '../../shared.js';
 
 export async function runFutbolRetrain(payload = {}) {
@@ -67,9 +69,21 @@ export async function runFutbolRetrain(payload = {}) {
   //    features_full ni team_market_profiles se usan ya.)
   result.train = await trainMetaModels({});
 
+  // 4) Tasas base por mercado (prior del shrink de calibración) — DESDE EL CRUDO,
+  //    ya con los partidos recién finalizados. Auto-ajusta la base con cada
+  //    jornada. Idempotente y FALLA SUAVE: si truena, el motor sigue con las
+  //    bases previas (no rompe el retrain ni el análisis).
+  try {
+    result.baseRates = await computeMarketBaseRates({ pool: pgPool });
+  } catch (e) {
+    console.error('[futbol-retrain] base-rates falló (no crítico):', e?.message || e);
+    result.baseRates = { ok: false, error: String(e?.message || e) };
+  }
+
   console.log(
     `[futbol-retrain] OK · capturados=${result.capture?.fixturesDone ?? 0} · ` +
-      `muestras=${result.train?.samples ?? 0} · entrenados=${result.train?.trained ?? 0} · activos=${result.train?.activated ?? 0}`
+      `muestras=${result.train?.samples ?? 0} · entrenados=${result.train?.trained ?? 0} · activos=${result.train?.activated ?? 0} · ` +
+      `tasas_base=${result.baseRates?.markets ?? 0}`
   );
   return result;
 }

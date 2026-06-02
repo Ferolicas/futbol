@@ -47,6 +47,7 @@ const [
   _reenrich,
   _buildProfiles,
   _trainMeta,
+  _baseRates,
   _reenrichBaseball,
   _trainBaseballMeta,
 ] = await Promise.all([
@@ -72,6 +73,7 @@ const [
   import(SCRIPTS + 'reenrich-features.js'),
   import(SCRIPTS + 'build-team-profiles.js'),
   import(SCRIPTS + 'train-meta-models.js'),
+  import(SCRIPTS + 'compute-market-base-rates.js'),
   import(SCRIPTS + 'reenrich-baseball.js'),
   import(SCRIPTS + 'train-baseball-meta-models.js'),
 ]);
@@ -131,6 +133,9 @@ export const captureFinalizedFixturesRaw = _rawBackfill.captureFinalizedFixtures
 export const reenrichFeatures = _reenrich.reenrichFeatures;
 export const buildTeamProfiles = _buildProfiles.buildTeamProfiles;
 export const trainMetaModels = _trainMeta.trainMetaModels;
+// scripts/compute-market-base-rates.js — prior del shrink de calibración. Lo
+// re-corre el cron nocturno (futbol-retrain) tras entrenar, con el pgPool.
+export const computeMarketBaseRates = _baseRates.computeMarketBaseRates;
 
 // scripts/reenrich-baseball.js + scripts/train-baseball-meta-models.js —
 // se invocan desde el cron baseball-retrain. Mismo guard CLI que los de fútbol.
