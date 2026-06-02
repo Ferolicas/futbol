@@ -953,6 +953,50 @@ async function persistHalfStatsSnapshot(match, data) {
   }
 }
 
+// ── Red de seguridad anti-"pegado en vivo" (API-free) ───────────────────────
+// Un partido marcado LIVE en liveStats cuyo expectedEnd ya pasó hace rato puede
+// quedar congelado "en vivo" si el tick se salta (window-skip), si se perdió su
+// transición a FT, o si cruzó medianoche (liveStats se indexa por día UTC). Esta
+// pasada corre SIEMPRE (antes del window-skip), recorre liveStats de HOY y AYER y
+// fuerza a FT cualquier entrada LIVE vencida. NO llama a la API: conserva el
+// último goals/score conocido y solo corrige el status para despegarla; el
+// finalize y el forceApi de /api/fixtures rellenan el resultado real después.
+// Devuelve los cierres aplicados (para broadcastear y corregir fixtures:{d}).
+const FORCE_FINISH_GRACE_MS = 30 * 60 * 1000; // margen tras expectedEnd del schedule
+const FORCE_FINISH_STALE_MS = 40 * 60 * 1000; // sin schedule: tiempo sin actualizarse
+async function forceFinishOverdueLive(allKickoffs, now, dates) {
+  const expectedEndByFid = new Map(
+    (allKickoffs || []).map(m => [Number(m.fixtureId), Number(m.expectedEnd)]));
+  const finished = [];
+  for (const d of dates) {
+    let ls;
+    try { ls = await redisGet(KEYS.liveStats(d)); } catch { ls = null; }
+    if (!ls || typeof ls !== 'object') continue;
+    let changed = false;
+    for (const [fid, m] of Object.entries(ls)) {
+      if (!m || !LIVE_STATUSES.includes(m.status?.short)) continue;
+      const ee = expectedEndByFid.get(Number(fid));
+      const lastTouch = m.updatedAt ? Date.parse(m.updatedAt) : 0;
+      const overdue = (Number.isFinite(ee) && now > ee + FORCE_FINISH_GRACE_MS) ||
+                      (!Number.isFinite(ee) && lastTouch && now - lastTouch > FORCE_FINISH_STALE_MS);
+      if (!overdue) continue;
+      const ftStatus = { short: 'FT', long: 'Match Finished', elapsed: 90 };
+      ls[fid] = { ...m, status: ftStatus, savedAt: new Date().toISOString() };
+      changed = true;
+      finished.push({
+        fixtureId: Number(fid), status: ftStatus, goals: m.goals, score: m.score,
+        corners: m.corners, yellowCards: m.yellowCards, redCards: m.redCards,
+        goalScorers: m.goalScorers || [], missedPenalties: m.missedPenalties || [],
+      });
+      console.log(`[live:force-finish] fid=${fid} (${d}) LIVE→FT — vencido (expectedEnd=${ee || 'n/a'}, updatedAt=${m.updatedAt || 'n/a'})`);
+    }
+    if (changed) {
+      try { await redisSet(KEYS.liveStats(d), ls, TTL.liveStats); } catch {}
+    }
+  }
+  return finished;
+}
+
 export async function runLive(_payload = {}) {
   const today = new Date().toISOString().split('T')[0];
   // Schedule cruzando medianoche: un partido que arrancó ~23:30 UTC del día N
@@ -990,6 +1034,36 @@ export async function runLive(_payload = {}) {
     ...((schedTomorrow?.kickoffTimes)  || []),
   ];
   console.log(`${LL} tick: today=${today} schedules(y/t/m)=${(schedYesterday?.kickoffTimes?.length||0)}/${(schedToday?.kickoffTimes?.length||0)}/${(schedTomorrow?.kickoffTimes?.length||0)} unión=${allKickoffs.length}`);
+
+  // Red de seguridad: despegar partidos LIVE vencidos (hoy + ayer) ANTES del
+  // window-skip, para que nada quede "en vivo" eternamente aunque el tick se
+  // salte o el partido cruzara medianoche. API-free.
+  const forcedFinished = await forceFinishOverdueLive(allKickoffs, now, [today, yesterday]);
+  if (forcedFinished.length > 0) {
+    console.log(`${LL} force-finish: ${forcedFinished.length} partido(s) LIVE vencido(s) → FT`);
+    triggerEvent('live-scores', 'update', {
+      date: today, liveCount: 0, matches: forcedFinished,
+      timestamp: new Date().toISOString(), forcedFinish: true,
+    }).catch(() => {});
+    // Corrige también fixtures:{hoy} y fixtures:{ayer} para que un page-load por
+    // /api/fixtures tampoco lo muestre en vivo.
+    const forcedIds = new Set(forcedFinished.map(x => x.fixtureId));
+    for (const d of [today, yesterday]) {
+      try {
+        const cached = await redisGet(KEYS.fixtures(d));
+        if (Array.isArray(cached) && cached.length > 0) {
+          let chg = false;
+          const upd = cached.map(f => {
+            if (!forcedIds.has(f.fixture?.id)) return f;
+            if (FINISHED_STATUSES.includes(f.fixture?.status?.short)) return f;
+            chg = true;
+            return { ...f, fixture: { ...f.fixture, status: { short: 'FT', long: 'Match Finished', elapsed: 90 } } };
+          });
+          if (chg) await redisSet(KEYS.fixtures(d), upd, TTL.fixtures);
+        }
+      } catch {}
+    }
+  }
 
   if (allKickoffs.length > 0) {
     // Ventana global: del primer kickoff (de cualquier día) al último expectedEnd.

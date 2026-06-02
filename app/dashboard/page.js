@@ -493,15 +493,25 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // F2/F6/F7: poll de 30s SOLO como fallback cuando el WS está caído. Con el WS
-  // conectado, los eventos 'live-scores' del worker actualizan en tiempo real vía
-  // el contexto live-stats → el poll a /api/refresh-live (que quema cuota) no corre.
+  // F2 (Fase 2 — watchdog de frescura): mientras haya partidos en vivo, cada 20s
+  // comprobamos cuánto hace del último evento WS recibido (pusherLastUpdate). Se
+  // refresca si el WS está caído O "connected" pero medio-muerto (sin entregar:
+  // ningún update en >40s). Con el WS sano (update cada ~20s) el watchdog NUNCA
+  // dispara el fetch → cero polling redundante. Esto cierra el hueco donde la
+  // tarjeta quedaba congelada aunque el push sí llegara (el WS estaba "connected"
+  // pero no entregaba y el poll anterior se suprimía por wsState).
   useEffect(() => {
     const hasLive = fixtures.some(f => isLive(f.fixture.status.short));
     if (!hasLive) return;
-    if (wsState === 'connected') return; // WS activo → sin poll redundante
-    refreshLiveData();
-    const poll = setInterval(refreshLiveData, 30000);
+    const STALE_MS = 40000;
+    const check = () => {
+      const last = pusherLastUpdate.current || 0;
+      if (wsState !== 'connected' || Date.now() - last > STALE_MS) {
+        refreshLiveData();
+      }
+    };
+    check(); // chequeo inmediato al detectar que hay partidos en vivo
+    const poll = setInterval(check, 20000);
     return () => clearInterval(poll);
   }, [fixtures, refreshLiveData, wsState]);
 

@@ -186,6 +186,8 @@ export async function GET(request) {
     // días no-pasados (un día pasado nunca debe arrastrar lives de su víspera).
     if (!isPastDate) {
       const LIVE_NOW = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
+      const nowMsCM = Date.now();
+      const STALE_LIVE_MS = 110 * 60 * 1000; // 90min + 20min buffer
       const d = new Date(date + 'T12:00:00Z');
       const prevDay = new Date(d.getTime() - 86400000).toISOString().split('T')[0];
       const idsNow = new Set(fixtures.map(f => f.fixture?.id));
@@ -195,7 +197,16 @@ export async function GET(request) {
           for (const f of prevFixtures) {
             if (LIVE_NOW.includes(f.fixture?.status?.short) &&
                 f.fixture?.id && !idsNow.has(f.fixture.id)) {
-              fixtures.push(f);
+              // Guard anti-"pegado en vivo": un partido de ayer marcado LIVE cuyo
+              // kickoff fue hace >110min NO está realmente en juego (el live cron
+              // lo dejó congelado). Lo reincorporamos como FT, nunca como live —
+              // mismo criterio que la red de seguridad del camino principal arriba.
+              const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
+              if (kickoff > 0 && nowMsCM - kickoff > STALE_LIVE_MS) {
+                fixtures.push({ ...f, fixture: { ...f.fixture, status: { short: 'FT', long: 'Match Finished', elapsed: 90 } } });
+              } else {
+                fixtures.push(f);
+              }
               idsNow.add(f.fixture.id);
             }
           }
