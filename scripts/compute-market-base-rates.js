@@ -80,17 +80,20 @@ async function main() {
   if (DRY) { console.log('[base-rates] --dry: no se escribe nada.'); await pool.end(); return; }
   if (!rows.length) { console.error('[base-rates] sin mercados que escribir — abortando (no desactivo lo previo).'); await pool.end(); process.exit(1); }
 
-  // Versión global nueva; desactiva la base-rate previa e inserta el snapshot.
-  const { rows: vr } = await pool.query(`SELECT COALESCE(MAX(version),0)+1 AS v FROM prediction_models WHERE sport='football' AND model_type='base-rate'`);
-  const version = vr[0].v;
+  // La PK es (sport, market_key, version), COMPARTIDA entre model_types. Así que
+  // la versión es POR-MERCADO = MAX(version) de cualquier tipo +1 (igual que el
+  // trainer). Desactiva la base-rate previa e inserta el snapshot nuevo.
+  const { rows: vrows } = await pool.query(`SELECT market_key, MAX(version) AS v FROM prediction_models WHERE sport='football' GROUP BY market_key`);
+  const maxV = new Map(vrows.map(r => [r.market_key, Number(r.v) || 0]));
+  for (const r of rows) r.version = (maxV.get(r.market_key) || 0) + 1;
   await pool.query(`UPDATE prediction_models SET active=FALSE WHERE sport='football' AND model_type='base-rate'`);
   await pool.query(
     `INSERT INTO prediction_models (sport, market_key, version, model_type, weights, metrics, active, trained_at)
-     SELECT 'football', x.market_key, $1, 'base-rate', x.weights, x.metrics, TRUE, NOW()
-     FROM jsonb_to_recordset($2::jsonb) AS x(market_key text, weights jsonb, metrics jsonb)`,
-    [version, JSON.stringify(rows)]
+     SELECT 'football', x.market_key, x.version, 'base-rate', x.weights, x.metrics, TRUE, NOW()
+     FROM jsonb_to_recordset($1::jsonb) AS x(market_key text, version int, weights jsonb, metrics jsonb)`,
+    [JSON.stringify(rows)]
   );
-  console.log(`[base-rates] OK · escritas ${rows.length} tasas base activas (version=${version}).`);
+  console.log(`[base-rates] OK · escritas ${rows.length} tasas base activas (versión por-mercado).`);
   await pool.end();
 }
 
