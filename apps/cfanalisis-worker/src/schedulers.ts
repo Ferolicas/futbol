@@ -26,7 +26,7 @@ type Sched = { queue: QueueName; id: string; pattern?: string; every?: number; t
 // futbol-live (PARTE 1: /fixtures/statistics dentro de live.js). El job dedicado
 // de 30 min queda obsoleto → al añadir su id aquí, registerSchedulers() borra el
 // scheduler Y su job delayed pendiente en el arranque (no quedan dos corriendo).
-const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-odds-15m', 'futbol-raw-backfill-half2', 'baseball-live-5m', 'futbol-live-corners-30m'];
+const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-odds-15m', 'futbol-raw-backfill-half2', 'baseball-live-5m', 'futbol-live-corners-30m', 'futbol-odds-30m'];
 
 const SCHEDULES: Sched[] = [
   // ── Fútbol — diarios (hora España) ──
@@ -61,11 +61,10 @@ const SCHEDULES: Sched[] = [
   // de futbol-live (PARTE 1). Su id viejo está en STALE_SCHEDULER_IDS para que
   // BullMQ lo limpie. La cola/worker (queues.ts, workers.ts) quedan inertes (sin
   // job que los dispare); no se borran para minimizar riesgo.
-  // Odds: el cron dispara cada 30min pero el handler tiene PRESUPUESTO acotado
-  // (ODDS_BUDGET=2 ejecuciones/día) con espaciado (primera 2h antes del 1er
-  // partido). El tope DURO real se cuenta en CRÉDITOS (región×mercado) en
-  // lib/odds-api.js para no exceder el plan de The Odds API.
-  { queue: 'futbol-odds',         id: 'futbol-odds-30m',         pattern: '*/30 * * * *' },
+  // Odds de FÚTBOL: ELIMINADO. The Odds API se quitó del fútbol — API-Football ya
+  // trae bet365/bwin (superset). Su id 'futbol-odds-30m' está en STALE_SCHEDULER_IDS
+  // para que BullMQ borre el scheduler + su job delayed en el arranque. La cola/
+  // worker quedan inertes (sin job que los dispare). Baseball sigue usando odds.
   // ── Baseball — diarios (hora España) ──
   { queue: 'baseball-fixtures',  id: 'baseball-fixtures-daily',  pattern: '5 1 * * *',  tz: TZ }, // 1:05
   { queue: 'baseball-analyze',   id: 'baseball-analyze-daily',   pattern: '30 1 * * *', tz: TZ }, // 1:30 — jornada Colombia que arranca
