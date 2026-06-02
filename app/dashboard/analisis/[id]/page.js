@@ -1275,12 +1275,12 @@ function TeamLogo({ src, name, size = 32 }) {
 // ══════════════════════════════════════════
 function PlayerFace({ id, size = 22, ring }) {
   const [err, setErr] = useState(false);
-  const src = id ? `https://media.api-sports.io/football/players/${id}.png` : null;
+  const src = id ? `/api/player-photo/${id}` : null;
   const common = { width: size, height: size, borderRadius: '50%', flexShrink: 0 };
   if (!src || err) {
     return <span style={{ ...common, background: 'rgba(255,255,255,.1)', border: `1px solid ${ring || 'rgba(255,255,255,.18)'}`, display: 'inline-block' }} aria-hidden="true" />;
   }
-  return <img src={src} alt="" loading="lazy" onError={() => setErr(true)} style={{ ...common, objectFit: 'cover', background: 'rgba(255,255,255,.08)', border: ring ? `1.5px solid ${ring}` : 'none' }} />;
+  return <img src={src} alt="" loading="lazy" decoding="async" onError={() => setErr(true)} style={{ ...common, objectFit: 'cover', background: 'rgba(255,255,255,.08)', border: ring ? `1.5px solid ${ring}` : 'none' }} />;
 }
 
 // ══════════════════════════════════════════

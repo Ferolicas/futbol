@@ -2300,12 +2300,12 @@ function GoalBurst() {
 
 // Foto oficial del jugador (API-Football). Fallback a placeholder si no hay id
 // o la imagen 404ea. loading=lazy para no bloquear el scroll.
-const playerFace = (id) => id ? `https://media.api-sports.io/football/players/${id}.png` : null;
+const playerFace = (id) => id ? `/api/player-photo/${id}` : null;
 function PlayerFace({ id, size = 18 }) {
   const [err, setErr] = useState(false);
   const src = playerFace(id);
   if (!src || err) return <span className="scorer-face scorer-face-ph" style={{ width: size, height: size }} aria-hidden="true" />;
-  return <img src={src} alt="" width={size} height={size} className="scorer-face" loading="lazy" onError={() => setErr(true)} />;
+  return <img src={src} alt="" width={size} height={size} className="scorer-face" loading="lazy" decoding="async" onError={() => setErr(true)} />;
 }
 
 // Línea de goleador con foto + minuto + nombre. side='home' (izq, verde) /
