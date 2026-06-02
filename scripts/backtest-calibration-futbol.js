@@ -78,14 +78,32 @@ async function main() {
   const ensureS = (f) => { if (!famShrunk[f]) famShrunk[f] = { buckets: Array.from({ length: 10 }, () => ({ sp: 0, sy: 0, n: 0 })), brier: 0, ll: 0, n: 0, sumy: 0 }; return famShrunk[f]; };
   const c01 = (p) => Math.max(1e-6, Math.min(1 - 1e-6, p));
 
-  // Tasa base por mercado (prior del shrink) = frecuencia global del mercado sobre
-  // una muestra pooled de registros de todos los equipos. Read-only.
+  // Actuals REALES de cada fixture terminado (buildActuals = la misma definición
+  // que evalúa el motor y la familia). Se precomputa una vez y se reusa para
+  // (a) la tasa base del shrink y (b) el bucle de evaluación. Read-only.
+  const actualsByFid = new Map();
+  for (const r of fxRows) {
+    const f = r.payload;
+    if (!FINISHED.has(f.fixture?.status?.short)) continue;
+    const fid = Number(f.fixture?.id); if (!fid) continue;
+    const a = buildActuals(f, stById.get(fid) || null, evById.get(fid) || null, hsById.get(fid) || null);
+    if (a) actualsByFid.set(fid, a);
+  }
+
+  // Tasa base por mercado (prior del shrink) = frecuencia REAL del mercado sobre
+  // TODOS los fixtures terminados, medida con el MISMO def.gate/outcome del
+  // backtest. Es por-CLAVE, no por-familia: cada línea tiene su propia base
+  // (Over0.5≈0.95, Over3.5≈0.25, gana local≈0.45, empate≈0.27…). Encoger hacia
+  // ESTA base — y no hacia 0.5 — es lo que calibra sin romper los conteos. R-O.
   const baseRate = {};
   if (USE_SHRINK) {
-    const pool = []; const CAP = 12000;
-    for (const tid of byTeam.keys()) { for (const rec of teamRecords(tid)) { pool.push(rec); } if (pool.length >= CAP) break; }
-    for (const key of Object.keys(MARKET_DEFS)) { const { rate } = rateFromRecords(pool, MARKET_DEFS[key]); if (rate != null) baseRate[key] = rate; }
-    console.log(`[backtest] shrink ON · tasas base de ${Object.keys(baseRate).length} mercados (pool=${pool.length} registros) · k=${K_GLOBAL != null ? K_GLOBAL : 'por-familia'}`);
+    const MIN_BASE_N = 50; // muestra mínima para un prior estable
+    for (const key of Object.keys(MARKET_DEFS)) {
+      const def = MARKET_DEFS[key]; let n = 0, hits = 0;
+      for (const a of actualsByFid.values()) { if (!def.gate(a)) continue; n++; if (def.outcome(a)) hits++; }
+      if (n >= MIN_BASE_N) baseRate[key] = hits / n;
+    }
+    console.log(`[backtest] shrink ON · tasas base de ${Object.keys(baseRate).length} mercados (sobre ${actualsByFid.size} fixtures terminados) · k=${K_GLOBAL != null ? K_GLOBAL : 'por-familia'}`);
   }
 
   let nFix = 0;
@@ -94,7 +112,7 @@ async function main() {
     if (!FINISHED.has(f.fixture?.status?.short)) continue;
     const homeId = f.teams?.home?.id, awayId = f.teams?.away?.id; if (!homeId || !awayId) continue;
     const fid = Number(f.fixture.id);
-    const actuals = buildActuals(f, stById.get(fid) || null, evById.get(fid) || null, hsById.get(fid) || null);
+    const actuals = actualsByFid.get(fid);
     if (!actuals) continue;
     const beforeMs = new Date(f.fixture.date).getTime();
     const pit = (recs) => recs.filter(x => x && x.date && new Date(x.date).getTime() < beforeMs);
