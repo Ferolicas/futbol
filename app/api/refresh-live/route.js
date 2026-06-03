@@ -32,13 +32,15 @@ function extractLiveStats(match) {
   for (const ev of (match.events || [])) {
     if (ev.type === 'Goal') {
       if (ev.detail === 'Missed Penalty') {
-        missedPenalties.push({ player: ev.player?.name, teamId: ev.team?.id, teamName: ev.team?.name, minute: ev.time?.elapsed, extra: ev.time?.extra });
+        // playerId → foto oficial del jugador en el frontend (PlayerFace). Sin
+        // esto solo se veia el circulo placeholder hasta que el worker reescribia.
+        missedPenalties.push({ player: ev.player?.name, playerId: ev.player?.id ?? null, teamId: ev.team?.id, teamName: ev.team?.name, minute: ev.time?.elapsed, extra: ev.time?.extra });
       } else {
-        goalScorers.push({ player: ev.player?.name, teamId: ev.team?.id, teamName: ev.team?.name, minute: ev.time?.elapsed, extra: ev.time?.extra, type: ev.detail });
+        goalScorers.push({ player: ev.player?.name, playerId: ev.player?.id ?? null, assist: ev.assist?.name ?? null, assistId: ev.assist?.id ?? null, teamId: ev.team?.id, teamName: ev.team?.name, minute: ev.time?.elapsed, extra: ev.time?.extra, type: ev.detail });
       }
     }
     if (ev.type === 'Card') {
-      cardEvents.push({ player: ev.player?.name, teamId: ev.team?.id, teamName: ev.team?.name, minute: ev.time?.elapsed, type: ev.detail });
+      cardEvents.push({ player: ev.player?.name, playerId: ev.player?.id ?? null, teamId: ev.team?.id, teamName: ev.team?.name, minute: ev.time?.elapsed, type: ev.detail });
     }
   }
 
