@@ -49,7 +49,7 @@ async function apiGet(path) {
 }
 async function quota() {
   const j = await apiGet('/status');
-  return { current: j?.response?.requests?.current ?? 0, limit: j?.response?.requests?.limit_day ?? 75000 };
+  return { current: j?.response?.requests?.current ?? 0, limit: j?.response?.requests?.limit_day ?? 150000 };
 }
 async function waitIfQuotaExhausted() {
   const q = await quota();

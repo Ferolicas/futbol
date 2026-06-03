@@ -23,7 +23,7 @@ import { analyzeMatch, getCachedFixturesRaw, redisGet, redisSet, triggerEvent } 
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
 
-// API-Football Ultra serializa todo a ~13 req/s vía el rate limiter compartido
+// API-Football Mega serializa todo a ~13 req/s vía el rate limiter compartido
 // en lib/api-football.js. Más de ~10 análisis en paralelo no acelera nada —
 // solo bloquea el event loop con trabajo CPU del motor (Dixon-Coles + stages
 // 3-6) y dispara el "job stalled more than allowable limit" de BullMQ porque

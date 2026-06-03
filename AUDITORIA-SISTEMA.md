@@ -1143,7 +1143,7 @@ fórmulas** → el usuario ve cifras incoherentes entre widgets. Unificar todo a
 ## NOTAS DE FÍSICA (para fijar expectativas de "tiempo real")
 - Piso de datos en vivo = **20s** (cron `futbol-live-20s`) + RTT API-Football. El WS no
   lo mejora; solo evita el poll del cliente. Para bajar de 20s hay que subir frecuencia
-  de poll → choca con cuota 7500/día de API-Football.
+  de poll → choca con cuota 150000/día de API-Football.
 - Piso de red navegador↔VPS = RTT geográfico (Colombia↔servidor). Irreducible por código.
 - Lo optimizable por código: queries duplicadas (M1), doble polling (A3), payloads
   grandes, bloqueos en el render. Eso es lo que perseguimos.

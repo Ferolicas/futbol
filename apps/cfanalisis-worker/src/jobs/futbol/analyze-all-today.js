@@ -18,7 +18,7 @@ import {
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
 
-// API-Football Ultra serializa a ~13 req/s vía el rate limiter de
+// API-Football Mega serializa a ~13 req/s vía el rate limiter de
 // lib/api-football.js. Más de ~10 en paralelo solo bloquea el event loop
 // con trabajo CPU del motor (Dixon-Coles + stages 3-6) y dispara stalls
 // porque el lock renewer de BullMQ no logra ejecutarse.

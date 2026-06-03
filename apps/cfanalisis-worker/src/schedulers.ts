@@ -53,7 +53,7 @@ const SCHEDULES: Sched[] = [
   // ── Fútbol — periódicos ──
   // Live cada 20s: el handler hace smart-skip (0 llamadas fuera de partidos),
   // así que el 3x del intervalo solo aplica durante ventanas en vivo. En plan
-  // Ultra (75k/día) eso son ~2.5k/día (~3,5% de cuota). Objetivo: ver el gol
+  // Mega (150k/día) eso son ~2.5k/día (~1,7% de cuota). Objetivo: ver el gol
   // a los ~20s.
   { queue: 'futbol-live',         id: 'futbol-live-20s',         every: 20_000 },
   { queue: 'futbol-lineups',      id: 'futbol-lineups-5m',       pattern: '*/5 * * * *' },

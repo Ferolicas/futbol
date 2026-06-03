@@ -4,7 +4,7 @@
  * Port of /api/cron/live-corners. Fetches /fixtures/statistics for currently
  * live matches to refresh corner counts. ~1 API call per live match.
  *
- * Schedule on cron-job.org: every 5 minutes (was 30). With the 75k/day plan
+ * Schedule on cron-job.org: every 5 minutes (was 30). With the 150k/day plan
  * even 100 simultaneous matches × 18 polls/match = 1800 calls/day — trivial.
  *
  * Payload: {}
