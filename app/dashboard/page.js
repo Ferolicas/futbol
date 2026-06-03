@@ -91,10 +91,7 @@ export default function Dashboard() {
   // fuente primaria + SWR 60s de respaldo. El poll de 30s a /api/refresh-live solo
   // se activa como FALLBACK cuando el WS NO está conectado (mata el polling redundante).
   const wsState = useWorkerSocketState();
-  // Owner re-analyze state
-  const [reanalyzing, setReanalyzing] = useState(false);
-  const [reanalyzeDone, setReanalyzeDone] = useState(false);
-  const [reanalyzeProgress, setReanalyzeProgress] = useState(null);
+  // Estado de re-analyze (owner) eliminado junto con su botón del header.
   // Modal: ver análisis completo sin navegar
   const [analysisModalId, setAnalysisModalId] = useState(null);
   // Track Pusher activity (for debugging/diagnostics)
@@ -155,70 +152,7 @@ export default function Dashboard() {
     return updated;
   }, []);
 
-  const isOwner = user?.email?.toLowerCase() === 'ferneyolicas@gmail.com';
-
-  const handleReanalyze = async () => {
-    setReanalyzing(true);
-    setReanalyzeDone(false);
-    setReanalyzeProgress(null);
-
-    try {
-      // Kick off server-side chain — returns immediately, browser can close
-      const res = await fetch(`/api/admin/reanalyze?date=${date}`, { method: 'POST' });
-      if (!res.ok) {
-        console.error('[REANALYZE] Failed to start:', res.status);
-        setReanalyzing(false);
-        return;
-      }
-      const startData = await res.json();
-      if (!startData.started) {
-        // Already running — just start polling
-        console.log('[REANALYZE]', startData.message);
-      }
-
-      // Poll progress from Redis every 3 seconds
-      const poll = async () => {
-        try {
-          const r = await fetch(`/api/admin/reanalyze?date=${date}`);
-          if (!r.ok) return;
-          const p = await r.json();
-
-          if (p.total) {
-            setReanalyzeProgress({
-              current: p.offset || 0,
-              total: p.total,
-              analyzed: p.analyzed || 0,
-              skipped: p.skipped || 0,
-            });
-          }
-
-          if (p.completed) {
-            setReanalyzeDone(true);
-            setReanalyzing(false);
-            loadFixtures(date);
-            setTimeout(() => { setReanalyzeDone(false); setReanalyzeProgress(null); }, 6000);
-            return; // stop polling
-          }
-
-          if (!p.running && !p.completed) {
-            // Job not found or errored — stop
-            setReanalyzing(false);
-            return;
-          }
-
-          setTimeout(poll, 3000); // next poll
-        } catch (e) {
-          console.error('[REANALYZE] poll error:', e);
-          setTimeout(poll, 5000);
-        }
-      };
-
-      setTimeout(poll, 2000); // first poll after 2s
-    } catch (e) {
-      console.error('[REANALYZE]', e);
-      setReanalyzing(false);
-    }
-  };
+  // isOwner y handleReanalyze eliminados junto con el botón "Re-analizar" del header.
 
   // ─── SWR: ÚNICA fuente de /api/fixtures por (date, tz) ──────────────────
   // - Revalida cada 60s en background mientras la pestaña tenga foco.
@@ -1169,31 +1103,7 @@ export default function Dashboard() {
         <header className="header header-slide-in">
           <img src="/vflogo.png" alt="CFanalisis" className="brand-logo" />
           <div className="header-right">
-            {isOwner && (
-              <div className="reanalyze-wrapper">
-                <button
-                  className="btn-reanalyze"
-                  onClick={handleReanalyze}
-                  disabled={reanalyzing}
-                >
-                  {reanalyzeDone
-                    ? `✓ ${reanalyzeProgress?.analyzed || 0} analizados · ${reanalyzeProgress?.skipped || 0} saltados`
-                    : reanalyzing
-                      ? reanalyzeProgress
-                        ? `${Math.round((reanalyzeProgress.current / reanalyzeProgress.total) * 100)}% · ${reanalyzeProgress.analyzed} nuevos`
-                        : 'Iniciando...'
-                      : 'Re-analizar pendientes'}
-                </button>
-                {reanalyzing && reanalyzeProgress && (
-                  <div className="reanalyze-bar">
-                    <div
-                      className="reanalyze-bar-fill"
-                      style={{ width: `${Math.round((reanalyzeProgress.current / reanalyzeProgress.total) * 100)}%` }}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Botón "Re-analizar pendientes" (owner) eliminado a pedido del usuario. */}
             {user && (
               <div className="user-badge">
                 <span className="user-name">{user?.name?.split(' ')[0] || user?.email?.split('@')[0]}</span>
@@ -1208,9 +1118,8 @@ export default function Dashboard() {
             {pushSupported && pushError && (
               <span style={{ fontSize: 11, color: '#ef4444', maxWidth: 280, textAlign: 'right' }}>{pushError}</span>
             )}
-            <button className="btn-reload" onClick={async () => { await refreshLiveData(undefined, { force: true }); loadFixtures(date); }} disabled={loading || refreshingLive}>
-              <span className={loading || refreshingLive ? 'spin' : ''}>&#8635;</span>
-            </button>
+            {/* Botón "Actualizar" (recarga manual) eliminado a pedido — los datos
+                en vivo entran por WebSocket + poll de respaldo, no hace falta. */}
           </div>
         </header>
 
