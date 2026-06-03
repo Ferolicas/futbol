@@ -11,6 +11,9 @@ export const metadata = {
     statusBarStyle: 'black-translucent',
     title: 'CFanalisis',
   },
+  // Equivalente estándar (Chrome/Android) del apple-mobile-web-app-capable.
+  // Chrome avisa que el meta apple-* está deprecado y pide este también.
+  other: { 'mobile-web-app-capable': 'yes' },
   icons: {
     icon: '/icon-192.png',
     apple: [
