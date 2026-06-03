@@ -375,8 +375,26 @@ export default function Dashboard() {
                 cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : existing.cardEvents,
                 missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : existing.missedPenalties,
               };
-            } else {
+            } else if (!existing) {
+              // Primera vez que vemos el partido (seed inicial) → snapshot del server.
               next[fid] = fresh;
+            } else {
+              // Partido EN VIVO con datos ya presentes (normalmente del WS, que es
+              // la fuente de verdad en vivo y va por delante de este poll de 60s).
+              // NO reemplazar en bloque: eso reseteaba los córners que el WS ya
+              // avanzó (bug "frontend 0-0 / córner no actualiza"). El poll solo
+              // rellena huecos y los córners NUNCA bajan (máximo por-lado).
+              const ph = existing.corners?.home ?? 0, pa = existing.corners?.away ?? 0;
+              const fh = fresh.corners?.home ?? 0, fa = fresh.corners?.away ?? 0;
+              const ch = Math.max(ph, fh), ca = Math.max(pa, fa);
+              next[fid] = {
+                ...fresh,
+                ...existing, // el WS (existing) gana sobre el snapshot del poll
+                corners: { home: ch, away: ca, total: ch + ca },
+                goalScorers: existing.goalScorers?.length > 0 ? existing.goalScorers : (fresh.goalScorers || []),
+                cardEvents: existing.cardEvents?.length > 0 ? existing.cardEvents : (fresh.cardEvents || []),
+                missedPenalties: existing.missedPenalties?.length > 0 ? existing.missedPenalties : (fresh.missedPenalties || []),
+              };
             }
           }
           return next;
