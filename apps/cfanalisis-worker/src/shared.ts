@@ -44,6 +44,7 @@ const [
   _db,
   _mlbStatsApi,
   _rawBackfill,
+  _playerPhotos,
   _reenrich,
   _buildProfiles,
   _trainMeta,
@@ -67,6 +68,7 @@ const [
   import(LIB + 'db.js'),
   import(LIB + 'mlb-stats-api.js'),
   import(LIB + 'raw-backfill.js'),
+  import(LIB + 'player-photos.js'),
   // Scripts del pipeline de retrain — refactorizados a funciones exportadas
   // (CommonJS, con guard require.main para uso CLI). Se cargan vía import()
   // dinámico igual que los lib/*; el guard NO se dispara dentro del worker.
@@ -126,6 +128,9 @@ export const ALL_LEAGUE_IDS = _leagues.ALL_LEAGUE_IDS;
 
 // lib/raw-backfill.js (captura cruda total, Camino B)
 export const runRawBackfill = _rawBackfill.runRawBackfill;
+// lib/player-photos.js — almacén/warm de fotos de jugadores
+export const warmPlayerPhotos = _playerPhotos.warmPlayerPhotos;
+export const getPlayerPhoto = _playerPhotos.getPlayerPhoto;
 // Captura focalizada por fixture (cron nocturno de retrain).
 export const captureFinalizedFixturesRaw = _rawBackfill.captureFinalizedFixturesRaw;
 

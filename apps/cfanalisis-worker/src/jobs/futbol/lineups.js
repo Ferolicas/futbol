@@ -11,6 +11,7 @@ import {
   getCachedAnalysis, cacheAnalysis, incrementApiCallCount,
   triggerEvent,
   redisGet, redisSet, KEYS, getMatchSchedule,
+  warmPlayerPhotos,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
@@ -170,6 +171,19 @@ export async function runLineups(_payload = {}, _job = null) {
     ]);
     apiCalls += 2;
     if (!lineups?.length) return { fixtureId, skipped: true };
+
+    // Pre-carga (warm) a disco las fotos de TODOS los jugadores de la alineación
+    // (titulares + suplentes, ambos equipos). Así cuando caiga un gol en vivo la
+    // foto ya está cacheada → sale instantánea. Fire-and-forget: no bloquea el
+    // análisis ni gasta cuota de API-Football (api-sports.io es media, no la API).
+    try {
+      const photoIds = [];
+      for (const tl of lineups) {
+        for (const p of (tl.startXI || [])) if (p?.player?.id) photoIds.push(p.player.id);
+        for (const p of (tl.substitutes || [])) if (p?.player?.id) photoIds.push(p.player.id);
+      }
+      if (photoIds.length) warmPlayerPhotos(photoIds).catch(() => {});
+    } catch { /* nunca romper el job por el warm de fotos */ }
 
     const existing = await getCachedAnalysis(fixtureId, today);
     if (existing) {
