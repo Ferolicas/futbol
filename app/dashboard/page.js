@@ -54,6 +54,10 @@ export default function Dashboard() {
   const [splash, setSplash] = useState(!_splashDone);
   const [splashFade, setSplashFade] = useState(false);
   const [userTz, setUserTz] = useState('UTC'); // corrected on mount to user's real timezone
+  // tzReady: hasta que detectamos la zona horaria real del cliente (en el mount)
+  // NO disparamos el fetch de /api/fixtures. Asi evitamos el fetch inicial con
+  // tz=UTC (placeholder) que luego se repetia con la tz correcta.
+  const [tzReady, setTzReady] = useState(false);
   const [tab, setTab] = useState('partidos');
   const [date, setDate] = useState(today());
   const [fixtures, setFixtures] = useState([]);
@@ -97,6 +101,12 @@ export default function Dashboard() {
   const pusherLastUpdate = useRef(0);
   // Ref to always have the latest liveStats without adding it as a loadFixtures dependency
   const liveStatsRef = useRef(liveStats);
+  // Senala que la proxima carga de fixtures debe REEMPLAZAR los live stats
+  // (cambio de fecha) en vez de mergearlos (poll/focus de la misma fecha).
+  const clearLiveOnNextLoadRef = useRef(false);
+  // Puente para que el onSuccess de SWR llame a applyFixturesData (definida mas
+  // abajo) sin problemas de orden de declaracion.
+  const applyFixturesDataRef = useRef(null);
   // Web push notifications
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushSupported, setPushSupported] = useState(false);
@@ -210,16 +220,16 @@ export default function Dashboard() {
     }
   };
 
-  // ─── SWR: cache de /api/fixtures por (date, tz) ─────────────────────────
+  // ─── SWR: ÚNICA fuente de /api/fixtures por (date, tz) ──────────────────
   // - Revalida cada 60s en background mientras la pestaña tenga foco.
   // - Revalida al volver al foco (usuario cambia de tab y vuelve).
   // - Dedup 5s para que varias llamadas a mutate() simultaneas no spameen.
-  // - keepPreviousData=true para que al cambiar de fecha NO se vea vacio
-  //   antes de cargar; loadFixtures sigue controlando setLoading explicito
-  //   cuando hace falta UX (cambio de fecha con clearLiveStats).
+  // - keepPreviousData=true para que al cambiar de fecha NO se vea vacio.
+  // - La key es null mientras tzReady sea false → SWR no hace fetch hasta que
+  //   conocemos la zona real del cliente (un solo fetch, con la tz correcta).
   const fixturesKey = useMemo(
-    () => date ? `/api/fixtures?date=${date}&tz=${encodeURIComponent(userTz)}` : null,
-    [date, userTz],
+    () => (tzReady && date) ? `/api/fixtures?date=${date}&tz=${encodeURIComponent(userTz)}` : null,
+    [tzReady, date, userTz],
   );
   const { mutate: fixturesMutate } = useSWR(
     fixturesKey,
@@ -230,36 +240,21 @@ export default function Dashboard() {
       revalidateOnReconnect: true,
       dedupingInterval: 5000,
       keepPreviousData: true,
-      // Cuando SWR trae datos frescos (poll o focus), reproducimos la misma
-      // logica de hidratacion que hace loadFixtures — sin tocar setLoading
-      // (no es UI-blocking, es revalidate silencioso).
-      onSuccess: (data) => {
-        if (!data || data.error) return;
-        const fx = data.fixtures || [];
-        const currentLive = liveStatsRef.current;
-        const FT_SET = new Set(['FT', 'AET', 'PEN']);
-        const fxWithLiveOverride = Object.keys(currentLive).length > 0
-          ? fx.map(f => {
-              const live = currentLive[f.fixture?.id];
-              if (!live) return f;
-              if (FT_SET.has(live.status?.short) && !FT_SET.has(f.fixture?.status?.short)) {
-                return { ...f, fixture: { ...f.fixture, status: live.status }, goals: live.goals || f.goals, score: live.score || f.score };
-              }
-              return f;
-            })
-          : fx;
-        setFixtures(fxWithLiveOverride);
-        setHidden(data.hidden || []);
-        setFavorites(data.favorites || []);
-        setAnalyzed(data.analyzed || []);
-        setAnalyzedOdds(data.analyzedOdds || {});
-        setAnalyzedData(data.analyzedData || {});
-        setStandings(data.standings || {});
-        setFromCache(data.fromCache || false);
-        if (data.quota) setQuota(data.quota);
+      // Toda la hidratacion (carga inicial, cambio de fecha, poll de 60s y
+      // focus) pasa por applyFixturesData → una sola ruta, un solo fetch.
+      onSuccess: (data) => { applyFixturesDataRef.current?.(data); },
+      onError: (err) => {
+        setError(err?.message || 'Error de conexion');
+        setLoading(false);
       },
     },
   );
+
+  // Skeleton al cargar por primera vez y al cambiar de fecha/tz (cambia la key
+  // de SWR). El poll de 60s y el focus NO cambian la key → no parpadea skeleton.
+  useEffect(() => {
+    if (fixturesKey) setLoading(true);
+  }, [fixturesKey]);
 
   // Fetch missing stats for finished matches immediately (don't wait for cron).
   // Called on page load and after reanalyze — uses Redis cache, API only when truly missing.
@@ -308,100 +303,105 @@ export default function Dashboard() {
     }
   }, [setLiveStats]);
 
-  const loadFixtures = useCallback(async (d, { silent, tz, clearLiveStats } = {}) => {
-    if (!silent) setLoading(true);
-    setError('');
-    try {
-      const tzParam = tz || getUserTz();
-      const res = await fetch(`/api/fixtures?date=${d}&tz=${encodeURIComponent(tzParam)}`);
-      const data = await res.json();
-      if (data.error && !data.fixtures?.length) {
-        setError(data.error);
-        if (data.quota) setQuota(data.quota);
-        return;
-      }
-      const fx = data.fixtures || [];
-      // Apply current liveStats on top of server data — prevents loadFixtures from
-      // overwriting a FT status that refreshLiveData already fixed in React state
-      // when the server Redis cache hasn't caught up yet.
-      const currentLive = liveStatsRef.current;
-      const FT_SET = new Set(['FT', 'AET', 'PEN']);
-      const fxWithLiveOverride = Object.keys(currentLive).length > 0
-        ? fx.map(f => {
-            const live = currentLive[f.fixture?.id];
-            if (!live) return f;
-            // Only upgrade to FT, never downgrade
-            if (FT_SET.has(live.status?.short) && !FT_SET.has(f.fixture?.status?.short)) {
-              return { ...f, fixture: { ...f.fixture, status: live.status }, goals: live.goals || f.goals, score: live.score || f.score };
-            }
-            return f;
-          })
-        : fx;
-      setFixtures(fxWithLiveOverride);
-      setFromCache(data.fromCache || false);
-      setHidden(data.hidden || []);
-      setFavorites(data.favorites || []);
-      setAnalyzed(data.analyzed || []);
-      setAnalyzedOdds(data.analyzedOdds || {});
-      setAnalyzedData(data.analyzedData || {});
-      setStandings(data.standings || {});
+  // Hidratacion unificada desde la respuesta de /api/fixtures. Antes esta logica
+  // estaba duplicada entre el onSuccess de SWR y un fetch manual en loadFixtures,
+  // lo que disparaba /api/fixtures 2-3 veces por carga. Ahora es la unica ruta:
+  // la usa el onSuccess de SWR para la carga inicial, el cambio de fecha, el
+  // poll de 60s y el focus.
+  const applyFixturesData = useCallback((data) => {
+    if (!data) { setLoading(false); return; }
+    if (data.error && !data.fixtures?.length) {
+      setError(data.error);
       if (data.quota) setQuota(data.quota);
-      if (data.error) setError(data.error);
-      // Track if daily analysis batch is still running (timeout after 10 min)
-      const batchAge = data.batchStatus?.startedAt
-        ? Date.now() - new Date(data.batchStatus.startedAt).getTime() : 0;
-      if (data.batchStatus?.started && !data.batchStatus?.completed && batchAge < 600000) {
-        setBatchRunning(true);
-      } else {
-        setBatchRunning(false);
-      }
-
-      // Populate initial live stats from /api/fixtures response (corners, cards, scorers)
-      if (data.initialLiveStats && Object.keys(data.initialLiveStats).length > 0) {
-        if (clearLiveStats) {
-          // Date change: replace entirely with server data (old date data is irrelevant)
-          setLiveStats(data.initialLiveStats);
-        } else {
-          // Same date refresh: merge carefully, never downgrade FT stats
-          const FT = ['FT', 'AET', 'PEN'];
-          setLiveStats(prev => {
-            const next = { ...prev };
-            for (const [fid, fresh] of Object.entries(data.initialLiveStats)) {
-              const existing = next[fid];
-              if (existing && FT.includes(existing.status?.short)) {
-                next[fid] = {
-                  ...existing,
-                  corners: fresh.corners?.total > 0 ? fresh.corners : existing.corners,
-                  yellowCards: fresh.yellowCards?.total > 0 ? fresh.yellowCards : existing.yellowCards,
-                  redCards: fresh.redCards || existing.redCards,
-                  goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : existing.goalScorers,
-                  cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : existing.cardEvents,
-                  missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : existing.missedPenalties,
-                };
-              } else {
-                next[fid] = fresh;
-              }
-            }
-            return next;
-          });
-        }
-      } else if (clearLiveStats) {
-        setLiveStats({});
-      }
-
-      // Background: fetch missing stats for finished matches (only if truly missing)
-      refreshFinishedStats(fx, data.initialLiveStats || {});
-
-      // Sembrar la cache de SWR para que el revalidate de focus/poll de 60s
-      // tenga el mismo payload que acabamos de procesar — evita doble
-      // fetch al volver de /analisis/[id].
-      try { fixturesMutate(data, { revalidate: false }); } catch {}
-    } catch (e) {
-      setError(e.message || 'Error de conexion');
-    } finally {
       setLoading(false);
+      return;
     }
-  }, [refreshFinishedStats]);
+    // ¿reemplazar live stats (cambio de fecha) o mergear (misma fecha)?
+    const clearLiveStats = clearLiveOnNextLoadRef.current;
+    clearLiveOnNextLoadRef.current = false;
+
+    const fx = data.fixtures || [];
+    // Apply current liveStats on top of server data — prevents overwriting a FT
+    // status that refreshLiveData already fixed in React state when the server
+    // Redis cache hasn't caught up yet.
+    const currentLive = liveStatsRef.current;
+    const FT_SET = new Set(['FT', 'AET', 'PEN']);
+    const fxWithLiveOverride = Object.keys(currentLive).length > 0
+      ? fx.map(f => {
+          const live = currentLive[f.fixture?.id];
+          if (!live) return f;
+          // Only upgrade to FT, never downgrade
+          if (FT_SET.has(live.status?.short) && !FT_SET.has(f.fixture?.status?.short)) {
+            return { ...f, fixture: { ...f.fixture, status: live.status }, goals: live.goals || f.goals, score: live.score || f.score };
+          }
+          return f;
+        })
+      : fx;
+    setFixtures(fxWithLiveOverride);
+    setFromCache(data.fromCache || false);
+    setHidden(data.hidden || []);
+    setFavorites(data.favorites || []);
+    setAnalyzed(data.analyzed || []);
+    setAnalyzedOdds(data.analyzedOdds || {});
+    setAnalyzedData(data.analyzedData || {});
+    setStandings(data.standings || {});
+    if (data.quota) setQuota(data.quota);
+    setError(data.error || '');
+
+    // Track if daily analysis batch is still running (timeout after 10 min)
+    const batchAge = data.batchStatus?.startedAt
+      ? Date.now() - new Date(data.batchStatus.startedAt).getTime() : 0;
+    setBatchRunning(!!(data.batchStatus?.started && !data.batchStatus?.completed && batchAge < 600000));
+
+    // Populate initial live stats from /api/fixtures response (corners, cards, scorers)
+    if (data.initialLiveStats && Object.keys(data.initialLiveStats).length > 0) {
+      if (clearLiveStats) {
+        // Date change: replace entirely with server data (old date data is irrelevant)
+        setLiveStats(data.initialLiveStats);
+      } else {
+        // Same date refresh: merge carefully, never downgrade FT stats
+        const FT = ['FT', 'AET', 'PEN'];
+        setLiveStats(prev => {
+          const next = { ...prev };
+          for (const [fid, fresh] of Object.entries(data.initialLiveStats)) {
+            const existing = next[fid];
+            if (existing && FT.includes(existing.status?.short)) {
+              next[fid] = {
+                ...existing,
+                corners: fresh.corners?.total > 0 ? fresh.corners : existing.corners,
+                yellowCards: fresh.yellowCards?.total > 0 ? fresh.yellowCards : existing.yellowCards,
+                redCards: fresh.redCards || existing.redCards,
+                goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : existing.goalScorers,
+                cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : existing.cardEvents,
+                missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : existing.missedPenalties,
+              };
+            } else {
+              next[fid] = fresh;
+            }
+          }
+          return next;
+        });
+      }
+    } else if (clearLiveStats) {
+      setLiveStats({});
+    }
+
+    // Background: fetch missing stats for finished matches (only if truly missing)
+    refreshFinishedStats(fx, data.initialLiveStats || {});
+    setLoading(false);
+  }, [refreshFinishedStats, setLiveStats]);
+
+  // Mantener el puente onSuccess→applyFixturesData siempre fresco (evita TDZ:
+  // el onSuccess de SWR esta declarado antes que applyFixturesData).
+  useEffect(() => { applyFixturesDataRef.current = applyFixturesData; }, [applyFixturesData]);
+
+  // loadFixtures: revalida la fecha ACTUAL via SWR (un solo fetch, con dedup).
+  // Ya NO hace su propio fetch. Para cambiar de fecha se usa setDate (changeDate),
+  // que cambia la key de SWR y dispara el fetch de la nueva fecha.
+  const loadFixtures = useCallback((_d, opts = {}) => {
+    if (opts.clearLiveStats) clearLiveOnNextLoadRef.current = true;
+    return fixturesMutate();
+  }, [fixturesMutate]);
 
   // Force-refresh live data: triggers live + corners crons on the server,
   // then updates all live stats (scores, corners, cards, goal scorers, minutes).
@@ -485,11 +485,10 @@ export default function Dashboard() {
     setUserTz(tz);
     const localDate = todayInTz(tz);
     setDate(localDate);
-    refreshLiveData(localDate).finally(() => {
-      // SWR puede tener cache de una sesion previa; loadFixtures lo respeta.
-      // silent=false en el primer mount → enseña el skeleton si no hay cache.
-      loadFixtures(localDate, { silent: false, tz });
-    });
+    // refreshLiveData primero (igual que antes) y, al terminar, habilitamos el
+    // fetch de fixtures (tzReady=true). SWR dispara UN unico /api/fixtures ya con
+    // la tz correcta del cliente; onSuccess → applyFixturesData hidrata todo.
+    refreshLiveData(localDate).finally(() => setTzReady(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -775,10 +774,11 @@ export default function Dashboard() {
     setSelected(new Set());
     setSelectedMarkets({});
     setExpandedMatch(null);
-    // Don't clear liveStats here — loadFixtures will replace them atomically
-    // to avoid flickering (empty → loaded). loadFixtures sets fresh stats from server.
+    // Don't clear liveStats here — el siguiente onSuccess los reemplaza
+    // atomicamente (clearLiveOnNextLoad) para evitar flicker (empty → loaded).
     pusherLastUpdate.current = 0;
-    loadFixtures(nd, { tz: userTz, clearLiveStats: true });
+    clearLiveOnNextLoadRef.current = true;
+    // setDate(nd) ya cambio la key de SWR → dispara un unico fetch de la nueva fecha.
   };
 
   const visible = fixtures.filter(f => {
@@ -1236,7 +1236,8 @@ export default function Dashboard() {
                   setSelectedMarkets({});
                   setExpandedMatch(null);
                   pusherLastUpdate.current = 0;
-                  loadFixtures(nd, { tz: userTz, clearLiveStats: true });
+                  clearLiveOnNextLoadRef.current = true;
+                  // setDate(nd) ya cambio la key de SWR → un unico fetch.
                 }}
                 style={{
                   position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer',
@@ -1268,7 +1269,8 @@ export default function Dashboard() {
                   setSelectedMarkets({});
                   setExpandedMatch(null);
                   pusherLastUpdate.current = 0;
-                  loadFixtures(nd, { tz: userTz, clearLiveStats: true });
+                  clearLiveOnNextLoadRef.current = true;
+                  // setDate(nd) ya cambio la key de SWR → un unico fetch.
                 }}
                 style={{
                   background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.3)',
