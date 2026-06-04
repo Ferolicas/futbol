@@ -2,6 +2,7 @@ import { analyzeMatch, getQuota } from '../../../lib/api-football';
 import { cacheAnalysis } from '../../../lib/sanity-cache';
 import { redisGet, redisSet } from '../../../lib/redis';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
+import { userHasActivePlan } from '../../../lib/require-active-plan';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,9 @@ export async function POST(request) {
     // POSTear fixtures y disparar analyzeMatch (quema cuota API-Football +
     // CPU) sin sesión. Ahora se requiere sesión.
     if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!(await userHasActivePlan(user))) {
+      return Response.json({ error: 'Subscription required' }, { status: 403 });
+    }
 
     const { fixtures, date: clientDate } = await request.json();
 

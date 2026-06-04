@@ -3,6 +3,7 @@ import { getCachedAnalysis, cacheAnalysis, getCachedFixtures } from '../../../..
 import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { getCurrentUser } from '../../../../lib/auth-pg';
+import { userHasActivePlan } from '../../../../lib/require-active-plan';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -17,9 +18,14 @@ export async function GET(request, { params }) {
   }
 
   // R8 FIX: contenido premium + acciones que gastan cuota (analyzeMatch inline,
-  // refresh-stats/lineups) estaban SIN auth. Exigimos sesión.
-  if (!(await getCurrentUser())) {
+  // refresh-stats/lineups) estaban SIN auth. Exigimos sesión + plan activo o
+  // admin (igual que baseball).
+  const user = await getCurrentUser();
+  if (!user) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  if (!(await userHasActivePlan(user))) {
+    return Response.json({ error: 'Subscription required' }, { status: 403 });
   }
 
   try {
@@ -99,9 +105,13 @@ export async function GET(request, { params }) {
 export async function POST(request, { params }) {
   const { id } = params;
   // R8 FIX: las acciones analyze/refresh-stats/refresh-lineups gastan cuota
-  // API-Football → exigir sesión.
-  if (!(await getCurrentUser())) {
+  // API-Football → exigir sesión + plan activo o admin (igual que baseball).
+  const user = await getCurrentUser();
+  if (!user) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  if (!(await userHasActivePlan(user))) {
+    return Response.json({ error: 'Subscription required' }, { status: 403 });
   }
   const { action, date } = await request.json();
 

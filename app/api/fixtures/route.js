@@ -2,6 +2,7 @@ import { getFixtures, getQuota, getCachedStandingsPositions } from '../../../lib
 import { getAnalyzedMatchesFull, getAnalyzedFixtureIds } from '../../../lib/sanity-cache';
 import { redisGet, redisSet, KEYS, TTL } from '../../../lib/redis';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
+import { userHasActivePlan } from '../../../lib/require-active-plan';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { filterFixturesByLocalDate } from '../../../lib/timezone';
 import { esTeam } from '../../../lib/team-names-es';
@@ -28,12 +29,18 @@ export async function GET(request) {
   const minOdds = minOddsRaw != null ? Number(minOddsRaw) : 1.20;
 
   try {
-    // ===== PHASE 1: Load fixtures (Redis -> Supabase/API) + start auth in parallel =====
-    const isPastDate = date < todayStr;
-
-    // Start Supabase auth early — runs in parallel with fixture loading
+    // ===== AUTH GATE: sesión + plan activo o admin (igual que baseball) =====
+    // Contenido de pago: resolver la sesión y exigir plan activo/admin ANTES de
+    // cargar fixtures (evita gastar cuota API-Football para no autorizados).
     const supabase = createSupabaseServerClient();
-    const sessionPromise = supabase.auth.getUser();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!(await userHasActivePlan(user))) {
+      return Response.json({ error: 'Subscription required' }, { status: 403 });
+    }
+
+    // ===== PHASE 1: Load fixtures (Redis -> Supabase/API) =====
+    const isPastDate = date < todayStr;
 
     let fixtures = [];
     let fromCache = false;
@@ -243,7 +250,7 @@ export async function GET(request) {
     ] = await Promise.all([
       fixtures.length > 0 ? Promise.all(liveStatsKeys.map(k => redisGet(k))) : [],
       fixtures.length > 0 ? redisGet(`dailyBatch:${date}`) : null,
-      sessionPromise.then(r => r.data?.user || null).catch(() => null),
+      Promise.resolve(user),
       fixtureIds.length > 0 ? redisGet(analysisRedisKey) : null,
       fixtureIds.length > 0 ? redisGet(oddsRedisKey) : null,
       fixtures.length > 0 ? redisGet(standingsRedisKey) : null,
