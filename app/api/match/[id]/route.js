@@ -41,7 +41,15 @@ export async function GET(request, { params }) {
         if (fixture) {
           const result = await analyzeMatch(fixture, { date });
           if (result && result.dataQuality !== 'insufficient') {
-            await cacheAnalysis(id, { ...result, date }).catch(() => {});
+            // A-2 FIX: visibilidad si la persistencia a PG falla (se sigue
+            // sirviendo desde Redis, pero sin esto desaparece al expirar el TTL).
+            const _cache = await cacheAnalysis(id, { ...result, date }).catch((e) => {
+              console.error('[cacheAnalysis:THREW]', { fixtureId: id, date, error: e.message });
+              return { db: false, redis: false };
+            });
+            if (_cache && _cache.db === false) {
+              console.error('[cacheAnalysis:PG_FAILED]', { fixtureId: id, date, error: _cache.error });
+            }
             analysis = result.analysis || result;
           }
         }
@@ -124,7 +132,15 @@ export async function POST(request, { params }) {
       if (lineups.available) {
         const existing = await getCachedAnalysis(id, date);
         if (existing) {
-          await cacheAnalysis(id, { ...existing, lineups });
+          // A-2 FIX: captar db:false y excepción (antes sin catch; un fallo de
+          // PG quedaba invisible). El usuario sigue recibiendo los lineups.
+          const _cache = await cacheAnalysis(id, { ...existing, lineups }).catch((e) => {
+            console.error('[cacheAnalysis:THREW]', { fixtureId: id, date, error: e.message });
+            return { db: false, redis: false };
+          });
+          if (_cache && _cache.db === false) {
+            console.error('[cacheAnalysis:PG_FAILED]', { fixtureId: id, date, error: _cache.error });
+          }
         }
       }
 
@@ -198,7 +214,15 @@ export async function POST(request, { params }) {
       if (!result || result.dataQuality === 'insufficient') {
         return Response.json({ error: 'Insufficient data to analyze this match.' }, { status: 422 });
       }
-      await cacheAnalysis(id, { ...result, date }).catch(() => {});
+      // A-2 FIX: visibilidad si la persistencia a PG falla (se sigue sirviendo
+      // desde Redis, pero sin esto desaparece al expirar el TTL).
+      const _cache = await cacheAnalysis(id, { ...result, date }).catch((e) => {
+        console.error('[cacheAnalysis:THREW]', { fixtureId: id, date, error: e.message });
+        return { db: false, redis: false };
+      });
+      if (_cache && _cache.db === false) {
+        console.error('[cacheAnalysis:PG_FAILED]', { fixtureId: id, date, error: _cache.error });
+      }
       const quota = await getQuota();
       return Response.json({ analysis: result.analysis || result, quota });
     }

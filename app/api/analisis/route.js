@@ -34,7 +34,16 @@ export async function POST(request) {
         try {
           const result = await analyzeMatch(fixture, { date });
           totalApiCalls += result.apiCalls || 0;
-          await cacheAnalysis(fixture.fixture.id, { ...result, date }).catch(() => {});
+          // A-2 FIX: visibilidad si la persistencia a PG falla (el análisis se
+          // sigue sirviendo desde Redis, pero sin esto desaparece al expirar el
+          // TTL sin que nadie se entere).
+          const _cache = await cacheAnalysis(fixture.fixture.id, { ...result, date }).catch((e) => {
+            console.error('[cacheAnalysis:THREW]', { fixtureId: fixture.fixture.id, date, error: e.message });
+            return { db: false, redis: false };
+          });
+          if (_cache && _cache.db === false) {
+            console.error('[cacheAnalysis:PG_FAILED]', { fixtureId: fixture.fixture.id, date, error: _cache.error });
+          }
           return { fixtureId: fixture.fixture.id, success: true, ...result };
         } catch (e) {
           return { fixtureId: fixture.fixture.id, success: false, error: e.message };
