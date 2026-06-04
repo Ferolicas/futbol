@@ -160,10 +160,18 @@ export function startWorkers(role: WorkerRole = 'all'): Worker[] {
       logger.info({ queue: name, jobId: job.id }, 'job completed');
     });
     w.on('failed', (job, err) => {
-      notifyError(
-        { source: 'job', name, jobId: job?.id, extra: { attempts: job?.attemptsMade } },
-        err,
-      ).catch(() => {});
+      // JS-2: BullMQ emite 'failed' en CADA intento, no solo al agotar attempts.
+      // Alertar solo en el fallo TERMINAL (reintentos agotados); los intermedios
+      // suelen recuperarse en el siguiente intento → solo log, sin alerta.
+      const isFinal = (job?.attemptsMade ?? 0) >= (job?.opts?.attempts ?? 1);
+      if (isFinal) {
+        notifyError(
+          { source: 'job', name, jobId: job?.id, extra: { attempts: job?.attemptsMade } },
+          err,
+        ).catch(() => {});
+      } else {
+        logger.warn({ queue: name, jobId: job?.id, attempt: job?.attemptsMade }, 'job failed (will retry)');
+      }
     });
     w.on('error', (err) => {
       notifyError({ source: 'job', name, extra: { kind: 'worker-error' } }, err).catch(() => {});
