@@ -25,18 +25,62 @@ import { makeRedisClient } from '../redis.js';
 
 type Socket = {
   readyState: number;
+  bufferedAmount?: number;
   send: (data: string) => void;
   on: (event: string, fn: (...args: any[]) => void) => void;
+  ping?: () => void;
+  terminate?: () => void;
   close: (code?: number, reason?: string) => void;
 };
 
 const OPEN = 1;
+// RT-2: si un socket acumula >1MB de snapshots sin drenar, está atascado → se
+// descarta el envío y se cierra (cliente muerto/lento). Los payloads live son
+// pequeños, así que 1MB ya es muchísimo backlog.
+const MAX_BUFFERED = 1_000_000; // 1MB
+// RT-1: cada 30s se pinguea a cada socket; el que no devolvió pong desde el
+// ciclo anterior se considera muerto y se termina.
+const HEARTBEAT_INTERVAL = 30_000;
 
 class WSManager {
   // topic → Set<socket>
   private subscriptions = new Map<string, Set<Socket>>();
   // socket → Set<topic>   (para limpiar al cerrar)
   private sockets = new Map<Socket, Set<string>>();
+  // RT-1: sockets que respondieron al último ping (liveness). Presente = vivo.
+  private alive = new Set<Socket>();
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    this.startHeartbeat();
+  }
+
+  // RT-1: heartbeat/reaper. Idempotente. Cada ciclo: el socket que no devolvió
+  // pong desde el ciclo anterior se da por muerto (terminate + detach); al resto
+  // se le marca no-vivo y se le envía un ping (el evento 'pong' lo re-marca vivo).
+  // Detecta conexiones medio-abiertas (móvil dormido, NAT, red caída) que de
+  // otro modo no disparan 'close' y se quedan en los Map gastando memoria.
+  startHeartbeat() {
+    if (this.heartbeatTimer) return; // idempotente
+    this.heartbeatTimer = setInterval(() => {
+      // Snapshot: detach() muta this.sockets dentro del bucle.
+      for (const socket of Array.from(this.sockets.keys())) {
+        if (!this.alive.has(socket)) {
+          try { socket.terminate?.(); } catch {}
+          this.detach(socket);
+          continue;
+        }
+        this.alive.delete(socket);
+        try { socket.ping?.(); } catch {}
+      }
+    }, HEARTBEAT_INTERVAL);
+    // No mantener vivo el proceso solo por este timer.
+    this.heartbeatTimer.unref?.();
+  }
+
+  stopHeartbeat() {
+    if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
+  }
 
   size() {
     return this.sockets.size;
@@ -48,6 +92,9 @@ class WSManager {
 
   attach(socket: Socket, topicsCsv?: string) {
     this.sockets.set(socket, new Set());
+    // RT-1: nace vivo; cada 'pong' (respuesta al ping del servidor) lo re-marca.
+    this.alive.add(socket);
+    socket.on('pong', () => this.alive.add(socket));
 
     socket.on('message', (raw: Buffer | string) => {
       let msg: any;
@@ -110,6 +157,7 @@ class WSManager {
       }
     }
     this.sockets.delete(socket);
+    this.alive.delete(socket);
   }
 
   broadcast(topic: string, event: string, data: unknown) {
@@ -119,10 +167,17 @@ class WSManager {
     let delivered = 0;
     for (const socket of set) {
       try {
-        if (socket.readyState === OPEN) {
-          socket.send(payload);
-          delivered++;
+        if (socket.readyState !== OPEN) continue;
+        // RT-2: backpressure. Si el cliente no drena (>1MB en buffer), está
+        // atascado → no enviar, terminar y limpiar (cuenta como muerto).
+        if ((socket.bufferedAmount ?? 0) > MAX_BUFFERED) {
+          console.warn('[ws:backpressure] descarto socket atascado', { topic, event, buffered: socket.bufferedAmount });
+          try { socket.terminate?.(); } catch {}
+          this.detach(socket);
+          continue;
         }
+        socket.send(payload);
+        delivered++;
       } catch {
         this.detach(socket);
       }
