@@ -1,5 +1,24 @@
 import './globals.css';
+import { Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
 import Providers from '../components/providers';
+
+// FE-2: fuentes auto-hospedadas via next/font (reemplaza el @import render-blocking
+// de Google Fonts). Mismos pesos que el @import previo. Expuestas como CSS vars
+// para que globals.css las use con var(--font-*).
+const jakarta = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '800'],
+  style: ['normal', 'italic'],
+  display: 'swap',
+  variable: '--font-jakarta',
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin'],
+  weight: ['500', '700'],
+  display: 'swap',
+  variable: '--font-mono',
+});
 
 export const metadata = {
   title: 'CF Analisis - Futbol',
@@ -31,7 +50,7 @@ export const viewport = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="es">
+    <html lang="es" className={`${jakarta.variable} ${jetbrainsMono.variable}`}>
       <body>
         <Providers>
           {children}
