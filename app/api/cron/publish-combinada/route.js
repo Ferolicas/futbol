@@ -31,6 +31,7 @@
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { buildCombinada } from '../../../../lib/combinada';
 import { getAnalyzedFixtureIds, getAnalyzedMatchesFull } from '../../../../lib/sanity-cache';
+import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -151,7 +152,7 @@ async function handle(request) {
     .single();
 
   if (error) {
-    return Response.json({ ok: false, error: error.message, date }, { status: 500 });
+    return jsonError(error);
   }
 
   return Response.json({

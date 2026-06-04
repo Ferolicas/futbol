@@ -1,6 +1,7 @@
 import { createEmbeddedPayment, isValidPlan } from '../../../lib/stripe';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../lib/supabase';
+import { jsonError } from '../../../lib/api-error';
 
 export async function POST(request) {
   try {
@@ -51,6 +52,6 @@ export async function POST(request) {
     });
   } catch (error) {
     console.error('[checkout]', error.message);
-    return Response.json({ error: error.message || 'Checkout failed' }, { status: 500 });
+    return jsonError(error, { publicMessage: 'Checkout failed' });
   }
 }

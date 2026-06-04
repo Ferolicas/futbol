@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../../lib/supabase';
+import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +20,6 @@ export async function GET() {
     return Response.json({ role: profile?.role || 'user', plan: profile?.plan || 'free' });
   } catch (err) {
     console.error('[user/role:GET]', err.message);
-    return Response.json({ error: err.message }, { status: 500 });
+    return jsonError(err);
   }
 }

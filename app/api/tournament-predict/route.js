@@ -28,6 +28,7 @@
 import { supabaseAdmin } from '../../../lib/supabase';
 import { simulateBracket } from '../../../lib/tournament-bracket';
 import { getCurrentUser } from '../../../lib/auth-pg';
+import { jsonError } from '../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -82,7 +83,7 @@ export async function GET(request) {
     .from('match_predictions')
     .select('fixture_id, league_id, league_name, home_team, away_team, kickoff, p_home_win, p_draw, p_away_win')
     .eq('league_id', leagueId);
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return jsonError(error);
 
   if (!matches || matches.length === 0) {
     return Response.json({

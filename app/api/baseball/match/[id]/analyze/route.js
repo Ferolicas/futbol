@@ -26,6 +26,7 @@ import {
 import { fetchMlbOddsByDate, matchMlbOdds } from '../../../../../../lib/odds-api';
 import { supabaseAdmin } from '../../../../../../lib/supabase';
 import { createSupabaseServerClient } from '../../../../../../lib/supabase-auth';
+import { jsonError } from '../../../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -161,6 +162,6 @@ export async function POST(_request, { params }) {
     return Response.json({ success: true, fixtureId, probabilities: probs, combinada, dataQuality: dq });
   } catch (e) {
     console.error('[api/baseball/match/analyze]', e.message);
-    return Response.json({ error: e.message }, { status: 500 });
+    return jsonError(e);
   }
 }

@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../../../lib/supabase';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
+import { jsonError } from '../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,13 +24,13 @@ export async function GET() {
 
     if (error) {
       console.error('[favorites:GET]', error.message);
-      return Response.json({ error: error.message }, { status: 500 });
+      return jsonError(error);
     }
 
     return Response.json({ favorites: data.map(r => r.fixture_id) });
   } catch (err) {
     console.error('[favorites:GET]', err.message);
-    return Response.json({ error: err.message }, { status: 500 });
+    return jsonError(err);
   }
 }
 
@@ -48,13 +49,13 @@ export async function POST(request) {
 
     if (error) {
       console.error('[favorites:POST]', error.message);
-      return Response.json({ error: error.message }, { status: 500 });
+      return jsonError(error);
     }
 
     return Response.json({ success: true, fixtureId });
   } catch (err) {
     console.error('[favorites:POST]', err.message);
-    return Response.json({ error: err.message }, { status: 500 });
+    return jsonError(err);
   }
 }
 
@@ -75,12 +76,12 @@ export async function DELETE(request) {
 
     if (error) {
       console.error('[favorites:DELETE]', error.message);
-      return Response.json({ error: error.message }, { status: 500 });
+      return jsonError(error);
     }
 
     return Response.json({ success: true, fixtureId });
   } catch (err) {
     console.error('[favorites:DELETE]', err.message);
-    return Response.json({ error: err.message }, { status: 500 });
+    return jsonError(err);
   }
 }

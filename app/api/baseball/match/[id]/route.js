@@ -4,6 +4,7 @@
  */
 import { supabaseAdmin } from '../../../../../lib/supabase';
 import { getCurrentUser } from '../../../../../lib/auth-pg';
+import { jsonError } from '../../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +33,6 @@ export async function GET(_request, { params }) {
     });
   } catch (e) {
     console.error('[api/baseball/match]', e.message);
-    return Response.json({ error: e.message }, { status: 500 });
+    return jsonError(e);
   }
 }

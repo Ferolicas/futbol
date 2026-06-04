@@ -8,6 +8,7 @@
  * el dashboard espera, conservamos: { leagueId, standings, fromCache }.
  */
 import { redisGet, redisSet } from '../../../../../lib/redis';
+import { jsonError } from '../../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -99,6 +100,6 @@ export async function GET(_request, { params }) {
     return Response.json({ leagueId, standings, fromCache: false });
   } catch (e) {
     console.error('[api/baseball/standings]', e.message);
-    return Response.json({ error: e.message }, { status: 500 });
+    return jsonError(e);
   }
 }

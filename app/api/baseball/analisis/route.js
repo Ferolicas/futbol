@@ -34,6 +34,7 @@ import { fetchMlbOddsByDate, matchMlbOdds } from '../../../../lib/odds-api';
 import { redisGet } from '../../../../lib/redis';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
+import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -214,6 +215,6 @@ export async function POST(request) {
     return Response.json(response);
   } catch (e) {
     console.error('[api/baseball/analisis]', e.message);
-    return Response.json({ error: e.message }, { status: 500 });
+    return jsonError(e);
   }
 }

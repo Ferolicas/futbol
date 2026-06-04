@@ -3,6 +3,7 @@ import { cacheAnalysis } from '../../../lib/sanity-cache';
 import { redisGet, redisSet } from '../../../lib/redis';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { userHasActivePlan } from '../../../lib/require-active-plan';
+import { jsonError } from '../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -108,6 +109,6 @@ export async function POST(request) {
     return Response.json({ analyses, totalApiCalls, quota });
   } catch (error) {
     console.error('[analisis]', error.message);
-    return Response.json({ error: error.message }, { status: 500 });
+    return jsonError(error);
   }
 }

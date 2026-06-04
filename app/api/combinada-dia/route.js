@@ -19,6 +19,7 @@
  */
 
 import { supabaseAdmin } from '../../../lib/supabase';
+import { jsonError } from '../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +37,7 @@ export async function GET(request) {
     .maybeSingle();
 
   if (error) {
-    return Response.json({ ok: false, error: error.message }, { status: 500 });
+    return jsonError(error);
   }
 
   if (!data) {

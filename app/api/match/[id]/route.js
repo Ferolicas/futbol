@@ -4,6 +4,7 @@ import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { getCurrentUser } from '../../../../lib/auth-pg';
 import { userHasActivePlan } from '../../../../lib/require-active-plan';
+import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -105,7 +106,7 @@ export async function GET(request, { params }) {
     return Response.json({ analysis, quota });
   } catch (error) {
     console.error('[match:GET]', error.message);
-    return Response.json({ error: error.message }, { status: 500 });
+    return jsonError(error);
   }
 }
 
@@ -230,6 +231,6 @@ export async function POST(request, { params }) {
     return Response.json({ error: 'Invalid action' }, { status: 400 });
   } catch (error) {
     console.error('[match:POST]', error.message);
-    return Response.json({ error: error.message }, { status: 500 });
+    return jsonError(error);
   }
 }

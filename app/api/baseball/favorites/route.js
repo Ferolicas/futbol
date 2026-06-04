@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
+import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +17,7 @@ export async function GET() {
     .from('baseball_user_favorites')
     .select('fixture_id')
     .eq('user_id', user.id);
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return jsonError(error);
   return Response.json({ favorites: (data || []).map(f => f.fixture_id) });
 }
 

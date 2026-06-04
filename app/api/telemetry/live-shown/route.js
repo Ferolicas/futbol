@@ -7,6 +7,7 @@
 // Clave Redis: `eventlog:shown:{date}` = mapa { "<fid>:<minuto>": shownAtISO }.
 // Guardamos el MÁS TEMPRANO (el primer dispositivo que lo mostró = latencia real).
 import { redisGet, redisSet } from '../../../../lib/redis';
+import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +33,6 @@ export async function POST(request) {
 
     return Response.json({ ok: true });
   } catch (e) {
-    return Response.json({ ok: false, error: e.message }, { status: 500 });
+    return jsonError(e);
   }
 }

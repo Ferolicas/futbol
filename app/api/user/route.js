@@ -5,6 +5,7 @@
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { redisGet, redisSet, KEYS } from '../../../lib/redis';
+import { jsonError } from '../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 const HIDDEN_TTL = 30 * 24 * 3600;
@@ -49,7 +50,7 @@ export async function GET(request) {
     return Response.json({ error: 'Invalid type parameter' }, { status: 400 });
   } catch (error) {
     console.error('[user:GET]', error.message);
-    return Response.json({ error: error.message }, { status: 500 });
+    return jsonError(error);
   }
 }
 
@@ -142,6 +143,6 @@ export async function POST(request) {
     return Response.json({ error: 'Invalid type' }, { status: 400 });
   } catch (error) {
     console.error('[user:POST]', error.message);
-    return Response.json({ error: error.message }, { status: 500 });
+    return jsonError(error);
   }
 }

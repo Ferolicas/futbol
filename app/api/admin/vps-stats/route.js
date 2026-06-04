@@ -4,6 +4,7 @@
  */
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../../lib/supabase';
+import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 10;
@@ -48,7 +49,7 @@ export async function GET() {
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     });
   } catch (e) {
-    return Response.json({ error: e.message }, { status: 502 });
+    return jsonError(e, { status: 502 });
   } finally {
     clearTimeout(timeout);
   }

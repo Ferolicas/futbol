@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { sendTicketNotification } from '../../../lib/resend-email';
 import { logAction } from '../../../lib/audit';
+import { jsonError } from '../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +29,7 @@ export async function GET() {
     }
     return Response.json({ tickets: data || [] });
   } catch (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+    return jsonError(error);
   }
 }
 
@@ -94,6 +95,6 @@ export async function POST(request) {
     return Response.json({ success: true, ticketId });
   } catch (error) {
     console.error('[tickets]', error.message);
-    return Response.json({ error: error.message }, { status: 500 });
+    return jsonError(error);
   }
 }

@@ -3,6 +3,7 @@ import { stripe, isValidPlan, PLAN_IDS } from '../../../../lib/stripe';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { getUserProfile } from '../../../../lib/supabase-auth';
 import { logAction } from '../../../../lib/audit';
+import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +23,7 @@ export async function GET() {
     .from('user_profiles')
     .select('id, email, name, role, plan, subscription_status, stripe_customer_id, created_at, updated_at')
     .order('created_at', { ascending: false });
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return jsonError(error);
 
   const isActive = (u) =>
     u.subscription_status === 'active' || ['admin', 'owner'].includes(u.role);
@@ -142,7 +143,7 @@ export async function POST(request) {
     .select('id, email, name, role, plan, subscription_status, stripe_customer_id')
     .eq('id', userId)
     .maybeSingle();
-  if (targetErr) return Response.json({ error: targetErr.message }, { status: 500 });
+  if (targetErr) return jsonError(targetErr);
   if (!target) return Response.json({ error: 'Usuario no encontrado' }, { status: 404 });
 
   if (['admin', 'owner'].includes(target.role)) {
@@ -181,7 +182,7 @@ export async function POST(request) {
     .from('user_profiles')
     .update(update)
     .eq('id', userId);
-  if (updErr) return Response.json({ error: updErr.message }, { status: 500 });
+  if (updErr) return jsonError(updErr);
 
   logAction({
     userId: admin.id,

@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { sendChatNotification } from '../../../lib/resend-email';
 import { triggerEvent } from '../../../lib/pusher';
+import { jsonError } from '../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +52,7 @@ export async function GET(request) {
     return Response.json({ messages: messages || [] });
   } catch (error) {
     console.error('[chat:GET]', error.message);
-    return Response.json({ error: error.message }, { status: 500 });
+    return jsonError(error);
   }
 }
 
@@ -99,7 +100,7 @@ export async function POST(request) {
     return Response.json({ success: true, id: row.id });
   } catch (error) {
     console.error('[chat:POST]', error.message);
-    return Response.json({ error: error.message }, { status: 500 });
+    return jsonError(error);
   }
 }
 

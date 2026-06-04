@@ -10,6 +10,7 @@
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { logAction } from '../../../../lib/audit';
+import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // calibration can take 20-30s on large prediction tables
@@ -63,7 +64,7 @@ export async function GET(request) {
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     });
   } catch (e) {
-    return Response.json({ error: e.message }, { status: 502 });
+    return jsonError(e, { status: 502 });
   } finally {
     clearTimeout(timeout);
   }
@@ -144,7 +145,7 @@ export async function POST(request) {
 
     return new Response(text, { status: res.status, headers: { 'Content-Type': 'application/json' } });
   } catch (e) {
-    return Response.json({ error: e.message }, { status: 502 });
+    return jsonError(e, { status: 502 });
   } finally {
     clearTimeout(t);
   }

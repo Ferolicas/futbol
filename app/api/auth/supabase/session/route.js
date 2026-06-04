@@ -1,4 +1,5 @@
 import { createSupabaseServerClient } from '../../../../../lib/supabase-auth';
+import { jsonError } from '../../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,6 @@ export async function GET() {
     return Response.json({ user: { ...user, ...profile } });
   } catch (err) {
     console.error('[auth/session]', err.message);
-    return Response.json({ error: err.message }, { status: 500 });
+    return jsonError(err);
   }
 }

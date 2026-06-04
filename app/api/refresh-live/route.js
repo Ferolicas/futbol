@@ -2,6 +2,7 @@ import { redisGet, redisSet, KEYS, TTL } from '../../../lib/redis';
 import { ALL_LEAGUE_IDS, isYouthTeam } from '../../../lib/leagues';
 import { getCurrentUser } from '../../../lib/auth-pg';
 import { statLookup, STAT_ALIASES } from '../../../lib/match-stats';
+import { jsonError } from '../../../lib/api-error';
 
 // Force-refresh live data — direct API call, no cron chaining.
 // Rate-limited to once every 15s via Redis lock.
@@ -471,6 +472,6 @@ export async function POST(request) {
 
   } catch (error) {
     console.error('[REFRESH-LIVE] Error:', error.message);
-    return Response.json({ error: error.message }, { status: 500 });
+    return jsonError(error);
   }
 }

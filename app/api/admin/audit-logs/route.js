@@ -7,6 +7,7 @@
  */
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../../lib/supabase';
+import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,6 +45,6 @@ export async function GET(request) {
     }
     return Response.json({ logs: data || [] });
   } catch (e) {
-    return Response.json({ error: e.message }, { status: 500 });
+    return jsonError(e);
   }
 }

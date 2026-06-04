@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { ALL_LEAGUE_IDS, LEAGUES } from '../../../../lib/leagues';
+import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,7 @@ export async function GET() {
 
     if (error) {
       console.error('[user/leagues:GET]', error.message);
-      return Response.json({ error: error.message }, { status: 500 });
+      return jsonError(error);
     }
 
     const leagueIds = profile?.custom_league_ids?.length > 0
@@ -34,7 +35,7 @@ export async function GET() {
     return Response.json({ leagueIds, isCustom: !!(profile?.custom_league_ids?.length > 0) });
   } catch (err) {
     console.error('[user/leagues:GET]', err.message);
-    return Response.json({ error: err.message }, { status: 500 });
+    return jsonError(err);
   }
 }
 
@@ -58,12 +59,12 @@ export async function PUT(request) {
 
     if (error) {
       console.error('[user/leagues:PUT]', error.message);
-      return Response.json({ error: error.message }, { status: 500 });
+      return jsonError(error);
     }
 
     return Response.json({ success: true, leagueIds: validIds });
   } catch (err) {
     console.error('[user/leagues:PUT]', err.message);
-    return Response.json({ error: err.message }, { status: 500 });
+    return jsonError(err);
   }
 }

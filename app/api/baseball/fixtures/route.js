@@ -12,6 +12,7 @@
 import { getMlbScheduleByDate } from '../../../../lib/mlb-stats-api';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
+import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -126,6 +127,6 @@ export async function GET(request) {
     return Response.json({ success: true, date, userTz, fetchedDates: fetchDates, fixtures: enriched, count: enriched.length });
   } catch (e) {
     console.error('[api/baseball/fixtures]', e.message);
-    return Response.json({ error: e.message }, { status: 500 });
+    return jsonError(e);
   }
 }
