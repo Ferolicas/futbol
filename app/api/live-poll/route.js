@@ -38,6 +38,7 @@ export async function GET(request) {
       headers: { 'Cache-Control': 'no-store' },
     });
   } catch (error) {
-    return Response.json({ liveStats: [], error: error.message });
+    console.error('[live-poll] error', error);
+    return Response.json({ liveStats: [], error: 'live unavailable' });
   }
 }

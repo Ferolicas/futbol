@@ -630,9 +630,10 @@ export async function GET(request) {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
     });
   } catch (e) {
+    console.error('[fixtures] error', e);
     const quota = await getQuota().catch(() => ({ used: 0, remaining: 100, limit: 100 }));
     return Response.json({
-      error: e.message || 'Error loading fixtures',
+      error: 'Error loading fixtures',
       fixtures: [],
       quota,
       hidden: [],
