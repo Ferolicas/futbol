@@ -20,6 +20,7 @@ export async function GET(request) {
     try {
       const res = await fetch(`http://ip-api.com/json/${ip}?fields=countryCode,currency`, {
         next: { revalidate: 0 },
+        signal: AbortSignal.timeout(5000),
       });
       const data = await res.json();
       if (data.countryCode) {
