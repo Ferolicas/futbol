@@ -143,6 +143,10 @@ function queuesForRole(role: WorkerRole): QueueName[] {
   return all; // 'all' = monolito (comportamiento previo a la Fase 1)
 }
 
+// JS-2b: errores de worker que son blips transitorios de reconexión a Redis
+// (ioredis/BullMQ reconectan solos) → NO son caídas; loguear sin alertar.
+const TRANSIENT_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ENOTFOUND']);
+
 export function startWorkers(role: WorkerRole = 'all'): Worker[] {
   const workers: Worker[] = [];
   const names = queuesForRole(role);
@@ -174,6 +178,17 @@ export function startWorkers(role: WorkerRole = 'all'): Worker[] {
       }
     });
     w.on('error', (err) => {
+      // JS-2b: distinguir blips transitorios de reconexión a Redis (no son
+      // caídas; ioredis/BullMQ reconectan solos) de errores reales del worker.
+      const code = (err as NodeJS.ErrnoException)?.code;
+      const msg = err?.message || '';
+      const isTransient =
+        (code != null && TRANSIENT_CODES.has(code)) ||
+        /connection is closed|redis.*closed/i.test(msg);
+      if (isTransient) {
+        logger.warn({ queue: name, code, msg: msg.slice(0, 120) }, 'worker transient error (no alert)');
+        return;
+      }
       notifyError({ source: 'job', name, extra: { kind: 'worker-error' } }, err).catch(() => {});
     });
     workers.push(w);
