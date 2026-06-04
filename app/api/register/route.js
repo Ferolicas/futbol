@@ -16,7 +16,7 @@ export async function POST(request) {
       return Response.json({ error: 'Demasiados intentos. Espera un momento.' }, { status: 429 });
     }
 
-    const { name, email, password, country, plan } = await request.json();
+    const { name, email, password, plan } = await request.json();
 
     if (!name || !email || !password) {
       return Response.json({ error: 'Nombre, email y contrasena son obligatorios' }, { status: 400 });
@@ -45,12 +45,15 @@ export async function POST(request) {
 
     const userId = result.user.id;
 
-    // Completar el perfil con country/plan (signupUser crea el perfil minimal).
+    // Completar el perfil con plan (signupUser crea el perfil minimal).
+    // BUG FIX: antes se escribía `country`, columna que NO existe en
+    // user_profiles → el upsert fallaba en CADA registro (error tragado) y el
+    // perfil se quedaba en 'inactive' (estado mínimo de signupUser) en vez de
+    // 'pending'. Quitado `country` (nada lo lee) → el upsert ahora sí persiste.
     const { error: profileErr } = await supabaseAdmin.from('user_profiles').upsert({
       id: userId,
       email: emailLower,
       name: name.trim(),
-      country: country || 'unknown',
       role: 'user',
       plan: plan || null,
       subscription_status: 'pending',
