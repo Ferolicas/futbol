@@ -46,8 +46,14 @@ async function activateUser(profile, plan, customerId) {
     stripe_customer_id: customerId,
     updated_at: new Date().toISOString(),
   }).eq('id', profile.id);
-  if (_err1) console.error('[webhook:activate]', _err1.message);
+  // A-1 FIX (fiabilidad): propagar el error de activación. Antes solo se logueaba
+  // → el cliente pagaba y se quedaba SIN acceso en silencio. Ahora lanza: el
+  // handler lo captura, devuelve 500 y NO marca el dedup → Stripe reintenta hasta
+  // que la activación persiste.
+  if (_err1) throw new Error(`activation update failed: ${_err1.message}`);
 
+  // Email de activación: una sola vez, SOLO tras activar con éxito. NO bloquea —
+  // si el UPDATE fue bien pero el email falla, la activación NO se revierte.
   try {
     await sendPlanActivatedEmail({
       to: profile.email,
@@ -85,17 +91,17 @@ export async function POST(request) {
     return Response.json({ error: 'Webhook signature failed' }, { status: 400 });
   }
 
-  // R4 FIX: idempotencia. Stripe reentrega eventos (y ante el 500 que devolvemos
-  // en error). Sin dedup, payment_intent.succeeded reactivaba el plan, reenviaba
-  // el email y RE-CREABA la suscripción (doble cobro). Marcamos cada event.id en
-  // Redis (TTL 24h) y saltamos los ya procesados.
+  // R4 + A-1 FIX: idempotencia. La COMPROBACIÓN del dedup se queda aquí (saltar
+  // si el evento ya se procesó). El MARCADO (redisSet) se movió al handler de
+  // payment_intent.succeeded, DESPUÉS de activar con éxito: así un fallo de
+  // activación NO queda "visto" y Stripe puede reintentar hasta activar al
+  // cliente. Los demás eventos (subscription.*, invoice.*) son UPDATEs
+  // idempotentes → reprocesarlos en un reintento es inocuo.
   if (event.id) {
-    const dedupKey = `stripe-event:${event.id}`;
-    const seen = await redisGet(dedupKey);
+    const seen = await redisGet(`stripe-event:${event.id}`);
     if (seen) {
       return Response.json({ received: true, deduped: true });
     }
-    await redisSet(dedupKey, '1', 24 * 3600);
   }
 
   try {
@@ -111,13 +117,37 @@ export async function POST(request) {
           console.error(`[webhook] User not found: customer=${customerId} userId=${userId}`);
           break;
         }
+
+        // A-1 FIX: activar PRIMERO. Si el UPDATE falla, activateUser LANZA → cae
+        // al catch del handler → 500 → Stripe reintenta y el dedup (abajo) NO se
+        // marca → el cliente acaba activándose.
         await activateUser(profile, plan, customerId);
 
+        // Activación OK (debitado + plan activo + email). SOLO AHORA marcamos el
+        // evento como visto: a partir de aquí un reintento de Stripe se salta (no
+        // re-cobra, no re-activa, no re-envía email).
+        if (event.id) {
+          await redisSet(`stripe-event:${event.id}`, '1', 24 * 3600);
+        }
+
+        // Suscripción recurrente: proceso SEPARADO que NUNCA entorpece el acceso
+        // del cliente. Idempotente con event.id → un reintento jamás crea una 2ª
+        // suscripción. Un fallo aquí (método de pago no apto para cobros
+        // recurrentes, etc.) es PERMANENTE: NO se revierte la activación, NO se
+        // reenvía email, NO se devuelve 500, NO se reintenta dentro del webhook.
+        // Se registra en columnas + log para gestión manual.
         try {
-          const sub = await createPostPaymentSubscription(customerId, plan, pi.payment_method, pi.created);
+          const sub = await createPostPaymentSubscription(customerId, plan, pi.payment_method, pi.created, event.id);
           console.log(`[webhook] Subscription created for ${plan}: ${sub.id}`);
+          await supabaseAdmin.from('user_profiles')
+            .update({ subscription_setup_status: 'done', subscription_setup_error: null })
+            .eq('id', profile.id);
         } catch (e) {
-          console.error('[webhook] Failed to create subscription:', e.message);
+          const setupError = `${e.code || 'error'}: ${e.message}`;
+          await supabaseAdmin.from('user_profiles')
+            .update({ subscription_setup_status: 'failed', subscription_setup_error: setupError })
+            .eq('id', profile.id);
+          console.error('[webhook:SUBSCRIPTION_SETUP_FAILED]', { eventId: event.id, customerId, userId, plan, error: setupError });
         }
         break;
       }
