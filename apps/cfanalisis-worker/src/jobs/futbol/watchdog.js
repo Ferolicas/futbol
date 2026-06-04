@@ -25,30 +25,41 @@ export async function runWatchdog(data = {}) {
   const retryCmd = (queue) =>
     `curl -X POST http://127.0.0.1:8080/admin/retry -H "Authorization: Bearer WORKER_SECRET" -H "Content-Type: application/json" -d '{"queue":"${queue}"}'`;
 
-  // ── Check 1: futbol-daily completó para el día canónico ──
-  const daily = await redisGet(`dailyBatch:${date}`);
-  const dailyOk = daily?.completed === true;
+  // ── Check 1: futbol-daily completó — robusto a la frontera de cronTargetDate ──
+  // cronTargetDate() cambia de resultado según el lado del mediodía-Bogotá y el
+  // watchdog corre cerca de esa frontera, así que daily pudo escribir cualquiera
+  // de los dos días candidatos. OK si CUALQUIERA tiene el flag completed.
+  const d1 = date;            // cronTargetDate()
+  const d2 = bogotaToday();
+  const days = d1 === d2 ? [d1] : [d1, d2];
+  let dailyOk = false;
+  let checkedDate = d1;
+  for (const d of days) {
+    const flag = await redisGet(`dailyBatch:${d}`);
+    if (flag?.completed === true) { dailyOk = true; checkedDate = d; break; }
+  }
   if (!dailyOk) {
     await notifyError(
-      { source: 'job', name: 'futbol-watchdog', extra: { check: 'daily', date } },
-      new Error(`Pipeline: futbol-daily NO completó para ${date}. Re-disparar:\n${retryCmd('futbol-daily')}`),
+      { source: 'job', name: 'futbol-watchdog', extra: { check: 'daily', days } },
+      new Error(`Pipeline: futbol-daily NO completó para ${days.join(' / ')}. Re-disparar:\n${retryCmd('futbol-daily')}`),
     ).catch(() => {});
   }
 
-  // ── Check 2: futbol-retrain dejó rastro de HOY (Bogotá) ──
-  // completedAt es ISO UTC; a las 07:30 Madrid (madrugada UTC) la fecha UTC y la
-  // de Bogotá coinciden, así que comparar la parte YYYY-MM-DD contra bogotaToday()
-  // es simple y robusto.
+  // ── Check 2: futbol-retrain dejó rastro reciente (<6h) ──
+  // Comparar el DÍA (completedAt UTC vs bogotaToday) daba falso positivo
+  // nocturno por el desfase de zona. Usamos la EDAD del rastro: el watchdog corre
+  // ~1h después de retrain, así que <6h = OK; cualquier cosa más vieja = no corrió.
   const retrain = await redisGet('lastRun:futbol-retrain');
-  const retrainDay = typeof retrain?.completedAt === 'string' ? retrain.completedAt.slice(0, 10) : null;
-  const retrainOk = retrainDay != null && retrainDay === bogotaToday();
+  const retrainMs = retrain?.completedAt ? Date.parse(retrain.completedAt) : NaN;
+  const ageHours = Number.isFinite(retrainMs) ? (Date.now() - retrainMs) / 3_600_000 : Infinity;
+  const retrainOk = ageHours <= 6;
   if (!retrainOk) {
     await notifyError(
-      { source: 'job', name: 'futbol-watchdog', extra: { check: 'retrain', lastRun: retrainDay } },
-      new Error(`Pipeline: futbol-retrain NO completó hoy (último: ${retrainDay || 'nunca'}). Re-disparar:\n${retryCmd('futbol-retrain')}`),
+      { source: 'job', name: 'futbol-watchdog', extra: { check: 'retrain', lastRun: retrain?.completedAt || null } },
+      new Error(`Pipeline: futbol-retrain NO completó recientemente (último: ${retrain?.completedAt || 'nunca'}). Re-disparar:\n${retryCmd('futbol-retrain')}`),
     ).catch(() => {});
   }
 
-  logger.info({ date, dailyOk, retrainOk }, '[futbol-watchdog] checks');
+  logger.info({ date, checkedDate, dailyOk, retrainOk, retrainAgeHours: Number.isFinite(ageHours) ? Math.round(ageHours * 10) / 10 : null }, '[futbol-watchdog] checks');
   return { date, dailyOk, retrainOk };
 }
