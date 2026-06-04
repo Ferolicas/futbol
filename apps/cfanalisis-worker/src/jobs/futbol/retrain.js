@@ -27,6 +27,7 @@ import {
   captureFinalizedFixturesRaw,
   trainMetaModels,
   computeMarketBaseRates,
+  redisSet,
 } from '../../shared.js';
 
 export async function runFutbolRetrain(payload = {}) {
@@ -85,5 +86,7 @@ export async function runFutbolRetrain(payload = {}) {
       `muestras=${result.train?.samples ?? 0} · entrenados=${result.train?.trained ?? 0} · activos=${result.train?.activated ?? 0} · ` +
       `tasas_base=${result.baseRates?.markets ?? 0}`
   );
+  // JS-1: dejar rastro para el watchdog (dead-man's switch). TTL 48h.
+  await redisSet('lastRun:futbol-retrain', { completedAt: new Date().toISOString() }, 172800);
   return result;
 }

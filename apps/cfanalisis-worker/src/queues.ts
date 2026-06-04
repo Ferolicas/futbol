@@ -16,6 +16,7 @@ export const QUEUE_NAMES = [
   'futbol-odds',
   'futbol-raw-backfill',
   'futbol-retrain',
+  'futbol-watchdog',
   // Baseball
   'baseball-fixtures',
   'baseball-analyze',
@@ -69,6 +70,8 @@ const opts: Record<QueueName, JobsOptions> = {
   // pasos son idempotentes, así que reintentar es seguro; pero cada intento
   // re-corre todo el ciclo pesado → tope 2 intentos.
   'futbol-retrain':          { ...defaultJobOpts, attempts: 2 },
+  // Watchdog (dead-man's switch): chequeo ligero diario; default opts.
+  'futbol-watchdog':         defaultJobOpts,
   'baseball-fixtures':            defaultJobOpts,
   'baseball-analyze':             analyzeJobOpts,
   'baseball-analyze-all-today':   analyzeJobOpts,

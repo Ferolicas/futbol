@@ -49,6 +49,10 @@ const SCHEDULES: Sched[] = [
   { queue: 'futbol-daily',     id: 'futbol-daily-daily',     pattern: '10 2 * * *',  tz: TZ },
   { queue: 'futbol-finalize',  id: 'futbol-finalize-daily',  pattern: '0 3,4 * * *', tz: TZ },
   { queue: 'futbol-retrain',   id: 'futbol-retrain-daily',   pattern: '30 6 * * *',  tz: TZ },
+  // Dead-man's switch (JS-1): a las 07:30 Madrid (tras retrain 06:30) verifica
+  // que daily y retrain completaron; si no, alerta a Telegram con el comando de
+  // re-disparo. Silencio = todo OK.
+  { queue: 'futbol-watchdog',  id: 'futbol-watchdog-daily',  pattern: '30 7 * * *',  tz: TZ },
   { queue: 'futbol-cleanup',   id: 'futbol-cleanup-daily',   pattern: '0 3 * * *',   tz: TZ },
   // ── Fútbol — periódicos ──
   // Live cada 20s: el handler hace smart-skip (0 llamadas fuera de partidos),
