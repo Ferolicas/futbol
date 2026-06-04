@@ -65,10 +65,16 @@ export async function POST(request) {
 
   try {
     if (type === 'hide') {
-      await supabaseAdmin.from('user_hidden').upsert(
+      const { error: hideErr } = await supabaseAdmin.from('user_hidden').upsert(
         { user_id: userId, fixture_id: Number(data.fixtureId), date },
         { onConflict: 'user_id,fixture_id' }
       );
+      // M-2 FIX: pgAdmin devuelve {error} sin lanzar. Antes el fallo se tragaba y
+      // el usuario recibía 200 con una lista que no reflejaba su cambio.
+      if (hideErr) {
+        console.error('[user:hide]', { userId, fixtureId: Number(data.fixtureId), error: hideErr.message });
+        return Response.json({ error: 'No se pudo guardar el cambio' }, { status: 500 });
+      }
       await redisSet(KEYS.userHidden(userId), null, 1).catch(() => {});
       const { data: rows } = await supabaseAdmin.from('user_hidden').select('fixture_id').eq('user_id', userId);
       const ids = (rows || []).map(r => r.fixture_id);
@@ -77,7 +83,12 @@ export async function POST(request) {
     }
 
     if (type === 'unhide') {
-      await supabaseAdmin.from('user_hidden').delete().eq('user_id', userId).eq('fixture_id', Number(data.fixtureId));
+      const { error: unhideErr } = await supabaseAdmin.from('user_hidden').delete().eq('user_id', userId).eq('fixture_id', Number(data.fixtureId));
+      // M-2 FIX: leer el {error} del delete (pgAdmin no lanza) y no fingir éxito.
+      if (unhideErr) {
+        console.error('[user:unhide]', { userId, fixtureId: Number(data.fixtureId), error: unhideErr.message });
+        return Response.json({ error: 'No se pudo guardar el cambio' }, { status: 500 });
+      }
       await redisSet(KEYS.userHidden(userId), null, 1).catch(() => {});
       const { data: rows } = await supabaseAdmin.from('user_hidden').select('fixture_id').eq('user_id', userId);
       const ids = (rows || []).map(r => r.fixture_id);
@@ -119,7 +130,12 @@ export async function POST(request) {
         .delete()
         .eq('id', combinadaId)
         .eq('user_id', userId);
-      if (error) console.error('[user:delete-combinada]', error.message);
+      // M-2 FIX: antes solo logueaba y devolvía success aunque el delete fallara
+      // (mismo patrón de fallo silencioso). Ahora propaga el error.
+      if (error) {
+        console.error('[user:delete-combinada]', { userId, combinadaId, error: error.message });
+        return Response.json({ error: 'No se pudo eliminar la combinada' }, { status: 500 });
+      }
       return Response.json({ success: true });
     }
 
