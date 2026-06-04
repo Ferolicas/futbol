@@ -4,6 +4,7 @@ import { redisGet, redisSet } from '../../../lib/redis';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { userHasActivePlan } from '../../../lib/require-active-plan';
 import { jsonError } from '../../../lib/api-error';
+import { redisRateLimit } from '../../../lib/ratelimit-redis';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,11 @@ export async function POST(request) {
     if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (!(await userHasActivePlan(user))) {
       return Response.json({ error: 'Subscription required' }, { status: 403 });
+    }
+    // BE-2: rate-limit por usuario — analyzeMatch quema cuota API-Football + CPU.
+    const rl = await redisRateLimit('analisis', userId, 20, 60);
+    if (!rl.success) {
+      return Response.json({ error: 'Demasiadas solicitudes. Espera un momento.' }, { status: 429 });
     }
 
     const { fixtures, date: clientDate } = await request.json();

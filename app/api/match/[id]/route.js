@@ -5,6 +5,7 @@ import { supabaseAdmin } from '../../../../lib/supabase';
 import { getCurrentUser } from '../../../../lib/auth-pg';
 import { userHasActivePlan } from '../../../../lib/require-active-plan';
 import { jsonError } from '../../../../lib/api-error';
+import { redisRateLimit } from '../../../../lib/ratelimit-redis';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -121,6 +122,11 @@ export async function POST(request, { params }) {
   }
   if (!(await userHasActivePlan(user))) {
     return Response.json({ error: 'Subscription required' }, { status: 403 });
+  }
+  // BE-2: rate-limit por usuario en acciones que queman cuota API-Football/CPU.
+  const rl = await redisRateLimit('match-action', user.id, 20, 60);
+  if (!rl.success) {
+    return Response.json({ error: 'Demasiadas solicitudes. Espera un momento.' }, { status: 429 });
   }
   const { action, date } = await request.json();
 
