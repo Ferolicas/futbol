@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useState } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { usePusherEvent } from '../../lib/use-pusher';
 
 const LiveStatsContext = createContext({
@@ -56,8 +56,13 @@ export default function LiveStatsProvider({ children }) {
     });
   }, []));
 
+  // RT-3: memoizar el value para no recrear el objeto en cada render → evita
+  // re-render en cascada de todos los consumidores cuando nada cambió.
+  // (setLiveStats es estable entre renders, no hace falta como dependencia.)
+  const value = useMemo(() => ({ liveStats, setLiveStats, isPopulated }), [liveStats, isPopulated]);
+
   return (
-    <LiveStatsContext.Provider value={{ liveStats, setLiveStats, isPopulated }}>
+    <LiveStatsContext.Provider value={value}>
       {children}
     </LiveStatsContext.Provider>
   );
