@@ -53,6 +53,8 @@ export default function Dashboard() {
   const { user, supabase } = useAuth();
   const [splash, setSplash] = useState(!_splashDone);
   const [splashFade, setSplashFade] = useState(false);
+  // Banner de bienvenida tras checkout exitoso (ver efecto checkout=success).
+  const [welcome, setWelcome] = useState(false);
   const [userTz, setUserTz] = useState('UTC'); // corrected on mount to user's real timezone
   // tzReady: hasta que detectamos la zona horaria real del cliente (en el mount)
   // NO disparamos el fetch de /api/fixtures. Asi evitamos el fetch inicial con
@@ -522,6 +524,25 @@ export default function Dashboard() {
       setTimeout(() => setSplash(false), 400);
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Bienvenida tras checkout exitoso: el PaymentModal vuelve a
+  // /dashboard?checkout=success&plan=X. Mostramos un banner de confirmación
+  // (mismo patrón visual .batch-banner ya existente — sin librería de toasts) y
+  // limpiamos el query param para que no reaparezca al recargar.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('checkout') !== 'success') return;
+    setWelcome(true);
+    // Limpia checkout&plan de la URL sin recargar ni navegar → al refrescar no
+    // reaparece el mensaje.
+    params.delete('checkout');
+    params.delete('plan');
+    const qs = params.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+    const t = setTimeout(() => setWelcome(false), 6000);
+    return () => clearTimeout(t);
+  }, []);
 
   // === WEB PUSH NOTIFICATIONS ===
   useEffect(() => {
@@ -1157,6 +1178,21 @@ export default function Dashboard() {
                 en vivo entran por WebSocket + poll de respaldo, no hace falta. */}
           </div>
         </header>
+
+        {/* WELCOME tras checkout exitoso — reutiliza el banner verde .batch-banner */}
+        {welcome && (
+          <div className="batch-banner fade-in" role="status" style={{ justifyContent: 'space-between' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span aria-hidden="true" style={{ fontSize: '1rem', color: 'var(--green)' }}>&#10003;</span>
+              <span>¡Pago confirmado! Bienvenido a CF Análisis.</span>
+            </span>
+            <button
+              aria-label="Cerrar"
+              onClick={() => setWelcome(false)}
+              style={{ background: 'none', border: 'none', color: 'var(--t2)', cursor: 'pointer', fontSize: '1rem', lineHeight: 1, padding: 4 }}
+            >&#10005;</button>
+          </div>
+        )}
 
         {/* CONTROLS: Date + Filters */}
         <div className="controls-row">
