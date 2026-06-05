@@ -45,7 +45,13 @@ export async function GET(request, { params }) {
           if (result && result.dataQuality !== 'insufficient') {
             // A-2 FIX: visibilidad si la persistencia a PG falla (se sigue
             // sirviendo desde Redis, pero sin esto desaparece al expirar el TTL).
-            const _cache = await cacheAnalysis(id, { ...result, date }).catch((e) => {
+            // POR QUÉ FALLABA: analyzeMatch devuelve { analysis, fromCache,
+            // apiCalls, persist }. combinada/calculatedProbabilities/odds viven en
+            // result.analysis.*, NO en result.*. Con `{ ...result }`, cacheAnalysis
+            // leía data.combinada=undefined → columnas combinada/probabilities a
+            // NULL, y guardaba el JSON doble-anidado (analysis.analysis.*). Se
+            // persiste el doc DESANIDADO (result.analysis) — igual que el nocturno.
+            const _cache = await cacheAnalysis(id, { ...(result.analysis || result), date }).catch((e) => {
               console.error('[cacheAnalysis:THREW]', { fixtureId: id, date, error: e.message });
               return { db: false, redis: false };
             });
@@ -223,7 +229,12 @@ export async function POST(request, { params }) {
       }
       // A-2 FIX: visibilidad si la persistencia a PG falla (se sigue sirviendo
       // desde Redis, pero sin esto desaparece al expirar el TTL).
-      const _cache = await cacheAnalysis(id, { ...result, date }).catch((e) => {
+      // POR QUÉ FALLABA: analyzeMatch devuelve { analysis, fromCache, apiCalls,
+      // persist }. combinada/calculatedProbabilities/odds viven en result.analysis.*,
+      // NO en result.*. Con `{ ...result }`, cacheAnalysis leía data.combinada=
+      // undefined → columnas combinada/probabilities a NULL y JSON doble-anidado
+      // (el caso de 1546805). Se persiste el doc DESANIDADO (result.analysis).
+      const _cache = await cacheAnalysis(id, { ...(result.analysis || result), date }).catch((e) => {
         console.error('[cacheAnalysis:THREW]', { fixtureId: id, date, error: e.message });
         return { db: false, redis: false };
       });
