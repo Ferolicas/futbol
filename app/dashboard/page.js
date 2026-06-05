@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { useAuth } from '../../components/providers';
@@ -108,6 +108,26 @@ export default function Dashboard() {
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushSupported, setPushSupported] = useState(false);
   const [pushError, setPushError] = useState(null);
+
+  // Latest-value refs (FE-5): permiten que toggleSelect/toggleFavorite/dismissMatch
+  // sean useCallback ESTABLES (sin leer estado que cambia por render). Mantienen viva
+  // la memoización de MatchCard — sin esto, un memo simple se anularía porque los
+  // handlers cambiarían de identidad en cada tick. Mismo patrón que liveStatsRef.
+  const favoritesRef = useRef(favorites);
+  const hiddenRef = useRef(hidden);
+  const analyzedRef = useRef(analyzed);
+  const selectedMarketsRef = useRef(selectedMarkets);
+  const dateRef = useRef(date);
+  const pushEnabledRef = useRef(pushEnabled);
+  const pushSupportedRef = useRef(pushSupported);
+  const subscribePushRef = useRef(null); // asignado tras definir subscribePush
+  favoritesRef.current = favorites;
+  hiddenRef.current = hidden;
+  analyzedRef.current = analyzed;
+  selectedMarketsRef.current = selectedMarkets;
+  dateRef.current = date;
+  pushEnabledRef.current = pushEnabled;
+  pushSupportedRef.current = pushSupported;
 
   // liveStats persiste a traves de SPA-navigation via su Context propio
   // (live-stats-context.js), no requiere reseed manual aqui.
@@ -572,6 +592,7 @@ export default function Dashboard() {
       return fail(e?.message ? `No se pudo activar: ${e.message}` : 'No se pudo activar las notificaciones');
     }
   }, [pushSupported]);
+  subscribePushRef.current = subscribePush;
 
   // Renovación al abrir la app: si el permiso ya está concedido, garantiza que
   // el servidor tenga una suscripción fresca (segunda capa, junto al
@@ -767,13 +788,13 @@ export default function Dashboard() {
     return 0;
   });
 
-  const toggleSelect = (fid) => {
+  const toggleSelect = useCallback((fid) => {
     setSelected(prev => {
       const n = new Set(prev);
       n.has(fid) ? n.delete(fid) : n.add(fid);
       return n;
     });
-  };
+  }, []);
 
 
   const analyzeSelected = async () => {
@@ -803,16 +824,18 @@ export default function Dashboard() {
   // Unified dismiss: removes from both Partidos AND Analizados tabs.
   // Optimistic con rollback — si la persistencia falla, devolvemos la UI al
   // estado previo en vez de mentir al usuario (mismo patron que saveCombinada).
-  const dismissMatch = async (e, fixtureId) => {
+  const dismissMatch = useCallback(async (e, fixtureId) => {
     e.stopPropagation();
     // Snapshot ANTES de mutar para poder hacer rollback exacto.
+    // Leemos los valores via refs (no estado directo) para que este handler
+    // sea useCallback estable y no rompa la memoización de MatchCard (FE-5).
     // SWR mantiene su propia cache: ademas del rollback local mutamos la
     // entry de fixtures con revalidate=false (no relanza fetch — confiamos
     // en la respuesta del POST) y, si POST falla, revalidamos para
     // resincronizar con el servidor.
-    const prevHidden = hidden;
-    const prevAnalyzed = analyzed;
-    const prevSelectedMarkets = selectedMarkets;
+    const prevHidden = hiddenRef.current;
+    const prevAnalyzed = analyzedRef.current;
+    const prevSelectedMarkets = selectedMarketsRef.current;
 
     setHidden(prev => prev.includes(fixtureId) ? prev : [...prev, fixtureId]);
     setAnalyzed(prev => prev.filter(id => id !== fixtureId));
@@ -833,7 +856,7 @@ export default function Dashboard() {
       const res = await fetch('/api/hidden', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fixtureId, date }),
+        body: JSON.stringify({ fixtureId, date: dateRef.current }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (e) {
@@ -845,7 +868,7 @@ export default function Dashboard() {
       try { fixturesMutate(); } catch {}
       setError('No se pudo ocultar el partido — restaurado.');
     }
-  };
+  }, [fixturesMutate, setSelectedMarkets]);
 
   // Toggle favorite — optimistic update + persist + rollback si falla.
   //
@@ -857,10 +880,14 @@ export default function Dashboard() {
   //
   // Marcar favorito SIN push = no tendría sentido, por eso lo forzamos.
   // La campanita global fue eliminada — el favorito ES el toggle de alertas.
-  const toggleFavorite = async (e, fixtureId) => {
+  const toggleFavorite = useCallback(async (e, fixtureId) => {
     e.stopPropagation();
-    const isFav = favorites.includes(fixtureId);
-    const prevFavorites = favorites;
+    // Leemos favorites y el estado de push via refs (no estado directo) para
+    // que el handler sea useCallback estable — si dependiera de `favorites`
+    // cambiaría de identidad en cada toggle y re-renderizaría TODAS las
+    // tarjetas, anulando la memoización de MatchCard (FE-5).
+    const isFav = favoritesRef.current.includes(fixtureId);
+    const prevFavorites = favoritesRef.current;
 
     setFavorites(prev => isFav ? prev.filter(id => id !== fixtureId) : [...prev, fixtureId]);
     try {
@@ -881,13 +908,13 @@ export default function Dashboard() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       // Al MARCAR favorito → asegurar suscripción push inmediatamente.
-      if (!isFav && pushSupported && typeof Notification !== 'undefined') {
+      if (!isFav && pushSupportedRef.current && typeof Notification !== 'undefined') {
         if (Notification.permission === 'denied') {
           setPushError('Las notificaciones están bloqueadas en tu navegador. Habilítalas en ajustes para recibir alertas de tus favoritos.');
-        } else if (!pushEnabled) {
+        } else if (!pushEnabledRef.current) {
           // subscribePush() internamente pide permiso si está 'default'
           // y crea la subscription via service worker.
-          subscribePush().catch(err => {
+          subscribePushRef.current?.().catch(err => {
             console.error('[toggleFavorite] push subscribe failed:', err?.message);
           });
         }
@@ -898,7 +925,7 @@ export default function Dashboard() {
       try { fixturesMutate(); } catch {}
       setError('No se pudo guardar el favorito — restaurado.');
     }
-  };
+  }, [fixturesMutate]);
 
   // Keep backward-compatible aliases
   const doHide = dismissMatch;
@@ -1387,10 +1414,10 @@ export default function Dashboard() {
                       standings={standings}
                       matchData={analyzedData[m.fixture.id]}
                       liveStats={liveStats[m.fixture.id]}
-                      onSelect={() => toggleSelect(m.fixture.id)}
-                      onHide={(e) => doHide(e, m.fixture.id)}
-                      onFavorite={(e) => toggleFavorite(e, m.fixture.id)}
-                      onView={() => goToAnalysis(m.fixture.id, m)}
+                      onSelect={toggleSelect}
+                      onHide={doHide}
+                      onFavorite={toggleFavorite}
+                      onView={goToAnalysis}
                       idx={i}
                       userTz={userTz}
                     />
@@ -1570,7 +1597,7 @@ export default function Dashboard() {
 
 /* ======================== MATCH CARD ======================== */
 
-function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings, matchData, liveStats, onSelect, onHide, onFavorite, onView, idx, userTz }) {
+const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings, matchData, liveStats, onSelect, onHide, onFavorite, onView, idx, userTz }) {
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
@@ -1587,7 +1614,7 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
   return (
     <div
       className={`mcard ${live ? 'live' : ''} ${finished ? 'fin' : ''} ${isSelected ? 'sel' : ''} ${isAnalyzed ? 'done' : ''} mcard-in`}
-      onClick={isAnalyzed ? onView : onSelect}
+      onClick={isAnalyzed ? () => onView(match.fixture.id, match) : () => onSelect(match.fixture.id)}
     >
       {/* Convertido de motion.div → div: el prop `layout` de framer-motion
           animaba el reflow 130px→320px al expandir el acordeón, recalculando
@@ -1729,24 +1756,24 @@ function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings,
             <span className="tag-done">&#10003; ANALIZADO</span>
           ) : (
             <label className="mcard-cb" onClick={e => e.stopPropagation()}>
-              <input type="checkbox" checked={isSelected} onChange={onSelect} />
+              <input type="checkbox" checked={isSelected} onChange={() => onSelect(match.fixture.id)} />
               <span className="cb-mark" />
             </label>
           )}
           {onFavorite && (
             <button
               className={`btn-fav${isFavorite ? ' active' : ''}`}
-              onClick={onFavorite}
+              onClick={(e) => onFavorite(e, match.fixture.id)}
               title={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
             >&#9733;</button>
           )}
-          <button className="btn-x" onClick={(e) => { e.stopPropagation(); onHide(e); }}>&#10005;</button>
+          <button className="btn-x" onClick={(e) => { e.stopPropagation(); onHide(e, match.fixture.id); }}>&#10005;</button>
         </div>
 
       </div>
     </div>
   );
-}
+});
 
 /* ======================== ANALYSIS MODAL ======================== */
 
