@@ -1,14 +1,40 @@
 // @ts-nocheck
 /**
  * Job: futbol-finalize
- * Port of /api/cron/finalize. Two-pass finalizer:
- *   Pass 1: Redis (fast, no API calls).
- *   Pass 2: Supabase fallback — finds unfinalized predictions older than 2h
- *           and reconciles them via match_results or API fetch.
  *
- * Payload: {} (none)
+ * Cierra los resultados de los partidos del día leyendo la lista de fixtures de
+ * `match_schedule` (NO del bucket Redis efímero `live:*`, que tenía TTL 2h y
+ * vivía bajo la fecha-UTC equivocada → perdía casi todos los partidos de la
+ * tarde/noche; anoche finalizó 1 de 6). Patrón calcado de baseball-finalize:
+ * lista pendiente desde una tabla → agrupar por fecha → 1 llamada /fixtures?id=X
+ * por partido. Sin dependencia de Redis ni de `match_predictions` (tabla muerta).
+ *
+ * Flujo:
+ *   1. Resolver fecha(s) objetivo. El cron corre de madrugada España (03/04),
+ *      que en Bogotá es aún la noche de la jornada que acaba de terminar, así
+ *      que bogotaToday() ES esa jornada. Por defecto procesa esa jornada + la
+ *      anterior (red de seguridad para lo que no finalizó la corrida previa).
+ *      payload.date fuerza una fecha concreta; payload.includeNext añade la
+ *      jornada siguiente (partidos de Asia/Oceanía que ya terminaron temprano).
+ *   2. Sacar los fixtureId de kickoff_times de la fila de cada fecha.
+ *   3. Saltar los que ya están en match_results (dedup → 0 llamadas API).
+ *   4. /fixtures?id=X por cada uno; solo FT/AET/PEN se finalizan. La API
+ *      devuelve el resultado COMPLETO; nada se filtra a mano (match_results
+ *      guarda full_data = payload entero, y raw_api_payloads el crudo por
+ *      endpoint), así que ningún mercado se omite por no haberlo pedido.
+ *   5. Upsert a match_results + referee_stats + halfstats. Luego
+ *      captureFinalizedFixturesRaw nutre raw_api_payloads (fixture detalle +
+ *      statistics/events/lineups/injuries).
+ *
+ * Payload: { date?: 'YYYY-MM-DD', includeNext?: boolean }
  */
-import { redisGet, KEYS, supabaseAdmin, pgQuery } from '../../shared.js';
+import {
+  supabaseAdmin,
+  pgQuery,
+  getMatchSchedule,
+  captureFinalizedFixturesRaw,
+  bogotaToday,
+} from '../../shared.js';
 import { mapPool } from '../../pool.js';
 
 const FINALIZE_CONCURRENCY = 10;
@@ -258,25 +284,6 @@ async function upsertMatchResult(fid, date, match, r) {
   }, { onConflict: 'fixture_id' });
 }
 
-async function updatePrediction(fid, r) {
-  return supabaseAdmin.from('match_predictions').update({
-    // Columnas legacy (compat con queries existentes + calibracion vieja)
-    actual_home_goals:        r.hGoals,
-    actual_away_goals:        r.aGoals,
-    actual_result:            r.actualResult,
-    actual_btts:              r.actualBtts,
-    actual_total_goals:       r.totalGoals,
-    actual_corners:           r.totalCorners || null,
-    actual_total_cards:       r.totalCards ?? null,
-    actual_first_goal_minute: r.firstGoalMinute ?? null,
-    actual_goal_minutes:      r.goalMinutes && r.goalMinutes.length ? r.goalMinutes : null,
-    actual_goal_scorers:      r.goalScorers && r.goalScorers.length ? r.goalScorers : null,
-    // Nuevo: payload completo para calibracion dinamica de TODOS los mercados
-    actuals_full:             r.actualsFull,
-    finalized_at:             new Date().toISOString(),
-  }).eq('fixture_id', fid);
-}
-
 // ── Snapshot de stats por mitad (durable) ────────────────────────────────────
 // El live captura el total de la 1ª parte en el tick de HT (payload.firstHalf).
 // Aquí, al finalizar, escribimos el total a 90' (fullTime) y derivamos la 2ª
@@ -354,157 +361,130 @@ async function persistHalfStatsFull(fid, match, r) {
     [fid, payload.season, JSON.stringify(payload)]);
 }
 
-export async function runFinalize(_payload = {}) {
+// Aritmética de calendario pura sobre 'YYYY-MM-DD' (la fecha ya representa un
+// día de Bogotá; no se le aplica zona horaria).
+function addDaysStr(dateStr, days) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().split('T')[0];
+}
+
+// Fechas objetivo a finalizar. Sin payload.date: la jornada Bogotá que acaba de
+// terminar (bogotaToday() a la hora del cron de madrugada España ES esa jornada,
+// porque en Bogotá todavía es de noche) + la anterior como red de seguridad
+// (recupera lo que la corrida previa no finalizó). El dedup contra match_results
+// hace que reprocesar una fecha ya cerrada sea gratis (0 llamadas API).
+function resolveDates(payload = {}) {
+  if (payload.date) return [String(payload.date)];
+  const base = bogotaToday();
+  const dates = [base, addDaysStr(base, -1)];
+  if (payload.includeNext) dates.unshift(addDaysStr(base, 1));
+  return [...new Set(dates)];
+}
+
+export async function runFinalize(payload = {}) {
   const apiKey = process.env.FOOTBALL_API_KEY;
   if (!apiKey) throw new Error('FOOTBALL_API_KEY not configured');
 
-  const today     = new Date().toISOString().split('T')[0];
-  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+  const dates = resolveDates(payload);
 
-  let pass1 = 0, pass2 = 0;
-  let apiCalls = 0;
+  let candidates = 0, finalized = 0, notFinal = 0, noMatch = 0, apiCalls = 0;
   const errors = [];
+  const finalizedFids = [];
 
-  // ── PASS 1 — Redis (fast path, no API calls except for missing results)
-  try {
-    const liveStats = await redisGet(KEYS.liveStats(today));
-    if (liveStats && typeof liveStats === 'object') {
-      const finishedFids = Object.entries(liveStats)
-        .filter(([, d]) => FINISHED_STATUSES.includes(d.status?.short))
-        .map(([fid]) => Number(fid));
+  for (const date of dates) {
+    // Fuente de la lista: match_schedule (durable en Supabase; la escribe
+    // futbol-fixtures a las 02:05). NO Redis liveStats (efímero, TTL 2h).
+    const schedule = await getMatchSchedule(date).catch((e) => {
+      console.error(`[futbol-finalize] getMatchSchedule ${date}:`, e.message);
+      return null;
+    });
+    const kickoffs = Array.isArray(schedule?.kickoffTimes) ? schedule.kickoffTimes : [];
+    const fids = [...new Set(
+      kickoffs
+        .map((k) => Number(k?.fixtureId ?? k?.fixture_id ?? k?.id))
+        .filter(Number.isFinite),
+    )];
+    candidates += fids.length;
+    if (fids.length === 0) continue;
 
-      if (finishedFids.length > 0) {
-        const { data: existing } = await supabaseAdmin
-          .from('match_results').select('fixture_id').in('fixture_id', finishedFids);
-        const existingIds = new Set((existing || []).map(r => r.fixture_id));
-        const toSave = finishedFids.filter(fid => !existingIds.has(fid));
+    // Dedup: no re-finalizar ni gastar API en lo ya guardado en match_results.
+    const { data: existing } = await supabaseAdmin
+      .from('match_results').select('fixture_id').in('fixture_id', fids);
+    const existingIds = new Set((existing || []).map((row) => row.fixture_id));
+    const toCheck = fids.filter((fid) => !existingIds.has(fid));
+    if (toCheck.length === 0) continue;
 
-        const p1Results = await mapPool(toSave, FINALIZE_CONCURRENCY, async (fid) => {
-          const match = await fetchFixture(fid, apiKey);
-          apiCalls++;
-          if (!match) return { fid, status: 'no-match' };
-          if (!FINISHED_STATUSES.includes(match.fixture?.status?.short)) return { fid, status: 'not-finished' };
+    const res = await mapPool(toCheck, FINALIZE_CONCURRENCY, async (fid) => {
+      // UNA llamada general /fixtures?id=X (con rescate de stats para ligas
+      // exóticas). Devuelve el resultado completo; nada se pide por mercado.
+      const match = await fetchFixture(fid, apiKey);
+      apiCalls++;
+      if (!match) return { status: 'no-match' };
+      if (!FINISHED_STATUSES.includes(match.fixture?.status?.short)) return { status: 'not-final' };
 
-          const r = extractResult(match);
-          const { error } = await upsertMatchResult(fid, today, match, r);
-          if (error) throw new Error(`upsert: ${error.message || error}`);
-          // updatePrediction returns a Promise (async function) — safe to await
-          try { await updatePrediction(fid, r); } catch (e) {
-            console.warn(`[finalize P1] updatePrediction ${fid}:`, e.message);
-          }
-          // Acumular tarjetas al arbitro — fallo aqui NO debe romper el finalize
-          try { await upsertRefereeStats(match, r, today); } catch (e) {
-            console.warn(`[finalize P1] upsertRefereeStats ${fid}:`, e.message);
-          }
-          try { await persistHalfStatsFull(fid, match, r); } catch (e) {
-            console.warn(`[finalize P1] persistHalfStatsFull ${fid}:`, e.message);
-          }
-          return { fid, status: 'finalized' };
-        });
-
-        p1Results.forEach((r, idx) => {
-          if (!r.ok) {
-            errors.push({ pass: 1, fixtureId: toSave[idx], error: r.error.message });
-            console.error(`[job:futbol-finalize P1] fixture ${toSave[idx]}:`, r.error.message);
-          } else if (r.value.status === 'finalized') {
-            pass1++;
-          }
-        });
+      const r = extractResult(match);
+      // full_data = payload entero → ningún campo/mercado se omite a mano.
+      const { error } = await upsertMatchResult(fid, date, match, r);
+      if (error) throw new Error(`upsert: ${error.message || error}`);
+      // referee_stats (se conserva) — fallo aquí NO debe romper el finalize.
+      try { await upsertRefereeStats(match, r, date); } catch (e) {
+        console.warn(`[futbol-finalize] upsertRefereeStats ${fid}:`, e.message);
       }
-    }
-  } catch (e) {
-    console.error('[job:futbol-finalize P1]', e.message);
-    errors.push({ pass: 1, error: e.message });
+      // halfstats fullTime/2ª parte → raw_api_payloads (complementa la captura,
+      // que NO trae halfstats).
+      try { await persistHalfStatsFull(fid, match, r); } catch (e) {
+        console.warn(`[futbol-finalize] persistHalfStatsFull ${fid}:`, e.message);
+      }
+      return { status: 'finalized' };
+    });
+
+    res.forEach((rr, idx) => {
+      const fid = toCheck[idx];
+      if (!rr.ok) {
+        errors.push({ date, fixtureId: fid, error: rr.error.message });
+        console.error(`[futbol-finalize] fixture ${fid}:`, rr.error.message);
+      } else if (rr.value.status === 'finalized') {
+        finalized++;
+        finalizedFids.push(fid);
+      } else if (rr.value.status === 'not-final') {
+        notFinal++;
+      } else {
+        noMatch++;
+      }
+    });
   }
 
-  // ── PASS 2 — Supabase fallback (catches Redis-expired matches)
-  try {
-    const twoHoursAgo = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
-    const { data: unfinalized } = await supabaseAdmin
-      .from('match_predictions')
-      .select('fixture_id, date')
-      .is('finalized_at', null)
-      .lt('kickoff', twoHoursAgo)
-      .in('date', [today, yesterday]);
-
-    if (unfinalized?.length > 0) {
-      const unfinalizedFids = unfinalized.map(r => r.fixture_id);
-      const { data: alreadyInResults } = await supabaseAdmin
-        .from('match_results')
-        .select('fixture_id, goals, score, status, corners, yellow_cards, red_cards, goal_scorers, card_events, date')
-        .in('fixture_id', unfinalizedFids);
-
-      const resultsMap = new Map((alreadyInResults || []).map(r => [r.fixture_id, r]));
-
-      const p2Results = await mapPool(unfinalized, FINALIZE_CONCURRENCY, async ({ fixture_id: fid, date }) => {
-        const existing = resultsMap.get(fid);
-
-        if (existing) {
-          const hGoals = existing.goals?.home ?? null;
-          const aGoals = existing.goals?.away ?? null;
-          const yc = existing.yellow_cards || {};
-          const rc = existing.red_cards || {};
-          const totalCards = (yc.home || 0) + (yc.away || 0) + (rc.home || 0) + (rc.away || 0);
-          const scorers = Array.isArray(existing.goal_scorers) ? existing.goal_scorers : [];
-          const goalMinutes = scorers
-            .map(e => (e.time?.elapsed != null ? e.time.elapsed + (e.time.extra || 0) : null))
-            .filter(m => m != null)
-            .sort((a, b) => a - b);
-          const goalScorers = scorers.map(e => ({
-            player_id: e.player?.id ?? null,
-            name: e.player?.name ?? null,
-            team_id: e.team?.id ?? null,
-            minute: e.time?.elapsed != null ? e.time.elapsed + (e.time.extra || 0) : null,
-            detail: e.detail || null,
-          }));
-          const r = {
-            hGoals, aGoals,
-            actualResult: hGoals === null ? null : hGoals > aGoals ? 'H' : hGoals < aGoals ? 'A' : 'D',
-            actualBtts:   hGoals > 0 && aGoals > 0,
-            totalGoals:   hGoals !== null ? hGoals + aGoals : null,
-            totalCorners: existing.corners?.total || null,
-            totalCards:   totalCards || null,
-            firstGoalMinute: goalMinutes[0] ?? null,
-            goalMinutes,
-            goalScorers,
-          };
-          await updatePrediction(fid, r);
-          return { fid, status: 'finalized-from-results' };
-        }
-
-        const match = await fetchFixture(fid, apiKey);
-        apiCalls++;
-        if (!match) return { fid, status: 'no-match' };
-        if (!FINISHED_STATUSES.includes(match.fixture?.status?.short)) return { fid, status: 'not-finished' };
-
-        const r = extractResult(match);
-        const { error } = await upsertMatchResult(fid, date, match, r);
-        if (error) throw new Error(`upsert: ${error.message || error}`);
-        try { await updatePrediction(fid, r); } catch (e) {
-          console.warn(`[finalize P2] updatePrediction ${fid}:`, e.message);
-        }
-        try { await upsertRefereeStats(match, r, date); } catch (e) {
-          console.warn(`[finalize P2] upsertRefereeStats ${fid}:`, e.message);
-        }
-        try { await persistHalfStatsFull(fid, match, r); } catch (e) {
-          console.warn(`[finalize P2] persistHalfStatsFull ${fid}:`, e.message);
-        }
-        return { fid, status: 'finalized-from-api' };
-      });
-
-      p2Results.forEach((r, idx) => {
-        if (!r.ok) {
-          errors.push({ pass: 2, fixtureId: unfinalized[idx].fixture_id, error: r.error.message });
-          console.error(`[job:futbol-finalize P2] fixture ${unfinalized[idx].fixture_id}:`, r.error.message);
-        } else if (r.value.status?.startsWith('finalized')) {
-          pass2++;
-        }
-      });
+  // Nutrir raw_api_payloads con el crudo de los recién finalizados (fixture
+  // detalle + statistics/events/lineups/injuries). captureH2H=false: el H2H lo
+  // hace el cron de retrain (06:30); aquí evitamos las llamadas extra.
+  // Idempotente y de fallo suave: si truena, los resultados ya quedaron en
+  // match_results (lo importante para que el modelo no se desnutra).
+  let rawCaptured = 0;
+  if (finalizedFids.length > 0) {
+    try {
+      const cap = await captureFinalizedFixturesRaw({ fixtureIds: finalizedFids, captureH2H: false });
+      rawCaptured = cap?.fixturesDone ?? 0;
+    } catch (e) {
+      console.error('[futbol-finalize] captureFinalizedFixturesRaw falló (no crítico):', e.message);
+      errors.push({ stage: 'raw-capture', error: e.message });
     }
-  } catch (e) {
-    console.error('[job:futbol-finalize P2]', e.message);
-    errors.push({ pass: 2, error: e.message });
   }
 
-  return { ok: true, pass1, pass2, apiCalls, errors: errors.length, concurrency: FINALIZE_CONCURRENCY };
+  console.log(
+    `[futbol-finalize] fecha=${dates.join('|')} candidatos=${candidates} ` +
+    `finalizados=${finalized} noFinal=${notFinal} sinPartido=${noMatch} ` +
+    `errores=${errors.length} apiCalls=${apiCalls} rawCaptured=${rawCaptured}`,
+  );
+
+  return {
+    ok: true,
+    dates,
+    candidates,
+    finalized,
+    notFinal,
+    noMatch,
+    apiCalls,
+    rawCaptured,
+    errors: errors.length,
+  };
 }
