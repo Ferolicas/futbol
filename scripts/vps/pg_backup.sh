@@ -73,7 +73,7 @@ if ! command -v pg_dump >/dev/null 2>&1; then
   fail "pg_dump no instalado"
 fi
 
-if ! PGPASSWORD="${PGPASSWORD:-}" pg_dump \
+if ! PGPASSWORD="${PGPASSWORD:-}" /usr/lib/postgresql/17/bin/pg_dump \
       -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
       -d "${PGDATABASE}" -Fc -Z 6 -f "${DUMP_FILE}"; then
   rm -f "${DUMP_FILE}"
