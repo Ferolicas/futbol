@@ -198,7 +198,8 @@ export default function Dashboard() {
       // focus) pasa por applyFixturesData → una sola ruta, un solo fetch.
       onSuccess: (data) => { applyFixturesDataRef.current?.(data); },
       onError: (err) => {
-        setError(err?.message || 'Error de conexion');
+        console.error('[fixtures:swr] error:', err);
+        setError('No pudimos cargar los partidos. Revisa tu conexión e inténtalo de nuevo.');
         setLoading(false);
       },
     },
@@ -265,7 +266,8 @@ export default function Dashboard() {
   const applyFixturesData = useCallback((data) => {
     if (!data) { setLoading(false); return; }
     if (data.error && !data.fixtures?.length) {
-      setError(data.error);
+      console.error('[fixtures] error:', data.error);
+      setError('No pudimos cargar los partidos. Reintenta en unos segundos.');
       if (data.quota) setQuota(data.quota);
       setLoading(false);
       return;
@@ -300,7 +302,8 @@ export default function Dashboard() {
     setAnalyzedData(data.analyzedData || {});
     setStandings(data.standings || {});
     if (data.quota) setQuota(data.quota);
-    setError(data.error || '');
+    if (data.error) console.warn('[fixtures] degradado:', data.error);
+    setError(data.error ? 'Algunos datos podrían estar desactualizados.' : '');
 
     // Track if daily analysis batch is still running (timeout after 10 min)
     const batchAge = data.batchStatus?.startedAt
@@ -815,7 +818,8 @@ export default function Dashboard() {
       loadFixtures(date);
       if (newAnalyzed.length > 0) setTab('analizados');
     } catch (e) {
-      setError('Error al analizar: ' + e.message);
+      console.error('[analyzeSelected] error:', e);
+      setError('No pudimos analizar ahora, reintenta en unos segundos.');
     } finally {
       setAnalyzing(false);
     }
@@ -949,7 +953,8 @@ export default function Dashboard() {
       if (!res.ok || !body?.success) {
         // Rollback + mostrar error
         setSavedCombinadas(prev => prev.filter(c => c.id !== tempId));
-        setError(body?.error || `No se pudo guardar la combinada (HTTP ${res.status})`);
+        console.error('[saveCombinada] HTTP', res.status, body?.error);
+        setError('No pudimos guardar la combinada. Reintenta en unos segundos.');
         return;
       }
       // Reemplazar id temporal por el id real del servidor
@@ -958,7 +963,8 @@ export default function Dashboard() {
       }
     } catch (e) {
       setSavedCombinadas(prev => prev.filter(c => c.id !== tempId));
-      setError(e.message || 'Error de red al guardar la combinada');
+      console.error('[saveCombinada] error:', e);
+      setError('No pudimos guardar la combinada. Revisa tu conexión e inténtalo de nuevo.');
     } finally {
       setSavingComb(false);
     }
@@ -976,11 +982,13 @@ export default function Dashboard() {
       if (!res.ok) {
         setSavedCombinadas(prevList); // rollback
         const body = await res.json().catch(() => ({}));
-        setError(body?.error || `No se pudo eliminar la combinada (HTTP ${res.status})`);
+        console.error('[deleteSavedCombinada] HTTP', res.status, body?.error);
+        setError('No pudimos eliminar la combinada. Reintenta en unos segundos.');
       }
     } catch (e) {
       setSavedCombinadas(prevList);
-      setError(e.message || 'Error de red al eliminar la combinada');
+      console.error('[deleteSavedCombinada] error:', e);
+      setError('No pudimos eliminar la combinada. Revisa tu conexión e inténtalo de nuevo.');
     }
   };
 
