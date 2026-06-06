@@ -109,7 +109,8 @@ async function processFixture(c, fx, rel) {
       };
     };
     const cols = Object.keys(mkTeam('home', homeId, awayId, true));
-    await bulkInsert(c, 'model.team_match_stats', cols, [mkTeam('home', homeId, awayId, true), mkTeam('away', awayId, homeId, false)]);
+    // DO NOTHING defensivo (PK fixture+team): solo chocaría con home_id==away_id (dato corrupto); no aborta.
+    await bulkInsert(c, 'model.team_match_stats', cols, [mkTeam('home', homeId, awayId, true), mkTeam('away', awayId, homeId, false)], 'ON CONFLICT DO NOTHING');
   }
 
   // player_match_stats (+ players dim)
@@ -130,7 +131,8 @@ async function processFixture(c, fx, rel) {
         saves: int(st.goals?.saves), goals_conceded: int(st.goals?.conceded) });
     }
   }
-  if (pRows.length) await bulkInsert(c, 'model.player_match_stats', Object.keys(pRows[0]), pRows);
+  // DO NOTHING defensivo (PK fixture+player): si la API listara al mismo jugador dos veces, no aborta.
+  if (pRows.length) await bulkInsert(c, 'model.player_match_stats', Object.keys(pRows[0]), pRows, 'ON CONFLICT DO NOTHING');
 
   // match_events
   const eRows = evArr.map(e => ({ fixture_id: fid, minute: int(e.time?.elapsed), extra_minute: int(e.time?.extra), type: e.type, detail: e.detail, comments: e.comments, team_id: e.team?.id, player_id: e.player?.id, assist_player_id: e.assist?.id }));
@@ -147,7 +149,10 @@ async function processFixture(c, fx, rel) {
     for (const e of (tb.startXI || [])) if (e.player?.id) lRows.push({ fixture_id: fid, team_id: teamId, player_id: e.player.id, is_starter: true, position: e.player.pos, grid: e.player.grid, formation, coach_id: coach });
     for (const e of (tb.substitutes || [])) if (e.player?.id) lRows.push({ fixture_id: fid, team_id: teamId, player_id: e.player.id, is_starter: false, position: e.player.pos, grid: e.player.grid, formation, coach_id: coach });
   }
-  if (lRows.length) await bulkInsert(c, 'model.lineups', Object.keys(lRows[0]), lRows);
+  // ON CONFLICT DO NOTHING: un jugador puede aparecer dos veces en la alineación del
+  // crudo (startXI + substitutes, o repetido) → choca con lineups_pkey (fixtures
+  // 1353602, 1362003). Ignorar el duplicado en vez de abortar el fixture entero.
+  if (lRows.length) await bulkInsert(c, 'model.lineups', Object.keys(lRows[0]), lRows, 'ON CONFLICT DO NOTHING');
 
   // injuries (fx:)
   const iRows = injArr.map(j => ({ fixture_id: fid, team_id: j.team?.id, player_id: j.player?.id, season, type: j.player?.type, reason: j.player?.reason, report_date: fx.fixture?.date ? String(fx.fixture.date).slice(0, 10) : null })).filter(r => r.team_id && r.player_id);
