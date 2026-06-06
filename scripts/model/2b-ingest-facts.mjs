@@ -42,10 +42,10 @@ async function upsertOne(c, table, cols, row, conflict, update) {
   const set = update.map(k => `${k}=EXCLUDED.${k}`).join(',');
   await c.query(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${ph}) ON CONFLICT (${conflict}) DO UPDATE SET ${set}`, cols.map(k => row[k]));
 }
-async function bulkInsert(c, table, cols, rows) {
+async function bulkInsert(c, table, cols, rows, onConflict = '') {
   if (!rows.length) return;
   const params = []; const tuples = rows.map(r => `(${cols.map(k => { params.push(r[k]); return `$${params.length}`; }).join(',')})`);
-  await c.query(`INSERT INTO ${table} (${cols.join(',')}) VALUES ${tuples.join(',')}`, params);
+  await c.query(`INSERT INTO ${table} (${cols.join(',')}) VALUES ${tuples.join(',')} ${onConflict}`, params);
 }
 
 // ── Procesa UN fixture (transacción) ──
@@ -134,7 +134,11 @@ async function processFixture(c, fx, rel) {
 
   // match_events
   const eRows = evArr.map(e => ({ fixture_id: fid, minute: int(e.time?.elapsed), extra_minute: int(e.time?.extra), type: e.type, detail: e.detail, comments: e.comments, team_id: e.team?.id, player_id: e.player?.id, assist_player_id: e.assist?.id }));
-  if (eRows.length) await bulkInsert(c, 'model.match_events', Object.keys(eRows[0]), eRows);
+  // ON CONFLICT DO NOTHING: la API a veces reporta DOS eventos con la misma clave
+  // natural en el mismo fixture (p.ej. dos tarjetas al mismo jugador/minuto). Ignorar
+  // el duplicado en vez de abortar la transacción (que dejaba el fixture sin ingerir).
+  // Resuelve también duplicados ENTRE filas del mismo INSERT. DELETE previo = idempotencia.
+  if (eRows.length) await bulkInsert(c, 'model.match_events', Object.keys(eRows[0]), eRows, 'ON CONFLICT DO NOTHING');
 
   // lineups (startXI + suplentes)
   const lRows = [];
@@ -147,7 +151,9 @@ async function processFixture(c, fx, rel) {
 
   // injuries (fx:)
   const iRows = injArr.map(j => ({ fixture_id: fid, team_id: j.team?.id, player_id: j.player?.id, season, type: j.player?.type, reason: j.player?.reason, report_date: fx.fixture?.date ? String(fx.fixture.date).slice(0, 10) : null })).filter(r => r.team_id && r.player_id);
-  if (iRows.length) await bulkInsert(c, 'model.match_injuries', Object.keys(iRows[0]), iRows);
+  // Mismo riesgo: la API puede listar al mismo jugador/razón dos veces para el fixture
+  // (misma clave ux_injuries_natural, report_date = fecha del partido) → DO NOTHING.
+  if (iRows.length) await bulkInsert(c, 'model.match_injuries', Object.keys(iRows[0]), iRows, 'ON CONFLICT DO NOTHING');
 }
 
 // ── Carga batch de payloads relacionados (1 query por endpoint) ──
