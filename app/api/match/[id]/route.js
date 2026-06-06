@@ -42,23 +42,24 @@ export async function GET(request, { params }) {
         const fixture = fixtures?.find(f => f.fixture.id === Number(id));
         if (fixture) {
           const result = await analyzeMatch(fixture, { date });
-          if (result && result.dataQuality !== 'insufficient') {
-            // A-2 FIX: visibilidad si la persistencia a PG falla (se sigue
-            // sirviendo desde Redis, pero sin esto desaparece al expirar el TTL).
-            // POR QUÉ FALLABA: analyzeMatch devuelve { analysis, fromCache,
-            // apiCalls, persist }. combinada/calculatedProbabilities/odds viven en
-            // result.analysis.*, NO en result.*. Con `{ ...result }`, cacheAnalysis
-            // leía data.combinada=undefined → columnas combinada/probabilities a
-            // NULL, y guardaba el JSON doble-anidado (analysis.analysis.*). Se
-            // persiste el doc DESANIDADO (result.analysis) — igual que el nocturno.
-            const _cache = await cacheAnalysis(id, { ...(result.analysis || result), date }).catch((e) => {
-              console.error('[cacheAnalysis:THREW]', { fixtureId: id, date, error: e.message });
-              return { db: false, redis: false };
-            });
-            if (_cache && _cache.db === false) {
-              console.error('[cacheAnalysis:PG_FAILED]', { fixtureId: id, date, error: _cache.error });
+          const doc = result?.analysis || result;
+          if (doc) {
+            // analyzeMatch ya persiste internamente. Re-persistimos por visibilidad
+            // SOLO si hay datos suficientes: un insufficient ya quedó guardado con
+            // combinada vacía y no merece un segundo upsert.
+            // (Spread DESANIDADO: combinada/calculatedProbabilities/odds viven en
+            // result.analysis.*, no en result.* → { ...doc } las persiste bien.)
+            if (result.dataQuality !== 'insufficient') {
+              const _cache = await cacheAnalysis(id, { ...doc, date }).catch((e) => {
+                console.error('[cacheAnalysis:THREW]', { fixtureId: id, date, error: e.message });
+                return { db: false, redis: false };
+              });
+              if (_cache && _cache.db === false) {
+                console.error('[cacheAnalysis:PG_FAILED]', { fixtureId: id, date, error: _cache.error });
+              }
             }
-            analysis = result.analysis || result;
+            // Mostrar el partido aunque sea insufficient (combinada vacía, sin picks).
+            analysis = doc;
           }
         }
       } catch (e) {
