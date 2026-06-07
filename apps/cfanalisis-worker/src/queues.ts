@@ -17,6 +17,7 @@ export const QUEUE_NAMES = [
   'futbol-raw-backfill',
   'futbol-retrain',
   'futbol-watchdog',
+  'futbol-model-sync',
   // Baseball
   'baseball-fixtures',
   'baseball-analyze',
@@ -72,6 +73,9 @@ const opts: Record<QueueName, JobsOptions> = {
   'futbol-retrain':          { ...defaultJobOpts, attempts: 2 },
   // Watchdog (dead-man's switch): chequeo ligero diario; default opts.
   'futbol-watchdog':         defaultJobOpts,
+  // Sync nocturno del schema model (FASE 2E): captura players + ingiere + standings.
+  // Idempotente → attempts:2 acotado.
+  'futbol-model-sync':       { ...defaultJobOpts, attempts: 2 },
   'baseball-fixtures':            defaultJobOpts,
   'baseball-analyze':             analyzeJobOpts,
   'baseball-analyze-all-today':   analyzeJobOpts,

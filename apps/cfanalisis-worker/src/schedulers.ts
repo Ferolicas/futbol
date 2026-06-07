@@ -49,6 +49,9 @@ const SCHEDULES: Sched[] = [
   { queue: 'futbol-daily',     id: 'futbol-daily-daily',     pattern: '10 2 * * *',  tz: TZ },
   { queue: 'futbol-finalize',  id: 'futbol-finalize-daily',  pattern: '0 3,4 * * *', tz: TZ },
   { queue: 'futbol-retrain',   id: 'futbol-retrain-daily',   pattern: '30 6 * * *',  tz: TZ },
+  // FASE 2E: sync nocturno del schema `model` (07:00 Madrid, tras retrain 06:30 y
+  // antes del watchdog 07:30). Captura players+standings e ingiere al modelo nuevo.
+  { queue: 'futbol-model-sync', id: 'futbol-model-sync-daily', pattern: '0 7 * * *',  tz: TZ },
   // Dead-man's switch (JS-1): a las 07:30 Madrid (tras retrain 06:30) verifica
   // que daily y retrain completaron; si no, alerta a Telegram con el comando de
   // re-disparo. Silencio = todo OK.

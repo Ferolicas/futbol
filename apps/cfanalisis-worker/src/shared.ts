@@ -51,6 +51,7 @@ const [
   _baseRates,
   _reenrichBaseball,
   _trainBaseballMeta,
+  _modelIngest,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
@@ -78,6 +79,7 @@ const [
   import(SCRIPTS + 'compute-market-base-rates.js'),
   import(SCRIPTS + 'reenrich-baseball.js'),
   import(SCRIPTS + 'train-baseball-meta-models.js'),
+  import(LIB + 'model-ingest.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -133,6 +135,10 @@ export const warmPlayerPhotos = _playerPhotos.warmPlayerPhotos;
 export const getPlayerPhoto = _playerPhotos.getPlayerPhoto;
 // Captura focalizada por fixture (cron nocturno de retrain).
 export const captureFinalizedFixturesRaw = _rawBackfill.captureFinalizedFixturesRaw;
+
+// lib/model-ingest.js (FASE 2E) — ingesta crudo → schema `model` (compartida con 2B).
+export const ingestFixtures = _modelIngest.ingestFixtures;
+export const ingestFixtureObjects = _modelIngest.ingestFixtureObjects;
 
 // scripts/* del pipeline de retrain (CommonJS → import() dinámico).
 export const reenrichFeatures = _reenrich.reenrichFeatures;

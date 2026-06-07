@@ -60,6 +60,19 @@ export async function runWatchdog(data = {}) {
     ).catch(() => {});
   }
 
-  logger.info({ date, checkedDate, dailyOk, retrainOk, retrainAgeHours: Number.isFinite(ageHours) ? Math.round(ageHours * 10) / 10 : null }, '[futbol-watchdog] checks');
-  return { date, dailyOk, retrainOk };
+  // ── Check 3: futbol-model-sync dejó rastro reciente (<6h) — FASE 2E ──
+  // Corre a las 07:00; el watchdog a las 07:30 → <6h = OK.
+  const modelSync = await redisGet('lastRun:futbol-model-sync');
+  const msMs = modelSync?.completedAt ? Date.parse(modelSync.completedAt) : NaN;
+  const msAgeHours = Number.isFinite(msMs) ? (Date.now() - msMs) / 3_600_000 : Infinity;
+  const modelSyncOk = msAgeHours <= 6;
+  if (!modelSyncOk) {
+    await notifyError(
+      { source: 'job', name: 'futbol-watchdog', extra: { check: 'model-sync', lastRun: modelSync?.completedAt || null } },
+      new Error(`Pipeline: futbol-model-sync NO completó recientemente (último: ${modelSync?.completedAt || 'nunca'}). Re-disparar:\n${retryCmd('futbol-model-sync')}`),
+    ).catch(() => {});
+  }
+
+  logger.info({ date, checkedDate, dailyOk, retrainOk, modelSyncOk, retrainAgeHours: Number.isFinite(ageHours) ? Math.round(ageHours * 10) / 10 : null }, '[futbol-watchdog] checks');
+  return { date, dailyOk, retrainOk, modelSyncOk };
 }
