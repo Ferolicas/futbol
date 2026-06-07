@@ -52,6 +52,7 @@ const [
   _reenrichBaseball,
   _trainBaseballMeta,
   _modelIngest,
+  _modelProfiles,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
@@ -80,6 +81,7 @@ const [
   import(SCRIPTS + 'reenrich-baseball.js'),
   import(SCRIPTS + 'train-baseball-meta-models.js'),
   import(LIB + 'model-ingest.js'),
+  import(LIB + 'model-profiles.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -139,6 +141,12 @@ export const captureFinalizedFixturesRaw = _rawBackfill.captureFinalizedFixtures
 // lib/model-ingest.js (FASE 2E) — ingesta crudo → schema `model` (compartida con 2B).
 export const ingestFixtures = _modelIngest.ingestFixtures;
 export const ingestFixtureObjects = _modelIngest.ingestFixtureObjects;
+
+// lib/model-profiles.js (FASE 2F) — builder de perfiles del schema model (full +
+// incremental). Nombre con prefijo Model para no colisionar con el buildTeamProfiles
+// legacy (scripts/build-team-profiles.js → team_market_profiles, ya en desuso).
+export const buildModelTeamProfiles = _modelProfiles.buildTeamProfiles;
+export const buildModelPlayerProfiles = _modelProfiles.buildPlayerProfiles;
 
 // scripts/* del pipeline de retrain (CommonJS → import() dinámico).
 export const reenrichFeatures = _reenrich.reenrichFeatures;

@@ -18,6 +18,7 @@
  */
 import {
   pgQuery, pgPool, captureFinalizedFixturesRaw, ingestFixtures, ingestFixtureObjects,
+  buildModelTeamProfiles, buildModelPlayerProfiles,
   getCachedFixturesRaw, redisSet, cronTargetDate, bogotaToday,
 } from '../../shared.js';
 
@@ -65,8 +66,30 @@ export async function runModelSync(payload = {}) {
   try { result.standings = await syncOfficialStandings(apiKey, recentFids, upObjs); }
   catch (e) { console.error('[model-sync] standings:', e.message); result.standings = { error: e.message }; }
 
+  // 4) Refresh INCREMENTAL de perfiles (FASE 2F): solo equipos/jugadores que jugaron.
+  try {
+    const teamIds = new Set();
+    for (const f of upObjs) { if (f.teams?.home?.id) teamIds.add(Number(f.teams.home.id)); if (f.teams?.away?.id) teamIds.add(Number(f.teams.away.id)); }
+    if (recentFids.length) {
+      const { rows: tr } = await pgQuery(`SELECT DISTINCT home_team_id, away_team_id FROM model.matches WHERE fixture_id = ANY($1::bigint[])`, [recentFids]);
+      for (const r of tr) { if (r.home_team_id) teamIds.add(Number(r.home_team_id)); if (r.away_team_id) teamIds.add(Number(r.away_team_id)); }
+    }
+    let playerIds = [];
+    if (recentFids.length) {
+      const { rows: pr } = await pgQuery(`SELECT DISTINCT player_id FROM model.player_match_stats WHERE fixture_id = ANY($1::bigint[])`, [recentFids]);
+      playerIds = pr.map(r => Number(r.player_id));
+    }
+    const tp = teamIds.size ? await buildModelTeamProfiles(pgPool, { teamIds: [...teamIds] }) : { written: 0 };
+    const pp = playerIds.length ? await buildModelPlayerProfiles(pgPool, { playerIds }) : { written: 0 };
+    result.profiles = { teams: tp.written, players: pp.written, teamIds: teamIds.size, playerIds: playerIds.length };
+  } catch (e) { console.error('[model-sync] profiles:', e.message); result.profiles = { error: e.message }; }
+
+  // 5) Refresh teams/statistics al crudo (FASE 2F) de los equipos afectados.
+  try { result.teamStats = await refreshTeamsStatistics(apiKey, recentFids); }
+  catch (e) { console.error('[model-sync] teams/statistics:', e.message); result.teamStats = { error: e.message }; }
+
   await redisSet('lastRun:futbol-model-sync', { completedAt: new Date().toISOString() }, 172800).catch(() => {});
-  console.log(`[model-sync] OK · recientes=${result.recent} · ingRecent=${result.ingestRecent?.done ?? 0} · ingUpcoming=${result.ingestUpcoming?.done ?? 0} · standings(ligas=${result.standings?.leagues ?? 0}, rankUpd=${result.standings?.rankUpdated ?? 0})`);
+  console.log(`[model-sync] OK · recientes=${result.recent} · ingRecent=${result.ingestRecent?.done ?? 0} · ingUpcoming=${result.ingestUpcoming?.done ?? 0} · standings(ligas=${result.standings?.leagues ?? 0}) · perfiles(eq=${result.profiles?.teams ?? 0}, jug=${result.profiles?.players ?? 0}) · teamStats=${result.teamStats?.saved ?? 0}`);
   return result;
 }
 
@@ -107,4 +130,30 @@ async function syncOfficialStandings(apiKey, recentFids, upObjs) {
     }
   }
   return { leagues, teams, rankUpdated };
+}
+
+// Refresca teams/statistics (agregado propio de la API) al crudo, para los equipos
+// de los partidos recientes. Va a raw_api_payloads (uso futuro); los perfiles del
+// modelo se construyen de los hechos por-partido, NO de aquí.
+async function refreshTeamsStatistics(apiKey, recentFids) {
+  if (!apiKey || !recentFids.length) return { skipped: true };
+  const { rows } = await pgQuery(`SELECT DISTINCT home_team_id, away_team_id, competition_id, season FROM model.matches WHERE fixture_id = ANY($1::bigint[]) AND competition_id IS NOT NULL AND season IS NOT NULL`, [recentFids]);
+  const tuples = new Set();
+  for (const r of rows) {
+    if (r.home_team_id) tuples.add(`${r.home_team_id}:${r.competition_id}:${r.season}`);
+    if (r.away_team_id) tuples.add(`${r.away_team_id}:${r.competition_id}:${r.season}`);
+  }
+  let saved = 0;
+  for (const tp of tuples) {
+    const [team, lid, season] = tp.split(':').map(Number);
+    const data = await apiGet(`/teams/statistics?team=${team}&league=${lid}&season=${season}`, apiKey);
+    if (!data) continue;
+    await pgQuery(
+      `INSERT INTO raw_api_payloads (endpoint,ref_type,ref_id,season,sub_key,payload,fetched_at)
+       VALUES ('teams/statistics','team',$1,$2,$3,$4::jsonb,NOW())
+       ON CONFLICT (endpoint,ref_id,sub_key) DO UPDATE SET payload=EXCLUDED.payload, season=EXCLUDED.season, fetched_at=NOW()`,
+      [team, season, `s:${season}:l:${lid}`, JSON.stringify({ response: data })]);
+    saved++;
+  }
+  return { tuples: tuples.size, saved };
 }

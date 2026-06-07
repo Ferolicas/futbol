@@ -219,6 +219,7 @@ CREATE TABLE IF NOT EXISTS model.team_profiles (
   team_id bigint NOT NULL,
   scope_venue text NOT NULL,         -- home|away|all
   scope_competition text NOT NULL,   -- all|domestic_league|continental|cup
+  scope_phase text NOT NULL,         -- all|knockout (FASE 2F)
   time_window text NOT NULL,         -- career|s{season}|last10
   sample_n int,
   goals_for_avg real, goals_against_avg real, shots_for_avg real, shots_against_avg real,
@@ -228,7 +229,7 @@ CREATE TABLE IF NOT EXISTS model.team_profiles (
   scoring_rate real, clean_sheet_rate real, btts_rate real,
   over05_rate real, over15_rate real, over25_rate real, over35_rate real,
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (team_id, scope_venue, scope_competition, time_window)
+  PRIMARY KEY (team_id, scope_venue, scope_competition, scope_phase, time_window)
 );
 CREATE INDEX IF NOT EXISTS ix_team_profiles_team ON model.team_profiles(team_id);
 
@@ -240,6 +241,7 @@ CREATE TABLE IF NOT EXISTS model.player_profiles (
   minutes_avg real, goals_avg real, assists_avg real, shots_avg real, sot_avg real,
   fouls_avg real, yellow_avg real, rating_avg real,
   appearance_rate real, scoring_rate real, shots_on_rate real, anytime_scorer_rate real, card_rate real,
+  shots_per90 real, sot_per90 real, fouls_per90 real, cards_per90 real,  -- FASE 2F per-90
   last_played_date date,
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (player_id, scope, time_window)
