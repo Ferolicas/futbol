@@ -54,6 +54,7 @@ const [
   _modelIngest,
   _modelProfiles,
   _modelImpact,
+  _modelPlayerMarkets,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
@@ -84,6 +85,7 @@ const [
   import(LIB + 'model-ingest.js'),
   import(LIB + 'model-profiles.js'),
   import(LIB + 'model-impact.js'),
+  import(LIB + 'model-player-markets.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -153,6 +155,10 @@ export const buildModelPlayerProfiles = _modelProfiles.buildPlayerProfiles;
 // lib/model-impact.js (FASE 4A) — builder de player_impact (impacto con/sin del
 // jugador en su equipo). Refrescado incremental cada noche por model-sync.
 export const buildPlayerImpact = _modelImpact.buildPlayerImpact;
+
+// lib/model-player-markets.js (Etapa 3) — mercados de jugador del startXI confirmado
+// (frecuencia empírica cruda de player_match_stats, 70/30). Lo llama futbol-lineups.
+export const buildPlayerMarkets = _modelPlayerMarkets.buildPlayerMarkets;
 
 // scripts/* del pipeline de retrain (CommonJS → import() dinámico).
 export const reenrichFeatures = _reenrich.reenrichFeatures;

@@ -11,7 +11,7 @@ import {
   getCachedAnalysis, cacheAnalysis, incrementApiCallCount,
   triggerEvent,
   redisGet, redisSet, KEYS, getMatchSchedule,
-  warmPlayerPhotos,
+  warmPlayerPhotos, buildPlayerMarkets, pgPool,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
@@ -208,6 +208,19 @@ export async function runLineups(_payload = {}, _job = null) {
       // Dixon-Coles purgado: NO recalculamos probabilidades aquí. Conservamos las
       // del motor de contexto (calculatedProbabilities + combinada) ya en `existing`
       // y solo refrescamos la metadata de alineación (lineupImpact/lineupCheck).
+      // Etapa 3: mercados de JUGADOR del startXI confirmado (gate duro: solo titulares).
+      // Guarda T-20: solo si faltan ≥20 min al kickoff (el sondeo de XI finaliza a T-20;
+      // si el XI no salió a tiempo, el fixture queda solo con mercados de equipo).
+      try {
+        if (new Date(match.fixture.date).getTime() - now >= 20 * 60 * 1000) {
+          const startXI = [];
+          for (const tl of lineups) for (const pl of (tl.startXI || [])) if (pl?.player?.id) startXI.push({ player_id: pl.player.id, team_id: tl.team?.id, name: pl.player?.name, position: pl.player?.pos });
+          if (startXI.length) {
+            updatedAnalysis.playerMarkets = await buildPlayerMarkets(pgPool, startXI, { cutoff: new Date() }); // serving: cutoff=ahora
+            updatedAnalysis.playerMarketsUpdatedAt = new Date().toISOString();
+          }
+        }
+      } catch (e) { console.error(`[futbol-lineups] playerMarkets ${fixtureId}:`, e.message); }
       await cacheAnalysis(fixtureId, updatedAnalysis);
       updated++;
       updatedFixtureIds.push(fixtureId);

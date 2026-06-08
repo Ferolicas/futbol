@@ -6,7 +6,7 @@
 //     --pit = point-in-time (cutoff = kickoff del partido, ranks = rank_before).
 //             Sin --pit = serving (cutoff = ahora, rank oficial→before como fallback).
 //   --json  imprime el objeto completo (con la cadena de pooling auditable).
-//   --h2h        aplica la capa H2H (OFF por defecto, igual que el serving real).
+//   --no-h2h     apaga la capa H2H (ON por defecto tras Etapa 1: solo temporada actual); --h2h la fuerza.
 //   --no-player  NO aplica la capa de jugador (ON por defecto) — para inspeccionar el núcleo solo.
 import pg from 'pg';
 import { predict, fetchH2HRows, fetchPlayerContext, computePlayerShifts } from '../../lib/model-engine.js';
@@ -45,14 +45,14 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: proc
 
   const t0 = Date.now();
   // mismo orquestador que servirá 4F: H2H OFF por defecto, jugador ON; --h2h / --no-player lo cambian.
-  const res = await predict(pool, ctx, { h2h: !!args.h2h, player: !args['no-player'] });
+  const res = await predict(pool, ctx, { h2h: args['no-h2h'] ? false : (args.h2h ? true : undefined), player: !args['no-player'] });
   // diagnóstico SIEMPRE (aunque la capa esté off): reusa lo que predict trajo, rellena lo que falte.
   const h2hRows = res.h2hRows ?? await fetchH2HRows(pool, ctx.homeTeamId, ctx.awayTeamId, ctx.cutoff);
   const pctx = res.pctx ?? await fetchPlayerContext(pool, fixtureId, ctx);
   const ps = computePlayerShifts(pctx, ctx);
   const ms = Date.now() - t0;
-  const nCur = h2hRows.filter(r => Number(r.comp_id) === Number(ctx.competitionId) && Number(r.comp_season) === Number(ctx.season)).length;
-  const nHist = h2hRows.length - nCur;
+  const nCur = h2hRows.filter(r => Number(r.comp_season) === Number(ctx.season)).length;   // modo (a): temporada actual (cualquier comp)
+  const nHist = h2hRows.length - nCur;                                                       // otras temporadas: YA NO se usan (modo b eliminado)
 
   if (args.json) { console.log(JSON.stringify({ fixture: res.fixture, markets: res.markets, applied: res.applied, h2h: { total: h2hRows.length, cur: nCur, hist: nHist }, player: ps }, null, 2)); await pool.end(); return; }
 
@@ -60,7 +60,7 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: proc
   console.log(`\n${m.home_name} vs ${m.away_name}  ·  ${m.comp_name} ${ctx.season ?? ''}  ·  fixture ${fixtureId}`);
   console.log(`modo=${pit ? 'POINT-IN-TIME' : 'serving'}  cutoff=${f.cutoff}  phase=${f.phase}${f.isKnockout ? '(KO)' : ''}`);
   console.log(`rank hoy: local=${f.homeRank ?? '—'} visita=${f.awayRank ?? '—'}  nTeams=${f.nTeams ?? '—'}  ·  filas: local=${f.homeRows} visita=${f.awayRows} liga=${f.leagueRows}  ·  ${ms}ms`);
-  console.log(`H2H directos (H vs A): total=${h2hRows.length}  ·  actual(a)=${nCur}  ·  histórico(b)=${nHist}  ·  aplicado=${res.applied.h2h ? 'sí (--h2h)' : 'NO (default off)'}${res.applied.h2h ? `  ·  1X2 mode=${process.env.H2H_1X2_MODE || 'softweight'}` : ''}`);
+  console.log(`H2H directos (H vs A): total=${h2hRows.length}  ·  temporada actual(a)=${nCur}  ·  otras(no usadas)=${nHist}  ·  aplicado=${res.applied.h2h ? 'sí' : 'NO (--no-h2h)'}${res.applied.h2h ? `  ·  1X2 mode=${process.env.H2H_1X2_MODE || 'softweight'}` : ''}`);
   console.log(`Jugador: aplicado=${res.applied.player ? 'sí' : 'NO (--no-player)'}  ·  lineup=${ps.hasLineup ? 'sí' : 'no'}  ·  local[gf=${ps.home.shift_gf} ga=${ps.home.shift_ga} cards=${ps.home.shift_cards} merma=${ps.home.merma} aus=${ps.home.ausentes.length}]  ·  visita[gf=${ps.away.shift_gf} ga=${ps.away.shift_ga} cards=${ps.away.shift_cards} merma=${ps.away.merma} aus=${ps.away.ausentes.length}]\n`);
 
   const r1x2 = res.markets['1x2'];
