@@ -7,7 +7,7 @@
 //             Sin --pit = serving (cutoff = ahora, rank oficial→before como fallback).
 //   --json  imprime el objeto completo (con la cadena de pooling auditable).
 import pg from 'pg';
-import { computeBaseMarkets, fetchH2HRows, applyH2H } from '../../lib/model-engine.js';
+import { computeBaseMarkets, fetchH2HRows, applyH2H, fetchPlayerContext, applyPlayer, computePlayerShifts } from '../../lib/model-engine.js';
 
 const args = Object.fromEntries(process.argv.slice(2).map(s => { const m = s.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] === '' ? true : m[2]] : [s, true]; }));
 const fixtureId = Number(args.fixture);
@@ -44,17 +44,21 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: proc
   const res = await computeBaseMarkets(pool, ctx);
   const h2hRows = await fetchH2HRows(pool, ctx.homeTeamId, ctx.awayTeamId, ctx.cutoff);
   applyH2H(res.markets, h2hRows, ctx);            // capa H2H (muta res.markets in-place)
+  const pctx = await fetchPlayerContext(pool, fixtureId, ctx);
+  const ps = computePlayerShifts(pctx, ctx);
+  applyPlayer(res.markets, pctx, ctx);            // capa de jugador (muta res.markets in-place)
   const ms = Date.now() - t0;
   const nCur = h2hRows.filter(r => Number(r.comp_id) === Number(ctx.competitionId) && Number(r.comp_season) === Number(ctx.season)).length;
   const nHist = h2hRows.length - nCur;
 
-  if (args.json) { console.log(JSON.stringify({ ...res, h2h: { total: h2hRows.length, cur: nCur, hist: nHist } }, null, 2)); await pool.end(); return; }
+  if (args.json) { console.log(JSON.stringify({ ...res, h2h: { total: h2hRows.length, cur: nCur, hist: nHist }, player: ps }, null, 2)); await pool.end(); return; }
 
   const f = res.fixture;
   console.log(`\n${m.home_name} vs ${m.away_name}  ·  ${m.comp_name} ${ctx.season ?? ''}  ·  fixture ${fixtureId}`);
   console.log(`modo=${pit ? 'POINT-IN-TIME' : 'serving'}  cutoff=${f.cutoff}  phase=${f.phase}${f.isKnockout ? '(KO)' : ''}`);
   console.log(`rank hoy: local=${f.homeRank ?? '—'} visita=${f.awayRank ?? '—'}  nTeams=${f.nTeams ?? '—'}  ·  filas: local=${f.homeRows} visita=${f.awayRows} liga=${f.leagueRows}  ·  ${ms}ms`);
-  console.log(`H2H directos (H vs A): total=${h2hRows.length}  ·  actual modo(a)=${nCur}  ·  histórico modo(b)=${nHist}  ·  1X2 mode=${process.env.H2H_1X2_MODE || 'softweight'}\n`);
+  console.log(`H2H directos (H vs A): total=${h2hRows.length}  ·  actual modo(a)=${nCur}  ·  histórico modo(b)=${nHist}  ·  1X2 mode=${process.env.H2H_1X2_MODE || 'softweight'}`);
+  console.log(`Jugador: lineup=${ps.hasLineup ? 'sí' : 'no'}  ·  local shift_gf=${ps.home.shift_gf} shift_ga=${ps.home.shift_ga} ausentes=${ps.home.ausentes.length}  ·  visita shift_gf=${ps.away.shift_gf} shift_ga=${ps.away.shift_ga} ausentes=${ps.away.ausentes.length}\n`);
 
   const r1x2 = res.markets['1x2'];
   if (r1x2) console.log(`1X2   local ${pct(r1x2.home)}  empate ${pct(r1x2.draw)}  visita ${pct(r1x2.away)}   (n=${r1x2.n} conf=${r1x2.conf})\n`);
@@ -79,6 +83,17 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: proc
     if (gt) for (const ln of gt.lines) {
       const st = (ln.chain || []).filter(c => c.step === 'h2h');
       if (st.length) console.log(`  goals_total o${ln.line}: ${pct(st[0].before)} → ${pct(st[st.length - 1].after)} (${st.map(x => `${x.mode}:n${x.n}`).join(', ')})`);
+    }
+  }
+
+  if (ps.hasLineup && (ps.home.ausentes.length || ps.away.ausentes.length)) {
+    console.log('\n— Jugador aplicado (antes → después) —');
+    console.log(`  shift local gf=${ps.home.shift_gf} ga=${ps.home.shift_ga} ausentes=[${ps.home.ausentes.join(',')}]  ·  visita gf=${ps.away.shift_gf} ga=${ps.away.shift_ga} ausentes=[${ps.away.ausentes.join(',')}]`);
+    for (const s of (res.markets['1x2'].chain || []).filter(c => c.step === 'player')) console.log(`  1x2: ${trip(s.before)} → ${trip(s.after)} (n=${s.n})`);
+    const gtp = res.markets['goals_total'];
+    if (gtp) for (const ln of gtp.lines) {
+      const st = (ln.chain || []).filter(c => c.step === 'player');
+      if (st.length) console.log(`  goals_total o${ln.line}: ${pct(st[0].before)} → ${pct(st[st.length - 1].after)} (n=${st[0].n})`);
     }
   }
   console.log('');
