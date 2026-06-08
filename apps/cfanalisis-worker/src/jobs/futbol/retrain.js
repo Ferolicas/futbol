@@ -25,7 +25,6 @@ import {
   pgQuery,
   pgPool,
   captureFinalizedFixturesRaw,
-  trainMetaModels,
   computeMarketBaseRates,
   redisSet,
 } from '../../shared.js';
@@ -64,11 +63,10 @@ export async function runFutbolRetrain(payload = {}) {
     ? await captureFinalizedFixturesRaw({ fixtureIds, captureH2H })
     : { skipped: 'no-new-fixtures' };
 
-  // 3) Re-entrenar el ML (detector de ruptura) DESDE EL CRUDO. (Ya NO hay pasos
-  //    reenrich/profiles: el motor de contexto calcula el ADN al vuelo desde el
-  //    crudo y el ML calcula sus features point-in-time desde el crudo — ni
-  //    features_full ni team_market_profiles se usan ya.)
-  result.train = await trainMetaModels({});
+  // 3) (Etapa 4) El re-entreno del ML de ruptura (trainMetaModels) se ELIMINÓ: el
+  //    motor viejo (context-engine + su capa ML) fue reemplazado por el motor del
+  //    schema `model`, que NO usa modelos de ruptura/familia. La captura (paso 2) se
+  //    CONSERVA: alimenta raw_api_payloads → el sync nocturno del modelo (07:00).
 
   // 4) Tasas base por mercado (prior del shrink de calibración) — DESDE EL CRUDO,
   //    ya con los partidos recién finalizados. Auto-ajusta la base con cada
@@ -83,7 +81,6 @@ export async function runFutbolRetrain(payload = {}) {
 
   console.log(
     `[futbol-retrain] OK · capturados=${result.capture?.fixturesDone ?? 0} · ` +
-      `muestras=${result.train?.samples ?? 0} · entrenados=${result.train?.trained ?? 0} · activos=${result.train?.activated ?? 0} · ` +
       `tasas_base=${result.baseRates?.markets ?? 0}`
   );
   // JS-1: dejar rastro para el watchdog (dead-man's switch). TTL 48h.

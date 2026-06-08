@@ -47,7 +47,6 @@ const [
   _playerPhotos,
   _reenrich,
   _buildProfiles,
-  _trainMeta,
   _baseRates,
   _reenrichBaseball,
   _trainBaseballMeta,
@@ -55,6 +54,7 @@ const [
   _modelProfiles,
   _modelImpact,
   _modelPlayerMarkets,
+  _modelProbabilities,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
@@ -78,7 +78,6 @@ const [
   // dinámico igual que los lib/*; el guard NO se dispara dentro del worker.
   import(SCRIPTS + 'reenrich-features.js'),
   import(SCRIPTS + 'build-team-profiles.js'),
-  import(SCRIPTS + 'train-meta-models.js'),
   import(SCRIPTS + 'compute-market-base-rates.js'),
   import(SCRIPTS + 'reenrich-baseball.js'),
   import(SCRIPTS + 'train-baseball-meta-models.js'),
@@ -86,6 +85,7 @@ const [
   import(LIB + 'model-profiles.js'),
   import(LIB + 'model-impact.js'),
   import(LIB + 'model-player-markets.js'),
+  import(LIB + 'model-probabilities.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -160,10 +160,14 @@ export const buildPlayerImpact = _modelImpact.buildPlayerImpact;
 // (frecuencia empírica cruda de player_match_stats, 70/30). Lo llama futbol-lineups.
 export const buildPlayerMarkets = _modelPlayerMarkets.buildPlayerMarkets;
 
+// lib/model-probabilities.js (Etapa 4) — rearma la combinada con los player props del
+// modelo cuando el XI confirma (arreglo de timing), reusando el scored ya cacheado.
+export const buildModelCombinada = _modelProbabilities.buildModelCombinada;
+
 // scripts/* del pipeline de retrain (CommonJS → import() dinámico).
 export const reenrichFeatures = _reenrich.reenrichFeatures;
 export const buildTeamProfiles = _buildProfiles.buildTeamProfiles;
-export const trainMetaModels = _trainMeta.trainMetaModels;
+// trainMetaModels (ML del motor viejo) ELIMINADO en Etapa 4 — context-engine borrado.
 // scripts/compute-market-base-rates.js — prior del shrink de calibración. Lo
 // re-corre el cron nocturno (futbol-retrain) tras entrenar, con el pgPool.
 export const computeMarketBaseRates = _baseRates.computeMarketBaseRates;

@@ -11,7 +11,7 @@ import {
   getCachedAnalysis, cacheAnalysis, incrementApiCallCount,
   triggerEvent,
   redisGet, redisSet, KEYS, getMatchSchedule,
-  warmPlayerPhotos, buildPlayerMarkets, pgPool,
+  warmPlayerPhotos, buildPlayerMarkets, buildModelCombinada, pgPool,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
@@ -216,8 +216,26 @@ export async function runLineups(_payload = {}, _job = null) {
           const startXI = [];
           for (const tl of lineups) for (const pl of (tl.startXI || [])) if (pl?.player?.id) startXI.push({ player_id: pl.player.id, team_id: tl.team?.id, name: pl.player?.name, position: pl.player?.pos });
           if (startXI.length) {
-            updatedAnalysis.playerMarkets = await buildPlayerMarkets(pgPool, startXI, { cutoff: new Date() }); // serving: cutoff=ahora
+            const playerMarkets = await buildPlayerMarkets(pgPool, startXI, { cutoff: new Date() }); // serving: cutoff=ahora
+            updatedAnalysis.playerMarkets = playerMarkets;
             updatedAnalysis.playerMarketsUpdatedAt = new Date().toISOString();
+            // ARREGLO TIMING (Etapa 4): el XI confirmado llega DESPUÉS de que analyzeMatch armó
+            // la combinada, así que la REARMA aquí con los player props — reusando el `scored` ya
+            // cacheado (analysis._scored). NO recalcula el motor: solo la combinada con jugadores.
+            if (existing._scored && existing.dataQuality !== 'insufficient') {
+              const teamNames = { home: existing.homeTeam, away: existing.awayTeam, homeId: eHomeId, awayId: eAwayId };
+              const rebuilt = buildModelCombinada(existing._scored, existing.odds, teamNames, playerMarkets, existing.calculatedProbabilities, existing.cornerCardData);
+              // existing._scored viene RECORTADO a prob_final≥0.70 (las <0.70 no son pick ni
+              // seleccionable) → selections/selectable IDÉNTICAS. Solo los contadores totales del
+              // embudo (scored/sinDatos) contarían de menos; se preservan del análisis original
+              // para que _funnel también quede idéntico.
+              const f0 = existing.combinada && existing.combinada._funnel;
+              if (f0 && rebuilt._funnel) {
+                if (f0.scored != null) rebuilt._funnel.scored = f0.scored;
+                if (f0.sinDatos != null) rebuilt._funnel.sinDatos = f0.sinDatos;
+              }
+              updatedAnalysis.combinada = rebuilt;
+            }
           }
         }
       } catch (e) { console.error(`[futbol-lineups] playerMarkets ${fixtureId}:`, e.message); }
