@@ -18,7 +18,7 @@
  */
 import {
   pgQuery, pgPool, captureFinalizedFixturesRaw, ingestFixtures, ingestFixtureObjects,
-  buildModelTeamProfiles, buildModelPlayerProfiles,
+  buildModelTeamProfiles, buildModelPlayerProfiles, buildPlayerImpact,
   getCachedFixturesRaw, redisSet, cronTargetDate, bogotaToday,
 } from '../../shared.js';
 
@@ -66,7 +66,7 @@ export async function runModelSync(payload = {}) {
   try { result.standings = await syncOfficialStandings(apiKey, recentFids, upObjs); }
   catch (e) { console.error('[model-sync] standings:', e.message); result.standings = { error: e.message }; }
 
-  // 4) Refresh INCREMENTAL de perfiles (FASE 2F): solo equipos/jugadores que jugaron.
+  // 4) Refresh INCREMENTAL de perfiles (2F) + player_impact (4A): solo equipos/jugadores que jugaron.
   try {
     const teamIds = new Set();
     for (const f of upObjs) { if (f.teams?.home?.id) teamIds.add(Number(f.teams.home.id)); if (f.teams?.away?.id) teamIds.add(Number(f.teams.away.id)); }
@@ -82,14 +82,16 @@ export async function runModelSync(payload = {}) {
     const tp = teamIds.size ? await buildModelTeamProfiles(pgPool, { teamIds: [...teamIds] }) : { written: 0 };
     const pp = playerIds.length ? await buildModelPlayerProfiles(pgPool, { playerIds }) : { written: 0 };
     result.profiles = { teams: tp.written, players: pp.written, teamIds: teamIds.size, playerIds: playerIds.length };
-  } catch (e) { console.error('[model-sync] profiles:', e.message); result.profiles = { error: e.message }; }
+    const pi = playerIds.length ? await buildPlayerImpact(pgPool, { playerIds }) : { written: 0 };
+    result.profiles.impact = pi.written;
+  } catch (e) { console.error('[model-sync] profiles:', e.message); result.profiles = result.profiles || { error: e.message }; }
 
   // 5) Refresh teams/statistics al crudo (FASE 2F) de los equipos afectados.
   try { result.teamStats = await refreshTeamsStatistics(apiKey, recentFids); }
   catch (e) { console.error('[model-sync] teams/statistics:', e.message); result.teamStats = { error: e.message }; }
 
   await redisSet('lastRun:futbol-model-sync', { completedAt: new Date().toISOString() }, 172800).catch(() => {});
-  console.log(`[model-sync] OK · recientes=${result.recent} · ingRecent=${result.ingestRecent?.done ?? 0} · ingUpcoming=${result.ingestUpcoming?.done ?? 0} · standings(ligas=${result.standings?.leagues ?? 0}) · perfiles(eq=${result.profiles?.teams ?? 0}, jug=${result.profiles?.players ?? 0}) · teamStats=${result.teamStats?.saved ?? 0}`);
+  console.log(`[model-sync] OK · recientes=${result.recent} · ingRecent=${result.ingestRecent?.done ?? 0} · ingUpcoming=${result.ingestUpcoming?.done ?? 0} · standings(ligas=${result.standings?.leagues ?? 0}) · perfiles(eq=${result.profiles?.teams ?? 0}, jug=${result.profiles?.players ?? 0}, imp=${result.profiles?.impact ?? 0}) · teamStats=${result.teamStats?.saved ?? 0}`);
   return result;
 }
 

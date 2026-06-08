@@ -53,6 +53,7 @@ const [
   _trainBaseballMeta,
   _modelIngest,
   _modelProfiles,
+  _modelImpact,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
@@ -82,6 +83,7 @@ const [
   import(SCRIPTS + 'train-baseball-meta-models.js'),
   import(LIB + 'model-ingest.js'),
   import(LIB + 'model-profiles.js'),
+  import(LIB + 'model-impact.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -147,6 +149,10 @@ export const ingestFixtureObjects = _modelIngest.ingestFixtureObjects;
 // legacy (scripts/build-team-profiles.js → team_market_profiles, ya en desuso).
 export const buildModelTeamProfiles = _modelProfiles.buildTeamProfiles;
 export const buildModelPlayerProfiles = _modelProfiles.buildPlayerProfiles;
+
+// lib/model-impact.js (FASE 4A) — builder de player_impact (impacto con/sin del
+// jugador en su equipo). Refrescado incremental cada noche por model-sync.
+export const buildPlayerImpact = _modelImpact.buildPlayerImpact;
 
 // scripts/* del pipeline de retrain (CommonJS → import() dinámico).
 export const reenrichFeatures = _reenrich.reenrichFeatures;
