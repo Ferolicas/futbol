@@ -91,7 +91,7 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: proc
     console.log(`  local  gf=${ps.home.shift_gf} ga=${ps.home.shift_ga} cards=${ps.home.shift_cards} merma=${ps.home.merma} ausentes=[${ps.home.ausentes.join(',')}]`);
     console.log(`  visita gf=${ps.away.shift_gf} ga=${ps.away.shift_ga} cards=${ps.away.shift_cards} merma=${ps.away.merma} ausentes=[${ps.away.ausentes.join(',')}]`);
     for (const s of (res.markets['1x2'].chain || []).filter(c => c.step === 'player')) console.log(`  1x2 (merma): ${trip(s.before)} → ${trip(s.after)} (n=${s.n})`);
-    for (const key of ['goals_total', 'cards_total']) {
+    for (const key of ['goals_total', 'goals_home', 'goals_away', 'cards_total']) {
       const mkt = res.markets[key]; if (!mkt) continue;
       for (const ln of mkt.lines) {
         const st = (ln.chain || []).filter(c => c.step === 'player');
