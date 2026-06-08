@@ -54,7 +54,7 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: proc
   console.log(`\n${m.home_name} vs ${m.away_name}  ·  ${m.comp_name} ${ctx.season ?? ''}  ·  fixture ${fixtureId}`);
   console.log(`modo=${pit ? 'POINT-IN-TIME' : 'serving'}  cutoff=${f.cutoff}  phase=${f.phase}${f.isKnockout ? '(KO)' : ''}`);
   console.log(`rank hoy: local=${f.homeRank ?? '—'} visita=${f.awayRank ?? '—'}  nTeams=${f.nTeams ?? '—'}  ·  filas: local=${f.homeRows} visita=${f.awayRows} liga=${f.leagueRows}  ·  ${ms}ms`);
-  console.log(`H2H directos (H vs A): total=${h2hRows.length}  ·  actual modo(a)=${nCur}  ·  histórico modo(b)=${nHist}  ·  1X2 mode=${process.env.H2H_1X2_MODE || 'default'}\n`);
+  console.log(`H2H directos (H vs A): total=${h2hRows.length}  ·  actual modo(a)=${nCur}  ·  histórico modo(b)=${nHist}  ·  1X2 mode=${process.env.H2H_1X2_MODE || 'softweight'}\n`);
 
   const r1x2 = res.markets['1x2'];
   if (r1x2) console.log(`1X2   local ${pct(r1x2.home)}  empate ${pct(r1x2.draw)}  visita ${pct(r1x2.away)}   (n=${r1x2.n} conf=${r1x2.conf})\n`);
