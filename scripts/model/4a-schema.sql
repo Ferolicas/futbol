@@ -9,7 +9,8 @@
 --   gf_with/gf_without  → goles a favor del equipo con / sin el jugador
 --   ga_with/ga_without  → goles en contra (para el modulador defensivo posterior)
 --   delta_gf = gf_with - gf_without   (>0 ⇒ el equipo marca más con él)
---   determinant = abs(delta_gf) >= 0.3  (umbral del dueño)
+--   determinant = abs(delta_gf) >= 0.5 AND n_with>=20 AND n_without>=20 (señal real;
+--                 0.3/n5 marcaba ~49% = ruido de muestra chica)
 -- Solo se materializan pares con n_with>=5 Y n_without>=5 (ambos lados medibles);
 -- un titular que juega SIEMPRE no tiene "sin" → sin fila → el motor no modula.
 --
@@ -29,7 +30,7 @@ CREATE TABLE IF NOT EXISTS model.player_impact (
   delta_gf    real,                        -- gf_with - gf_without (modulador ofensivo)
   delta_ga    real,                        -- ga_with - ga_without (modulador defensivo, uso posterior)
   n_with      int,    n_without   int,     -- tamaños de muestra de cada lado
-  determinant boolean,                     -- abs(delta_gf) >= 0.3
+  determinant boolean,                     -- abs(delta_gf)>=0.5 AND n_with>=20 AND n_without>=20
   updated_at  timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (player_id, team_id)
 );
