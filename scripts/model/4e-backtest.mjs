@@ -120,8 +120,16 @@ function score(variant, markets, row, tier) {
      WHERE ${where.join(' AND ')}
      ORDER BY m.kickoff ASC ${LIMIT ? `LIMIT ${LIMIT}` : ''}`, params);
 
-  // ── (1b) cobertura por liga = nº de fixtures de esa competición en el set ──
-  const compCount = {}; for (const r of U) compCount[r.competition_id] = (compCount[r.competition_id] || 0) + 1;
+  // ── (1b) cobertura por liga = nº de finalizados de esa competición en TODA la BD ──
+  // (NO del lote filtrado: con --limit/--liga la Premier caería mal en "baja"). Query aparte, sin filtros.
+  const compCount = {};
+  {
+    const { rows: cc } = await pool.query(
+      `SELECT competition_id, count(*)::int AS n FROM model.matches
+       WHERE result IS NOT NULL AND ft_home IS NOT NULL AND ft_away IS NOT NULL
+       GROUP BY competition_id`);
+    for (const r of cc) compCount[r.competition_id] = r.n;
+  }
   const tierOf = (cid) => { const c = compCount[cid] || 0; return c >= COV_HI ? 'alta' : c >= COV_LO ? 'media' : 'baja'; };
 
   // reanudación opcional (checkpoint local)
@@ -198,5 +206,5 @@ function printTables() {
     const cells = VARIANTS.map(v => { const e = acc.tier[`${v}|${tier}`]; if (!e) return ''.padEnd(14); return `${(eceOf(e) * 100).toFixed(1)}% (${totalN(e)})`.padEnd(14); });
     console.log([`${tier}`.padEnd(12), ...cells].join(''));
   }
-  console.log(`\nCobertura: alta ≥${COV_HI} fixtures/liga · media ≥${COV_LO} · baja <${COV_LO} (en el set).`);
+  console.log(`\nCobertura: alta ≥${COV_HI} finalizados/liga · media ≥${COV_LO} · baja <${COV_LO} (en TODA la BD, no el lote).`);
 }
