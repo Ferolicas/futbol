@@ -1944,7 +1944,11 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
       .filter(s => s.odd && s.odd >= 1.20 && s.probability >= 70 && s.probability <= 95)
       .map((s, i) => ({
         id: s.id || `mkt-${i}`,
-        name: s.name,
+        // Re-traduce la clave con lib/market-labels.js (misma fuente que el servidor y que la
+        // "Apuesta del Día", línea ~1074) en vez de usar s.name CACHEADO: así las etiquetas
+        // nuevas (hándicap ah_/eh_, marcador exacto cs_) salen legibles incluso en análisis
+        // cacheados ANTES del fix de etiquetas. scope 'player' conserva su name (id no es clave).
+        name: s.scope === 'context' ? marketLabel(s.id, { home: match.teams.home.name, away: match.teams.away.name }) : s.name,
         probability: s.probability,
         odd: s.odd,
         bookmaker: s.bookmaker || null,   // bookmaker real atribuido por el motor
