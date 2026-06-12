@@ -28,15 +28,37 @@ export default function PlanesClient({ userId, email }) {
   const [prices, setPrices] = useState(null);
   const [pricesLoading, setPricesLoading] = useState(true);
   const [error, setError] = useState('');
+  const [country, setCountry] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-  const goToCheckout = (planId) => {
-    // Checkout completo de Hotmart (todos los métodos locales: PSE, Nequi,
-    // tarjeta, PayPal, Efecty…). Se abre en una pestaña nueva para que
-    // cfanalisis.com siga abierto. Lleva email + sck=userId para que el webhook
-    // enlace el pago con esta cuenta.
+  // Geo-routing del pago: Colombia → Mercado Pago (métodos locales: tarjeta,
+  // PSE, Efecty; tarjeta con renovación automática). Resto del mundo → Stripe.
+  const goToCheckout = async (planId) => {
+    setSelectedPlan(planId);
+    setError('');
+
+    if (country === 'CO') {
+      setLoading(true);
+      try {
+        const res = await fetch('/api/mercadopago/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan: planId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data.initPoint) { window.location.href = data.initPoint; return; }
+        setError(data.error || 'No se pudo iniciar el pago. Intenta de nuevo.');
+      } catch {
+        setError('Error de conexión. Intenta de nuevo.');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // Resto del mundo (transitorio: Hotmart; pasará a Stripe al rotar la sk_live).
     const url = hotmartCheckoutUrl(planId, { email, userId });
     if (!url) { setError('Plan no disponible. Intenta de nuevo.'); return; }
-    setSelectedPlan(planId);
     window.open(url, '_blank', 'noopener');
   };
 
@@ -45,6 +67,7 @@ export default function PlanesClient({ userId, email }) {
       .then(r => r.json())
       .then(data => {
         if (data.countryCode) {
+          setCountry(data.countryCode);
           return fetch(`/api/currency?country=${data.countryCode}`)
             .then(r => r.json())
             .then(setPrices);
@@ -109,9 +132,9 @@ export default function PlanesClient({ userId, email }) {
                 initial={{ opacity: 0, y: 30 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 + idx * 0.08, duration: 0.5 }}
-                whileHover={{ scale: 1.02 }}
-                onClick={() => goToCheckout(plan.id)}
-                style={{ cursor: 'pointer' }}
+                whileHover={{ scale: loading ? 1 : 1.02 }}
+                onClick={() => !loading && goToCheckout(plan.id)}
+                style={{ cursor: loading ? 'wait' : 'pointer', opacity: loading && !isSelected ? 0.6 : 1 }}
               >
                 {plan.badge && (
                   <div className={`plan-badge ${isPremium ? 'premium' : ''}`}>{plan.badge}</div>
@@ -131,6 +154,11 @@ export default function PlanesClient({ userId, email }) {
                     <li key={f}>{f}</li>
                   ))}
                 </ul>
+                {loading && isSelected && (
+                  <div className="modal-loading" style={{ marginTop: 12, textAlign: 'center', fontSize: '.85rem' }}>
+                    Redirigiendo a Mercado Pago…
+                  </div>
+                )}
               </motion.div>
             );
           })}
