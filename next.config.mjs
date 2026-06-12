@@ -22,12 +22,12 @@ const nextConfig = {
   async headers() {
     const csp = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com",
+      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com https://sdk.mercadopago.com https://*.mercadopago.com https://*.mlstatic.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "img-src 'self' data: https:",
       "font-src 'self' data: https://fonts.gstatic.com",
       "connect-src 'self' https: wss:",
-      "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
+      "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://*.mercadopago.com https://*.mercadolibre.com",
       "object-src 'none'",
       "base-uri 'self'",
     ].join('; ');

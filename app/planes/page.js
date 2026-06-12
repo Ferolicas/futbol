@@ -23,10 +23,15 @@ export default async function PlanesPage() {
     redirect('/dashboard');
   }
 
+  const mpPublicKey = process.env.MP_ENV === 'live'
+    ? (process.env.MP_PUBLIC_KEY || '')
+    : (process.env.NEXT_PUBLIC_MP_PUBLIC_KEY_TEST || '');
+
   return (
     <PlanesClient
       userId={user.id}
       email={profile?.email || user.email}
+      mpPublicKey={mpPublicKey}
     />
   );
 }

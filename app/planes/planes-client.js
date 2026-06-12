@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { hotmartCheckoutUrl } from '../../lib/hotmart';
+import MercadoPagoModal from './MercadoPagoModal';
 
 // Orden, etiquetas y badges de los 5 planes (claves IDs en lib/stripe.js)
 const PLAN_ORDER = [
@@ -23,36 +24,24 @@ const PLATFORM_FEATURES = [
   'Corners, tarjetas, BTTS',
 ];
 
-export default function PlanesClient({ userId, email }) {
+export default function PlanesClient({ userId, email, mpPublicKey }) {
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [prices, setPrices] = useState(null);
   const [pricesLoading, setPricesLoading] = useState(true);
   const [error, setError] = useState('');
   const [country, setCountry] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [mpModal, setMpModal] = useState(null); // { plan, amountCop } cuando se abre el modal de Mercado Pago
 
-  // Geo-routing del pago: Colombia → Mercado Pago (métodos locales: tarjeta,
-  // PSE, Efecty; tarjeta con renovación automática). Resto del mundo → Stripe.
-  const goToCheckout = async (planId) => {
+  // Geo-routing del pago: Colombia → Mercado Pago en un MODAL embebido (tarjeta,
+  // renovación automática, sin redirigir). Resto del mundo → Stripe.
+  const goToCheckout = (planId) => {
     setSelectedPlan(planId);
     setError('');
 
     if (country === 'CO') {
-      setLoading(true);
-      try {
-        const res = await fetch('/api/mercadopago/subscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ plan: planId }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (data.initPoint) { window.location.href = data.initPoint; return; }
-        setError(data.error || 'No se pudo iniciar el pago. Intenta de nuevo.');
-      } catch {
-        setError('Error de conexión. Intenta de nuevo.');
-      } finally {
-        setLoading(false);
-      }
+      const copAmount = Math.round(prices?.plans?.[planId]?.local || 0);
+      if (!copAmount) { setError('No se pudo calcular el precio. Recarga la página.'); return; }
+      setMpModal({ plan: planId, amountCop: copAmount });
       return;
     }
 
@@ -132,9 +121,9 @@ export default function PlanesClient({ userId, email }) {
                 initial={{ opacity: 0, y: 30 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 + idx * 0.08, duration: 0.5 }}
-                whileHover={{ scale: loading ? 1 : 1.02 }}
-                onClick={() => !loading && goToCheckout(plan.id)}
-                style={{ cursor: loading ? 'wait' : 'pointer', opacity: loading && !isSelected ? 0.6 : 1 }}
+                whileHover={{ scale: 1.02 }}
+                onClick={() => goToCheckout(plan.id)}
+                style={{ cursor: 'pointer' }}
               >
                 {plan.badge && (
                   <div className={`plan-badge ${isPremium ? 'premium' : ''}`}>{plan.badge}</div>
@@ -154,11 +143,6 @@ export default function PlanesClient({ userId, email }) {
                     <li key={f}>{f}</li>
                   ))}
                 </ul>
-                {loading && isSelected && (
-                  <div className="modal-loading" style={{ marginTop: 12, textAlign: 'center', fontSize: '.85rem' }}>
-                    Redirigiendo a Mercado Pago…
-                  </div>
-                )}
               </motion.div>
             );
           })}
@@ -173,6 +157,17 @@ export default function PlanesClient({ userId, email }) {
           </button>
         </div>
       </motion.div>
+
+      {mpModal && (
+        <MercadoPagoModal
+          plan={mpModal.plan}
+          planLabel={`Plan ${mpModal.plan.charAt(0).toUpperCase()}${mpModal.plan.slice(1)}`}
+          amountCop={mpModal.amountCop}
+          email={email}
+          publicKey={mpPublicKey}
+          onClose={() => setMpModal(null)}
+        />
+      )}
     </div>
   );
 }
