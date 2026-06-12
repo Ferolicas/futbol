@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import PaymentModal from './PaymentModal';
+import { hotmartCheckoutUrl } from '../../lib/hotmart';
 
 // Orden, etiquetas y badges de los 5 planes (claves IDs en lib/stripe.js)
 const PLAN_ORDER = [
@@ -29,7 +29,6 @@ export default function PlanesClient({ userId, email }) {
   const [pricesLoading, setPricesLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [paymentData, setPaymentData] = useState(null);
 
   useEffect(() => {
     fetch('/api/detect-country')
@@ -45,39 +44,18 @@ export default function PlanesClient({ userId, email }) {
       .finally(() => setPricesLoading(false));
   }, []);
 
-  const handleSelectPlan = async (plan) => {
+  const handleSelectPlan = (plan) => {
+    // Hotmart: redirige al checkout de la oferta del plan elegido, con el email
+    // y el userId (sck) para enlazar el pago con esta cuenta en el webhook.
+    const url = hotmartCheckoutUrl(plan, { email, userId });
+    if (!url) {
+      setError('Plan no disponible. Intenta de nuevo.');
+      return;
+    }
     setSelectedPlan(plan);
     setLoading(true);
     setError('');
-
-    try {
-      const res = await fetch('/api/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan, email, currency: prices?.currency || 'USD' }),
-      });
-      const data = await res.json();
-
-      if (data.clientSecret) {
-        const localDisplay = fmtPrice(plan);
-        setPaymentData({
-          clientSecret: data.clientSecret,
-          plan: data.plan,
-          displayAmount: localDisplay,
-        });
-      } else {
-        setError(data.error || 'Error al procesar pago');
-      }
-    } catch {
-      setError('Error de conexion');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleClosePayment = () => {
-    setPaymentData(null);
-    setSelectedPlan(null);
+    window.location.href = url;
   };
 
   const fmtPrice = (planId) => {
@@ -174,15 +152,6 @@ export default function PlanesClient({ userId, email }) {
           </button>
         </div>
       </motion.div>
-
-      {paymentData && (
-        <PaymentModal
-          clientSecret={paymentData.clientSecret}
-          plan={paymentData.plan}
-          displayAmount={paymentData.displayAmount}
-          onClose={handleClosePayment}
-        />
-      )}
     </div>
   );
 }
