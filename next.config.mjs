@@ -22,12 +22,12 @@ const nextConfig = {
   async headers() {
     const csp = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com https://static.hotmart.com https://checkout.hotmart.com",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://static.hotmart.com",
       "img-src 'self' data: https:",
       "font-src 'self' data: https://fonts.gstatic.com",
       "connect-src 'self' https: wss:",
-      "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
+      "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://pay.hotmart.com https://*.hotmart.com",
       "object-src 'none'",
       "base-uri 'self'",
     ].join('; ');

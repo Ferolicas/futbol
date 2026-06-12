@@ -27,8 +27,23 @@ export default function PlanesClient({ userId, email }) {
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [prices, setPrices] = useState(null);
   const [pricesLoading, setPricesLoading] = useState(true);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Carga el widget de checkout de Hotmart (script + CSS) una sola vez. Con esto
+  // los enlaces .hotmart-fb abren el pago en un popup SOBRE la web (checkoutMode=2),
+  // sin redirigir. Es el snippet oficial que da Hotmart para el producto.
+  useEffect(() => {
+    if (document.getElementById('hotmart-checkout-widget')) return;
+    const s = document.createElement('script');
+    s.id = 'hotmart-checkout-widget';
+    s.src = 'https://static.hotmart.com/checkout/widget.min.js';
+    document.head.appendChild(s);
+    const l = document.createElement('link');
+    l.rel = 'stylesheet';
+    l.type = 'text/css';
+    l.href = 'https://static.hotmart.com/css/hotmart-fb.min.css';
+    document.head.appendChild(l);
+  }, []);
 
   useEffect(() => {
     fetch('/api/detect-country')
@@ -43,20 +58,6 @@ export default function PlanesClient({ userId, email }) {
       .catch(() => {})
       .finally(() => setPricesLoading(false));
   }, []);
-
-  const handleSelectPlan = (plan) => {
-    // Hotmart: redirige al checkout de la oferta del plan elegido, con el email
-    // y el userId (sck) para enlazar el pago con esta cuenta en el webhook.
-    const url = hotmartCheckoutUrl(plan, { email, userId });
-    if (!url) {
-      setError('Plan no disponible. Intenta de nuevo.');
-      return;
-    }
-    setSelectedPlan(plan);
-    setLoading(true);
-    setError('');
-    window.location.href = url;
-  };
 
   const fmtPrice = (planId) => {
     if (pricesLoading) return '...';
@@ -106,6 +107,7 @@ export default function PlanesClient({ userId, email }) {
             const isSelected = selectedPlan === plan.id;
             const isPremium = plan.badge === 'VIP';
             const original = fmtOriginal(plan.id);
+            const payUrl = hotmartCheckoutUrl(plan.id, { email, userId });
             return (
               <motion.div
                 key={plan.id}
@@ -114,8 +116,6 @@ export default function PlanesClient({ userId, email }) {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 + idx * 0.08, duration: 0.5 }}
                 whileHover={{ scale: 1.02 }}
-                onClick={() => !loading && handleSelectPlan(plan.id)}
-                style={{ cursor: loading ? 'wait' : 'pointer' }}
               >
                 {plan.badge && (
                   <div className={`plan-badge ${isPremium ? 'premium' : ''}`}>{plan.badge}</div>
@@ -135,9 +135,25 @@ export default function PlanesClient({ userId, email }) {
                     <li key={f}>{f}</li>
                   ))}
                 </ul>
-                {loading && isSelected && (
-                  <div className="modal-loading">Preparando pago...</div>
-                )}
+                {/* Botón de checkout Hotmart: la clase hotmart-fb hace que el
+                    widget abra el pago en un popup sobre la web (sin redirigir).
+                    onClick preventDefault evita la navegación; el widget abre el
+                    popup. Si por lo que sea el widget no cargó, el href sigue
+                    siendo el checkout real (fallback seguro). */}
+                <a
+                  href={payUrl}
+                  className="hotmart-fb hotmart__button-checkout plan-cta"
+                  onClick={(e) => { e.preventDefault(); setSelectedPlan(plan.id); }}
+                  style={{
+                    display: 'block', marginTop: 16, padding: '13px 18px',
+                    borderRadius: 12, textAlign: 'center', fontWeight: 800,
+                    textDecoration: 'none', cursor: 'pointer',
+                    background: isPremium ? '#f5c518' : '#16c784',
+                    color: '#06281a',
+                  }}
+                >
+                  Suscribirme
+                </a>
               </motion.div>
             );
           })}
