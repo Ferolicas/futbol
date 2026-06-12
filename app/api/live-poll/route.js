@@ -1,4 +1,5 @@
 import { redisGet, KEYS } from '../../../lib/redis';
+import { getCurrentUser } from '../../../lib/auth-pg';
 
 // Live poll: reads from Redis (populated by cron/live every minute).
 // NO direct API-Football calls. NO Sanity.
@@ -7,6 +8,10 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request) {
   try {
+    // Stats en vivo = contenido de la app de pago → exigir sesión.
+    if (!(await getCurrentUser())) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const { searchParams } = new URL(request.url);
     const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
     const fixtureId = searchParams.get('fixtureId');

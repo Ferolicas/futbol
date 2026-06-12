@@ -8,6 +8,7 @@
  * el dashboard espera, conservamos: { leagueId, standings, fromCache }.
  */
 import { redisGet, redisSet } from '../../../../../lib/redis';
+import { getCurrentUser } from '../../../../../lib/auth-pg';
 import { jsonError } from '../../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
@@ -63,6 +64,9 @@ function normalizeRecords(records) {
 
 export async function GET(_request, { params }) {
   try {
+    if (!(await getCurrentUser())) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const leagueId = Number(params.league);
     if (!leagueId) return Response.json({ error: 'Invalid league id' }, { status: 400 });
     if (leagueId !== 1) {

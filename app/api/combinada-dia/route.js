@@ -23,7 +23,22 @@ import { jsonError } from '../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
+// Endpoint de uso EXCLUSIVO de n8n (no lo llama el frontend). Se protege con
+// CRON_SECRET — mismo secreto que el resto de crons y que n8n ya envía a
+// /api/cron/publish-combinada — vía ?secret= o `Authorization: Bearer`.
+// Antes era público: cualquiera podía leer la combinada del día en crudo.
+function verifyAuth(request) {
+  const { searchParams } = new URL(request.url);
+  const secret = searchParams.get('secret')
+    || request.headers.get('authorization')?.replace('Bearer ', '');
+  return Boolean(process.env.CRON_SECRET) && secret === process.env.CRON_SECRET;
+}
+
 export async function GET(request) {
+  if (!verifyAuth(request)) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const url = new URL(request.url);
   const date = url.searchParams.get('date') || new Date().toISOString().split('T')[0];
 

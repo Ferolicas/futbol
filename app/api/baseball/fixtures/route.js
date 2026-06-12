@@ -12,6 +12,7 @@
 import { getMlbScheduleByDate } from '../../../../lib/mlb-stats-api';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
+import { userHasActivePlan } from '../../../../lib/require-active-plan';
 import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
@@ -62,8 +63,15 @@ export async function GET(request) {
     const date = searchParams.get('date') || todayUtc;
     const isPast = date < todayUtc;
 
+    // Contenido de pago: exigir sesión + plan activo/admin ANTES de cargar nada
+    // (igual que /api/fixtures de fútbol). Antes este endpoint servía el análisis
+    // completo — probabilidades, líneas, picks de jugadores — a usuarios anónimos.
     const supabase = createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!(await userHasActivePlan(user))) {
+      return Response.json({ error: 'Subscription required' }, { status: 403 });
+    }
 
     // Un día local cubre 2 días UTC → pedir fechas adyacentes y filtrar por TZ.
     const d = new Date(date + 'T12:00:00Z');

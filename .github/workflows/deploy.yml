@@ -84,6 +84,15 @@ jobs:
               # Build prod
               NODE_ENV=production npm run build
 
+              # ── .env para el server standalone de Node ──
+              # El standalone arranca desde .next/standalone/ y carga SU PROPIO
+              # .env (loadEnvConfig relativo a su dir), que tiene PRIORIDAD sobre
+              # el env que inyecta PM2. Si no lo sincronizamos, el standalone
+              # queda con el .env horneado en un build viejo → claves rotadas en
+              # /apps/futbol/.env NO surten efecto (bug real: RESEND_API_KEY vieja
+              # → emails 401 durante días). Copiar el .env actual lo evita.
+              cp .env .next/standalone/.env
+
               # ── PUBLIC para el server standalone de Node ──
               # El standalone de Next NO incluye public/ — hay que ponérselo al
               # lado. ANTES esto era un SYMLINK:

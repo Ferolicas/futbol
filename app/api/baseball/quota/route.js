@@ -9,12 +9,16 @@
  * UI: { used, limit, remaining, date }.
  */
 import { redisGet } from '../../../../lib/redis';
+import { getCurrentUser } from '../../../../lib/auth-pg';
 
 export const dynamic = 'force-dynamic';
 
 const DAILY_REQUEST_CAP = 15;
 
 export async function GET() {
+  if (!(await getCurrentUser())) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
   const date = new Date().toISOString().split('T')[0];
   let used = 0;
   try { used = Number(await redisGet(`theodds:req:${date}`)) || 0; } catch {}
