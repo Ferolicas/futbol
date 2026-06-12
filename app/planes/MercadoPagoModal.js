@@ -18,14 +18,16 @@ function loadMpSdk() {
   return mpSdkPromise;
 }
 
-const CONTAINER_ID = 'mp-card-brick-container';
+const CONTAINER_ID = 'mp-payment-brick-container';
 
-// Modal de pago con Mercado Pago — formulario de TARJETA embebido (Card Brick),
-// SIN redirigir. Al enviar, tokeniza la tarjeta y crea la suscripción recurrente
-// (preapproval) vía /api/mercadopago/subscribe. Mismo patrón de modal que Stripe.
+// Modal de pago con Mercado Pago — PAYMENT BRICK: muestra TODOS los métodos
+// (tarjeta, PSE/Nequi, Efecty…) embebidos sobre la web. Al enviar:
+//   - Tarjeta → suscripción recurrente (preapproval), activa sin salir del sitio.
+//   - PSE/Efecty → pago del periodo; MP devuelve la URL del banco y redirigimos
+//     SOLO en ese caso (es inevitable en esos métodos).
 export default function MercadoPagoModal({ plan, planLabel, amountCop, email, publicKey, onClose }) {
   const [error, setError] = useState('');
-  const [phase, setPhase] = useState('loading'); // loading | ready | processing | done
+  const [phase, setPhase] = useState('loading'); // loading | ready | processing
   const controllerRef = useRef(null);
 
   useEffect(() => {
@@ -38,14 +40,20 @@ export default function MercadoPagoModal({ plan, planLabel, amountCop, email, pu
 
         const mp = new MercadoPago(publicKey, { locale: 'es-CO' });
         const builder = mp.bricks();
-        controllerRef.current = await builder.create('cardPayment', CONTAINER_ID, {
+        controllerRef.current = await builder.create('payment', CONTAINER_ID, {
           initialization: {
             amount: amountCop,
             payer: { email: email || '' },
           },
           customization: {
             visual: { style: { theme: 'dark' } },
-            paymentMethods: { maxInstallments: 1 }, // suscripción → sin cuotas
+            paymentMethods: {
+              creditCard: 'all',
+              debitCard: 'all',
+              bankTransfer: 'all', // PSE / Nequi
+              ticket: 'all',       // Efecty
+              maxInstallments: 1,  // suscripción → sin cuotas
+            },
           },
           callbacks: {
             onReady: () => { if (!cancelled) setPhase('ready'); },
@@ -53,31 +61,37 @@ export default function MercadoPagoModal({ plan, planLabel, amountCop, email, pu
               console.error('[mp-brick]', e);
               if (!cancelled) setError('No se pudo cargar el formulario de pago.');
             },
-            onSubmit: async (formData) => {
+            onSubmit: ({ selectedPaymentMethod, formData }) => {
               setPhase('processing');
               setError('');
-              try {
-                const res = await fetch('/api/mercadopago/subscribe', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    plan,
-                    cardToken: formData.token,
-                    paymentMethodId: formData.payment_method_id,
-                  }),
-                });
-                const data = await res.json().catch(() => ({}));
-                if (res.ok && data.ok) {
-                  setPhase('done');
-                  window.location.href = '/dashboard';
-                } else {
+              return fetch('/api/mercadopago/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ plan, selectedPaymentMethod, formData }),
+              })
+                .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+                .then(({ ok, data }) => {
+                  if (ok && data.redirectUrl) {
+                    // PSE/Efecty → redirige al banco/instrucciones de pago.
+                    window.location.href = data.redirectUrl;
+                    return;
+                  }
+                  if (ok && data.ok) {
+                    // Tarjeta → suscripción activa, sin redirigir.
+                    window.location.href = '/dashboard';
+                    return;
+                  }
                   setError(data.error || 'No se pudo procesar el pago.');
                   setPhase('ready');
-                }
-              } catch {
-                setError('Error de conexión. Intenta de nuevo.');
-                setPhase('ready');
-              }
+                  throw new Error(data.error || 'payment_failed');
+                })
+                .catch((e) => {
+                  if (!/payment_failed/.test(e.message)) {
+                    setError('Error de conexión. Intenta de nuevo.');
+                    setPhase('ready');
+                  }
+                  throw e;
+                });
             },
           },
         });
@@ -105,7 +119,7 @@ export default function MercadoPagoModal({ plan, planLabel, amountCop, email, pu
         onClick={(e) => e.stopPropagation()}
         style={{
           background: '#0f1722', borderRadius: 16, padding: 24,
-          width: '100%', maxWidth: 460, maxHeight: '90vh', overflowY: 'auto',
+          width: '100%', maxWidth: 480, maxHeight: '92vh', overflowY: 'auto',
           boxShadow: '0 20px 60px rgba(0,0,0,.5)',
         }}
       >
@@ -113,7 +127,7 @@ export default function MercadoPagoModal({ plan, planLabel, amountCop, email, pu
           <div>
             <h2 style={{ margin: 0, fontSize: '1.15rem' }}>{planLabel || `Plan ${plan}`}</h2>
             <p style={{ margin: '4px 0 0', opacity: .85 }}>
-              {amountCop ? `${Math.round(amountCop).toLocaleString('es-CO')} COP` : ''} · renovación automática
+              {amountCop ? `${Math.round(amountCop).toLocaleString('es-CO')} COP` : ''}
             </p>
           </div>
           <button
