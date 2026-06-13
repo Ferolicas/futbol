@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { hotmartCheckoutUrl } from '../../lib/hotmart';
 import MercadoPagoModal from './MercadoPagoModal';
+import PaymentModal from './PaymentModal';
 
 // Orden, etiquetas y badges de los 5 planes (claves IDs en lib/stripe.js)
 const PLAN_ORDER = [
@@ -28,16 +28,21 @@ export default function PlanesClient({ userId, email, mpPublicKey }) {
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [prices, setPrices] = useState(null);
   const [pricesLoading, setPricesLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [country, setCountry] = useState(null);
-  const [mpModal, setMpModal] = useState(null); // { plan, amountCop } cuando se abre el modal de Mercado Pago
+  const [mpModal, setMpModal] = useState(null);    // { plan, amountCop } → modal Mercado Pago (Colombia)
+  const [paymentData, setPaymentData] = useState(null); // { clientSecret, plan, displayAmount } → modal Stripe (resto)
 
-  // Geo-routing del pago: Colombia → Mercado Pago en un MODAL embebido (tarjeta,
-  // renovación automática, sin redirigir). Resto del mundo → Stripe.
-  const goToCheckout = (planId) => {
+  // Geo-routing del pago:
+  //   Colombia → Mercado Pago (PSE/tarjeta) en MODAL embebido.
+  //   Resto del mundo → Stripe (tarjeta internacional) en MODAL embebido.
+  const goToCheckout = async (planId) => {
+    if (loading) return;
     setSelectedPlan(planId);
     setError('');
 
+    // ── Colombia → Mercado Pago ──
     if (country === 'CO') {
       const copAmount = Math.round(prices?.plans?.[planId]?.local || 0);
       if (!copAmount) { setError('No se pudo calcular el precio. Recarga la página.'); return; }
@@ -45,10 +50,29 @@ export default function PlanesClient({ userId, email, mpPublicKey }) {
       return;
     }
 
-    // Resto del mundo (transitorio: Hotmart; pasará a Stripe al rotar la sk_live).
-    const url = hotmartCheckoutUrl(planId, { email, userId });
-    if (!url) { setError('Plan no disponible. Intenta de nuevo.'); return; }
-    window.open(url, '_blank', 'noopener');
+    // ── Resto del mundo → Stripe (PaymentIntent embebido) ──
+    setLoading(true);
+    try {
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: planId, email, currency: prices?.currency || 'USD' }),
+      });
+      const data = await res.json();
+      if (data.clientSecret) {
+        setPaymentData({
+          clientSecret: data.clientSecret,
+          plan: data.plan,
+          displayAmount: fmtPrice(planId),
+        });
+      } else {
+        setError(data.error || 'Error al procesar el pago');
+      }
+    } catch {
+      setError('Error de conexion');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -123,7 +147,7 @@ export default function PlanesClient({ userId, email, mpPublicKey }) {
                 transition={{ delay: 0.3 + idx * 0.08, duration: 0.5 }}
                 whileHover={{ scale: 1.02 }}
                 onClick={() => goToCheckout(plan.id)}
-                style={{ cursor: 'pointer' }}
+                style={{ cursor: loading ? 'wait' : 'pointer' }}
               >
                 {plan.badge && (
                   <div className={`plan-badge ${isPremium ? 'premium' : ''}`}>{plan.badge}</div>
@@ -143,6 +167,9 @@ export default function PlanesClient({ userId, email, mpPublicKey }) {
                     <li key={f}>{f}</li>
                   ))}
                 </ul>
+                {loading && isSelected && (
+                  <div className="modal-loading">Preparando pago...</div>
+                )}
               </motion.div>
             );
           })}
@@ -158,6 +185,7 @@ export default function PlanesClient({ userId, email, mpPublicKey }) {
         </div>
       </motion.div>
 
+      {/* Colombia → Mercado Pago */}
       {mpModal && (
         <MercadoPagoModal
           plan={mpModal.plan}
@@ -165,7 +193,17 @@ export default function PlanesClient({ userId, email, mpPublicKey }) {
           amountCop={mpModal.amountCop}
           email={email}
           publicKey={mpPublicKey}
-          onClose={() => setMpModal(null)}
+          onClose={() => { setMpModal(null); setSelectedPlan(null); }}
+        />
+      )}
+
+      {/* Resto del mundo → Stripe */}
+      {paymentData && (
+        <PaymentModal
+          clientSecret={paymentData.clientSecret}
+          plan={paymentData.plan}
+          displayAmount={paymentData.displayAmount}
+          onClose={() => { setPaymentData(null); setSelectedPlan(null); }}
         />
       )}
     </div>

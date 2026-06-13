@@ -1917,6 +1917,37 @@ body {
 .modal-plan-after { font-size: .78rem; color: var(--t3); }
 .modal-loading { margin-top: 10px; text-align: center; color: var(--green); font-size: .85rem; font-weight: 600; }
 
+/* ===================== PAYMENT MODAL (Stripe — resto del mundo) ===================== */
+.payment-modal-overlay {
+  position: fixed; inset: 0; z-index: 10000; background: rgba(6,6,11,0.85);
+  backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center;
+  padding: 20px; animation: fadeIn .3s ease;
+}
+.payment-modal-content {
+  background: var(--bg-1); border: 1px solid var(--brd); border-radius: 24px;
+  padding: 32px 26px; max-width: 460px; width: 100%; position: relative;
+  animation: modalIn .4s var(--bounce) both; max-height: 92vh; overflow-y: auto;
+}
+.payment-modal-close {
+  position: absolute; top: 14px; right: 14px; background: none; border: none;
+  color: var(--t3); font-size: 1.8rem; line-height: 1; cursor: pointer;
+  width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; transition: all .2s;
+}
+.payment-modal-close:hover { background: rgba(255,255,255,0.06); color: var(--t1); }
+.payment-modal-form { display: block; }
+.payment-modal-header { text-align: center; margin-bottom: 18px; }
+.payment-modal-logo { width: 54px; height: auto; margin: 0 auto 12px; display: block; }
+.payment-modal-header h2 { font-size: 1.3rem; font-weight: 800; margin-bottom: 4px; color: var(--t1); }
+.payment-modal-amount { font-size: 1.5rem; font-weight: 800; color: var(--green); margin-top: 6px; }
+.payment-modal-conditions { margin-bottom: 18px; }
+.payment-modal-conditions ul { list-style: none; }
+.payment-modal-conditions li {
+  padding: 5px 0 5px 22px; font-size: .85rem; color: var(--t2); position: relative;
+}
+.payment-modal-conditions li::before { content: '\2713'; position: absolute; left: 0; color: var(--green); font-weight: 700; }
+.payment-modal-element { margin-bottom: 18px; }
+
 /* ===================== LOGIN PAGE ===================== */
 .login-page {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
