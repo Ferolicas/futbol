@@ -48,7 +48,7 @@ export async function POST(request) {
     // primera prueba en producción).
     console.log('[mp:subscribe] PSE/otro formData:', JSON.stringify(formData || {}).slice(0, 400));
     const { id, status, redirectUrl } = await createOrder({
-      plan, formData, userId: user.id, backUrl, ipAddress: ip,
+      plan, formData, userId: user.id, backUrl, ipAddress: ip, payerName: user.displayName,
     });
     const { error } = await supabaseAdmin.from('user_profiles').update({
       mp_preapproval_id: id,
@@ -62,9 +62,15 @@ export async function POST(request) {
     return Response.json({ ok: true, status, redirectUrl });
   } catch (e) {
     console.error('[mp:subscribe]', e.message);
-    const msg = /test user|real or test/i.test(e.message)
-      ? 'En modo prueba el pagador debe ser un usuario de prueba de Mercado Pago.'
-      : 'No se pudo procesar el pago. Intenta de nuevo.';
-    return Response.json({ error: msg }, { status: 500 });
+    // 424 / BankTransfers / 9032 / 9034 → la pasarela PSE de MP está caída
+    // momentáneamente (failed_dependency). NO es culpa del pagador: reintentar.
+    const isBankTransient = /\b424\b|BankTransfers|903[24]|failed_dependency/i.test(e.message);
+    const isTestUser = /test user|real or test/i.test(e.message);
+    const msg = isBankTransient
+      ? 'El banco no está disponible en este momento. Espera un minuto e intenta de nuevo.'
+      : isTestUser
+        ? 'En modo prueba el pagador debe ser un usuario de prueba de Mercado Pago.'
+        : 'No se pudo procesar el pago. Intenta de nuevo.';
+    return Response.json({ error: msg }, { status: 502 });
   }
 }

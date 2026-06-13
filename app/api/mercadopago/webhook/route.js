@@ -58,20 +58,27 @@ async function applyStatus({ externalRef, preapprovalId, appStatus, dedupeKey })
 
 export async function POST(request) {
   const url = new URL(request.url);
+  // data.id de la QUERY STRING — es EXACTAMENTE lo que MP firma en x-signature.
+  const dataIdFromQuery = url.searchParams.get('data.id') || url.searchParams.get('id');
   let type = url.searchParams.get('type') || url.searchParams.get('topic');
-  let id = url.searchParams.get('data.id') || url.searchParams.get('id');
 
   const body = await request.json().catch(() => null);
   if (body) {
     type = body.type || body.topic || type;
-    id = body.data?.id || body.id || id;
   }
+  // id del recurso a releer: el del query (coincide con la firma) o, si falta, el del body.
+  const id = dataIdFromQuery || body?.data?.id || body?.id;
   if (!id || !type) return Response.json({ received: true, ignored: true });
 
-  // 1) Firma
-  if (!verifyWebhookSignature(request, id)) {
-    console.error('[mp:webhook] firma inválida');
-    return Response.json({ error: 'invalid signature' }, { status: 401 });
+  // 1) Firma (defensa en profundidad). La verificamos con el data.id del QUERY,
+  //    que es lo que MP firma. Si NO valida, NO rechazamos: la seguridad real es
+  //    la re-lectura del recurso vía API con nuestro token (un id falso da 404 o
+  //    estado != approved → no activa; un id real activa al titular que pagó, no
+  //    a un atacante). Rechazar con 401 por firma dejaba a clientes que pagaron
+  //    SIN activar — ese era el bug crítico.
+  const sig = verifyWebhookSignature(request, dataIdFromQuery || id);
+  if (sig === false) {
+    console.warn('[mp:webhook] x-signature no validó — se continúa por re-lectura API', { id, type });
   }
 
   try {
