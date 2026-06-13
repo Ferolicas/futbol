@@ -13,27 +13,16 @@ const PLATFORM_LINES = [
   'Cancela cuando quieras',
 ];
 
-const PLAN_CONDITIONS = {
-  semanal: {
-    title: 'Plan Semanal',
-    lines: ['Suscripcion semanal — $7 USD/semana', 'Cobro automatico cada 7 dias', ...PLATFORM_LINES],
-  },
-  mensual: {
-    title: 'Plan Mensual',
-    lines: ['Suscripcion mensual — $15 USD/mes', 'Cobro automatico cada mes', ...PLATFORM_LINES],
-  },
-  trimestral: {
-    title: 'Plan Trimestral',
-    lines: ['Suscripcion trimestral — $35 USD cada 3 meses', 'Cobro automatico cada 3 meses', ...PLATFORM_LINES],
-  },
-  semestral: {
-    title: 'Plan Semestral',
-    lines: ['Suscripcion semestral — $80 USD cada 6 meses', 'Cobro automatico cada 6 meses', ...PLATFORM_LINES],
-  },
-  anual: {
-    title: 'Plan Anual',
-    lines: ['Suscripcion anual — €100 EUR/año (antes €120, ahorras €20)', 'Cobro automatico cada 12 meses', ...PLATFORM_LINES],
-  },
+// Metadata por plan (periodo legible). El PRECIO NO se hardcodea: se inyecta
+// desde displayAmount, que ya viene en la MONEDA LOCAL del cliente — así el
+// label coincide con lo que ve y paga (ej. "6 EUR/semana"), sin USD fijo que
+// confunda.
+const PLAN_META = {
+  semanal:    { title: 'Plan Semanal',    period: 'semanal',    per: 'semana',  cycle: 'cada 7 dias' },
+  mensual:    { title: 'Plan Mensual',    period: 'mensual',    per: 'mes',     cycle: 'cada mes' },
+  trimestral: { title: 'Plan Trimestral', period: 'trimestral', per: '3 meses', cycle: 'cada 3 meses' },
+  semestral:  { title: 'Plan Semestral',  period: 'semestral',  per: '6 meses', cycle: 'cada 6 meses' },
+  anual:      { title: 'Plan Anual',      period: 'anual',      per: 'año',     cycle: 'cada 12 meses' },
 };
 
 function PaymentForm({ plan, displayAmount, onClose }) {
@@ -42,7 +31,12 @@ function PaymentForm({ plan, displayAmount, onClose }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const conditions = PLAN_CONDITIONS[plan] || { title: 'Plan', lines: PLATFORM_LINES };
+  const meta = PLAN_META[plan] || { title: 'Plan', period: '', per: 'periodo', cycle: 'cada periodo' };
+  const conditionLines = [
+    `Suscripcion ${meta.period} — ${displayAmount}/${meta.per}`,
+    `Cobro automatico ${meta.cycle}`,
+    ...PLATFORM_LINES,
+  ];
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -73,13 +67,13 @@ function PaymentForm({ plan, displayAmount, onClose }) {
       <div className="payment-modal-header">
         <button type="button" className="payment-modal-close" onClick={onClose}>&times;</button>
         <img src="/vflogo.png" alt="CFanalisis" className="payment-modal-logo" />
-        <h2>{conditions.title}</h2>
+        <h2>{meta.title}</h2>
         <p className="payment-modal-amount">{displayAmount}</p>
       </div>
 
       <div className="payment-modal-conditions">
         <ul>
-          {conditions.lines.map((line, i) => (
+          {conditionLines.map((line, i) => (
             <li key={i}>{line}</li>
           ))}
         </ul>
@@ -120,10 +114,21 @@ export default function PaymentModal({ clientSecret, plan, displayAmount, onClos
       colorDanger: '#ff3d57',
       borderRadius: '10px',
       fontFamily: 'inherit',
+      // Iconos claros: con theme 'night' el icono de tarjeta salía negro sobre
+      // fondo oscuro (invisible). Forzamos color claro en todos los iconos.
+      colorIcon: '#e8e8ef',
+      colorIconTab: '#cfcfe0',
+      colorIconTabSelected: '#06060b',
+      colorIconTabHover: '#ffffff',
+      colorIconCardCvc: '#e8e8ef',
+      colorIconCardError: '#ff3d57',
     },
     rules: {
       '.Tab': { border: '1px solid #1e1e2e', backgroundColor: '#12121c' },
       '.Tab--selected': { borderColor: '#00e676', backgroundColor: '#0d0d14' },
+      '.TabIcon': { fill: '#e8e8ef' },
+      '.TabIcon--selected': { fill: '#06060b' },
+      '.Icon': { fill: '#e8e8ef' },
       '.Input': { border: '1px solid #1e1e2e', backgroundColor: '#12121c' },
       '.Input:focus': { borderColor: '#00e676' },
     },
