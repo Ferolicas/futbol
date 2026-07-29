@@ -19,6 +19,7 @@ export default function AnalysisSceneModal({
   const closeRef = useRef(null);
   const scenesRef = useRef([]);
   const progressRef = useRef(0);
+  const touchYRef = useRef(null);
   const [activeScene, setActiveScene] = useState(0);
   const [sceneCount, setSceneCount] = useState(0);
 
@@ -106,6 +107,55 @@ export default function AnalysisSceneModal({
       });
     };
 
+    const routeScrollDelta = (delta) => {
+      const active = scenesRef.current[Math.round(progressRef.current)];
+      let remaining = delta;
+
+      if (active) {
+        const maxInnerScroll = active.scrollHeight - active.clientHeight;
+        if (maxInnerScroll > 2 && delta > 0 && active.scrollTop < maxInnerScroll) {
+          const consumed = Math.min(delta, maxInnerScroll - active.scrollTop);
+          active.scrollTop += consumed;
+          remaining -= consumed;
+        } else if (maxInnerScroll > 2 && delta < 0 && active.scrollTop > 0) {
+          const consumed = Math.max(delta, -active.scrollTop);
+          active.scrollTop += consumed;
+          remaining -= consumed;
+        }
+      }
+
+      if (Math.abs(remaining) >= 1) scroller.scrollTop += remaining;
+    };
+
+    const onWheel = (event) => {
+      let delta = event.deltaY;
+      if (event.deltaMode === 1) delta *= 24;
+      if (event.deltaMode === 2) delta *= scroller.clientHeight;
+      if (Math.abs(delta) < 1) return;
+
+      event.preventDefault();
+      routeScrollDelta(delta);
+    };
+
+    const onTouchStart = (event) => {
+      touchYRef.current = event.touches[0]?.clientY ?? null;
+    };
+
+    const onTouchMove = (event) => {
+      const nextY = event.touches[0]?.clientY;
+      if (nextY == null || touchYRef.current == null) return;
+      const delta = touchYRef.current - nextY;
+      touchYRef.current = nextY;
+      if (Math.abs(delta) < 1) return;
+
+      event.preventDefault();
+      routeScrollDelta(delta);
+    };
+
+    const onTouchEnd = () => {
+      touchYRef.current = null;
+    };
+
     const onKeyDown = (event) => {
       const forward = ['ArrowDown', 'PageDown'].includes(event.key) || (event.key === ' ' && !event.shiftKey);
       const backward = ['ArrowUp', 'PageUp'].includes(event.key) || (event.key === ' ' && event.shiftKey);
@@ -121,6 +171,11 @@ export default function AnalysisSceneModal({
     const observer = new MutationObserver(syncScenes);
     observer.observe(stage, { childList: true, subtree: true });
     scroller.addEventListener('scroll', readNativeScroll, { passive: true });
+    stage.addEventListener('wheel', onWheel, { passive: false });
+    stage.addEventListener('touchstart', onTouchStart, { passive: true });
+    stage.addEventListener('touchmove', onTouchMove, { passive: false });
+    stage.addEventListener('touchend', onTouchEnd, { passive: true });
+    stage.addEventListener('touchcancel', onTouchEnd, { passive: true });
     scroller.addEventListener('keydown', onKeyDown);
     window.addEventListener('resize', readNativeScroll, { passive: true });
 
@@ -129,6 +184,11 @@ export default function AnalysisSceneModal({
       cancelAnimationFrame(scrollFrame);
       observer.disconnect();
       scroller.removeEventListener('scroll', readNativeScroll);
+      stage.removeEventListener('wheel', onWheel);
+      stage.removeEventListener('touchstart', onTouchStart);
+      stage.removeEventListener('touchmove', onTouchMove);
+      stage.removeEventListener('touchend', onTouchEnd);
+      stage.removeEventListener('touchcancel', onTouchEnd);
       scroller.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', readNativeScroll);
     };

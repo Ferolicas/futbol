@@ -136,5 +136,8 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - 2026-07-29: el análisis completo de Fútbol y Baseball se abre en un modal
   nativo con escenario sticky. El scroll interno es continuo y sin cooldown;
   su progreso funde las capas en el mismo viewport, sin flechas ni scroll-snap.
+  El controlador debe reenviar rueda/swipe al conductor exterior cuando la
+  escena activa no tenga overflow o ya esté en su borde; `overscroll-behavior`
+  por sí solo no encadena elementos posicionados de forma absoluta.
 - 2026-06: los nombres `supabaseAdmin`/`createSupabaseServerClient` son shims PG, no Supabase activo.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.
