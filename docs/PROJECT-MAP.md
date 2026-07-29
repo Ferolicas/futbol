@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-07-29 · Commit base: `a473445`
+Actualizado: 2026-07-29 · Commit base: `44c76aa`
 
 ## Identidad y stack
 
@@ -120,6 +120,7 @@ snapshots live a los IDs de la jornada antes de serializar la respuesta.
 - `app/globals.css`: sistema visual de Home, auth, planes, checkout y dashboard.
 - `app/dashboard/components/DashboardHeader.js`: encabezado autenticado compartido.
 - `app/dashboard/components/SportToggle.js`: selector desplegable y precarga de fútbol/béisbol.
+- `app/dashboard/components/AnalysisFullModal.js`: carcasa compartida del análisis completo con scroll vertical nativo.
 - `components/providers.js`: sesión global y sincronización de zona horaria.
 - `lib/db.js`: pool y compatibilidad de queries; afecta casi toda la app.
 - `lib/auth-pg.js` y `lib/auth-session.js`: cualquier cambio afecta login, layouts y APIs.
@@ -151,17 +152,10 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - 2026-07-29: `/planes` usa un escenario fijo; scroll, teclado y swipe cambian la tarjeta activa sin crear una lista vertical.
 - 2026-07-29: el dashboard recibe identidad inicial desde su layout de servidor y precarga ambas rutas deportivas.
 - 2026-07-29: el análisis completo de Fútbol y Baseball se abre en un modal
-  nativo con escenario fijo. El scroll interno es continuo;
-  su progreso cambia capas nítidas en el mismo viewport, sin blur, escalado,
-  flechas ni scroll-snap. El controlador captura rueda/swipe en el conductor y
-  actualiza un progreso virtual inmediatamente, sin depender de `scrollTop`
-  nativo. Fuera del recorrido interno, cada rueda o pulsación de navegación
-  avanza exactamente una escena; la ráfaga inercial del trackpad queda agrupada
-  hasta 80 ms de reposo para no saltar varias escenas. En iOS, cada gesto elige
-  un solo motor: WebKit cinético para el contenido que desborda o progreso
-  virtual al iniciar desde un borde; así no mezcla `scrollTop` manual con la
-  inercia nativa. Pointer Events permanece como controlador táctil para el resto
-  de plataformas.
+  compartido como documento vertical continuo. Todas las secciones permanecen
+  en el flujo normal y el único contenedor desplazable usa el comportamiento
+  nativo de rueda, trackpad, teclado e iOS/Android, sin controlador de gestos,
+  escenas, progreso virtual ni scroll-snap.
 - 2026-07-29: `BrandLogoMedia` usa `/logo-metalizado-fast.webm` (512 px/15 fps,
   VP9 con plano alfa real) y `/logo-metalizado-alpha-fast.webp` como primer
   frame/fallback estático en WebKit/iOS. Un coordinador permite reproducir un

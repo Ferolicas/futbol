@@ -31,13 +31,14 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - Navegación del dashboard: orden fijo `Partidos → Combinada → Estado`.
 - Tabs y chips: estado activo con color, borde y fondo; nunca dependen solo del color.
 - Tarjetas: una sola capa de profundidad, sin `backdrop-filter` ni animaciones de sombra repetidas por tarjeta.
+- Constructor de combinadas: cada selección reserva una fila completa para
+  partido/mercado y coloca probabilidad + cuota en una segunda fila estable;
+  los títulos largos envuelven y nunca se truncan para hacer sitio a métricas.
 - Checkout: hoja inferior en móvil y modal centrado en escritorio. Stripe y Mercado Pago comparten la misma carcasa visual.
-- Modal de análisis: escenario fijo sin paginación ni flechas. Rueda, teclado y
-  swipe capturados desde el conductor controlan las capas en el mismo viewport;
-  cuando no queda contenido interno por recorrer, cada gesto de rueda/trackpad
-  o pulsación de navegación cambia una sola escena;
-  las escenas permanecen nítidas, sin blur ni escalado, y solo el contenido que
-  excede la altura conserva scroll interno.
+- Modal de análisis: documento vertical continuo, sin escenas, paginación ni
+  revelado progresivo. Fútbol y Baseball mantienen todas sus secciones en el
+  flujo normal del DOM y una sola superficie desplazable usa el scroll nativo
+  del navegador para rueda, trackpad, teclado y gestos táctiles.
 - Cargas: skeleton de superficie. `BrandLogoMedia` utiliza un VP9 optimizado
   con alfa real en Chromium y una imagen WebP estática transparente en
   WebKit/iOS o movimiento reducido.
@@ -45,14 +46,12 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 ## Motion y rendimiento
 
 - Interacciones táctiles: 150–220 ms.
-- Cambios de escena del análisis: fundido nítido de 120–180 ms, sin escalado.
 - El scroll de Home y planes se desbloquea a los 110 ms para aceptar gestos rápidos.
 - Solo los estados realmente en vivo pueden mantener un pulso continuo.
 - `prefers-reduced-motion` elimina transiciones y animaciones no esenciales.
 - Las rutas `/dashboard` y `/dashboard/baseball` se precargan desde el selector deportivo.
-- Las transiciones del análisis responden al gesto y respetan
-  `prefers-reduced-motion`; la inercia de un trackpad se agrupa como un único
-  gesto, sin introducir una espera perceptible entre gestos consecutivos.
+- El modal de análisis no intercepta ni agrupa gestos: conserva la inercia y la
+  respuesta nativas de cada navegador.
 
 ## Responsive
 

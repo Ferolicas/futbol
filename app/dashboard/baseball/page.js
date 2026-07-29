@@ -45,7 +45,7 @@ import { fetcher } from '../../../lib/fetcher';
 import { usePusherEvent } from '../../../lib/use-pusher';
 import { DateCaption, LeaguePicker, StatusPicker } from '../components/DashboardFilters';
 import DashboardBuffer from '../components/DashboardBuffer';
-import AnalysisSceneModal from '../components/AnalysisSceneModal';
+import AnalysisFullModal from '../components/AnalysisFullModal';
 
 const BaseballAnalysisExperience = dynamic(
   () => import('./analisis/[id]/page').then((module) => module.BaseballAnalysisExperience),
@@ -552,15 +552,14 @@ export default function BaseballDashboard() {
 
 function BaseballAnalysisModal({ id, onClose }) {
   return (
-    <AnalysisSceneModal
+    <AnalysisFullModal
       onClose={onClose}
-      sceneSelector=".baseball-analysis-page.is-embedded > .baseball-analysis-hero, .baseball-analysis-page.is-embedded > .baseball-analysis-section"
       variant="baseball"
       bodyClassName="baseball-analysis-modal-body"
       ariaLabel="Análisis completo de baseball"
     >
       <BaseballAnalysisExperience fixtureId={id} embedded onClose={onClose} />
-    </AnalysisSceneModal>
+    </AnalysisFullModal>
   );
 }
 

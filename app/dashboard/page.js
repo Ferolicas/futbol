@@ -34,7 +34,7 @@ import { useLiveStats } from './live-stats-context';
 import { useSelectedMarkets } from './selected-markets-context';
 import { DateCaption, LeaguePicker, StatusPicker } from './components/DashboardFilters';
 import DashboardBuffer from './components/DashboardBuffer';
-import AnalysisSceneModal from './components/AnalysisSceneModal';
+import AnalysisFullModal from './components/AnalysisFullModal';
 
 const AnalysisExperience = dynamic(
   () => import('./analisis/[id]/page').then((module) => module.AnalysisExperience),
@@ -1907,13 +1907,12 @@ const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFav
 
 function AnalysisModal({ id, onClose }) {
   return (
-    <AnalysisSceneModal
+    <AnalysisFullModal
       onClose={onClose}
-      sceneSelector=".analysis-embedded .ap2-main > .ap2-glass"
       ariaLabel="Análisis completo"
     >
       <AnalysisExperience fixtureId={id} embedded onClose={onClose} />
-    </AnalysisSceneModal>
+    </AnalysisFullModal>
   );
 }
 
