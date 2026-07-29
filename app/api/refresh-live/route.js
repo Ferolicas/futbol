@@ -1,4 +1,4 @@
-import { redisGet, redisSet, KEYS, TTL } from '../../../lib/redis';
+import { redisGet, redisMGet, redisSet, KEYS, TTL } from '../../../lib/redis';
 import { ALL_LEAGUE_IDS, isYouthTeam } from '../../../lib/leagues';
 import { getCurrentUser } from '../../../lib/auth-pg';
 import { statLookup, STAT_ALIASES } from '../../../lib/match-stats';
@@ -19,6 +19,32 @@ const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'INT'];
 
 const YOUTH_RE = /\bU-?1[2-9]\b|\bU-?2[0-3]\b|\bunder[ -]?(1[2-9]|2[0-3])\b|\byouth\b|\bjunior\b|\bsub-?(1[2-9]|2[0-3])\b/i;
+
+// Fallback ligero para el navegador: solo lee el snapshot que el worker ya
+// mantiene en Redis. Nunca llama a API-Football ni consume cuota.
+export async function GET(request) {
+  try {
+    if (!(await getCurrentUser())) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const requestedDate = new URL(request.url).searchParams.get('date');
+    const utcDate = new Date().toISOString().split('T')[0];
+    const date = requestedDate || utcDate;
+    const dates = [...new Set([utcDate, date])];
+    const snapshots = await redisMGet(dates.map(item => KEYS.liveStats(item)));
+    const liveData = {};
+    snapshots.forEach(snapshot => {
+      if (snapshot && typeof snapshot === 'object') Object.assign(liveData, snapshot);
+    });
+    return Response.json({
+      success: true,
+      liveStats: liveData,
+      timestamp: new Date().toISOString(),
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error) {
+    return jsonError(error);
+  }
+}
 
 function extractLiveStats(match) {
   const homeId = match.teams.home.id;

@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 const SelectedMarketsContext = createContext({
   selectedMarkets: {},
@@ -15,7 +15,7 @@ export function useSelectedMarkets() {
 export default function SelectedMarketsProvider({ children }) {
   const [selectedMarkets, setSelectedMarkets] = useState({});
 
-  const toggleMarket = (fixtureId, market, matchName) => {
+  const toggleMarket = useCallback((fixtureId, market, matchName) => {
     setSelectedMarkets(prev => {
       const n = { ...prev };
       n[fixtureId] = { ...(n[fixtureId] || {}) };
@@ -27,10 +27,15 @@ export default function SelectedMarketsProvider({ children }) {
       }
       return n;
     });
-  };
+  }, []);
+
+  const value = useMemo(
+    () => ({ selectedMarkets, toggleMarket, setSelectedMarkets }),
+    [selectedMarkets, toggleMarket],
+  );
 
   return (
-    <SelectedMarketsContext.Provider value={{ selectedMarkets, toggleMarket, setSelectedMarkets }}>
+    <SelectedMarketsContext.Provider value={value}>
       {children}
     </SelectedMarketsContext.Provider>
   );

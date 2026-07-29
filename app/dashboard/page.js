@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import useSWR from 'swr';
+import { useVirtualizer, useWindowVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowRight,
   BarChart3,
@@ -69,6 +70,7 @@ const cap = (v) => Math.min(95, v);
 // primera carga del tab. Las subsiguientes navegaciones (back desde
 // detalle, cambio de fecha) lo saltan.
 let _splashDone = false;
+const EMPTY_MARKETS = Object.freeze({});
 
 // _dashCache fue eliminado en favor de SWR. SWR mantiene su propia cache
 // global por key — al volver desde /dashboard/analisis/[id] el cache hit
@@ -115,9 +117,8 @@ export default function Dashboard() {
   const [savingComb, setSavingComb] = useState(false);
   // Live match stats — shared context: dashboard + detail page use the same data
   const { liveStats, setLiveStats, isPopulated } = useLiveStats();
-  // F2/F6/F7: estado del WS. Patrón realtime tipo baseball — WS instantáneo como
-  // fuente primaria + SWR 60s de respaldo. El poll de 30s a /api/refresh-live solo
-  // se activa como FALLBACK cuando el WS NO está conectado (mata el polling redundante).
+  // El WebSocket es la fuente primaria; SWR y el snapshot Redis solo actúan
+  // como respaldo conservador si la conexión cae o deja de entregar eventos.
   const wsState = useWorkerSocketState();
   // Estado de re-analyze (owner) eliminado junto con su botón del header.
   // Modal: ver análisis completo sin navegar
@@ -132,6 +133,9 @@ export default function Dashboard() {
   // Puente para que el onSuccess de SWR llame a applyFixturesData (definida mas
   // abajo) sin problemas de orden de declaracion.
   const applyFixturesDataRef = useRef(null);
+  const liveFallbackInFlightRef = useRef(null);
+  const liveFallbackLastRunRef = useRef(0);
+  const wsConnectedAtRef = useRef(0);
   // Web push notifications
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushSupported, setPushSupported] = useState(false);
@@ -167,11 +171,14 @@ export default function Dashboard() {
 
   // Apply live data to fixtures — NEVER downgrade a finished match or go backwards in time
   const applyLiveUpdate = useCallback((prev, freshMatches) => {
+    if (!Array.isArray(freshMatches) || freshMatches.length === 0) return prev;
     const FT = ['FT', 'AET', 'PEN'];
+    const freshById = new Map(
+      freshMatches.map(match => [Number(match.fixtureId || match.fixture?.id), match]),
+    );
+    let changed = false;
     const updated = prev.map(f => {
-      const fresh = freshMatches.find(m =>
-        (m.fixtureId || m.fixture?.id) === f.fixture.id
-      );
+      const fresh = freshById.get(Number(f.fixture.id));
       if (!fresh) return f;
 
       // NEVER downgrade a finished match — FT is final
@@ -187,24 +194,39 @@ export default function Dashboard() {
         return f;
       }
 
+      const nextStatus = freshStatus || f.fixture.status;
+      const nextGoals = fresh.goals || f.goals;
+      const nextScore = fresh.score || f.score;
+      const statusUnchanged =
+        nextStatus?.short === f.fixture.status?.short &&
+        nextStatus?.elapsed === f.fixture.status?.elapsed &&
+        nextStatus?.extra === f.fixture.status?.extra &&
+        nextStatus?.long === f.fixture.status?.long;
+      const goalsUnchanged =
+        nextGoals?.home === f.goals?.home && nextGoals?.away === f.goals?.away;
+      const scoreUnchanged = JSON.stringify(nextScore) === JSON.stringify(f.score);
+      if (statusUnchanged && goalsUnchanged && scoreUnchanged) return f;
+
+      changed = true;
       return {
         ...f,
         fixture: {
           ...f.fixture,
-          status: freshStatus || f.fixture.status,
+          status: nextStatus,
         },
-        goals: fresh.goals || f.goals,
-        score: fresh.score || f.score,
+        goals: nextGoals,
+        score: nextScore,
       };
     });
-    return updated;
+    return changed ? updated : prev;
   }, []);
 
   // isOwner y handleReanalyze eliminados junto con el botón "Re-analizar" del header.
 
   // ─── SWR: ÚNICA fuente de /api/fixtures por (date, tz) ──────────────────
-  // - Revalida cada 60s en background mientras la pestaña tenga foco.
-  // - Revalida al volver al foco (usuario cambia de tab y vuelve).
+  // - El WebSocket es la fuente primaria; con conexión sana no se vuelve a
+  //   descargar el payload completo en segundo plano.
+  // - Si la conexión cae, SWR hace una revalidación conservadora cada 5 min.
   // - Dedup 5s para que varias llamadas a mutate() simultaneas no spameen.
   // - keepPreviousData=true para que al cambiar de fecha NO se vea vacio.
   // - La key es null mientras tzReady sea false → SWR no hace fetch hasta que
@@ -213,12 +235,13 @@ export default function Dashboard() {
     () => (tzReady && date) ? `/api/fixtures?date=${date}&tz=${encodeURIComponent(userTz)}` : null,
     [tzReady, date, userTz],
   );
+  const isViewingToday = date === todayInTz(userTz);
   const { mutate: fixturesMutate } = useSWR(
     fixturesKey,
     fetcher,
     {
-      refreshInterval: 60_000,
-      revalidateOnFocus: true,
+      refreshInterval: isViewingToday && wsState !== 'connected' ? 300_000 : 0,
+      revalidateOnFocus: isViewingToday && wsState !== 'connected',
       revalidateOnReconnect: true,
       dedupingInterval: 5000,
       keepPreviousData: true,
@@ -238,53 +261,6 @@ export default function Dashboard() {
   useEffect(() => {
     if (fixturesKey) setLoading(true);
   }, [fixturesKey]);
-
-  // Fetch missing stats for finished matches immediately (don't wait for cron).
-  // Called on page load and after reanalyze — uses Redis cache, API only when truly missing.
-  const refreshFinishedStats = useCallback(async (currentFixtures, currentLiveStats) => {
-    const FINISHED = ['FT', 'AET', 'PEN'];
-    const missing = (currentFixtures || []).filter(f => {
-      if (!FINISHED.includes(f.fixture?.status?.short)) return false;
-      const s = currentLiveStats[f.fixture.id];
-      return !s || (!s.corners && !s.yellowCards && !s.goalScorers?.length && !s.cardEvents?.length);
-    });
-    if (missing.length === 0) return;
-
-    const results = await Promise.allSettled(
-      missing.map(f =>
-        fetch(`/api/match/${f.fixture.id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'refresh-stats' }),
-        }).then(r => r.json())
-      )
-    );
-
-    const updates = {};
-    results.forEach((r, i) => {
-      if (r.status === 'fulfilled' && r.value?.stats) {
-        const fid = missing[i].fixture.id;
-        const stats = r.value.stats;
-        const existing = currentLiveStats[fid];
-        // Merge: take corners/cards/scorers but preserve FT status/goals
-        updates[fid] = {
-          ...(existing || {}),
-          corners: stats.corners || existing?.corners,
-          yellowCards: stats.yellowCards || existing?.yellowCards,
-          redCards: stats.redCards || existing?.redCards,
-          goalScorers: stats.goalScorers?.length > 0 ? stats.goalScorers : (existing?.goalScorers || []),
-          cardEvents: stats.cardEvents?.length > 0 ? stats.cardEvents : (existing?.cardEvents || []),
-          missedPenalties: stats.missedPenalties?.length > 0 ? stats.missedPenalties : (existing?.missedPenalties || []),
-          // Always keep the fixture's FT status, never overwrite with stale live status
-          status: existing?.status || missing[i].fixture.status,
-          goals: existing?.goals || missing[i].goals,
-        };
-      }
-    });
-    if (Object.keys(updates).length > 0) {
-      setLiveStats(prev => ({ ...prev, ...updates }));
-    }
-  }, [setLiveStats]);
 
   // Hidratacion unificada desde la respuesta de /api/fixtures. Antes esta logica
   // estaba duplicada entre el onSuccess de SWR y un fetch manual en loadFixtures,
@@ -389,10 +365,8 @@ export default function Dashboard() {
       setLiveStats({});
     }
 
-    // Background: fetch missing stats for finished matches (only if truly missing)
-    refreshFinishedStats(fx, data.initialLiveStats || {});
     setLoading(false);
-  }, [refreshFinishedStats, setLiveStats]);
+  }, [setLiveStats]);
 
   // Mantener el puente onSuccess→applyFixturesData siempre fresco (evita TDZ:
   // el onSuccess de SWR esta declarado antes que applyFixturesData).
@@ -406,76 +380,84 @@ export default function Dashboard() {
     return fixturesMutate();
   }, [fixturesMutate]);
 
-  // Force-refresh live data: triggers live + corners crons on the server,
-  // then updates all live stats (scores, corners, cards, goal scorers, minutes).
-  const [refreshingLive, setRefreshingLive] = useState(false);
-
-  const refreshLiveData = useCallback(async (overrideDate, { force = false } = {}) => {
+  // Fallback cache-only: lee el snapshot del worker en Redis. La ruta GET nunca
+  // dispara proveedores externos y se deduplica para que solo exista una
+  // petición en vuelo aunque coincidan varios chequeos.
+  const refreshLiveData = useCallback((overrideDate) => {
     const sentDate = overrideDate || date;
-    setRefreshingLive(true);
-    try {
-      const res = await fetch('/api/refresh-live', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: sentDate, force }),
-      });
-      const data = await res.json();
-      const FT = ['FT', 'AET', 'PEN'];
+    if (liveFallbackInFlightRef.current) return liveFallbackInFlightRef.current;
+    const task = (async () => {
+      try {
+        const res = await fetch(`/api/refresh-live?date=${encodeURIComponent(sentDate)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (dateRef.current !== sentDate) return;
+        const FT = ['FT', 'AET', 'PEN'];
 
-      // Helper: merge live stats into state
-      const mergeLiveStats = (statsObj) => {
-        if (!statsObj || typeof statsObj !== 'object') return;
-        setLiveStats(prev => {
-          const next = { ...prev };
-          for (const [fid, fresh] of Object.entries(statsObj)) {
-            const existing = next[fid];
-            // If server says FT, always accept — this fixes stale "live" entries
-            if (FT.includes(fresh.status?.short)) {
-              next[fid] = {
-                ...(existing || {}),
-                ...fresh,
-                corners: fresh.corners?.total > 0 ? fresh.corners : (existing?.corners || fresh.corners),
-                goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : (existing?.goalScorers || []),
-                cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : (existing?.cardEvents || []),
-                missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : (existing?.missedPenalties || []),
-              };
-            } else if (existing && FT.includes(existing.status?.short)) {
-              // Existing is FT — only upgrade stats, never downgrade status
-              next[fid] = {
-                ...existing,
-                corners: fresh.corners?.total > 0 ? fresh.corners : existing.corners,
-                yellowCards: fresh.yellowCards?.total > 0 ? fresh.yellowCards : existing.yellowCards,
-                redCards: fresh.redCards || existing.redCards,
-                goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : existing.goalScorers,
-                cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : existing.cardEvents,
-                missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : existing.missedPenalties,
-              };
-            } else {
-              next[fid] = {
-                ...(existing || {}),
-                ...fresh,
-                corners: fresh.corners?.total > 0 ? fresh.corners : (existing?.corners || fresh.corners),
-                goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : (existing?.goalScorers || []),
-                missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : (existing?.missedPenalties || []),
-              };
+        // Helper: merge live stats into state
+        const mergeLiveStats = (statsObj) => {
+          if (!statsObj || typeof statsObj !== 'object') return;
+          setLiveStats(prev => {
+            const next = { ...prev };
+            let changed = false;
+            for (const [fid, fresh] of Object.entries(statsObj)) {
+              const existing = next[fid];
+              let candidate;
+              // If server says FT, always accept — this fixes stale "live" entries
+              if (FT.includes(fresh.status?.short)) {
+                candidate = {
+                  ...(existing || {}),
+                  ...fresh,
+                  corners: fresh.corners?.total > 0 ? fresh.corners : (existing?.corners || fresh.corners),
+                  goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : (existing?.goalScorers || []),
+                  cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : (existing?.cardEvents || []),
+                  missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : (existing?.missedPenalties || []),
+                };
+              } else if (existing && FT.includes(existing.status?.short)) {
+                // Existing is FT — only upgrade stats, never downgrade status
+                candidate = {
+                  ...existing,
+                  corners: fresh.corners?.total > 0 ? fresh.corners : existing.corners,
+                  yellowCards: fresh.yellowCards?.total > 0 ? fresh.yellowCards : existing.yellowCards,
+                  redCards: fresh.redCards || existing.redCards,
+                  goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : existing.goalScorers,
+                  cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : existing.cardEvents,
+                  missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : existing.missedPenalties,
+                };
+              } else {
+                candidate = {
+                  ...(existing || {}),
+                  ...fresh,
+                  corners: fresh.corners?.total > 0 ? fresh.corners : (existing?.corners || fresh.corners),
+                  goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : (existing?.goalScorers || []),
+                  missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : (existing?.missedPenalties || []),
+                };
+              }
+              if (JSON.stringify(candidate) !== JSON.stringify(existing)) {
+                next[fid] = candidate;
+                changed = true;
+              }
             }
-          }
-          return next;
-        });
-        setFixtures(prev => applyLiveUpdate(prev, Object.values(statsObj)));
-      };
+            return changed ? next : prev;
+          });
+          setFixtures(prev => applyLiveUpdate(prev, Object.values(statsObj)));
+        };
 
-      // Merge today's live stats
-      if (data.liveStats && typeof data.liveStats === 'object') {
-        mergeLiveStats(data.liveStats);
+        if (data.liveStats && typeof data.liveStats === 'object') {
+          mergeLiveStats(data.liveStats);
+        }
+        if (data.viewDateLiveStats && typeof data.viewDateLiveStats === 'object') {
+          mergeLiveStats(data.viewDateLiveStats);
+        }
+      } catch {}
+    })();
+    const trackedTask = task.finally(() => {
+      if (liveFallbackInFlightRef.current === trackedTask) {
+        liveFallbackInFlightRef.current = null;
       }
-      // Merge viewed date live stats (fixes stale entries from past dates)
-      if (data.viewDateLiveStats && typeof data.viewDateLiveStats === 'object') {
-        mergeLiveStats(data.viewDateLiveStats);
-      }
-    } catch {} finally {
-      setRefreshingLive(false);
-    }
+    });
+    liveFallbackInFlightRef.current = trackedTask;
+    return trackedTask;
   }, [date, applyLiveUpdate]);
 
   // On mount ONLY: detect user timezone, set date to local today, load fixtures.
@@ -488,10 +470,9 @@ export default function Dashboard() {
     setUserTz(tz);
     const localDate = todayInTz(tz);
     setDate(localDate);
-    // refreshLiveData primero (igual que antes) y, al terminar, habilitamos el
-    // fetch de fixtures (tzReady=true). SWR dispara UN unico /api/fixtures ya con
-    // la tz correcta del cliente; onSuccess → applyFixturesData hidrata todo.
-    refreshLiveData(localDate).finally(() => setTzReady(true));
+    // Habilitar inmediatamente la carga principal. El worker y /api/fixtures ya
+    // entregan el snapshot live; no bloquear el primer render con otra petición.
+    setTzReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -502,20 +483,35 @@ export default function Dashboard() {
   // dispara el fetch → cero polling redundante. Esto cierra el hueco donde la
   // tarjeta quedaba congelada aunque el push sí llegara (el WS estaba "connected"
   // pero no entregaba y el poll anterior se suprimía por wsState).
+  const hasLiveFixtures = useMemo(
+    () => fixtures.some(f => isLive(f.fixture.status.short)),
+    [fixtures],
+  );
+
   useEffect(() => {
-    const hasLive = fixtures.some(f => isLive(f.fixture.status.short));
-    if (!hasLive) return;
-    const STALE_MS = 40000;
+    if (wsState === 'connected') wsConnectedAtRef.current = Date.now();
+  }, [wsState]);
+
+  useEffect(() => {
+    if (!hasLiveFixtures || !isViewingToday) return;
+    const STALE_MS = 50_000;
+    const MIN_FALLBACK_GAP_MS = 20_000;
     const check = () => {
-      const last = pusherLastUpdate.current || 0;
-      if (wsState !== 'connected' || Date.now() - last > STALE_MS) {
+      const now = Date.now();
+      const freshnessBase = pusherLastUpdate.current || wsConnectedAtRef.current || now;
+      const stale = wsState !== 'connected' || now - freshnessBase > STALE_MS;
+      if (stale && now - liveFallbackLastRunRef.current >= MIN_FALLBACK_GAP_MS) {
+        liveFallbackLastRunRef.current = now;
         refreshLiveData();
       }
     };
-    check(); // chequeo inmediato al detectar que hay partidos en vivo
+    const firstCheck = setTimeout(check, wsState === 'connected' ? STALE_MS : 0);
     const poll = setInterval(check, 20000);
-    return () => clearInterval(poll);
-  }, [fixtures, refreshLiveData, wsState]);
+    return () => {
+      clearTimeout(firstCheck);
+      clearInterval(poll);
+    };
+  }, [hasLiveFixtures, isViewingToday, refreshLiveData, wsState]);
 
   // Load saved combinadas per-user on mount
   useEffect(() => {
@@ -659,8 +655,6 @@ export default function Dashboard() {
 
   // === PUSHER REAL-TIME EVENTS ===
   // Only subscribe to Pusher for today's date — past dates are historical/fixed
-  const isViewingToday = date === todayInTz(userTz);
-
   // Live scores: update fixture list in real-time (liveStats handled by LiveStatsProvider)
   usePusherEvent(isViewingToday ? 'live-scores' : null, 'update', useCallback((data) => {
     if (!data?.matches) return;
@@ -775,16 +769,19 @@ export default function Dashboard() {
     setAnalysisModalId(fixtureId);
   }, [analyzedData]);
 
-  // Prefetch analisis bundle + sibling routes after first paint so click is instant.
+  // Precargar una sola vez el bundle del modal. Prefetchear 12 rutas completas
+  // descargaba RSC/datos por partido y competía con imágenes y scroll inicial.
   useEffect(() => {
-    if (!router?.prefetch) return;
-    try {
-      router.prefetch('/dashboard/baseball');
-      // Prefetch first 12 analyzed fixtures' detail routes
-      const ids = Object.keys(analyzedData).slice(0, 12);
-      ids.forEach(fid => router.prefetch(`/dashboard/analisis/${fid}`));
-    } catch {}
-  }, [router, analyzedData]);
+    const preload = () => {
+      try { AnalysisExperience.preload?.(); } catch {}
+    };
+    if ('requestIdleCallback' in window) {
+      const id = window.requestIdleCallback(preload, { timeout: 1500 });
+      return () => window.cancelIdleCallback?.(id);
+    }
+    const timer = setTimeout(preload, 250);
+    return () => clearTimeout(timer);
+  }, []);
 
   const changeDate = (offset) => {
     // Parse components directly to avoid UTC-vs-local timezone shift:
@@ -804,20 +801,27 @@ export default function Dashboard() {
     // setDate(nd) ya cambio la key de SWR → dispara un unico fetch de la nueva fecha.
   };
 
-  const visible = fixtures.filter(f => {
-    if (hidden.includes(f.fixture.id)) return false;
+  const hiddenSet = useMemo(() => new Set(hidden), [hidden]);
+  const favoritesSet = useMemo(() => new Set(favorites), [favorites]);
+  const analyzedSet = useMemo(() => new Set(analyzed), [analyzed]);
+  const fixtureById = useMemo(
+    () => new Map(fixtures.map(fixture => [Number(fixture.fixture.id), fixture])),
+    [fixtures],
+  );
+
+  const visible = useMemo(() => fixtures.filter(f => {
+    if (hiddenSet.has(f.fixture.id)) return false;
     const status = f.fixture.status.short;
-    // Hide postponed/cancelled/suspended/abandoned matches
     if (isPostponed(status)) return false;
     if (statusFilter === 'live' && !isLive(status)) return false;
     if (statusFilter === 'upcoming' && status !== 'NS') return false;
     if (statusFilter === 'finished' && !isFinished(status)) return false;
-    if (statusFilter === 'favoritos' && !favorites.includes(f.fixture.id)) return false;
+    if (statusFilter === 'favoritos' && !favoritesSet.has(f.fixture.id)) return false;
     if (leagueFilter && String(f.league.id) !== leagueFilter) return false;
     return true;
-  });
+  }), [fixtures, hiddenSet, statusFilter, favoritesSet, leagueFilter]);
 
-  const sorted = [...visible].sort((a, b) => {
+  const sorted = useMemo(() => [...visible].sort((a, b) => {
     if (sortBy === 'time') return new Date(a.fixture.date) - new Date(b.fixture.date);
     if (sortBy === 'odds') {
       const oddA = getMinOdd(a, analyzedOdds), oddB = getMinOdd(b, analyzedOdds);
@@ -827,8 +831,8 @@ export default function Dashboard() {
       return oddA - oddB;
     }
     if (sortBy === 'probability') {
-      const aA = analyzed.includes(a.fixture.id) ? 1 : 0;
-      const bA = analyzed.includes(b.fixture.id) ? 1 : 0;
+      const aA = analyzedSet.has(a.fixture.id) ? 1 : 0;
+      const bA = analyzedSet.has(b.fixture.id) ? 1 : 0;
       if (aA !== bA) return bA - aA;
       const aP = analyzedData[a.fixture.id]?.combinada?.combinedProbability || 0;
       const bP = analyzedData[b.fixture.id]?.combinada?.combinedProbability || 0;
@@ -836,7 +840,7 @@ export default function Dashboard() {
       return new Date(a.fixture.date) - new Date(b.fixture.date);
     }
     return 0;
-  });
+  }), [visible, sortBy, analyzedOdds, analyzedSet, analyzedData]);
 
   const toggleSelect = useCallback((fid) => {
     setSelected(prev => {
@@ -845,6 +849,14 @@ export default function Dashboard() {
       return n;
     });
   }, []);
+
+  const toggleExpandedMatch = useCallback((fixtureId) => {
+    setExpandedMatch(prev => (prev === fixtureId ? null : fixtureId));
+  }, []);
+
+  const toggleAccordionMarket = useCallback((fixtureId, market, matchName) => {
+    toggleMarket(fixtureId, market, matchName);
+  }, [toggleMarket]);
 
 
   const analyzeSelected = async () => {
@@ -1037,35 +1049,52 @@ export default function Dashboard() {
     }
   };
 
-  const liveCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && isLive(f.fixture.status.short)).length;
-  const upcomingCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && f.fixture.status.short === 'NS').length;
-  const finishedCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && isFinished(f.fixture.status.short)).length;
-  // Bug previo: `favorites.length` contaba TODOS los favoritos del usuario
-  // (incluidos partidos pasados). El filtro "Favoritos" solo cruza con
-  // `fixtures` del dia visible → contador mostraba "14" pero al hacer click
-  // la lista quedaba vacia porque ningun favorito guardado correspondia a
-  // los fixtures del dia. Ahora contamos solo los favoritos que existen
-  // hoy y no estan ocultos — coherente con el filtro `visible`.
-  const favoriteCount = fixtures.filter(f => favorites.includes(f.fixture.id) && !hidden.includes(f.fixture.id)).length;
+  const {
+    liveCount,
+    upcomingCount,
+    finishedCount,
+    favoriteCount,
+    leagues,
+    allVisibleCount,
+  } = useMemo(() => {
+    let liveTotal = 0;
+    let upcomingTotal = 0;
+    let finishedTotal = 0;
+    let favoriteTotal = 0;
+    let visibleTotal = 0;
+    const leagueMap = {};
 
-  const leagues = {};
-  fixtures.filter(f => !hidden.includes(f.fixture.id)).forEach(f => {
-    if (!leagues[f.league.id]) {
-      leagues[f.league.id] = {
-        id: f.league.id,
-        name: f.league.name,
-        country: f.leagueMeta?.country || f.league.country,
-        logo: f.league.logo,
-      };
+    for (const fixture of fixtures) {
+      const fixtureId = fixture.fixture.id;
+      if (hiddenSet.has(fixtureId)) continue;
+      const status = fixture.fixture.status.short;
+      if (isLive(status)) liveTotal++;
+      if (status === 'NS') upcomingTotal++;
+      if (isFinished(status)) finishedTotal++;
+      if (favoritesSet.has(fixtureId)) favoriteTotal++;
+      if (!isPostponed(status) &&
+          (!leagueFilter || String(fixture.league.id) === leagueFilter)) {
+        visibleTotal++;
+      }
+      if (!leagueMap[fixture.league.id]) {
+        leagueMap[fixture.league.id] = {
+          id: fixture.league.id,
+          name: fixture.league.name,
+          country: fixture.leagueMeta?.country || fixture.league.country,
+          logo: fixture.league.logo,
+        };
+      }
     }
-  });
 
-  const allVisibleCount = fixtures.filter((fixture) => {
-    if (hidden.includes(fixture.fixture.id)) return false;
-    if (isPostponed(fixture.fixture.status.short)) return false;
-    if (leagueFilter && String(fixture.league.id) !== leagueFilter) return false;
-    return true;
-  }).length;
+    return {
+      liveCount: liveTotal,
+      upcomingCount: upcomingTotal,
+      finishedCount: finishedTotal,
+      favoriteCount: favoriteTotal,
+      leagues: leagueMap,
+      allVisibleCount: visibleTotal,
+    };
+  }, [fixtures, hiddenSet, favoritesSet, leagueFilter]);
 
   const apuestaDelDia = useMemo(() => {
     // Reglas:
@@ -1080,7 +1109,7 @@ export default function Dashboard() {
     const all = [];
 
     Object.entries(analyzedData).forEach(([fid, data]) => {
-      const fx = fixtures.find(f => f.fixture.id === Number(fid));
+      const fx = fixtureById.get(Number(fid));
       const status = fx?.fixture?.status?.short;
       let priority = 0;
       if (status === 'NS') priority = 2;
@@ -1137,7 +1166,7 @@ export default function Dashboard() {
       combinedOdd: +combinedOdd.toFixed(2),
       combinedProbability: +combinedProbability.toFixed(1),
     };
-  }, [analyzedData, fixtures]);
+  }, [analyzedData, fixtureById]);
 
   const customCombinada = useMemo(() => {
     const all = [];
@@ -1150,7 +1179,54 @@ export default function Dashboard() {
     return { selections: all, combinedOdd: +co.toFixed(2), combinedProbability: +cp.toFixed(1), highRisk: cp < 60 };
   }, [selectedMarkets]);
 
-  const totalSel = Object.values(selectedMarkets).reduce((a, m) => a + Object.keys(m).length, 0);
+  const totalSel = useMemo(
+    () => Object.values(selectedMarkets).reduce((a, m) => a + Object.keys(m).length, 0),
+    [selectedMarkets],
+  );
+
+  // Solo se montan las filas próximas al viewport. Incluso con 400 partidos o
+  // más, el DOM conserva aproximadamente 8–12 tarjetas; la altura total sigue
+  // siendo desplazable y cada fila dinámica se mide al abrirse.
+  const matchListRef = useRef(null);
+  const [matchListOffset, setMatchListOffset] = useState(0);
+  const matchVirtualizer = useWindowVirtualizer({
+    count: !loading && tab === 'partidos' ? sorted.length : 0,
+    estimateSize: () => 310,
+    overscan: 5,
+    scrollMargin: matchListOffset,
+    getItemKey: index => sorted[index]?.fixture.id ?? index,
+    // Al abrir una tarjeta su altura crece. Mantener fijo el scroll actual
+    // evita que el virtualizador "compense" el cambio y saque la fila pulsada
+    // del viewport antes de que React termine de pintarla.
+    shouldAdjustScrollPositionOnItemSizeChange: () => false,
+  });
+
+  useEffect(() => {
+    if (splash || loading || tab !== 'partidos' || !matchListRef.current) return;
+    const updateOffset = () => {
+      if (!matchListRef.current) return;
+      const next = matchListRef.current.getBoundingClientRect().top + window.scrollY;
+      setMatchListOffset(prev => (Math.abs(prev - next) > 1 ? next : prev));
+    };
+    const frame = requestAnimationFrame(updateOffset);
+    window.addEventListener('resize', updateOffset, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('resize', updateOffset);
+    };
+  }, [
+    splash,
+    loading,
+    tab,
+    showApuesta,
+    apuestaDelDia?.selections?.length,
+    batchRunning,
+    error,
+    welcome,
+    pushError,
+    sorted.length,
+  ]);
+
   if (splash) {
     return (
       <div className={`splash ${splashFade ? 'fade-out' : ''}`}>
@@ -1301,37 +1377,7 @@ export default function Dashboard() {
                   <Sparkles size={15} aria-hidden="true" />
                   {apuestaDelDia.selections.length} selecciones ordenadas por oportunidad
                 </div>
-                <div className="apuesta-scroll">
-                {apuestaDelDia.selections.map((sel, i) => {
-                  const pct = cap(sel.probability);
-                  const probColor = pct >= 85 ? '#4ade80' : pct >= 80 ? '#fbbf24' : '#d97706';
-                  return (
-                    <article key={i} className={`apuesta-item ${sel.priority === 2 ? 'upcoming' : sel.priority === 1 ? 'live' : 'done'}`}>
-                      <span className="apuesta-index">{String(i + 1).padStart(2, '0')}</span>
-                      <span className="apuesta-item-copy">
-                        <span className="apuesta-match">
-                          {sel.priority === 1 && <span className="apuesta-status live">EN VIVO</span>}
-                          {sel.priority === 2 && <span className="apuesta-status ns">Próximo</span>}
-                          {sel.matchName}
-                        </span>
-                        <span className="apuesta-mkt">{(() => {
-                        const sufijos = { 'Goles': 'goles', 'Córners': 'córners', 'Tarjetas': 'tarjetas' };
-                        const sufijo = sufijos[sel.cat];
-                        if (sufijo && sel.name?.toLowerCase().endsWith(sufijo)) {
-                          const valor = sel.name.slice(0, sel.name.length - sufijo.length).trim();
-                          return <>{sel.cat} totales — {valor}</>;
-                        }
-                        return sel.name;
-                        })()}</span>
-                      </span>
-                      <span className="apuesta-item-metrics">
-                        <span className="apuesta-prob" style={{ color: probColor }}><small>Prob.</small>{pct}%</span>
-                        {sel.odd != null && <span className="apuesta-odd"><small>Cuota</small>{sel.odd.toFixed(2)}</span>}
-                      </span>
-                    </article>
-                  );
-                })}
-                </div>
+                <ApuestaSelectionList selections={apuestaDelDia.selections} />
               </div>
             )}
           </div>
@@ -1376,55 +1422,87 @@ export default function Dashboard() {
               </div>
             )}
             {sorted.length > 0 && (
-              // Lista PLANA (sin virtualización JS). La virtualización con
-              // measureElement reposicionaba todas las filas en cada frame al
-              // expandir un acordeón → tirones. Ahora `.mcard` usa
-              // content-visibility:auto (CSS) que salta el render de lo que
-              // está fuera de pantalla de forma nativa, sin reposicionar: el
-              // acordeón expande libre y escala a cientos de partidos.
-              <div className="match-list">
-                {sorted.map((m, i) => {
-                  const isMatchAnalyzed = analyzed.includes(m.fixture.id);
+              <div
+                ref={matchListRef}
+                className="match-list match-list-virtual"
+                style={{
+                  position: 'relative',
+                  display: 'block',
+                  height: `${matchVirtualizer.getTotalSize()}px`,
+                }}
+              >
+                {matchVirtualizer.getVirtualItems().map(virtualRow => {
+                  const m = sorted[virtualRow.index];
+                  if (!m) return null;
+                  const isMatchAnalyzed = analyzedSet.has(m.fixture.id);
                   if (isMatchAnalyzed) {
                     return (
-                      <AccordionCard
+                      <div
                         key={m.fixture.id}
-                        match={m}
-                        data={analyzedData[m.fixture.id]}
-                        odds={analyzedOdds[m.fixture.id]}
-                        standings={standings}
-                        liveStats={liveStats[m.fixture.id]}
-                        isExpanded={expandedMatch === m.fixture.id}
-                        onToggle={() => setExpandedMatch(expandedMatch === m.fixture.id ? null : m.fixture.id)}
-                        selMarkets={selectedMarkets[m.fixture.id] || {}}
-                        onToggleMarket={(mkt) => toggleMarket(m.fixture.id, mkt, `${m.teams.home.name} vs ${m.teams.away.name}`)}
-                        onViewFull={() => openAnalysisModal(m.fixture.id, m)}
-                        onRemove={(e) => dismissMatch(e, m.fixture.id)}
-                        isFavorite={favorites.includes(m.fixture.id)}
-                        onFavorite={(e) => toggleFavorite(e, m.fixture.id)}
-                        idx={i}
-                        userTz={userTz}
-                      />
+                        ref={matchVirtualizer.measureElement}
+                        data-index={virtualRow.index}
+                        className="virtual-match-row"
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          paddingBottom: 8,
+                          boxSizing: 'border-box',
+                          transform: `translateY(${virtualRow.start - matchListOffset}px)`,
+                        }}
+                      >
+                        <AccordionCard
+                          match={m}
+                          data={analyzedData[m.fixture.id]}
+                          odds={analyzedOdds[m.fixture.id]}
+                          standings={standings}
+                          liveStats={liveStats[m.fixture.id]}
+                          isExpanded={expandedMatch === m.fixture.id}
+                          onToggle={toggleExpandedMatch}
+                          selMarkets={selectedMarkets[m.fixture.id] || EMPTY_MARKETS}
+                          onToggleMarket={toggleAccordionMarket}
+                          onViewFull={openAnalysisModal}
+                          onRemove={dismissMatch}
+                          isFavorite={favoritesSet.has(m.fixture.id)}
+                          onFavorite={toggleFavorite}
+                          userTz={userTz}
+                        />
+                      </div>
                     );
                   }
                   return (
-                    <MatchCard
+                    <div
                       key={m.fixture.id}
-                      match={m}
-                      isAnalyzed={false}
-                      isSelected={selected.has(m.fixture.id)}
-                      isFavorite={favorites.includes(m.fixture.id)}
-                      odds={analyzedOdds[m.fixture.id]}
-                      standings={standings}
-                      matchData={analyzedData[m.fixture.id]}
-                      liveStats={liveStats[m.fixture.id]}
-                      onSelect={toggleSelect}
-                      onHide={doHide}
-                      onFavorite={toggleFavorite}
-                      onView={goToAnalysis}
-                      idx={i}
-                      userTz={userTz}
-                    />
+                      ref={matchVirtualizer.measureElement}
+                      data-index={virtualRow.index}
+                      className="virtual-match-row"
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        paddingBottom: 8,
+                        boxSizing: 'border-box',
+                        transform: `translateY(${virtualRow.start - matchListOffset}px)`,
+                      }}
+                    >
+                      <MatchCard
+                        match={m}
+                        isAnalyzed={false}
+                        isSelected={selected.has(m.fixture.id)}
+                        isFavorite={favoritesSet.has(m.fixture.id)}
+                        odds={analyzedOdds[m.fixture.id]}
+                        standings={standings}
+                        matchData={analyzedData[m.fixture.id]}
+                        liveStats={liveStats[m.fixture.id]}
+                        onSelect={toggleSelect}
+                        onHide={doHide}
+                        onFavorite={toggleFavorite}
+                        onView={goToAnalysis}
+                        userTz={userTz}
+                      />
+                    </div>
                   );
                 })}
               </div>
@@ -1574,7 +1652,66 @@ export default function Dashboard() {
 
 /* ======================== MATCH CARD ======================== */
 
-const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings, matchData, liveStats, onSelect, onHide, onFavorite, onView, idx, userTz }) {
+function ApuestaSelectionList({ selections }) {
+  const scrollRef = useRef(null);
+  const virtualizer = useVirtualizer({
+    count: selections.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 60,
+    overscan: 5,
+    getItemKey: index => `${selections[index]?.fixtureId || 'fixture'}-${selections[index]?.id || index}-${index}`,
+  });
+
+  return (
+    <div ref={scrollRef} className="apuesta-scroll" style={{ display: 'block' }}>
+      <div style={{ position: 'relative', height: `${virtualizer.getTotalSize()}px` }}>
+        {virtualizer.getVirtualItems().map(row => {
+          const sel = selections[row.index];
+          const pct = cap(sel.probability);
+          const probColor = pct >= 85 ? '#4ade80' : pct >= 80 ? '#fbbf24' : '#d97706';
+          const suffixes = { 'Goles': 'goles', 'Córners': 'córners', 'Tarjetas': 'tarjetas' };
+          const suffix = suffixes[sel.cat];
+          const marketName = suffix && sel.name?.toLowerCase().endsWith(suffix)
+            ? `${sel.cat} totales — ${sel.name.slice(0, sel.name.length - suffix.length).trim()}`
+            : sel.name;
+          return (
+            <div
+              key={row.key}
+              ref={virtualizer.measureElement}
+              data-index={row.index}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                paddingBottom: 5,
+                transform: `translateY(${row.start}px)`,
+              }}
+            >
+              <article className={`apuesta-item ${sel.priority === 2 ? 'upcoming' : sel.priority === 1 ? 'live' : 'done'}`}>
+                <span className="apuesta-index">{String(row.index + 1).padStart(2, '0')}</span>
+                <span className="apuesta-item-copy">
+                  <span className="apuesta-match">
+                    {sel.priority === 1 && <span className="apuesta-status live">EN VIVO</span>}
+                    {sel.priority === 2 && <span className="apuesta-status ns">Próximo</span>}
+                    {sel.matchName}
+                  </span>
+                  <span className="apuesta-mkt">{marketName}</span>
+                </span>
+                <span className="apuesta-item-metrics">
+                  <span className="apuesta-prob" style={{ color: probColor }}><small>Prob.</small>{pct}%</span>
+                  {sel.odd != null && <span className="apuesta-odd"><small>Cuota</small>{sel.odd.toFixed(2)}</span>}
+                </span>
+              </article>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings, matchData, liveStats, onSelect, onHide, onFavorite, onView, userTz }) {
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
@@ -1605,7 +1742,7 @@ const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFav
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '.82rem', fontWeight: 600, color: '#f1f5f9' }}>
             {match.league.logo
-              ? <img src={match.league.logo} alt={match.league.name} title={match.league.name} className="league-logo" />
+              ? <img src={match.league.logo} alt={match.league.name} title={match.league.name} className="league-logo" loading="lazy" decoding="async" />
               : <span>{flag} {match.league.name}</span>}
           </div>
           <span style={{ fontSize: '.75rem', color: 'rgba(255,255,255,.6)', textTransform: 'capitalize' }}>{cardDate}</span>
@@ -1630,7 +1767,7 @@ const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFav
               <div className="card-odds-row">
                 {bkName && (
                   <div className="card-bookmaker" title={bkName}>
-                    {bkLogo && <img className="card-bookmaker-logo" src={bkLogo} alt={bkName} />}
+                    {bkLogo && <img className="card-bookmaker-logo" src={bkLogo} alt={bkName} loading="lazy" decoding="async" />}
                     <span>{bkName}</span>
                   </div>
                 )}
@@ -1826,7 +1963,7 @@ function SubAccordion({ id, title, color, icon: Icon = BarChart3, openSub, setOp
   );
 }
 
-function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, onRemove, isFavorite, onFavorite, idx, userTz }) {
+const AccordionCard = memo(function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, onRemove, isFavorite, onFavorite, userTz }) {
   // Estado de sub-acordeón EXCLUSIVO (solo uno abierto a la vez). Los 3 bloques
   // (Estadísticas / Probabilidades / Jugadores) leen openSub y lo togglean.
   const [openSub, setOpenSub] = useState('markets');
@@ -1839,8 +1976,9 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
   const goalBurst = useGoalBurst((match.goals?.home ?? 0) + (match.goals?.away ?? 0), live);
   const homePos = data?.homePosition || standings?.[match.teams.home.id];
   const awayPos = data?.awayPosition || standings?.[match.teams.away.id];
-  const winProb = data?.calculatedProbabilities?.winner;
   const homeId = match.teams.home.id;
+  const fixtureId = match.fixture.id;
+  const matchName = `${match.teams.home.name} vs ${match.teams.away.name}`;
   const tz = userTz || 'UTC';
   const cardDate = new Date(match.fixture.date).toLocaleDateString('es', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long' });
   const sLabel = { NS: 'PRÓXIMO', '1H': 'EN VIVO — 1T', '2H': 'EN VIVO — 2T', HT: 'ENTRETIEMPO', FT: 'FINALIZADO', ET: 'EN VIVO — Extra', P: 'EN VIVO — Penales', AET: 'FINALIZADO', PEN: 'FINALIZADO', SUSP: 'SUSPENDIDO', PST: 'POSPUESTO', CANC: 'CANCELADO' }[match.fixture.status.short] || match.fixture.status.short;
@@ -1852,6 +1990,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
   // exactamente la misma selecciones que la "Combinada Auto" — un unico
   // sitio donde mantener el catalogo de mercados.
   const markets = useMemo(() => {
+    if (!isExpanded) return [];
     // "Selecciona para tu combinada": usa data.combinada.SELECTABLE — TODA línea con
     // prob≥70% y cuota real ≥1.20 (bet365/bwin, con equivalencia de línea entera). NO
     // el gate ≥90% de la "Combinada del Día" (eso es `selections`). Fallback a
@@ -1883,18 +2022,18 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
            : s.category || 'Otros',
       }))
       .sort((a, b) => b.probability - a.probability);
-  }, [data, match]);
+  }, [isExpanded, data, match]);
 
   return (
     <div className={`acc-card ${isExpanded ? 'open' : ''}`}>
       {/* Header */}
-      <div className="acc-head" onClick={onToggle}>
+      <div className="acc-head" onClick={() => onToggle(fixtureId)}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* ── Fila 1: Liga + Fecha ── */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '.82rem', fontWeight: 600, color: '#f1f5f9' }}>
-              {match.league.logo && <img src={match.league.logo} alt="" className="league-logo" />}
+              {match.league.logo && <img src={match.league.logo} alt="" className="league-logo" loading="lazy" decoding="async" />}
               <span>{flag} {match.league.name}</span>
             </div>
             <span style={{ fontSize: '.75rem', color: 'rgba(255,255,255,.6)', textTransform: 'capitalize' }}>{cardDate}</span>
@@ -1919,7 +2058,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
               <div className="card-odds-row">
                 {bkName && (
                     <div className="card-bookmaker" title={bkName}>
-                      {bkLogo && <img className="card-bookmaker-logo" src={bkLogo} alt={bkName} />}
+                      {bkLogo && <img className="card-bookmaker-logo" src={bkLogo} alt={bkName} loading="lazy" decoding="async" />}
                       <span>{bkName}</span>
                     </div>
                   )}
@@ -2030,12 +2169,12 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
           {/* ── Indicador: remove / fav / selCount / prob / chevron ── */}
           <div className="acc-indicator">
             {onRemove && (
-              <button className="btn-x acc-rm" onClick={e => { e.stopPropagation(); onRemove(e); }} title="Eliminar de analizados">&#10005;</button>
+              <button className="btn-x acc-rm" onClick={e => onRemove(e, fixtureId)} title="Eliminar de analizados">&#10005;</button>
             )}
             {onFavorite && (
               <button
                 className={`btn-fav${isFavorite ? ' active' : ''}`}
-                onClick={e => { e.stopPropagation(); onFavorite(e); }}
+                onClick={e => onFavorite(e, fixtureId)}
                 title={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
               >&#9733;</button>
             )}
@@ -2053,7 +2192,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
       </div>
 
       {/* Content */}
-      <div className={`acc-content ${isExpanded ? 'open' : ''}`}>
+      {isExpanded && <div className="acc-content open">
         <div className="acc-inner">
           {data ? (
             <>
@@ -2083,14 +2222,14 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                       <button
                         key={mkt.id}
                         className={`mkt ${checked ? 'on' : ''} ${mkt.probability >= 75 ? 'hi' : mkt.probability >= 50 ? 'md' : 'lo'}`}
-                        onClick={(e) => { e.stopPropagation(); onToggleMarket(mkt); }}
+                        onClick={(e) => { e.stopPropagation(); onToggleMarket(fixtureId, mkt, matchName); }}
                       >
                         <span className="mkt-name">{mkt.name}</span>
                         <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${cap(mkt.probability)}%` }} /></div>
                         <div className="mkt-nums">
                           <span className="mkt-pct">{cap(mkt.probability)}%</span>
                           {mkt.odd && <span className="mkt-odd">{mkt.odd.toFixed(2)}</span>}
-                          {bkLogo && <span className="mkt-bk" title={mkt.bookmaker}><img src={bkLogo} alt={mkt.bookmaker} className="bk-logo-lg" onError={(e) => { e.target.style.display = 'none'; }} /></span>}
+                          {bkLogo && <span className="mkt-bk" title={mkt.bookmaker}><img src={bkLogo} alt={mkt.bookmaker} className="bk-logo-lg" loading="lazy" decoding="async" onError={(e) => { e.target.style.display = 'none'; }} /></span>}
                           {checked && <span className="mkt-chk">&#10003;</span>}
                         </div>
                       </button>
@@ -2169,7 +2308,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                   detalle completo (last5 partidos, goal-timing, etc.) sigue
                   disponible en "Ver analisis completo". */}
 
-              <button className="btn-full" onClick={(e) => { e.stopPropagation(); onViewFull(); }}>
+              <button className="btn-full" onClick={(e) => { e.stopPropagation(); onViewFull(fixtureId, match); }}>
                 <span><small>Explora cada indicador</small><strong>Ver análisis completo</strong></span>
                 <ArrowRight size={18} aria-hidden="true" />
               </button>
@@ -2178,10 +2317,10 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
             <div className="no-data-inline">Sin datos de analisis</div>
           )}
         </div>
-      </div>
+      </div>}
     </div>
   );
-}
+});
 
 /* ======================== LIVE STATS COMPONENTS ======================== */
 
@@ -2804,7 +2943,7 @@ function TeamLogo({ src, name, size = 96 }) {
   // Inline width/height para que el prop `size` mande sobre la regla CSS
   // .team-crest{width:24px} (la clase ganaba al atributo HTML y aplastaba
   // todos los escudos a 24px, invirtiendo la jerarquía vs logos de liga).
-  return <img src={src} alt={name} className="team-crest" style={{ width: size, height: size, objectFit: 'contain', flexShrink: 0 }} onError={() => setErr(true)} />;
+  return <img src={src} alt={name} className="team-crest" width={size} height={size} loading="lazy" decoding="async" style={{ width: size, height: size, objectFit: 'contain', flexShrink: 0 }} onError={() => setErr(true)} />;
 }
 
 function getMinOdd(fixture, analyzedOdds) {

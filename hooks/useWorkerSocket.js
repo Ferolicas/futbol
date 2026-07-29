@@ -84,6 +84,13 @@ class WorkerSocket {
     ws.onopen = () => {
       this.attempt = 0;
       this.setState('connected');
+      // `getSocket()` puede abrir la conexión antes de que los hooks alcancen a
+      // registrar sus topics. En ese caso los subscribe() ejecutados mientras
+      // el socket estaba CONNECTING no pudieron enviarse. Re-sincronizar aquí
+      // garantiza que toda conexión/reconexión quede realmente suscrita.
+      for (const topic of this.topics) {
+        this.send({ type: 'subscribe', topic });
+      }
       this.startHeartbeat();
     };
 

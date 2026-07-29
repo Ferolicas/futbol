@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-07-29 · Commit base: `cc9c5e3`
+Actualizado: 2026-07-29 · Commit base: `a473445`
 
 ## Identidad y stack
 
@@ -48,7 +48,7 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `POST /api/mercadopago/webhook` | `app/api/mercadopago/webhook/route.js` | Mercado Pago | Confirma y activa el plan |
 | `GET /api/fixtures` | `app/api/fixtures/route.js` | Dashboard | Partidos y análisis diarios |
 | `GET /api/match/[id]` | `app/api/match/[id]/route.js` | Análisis | Detalle estadístico |
-| `POST /api/refresh-live` | `app/api/refresh-live/route.js` | Dashboard | Refresco de marcadores |
+| `GET/POST /api/refresh-live` | `app/api/refresh-live/route.js` | Dashboard | GET lee Redis; POST fuerza proveedor |
 | `/api/cron/*` | `app/api/cron/` | Cron/worker | Ingesta, análisis y finalización |
 
 El resto de endpoints se agrupa en `app/api/admin`, `baseball`, `chat`, `favorites`, `push`, `quota`, `tickets` y `user`.
@@ -96,7 +96,24 @@ Tras login o registro, las pantallas cliente llaman `refreshSession()` antes de 
 
 ### Realtime
 
-`apps/cfanalisis-worker` ingiere y publica actualizaciones. El dashboard combina WebSocket, polling y Redis; los cron endpoints ejecutan ingesta/finalización.
+`apps/cfanalisis-worker` ingiere y publica actualizaciones. El cliente WebSocket
+reenvía todos sus topics al abrir o reconectar. El dashboard usa esos eventos
+como fuente primaria; si no recibe eventos durante 50 s, su watchdog consulta
+solo el snapshot Redis mediante `GET /api/refresh-live`, con una única petición
+en vuelo y separación mínima de 20 s. La revalidación completa de fixtures queda
+como respaldo cada 5 min únicamente para hoy y con el WebSocket caído.
+
+### Rendimiento del dashboard
+
+La lista de partidos y la lista interna de “Apuesta del día” están virtualizadas:
+solo se montan las filas próximas al viewport, independientemente de que existan
+20, 100, 400 o más partidos. Una tarjeta analizada cerrada no monta mercados,
+probabilidades ni jugadores; al abrirse, `ResizeObserver` mide solo esa fila sin
+compensar el scroll. Las tarjetas están memoizadas y reciben handlers estables.
+
+`GET /api/fixtures` usa `MGET` para documentos Redis, una consulta PostgreSQL
+por lote para los `live_stats` ausentes y filtra análisis, cuotas, standings y
+snapshots live a los IDs de la jornada antes de serializar la respuesta.
 
 ## Dependencias compartidas
 
@@ -134,16 +151,25 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - 2026-07-29: `/planes` usa un escenario fijo; scroll, teclado y swipe cambian la tarjeta activa sin crear una lista vertical.
 - 2026-07-29: el dashboard recibe identidad inicial desde su layout de servidor y precarga ambas rutas deportivas.
 - 2026-07-29: el análisis completo de Fútbol y Baseball se abre en un modal
-  nativo con escenario fijo. El scroll interno es continuo y sin cooldown;
+  nativo con escenario fijo. El scroll interno es continuo;
   su progreso cambia capas nítidas en el mismo viewport, sin blur, escalado,
   flechas ni scroll-snap. El controlador captura rueda/swipe en el conductor y
   actualiza un progreso virtual inmediatamente, sin depender de `scrollTop`
-  nativo. En iOS, cada gesto elige un solo motor: WebKit cinético para el
-  contenido que desborda o progreso virtual al iniciar desde un borde; así no
-  mezcla `scrollTop` manual con la inercia nativa. Pointer Events permanece
-  como controlador táctil para el resto de plataformas.
-- 2026-07-29: `BrandLogoMedia` conserva `/logo-metalizado.webm` como fuente
-  principal y usa `/logo-metalizado-alpha.webp` en WebKit/iOS, donde el VP9 con
-  `alpha_mode=1` puede reproducirse con el plano transparente en negro.
+  nativo. Fuera del recorrido interno, cada rueda o pulsación de navegación
+  avanza exactamente una escena; la ráfaga inercial del trackpad queda agrupada
+  hasta 80 ms de reposo para no saltar varias escenas. En iOS, cada gesto elige
+  un solo motor: WebKit cinético para el contenido que desborda o progreso
+  virtual al iniciar desde un borde; así no mezcla `scrollTop` manual con la
+  inercia nativa. Pointer Events permanece como controlador táctil para el resto
+  de plataformas.
+- 2026-07-29: `BrandLogoMedia` usa `/logo-metalizado-fast.webm` (512 px/15 fps,
+  VP9 con plano alfa real) y `/logo-metalizado-alpha-fast.webp` como primer
+  frame/fallback estático en WebKit/iOS. Un coordinador permite reproducir un
+  solo logo a la vez.
+- 2026-07-29: `analysis:{date}` es caché canónica global escrita únicamente
+  por el worker; una respuesta de `/api/fixtures` jamás debe sobrescribirla con
+  el subconjunto visible de una zona horaria. La ruta contrasta siempre
+  `analyzed-ids:{date}` y días adyacentes para autorreparar caches parciales y
+  cubrir partidos nocturnos que cambian de jornada entre Bogotá y Madrid.
 - 2026-06: los nombres `supabaseAdmin`/`createSupabaseServerClient` son shims PG, no Supabase activo.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.

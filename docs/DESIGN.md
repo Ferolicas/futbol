@@ -34,10 +34,13 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - Checkout: hoja inferior en móvil y modal centrado en escritorio. Stripe y Mercado Pago comparten la misma carcasa visual.
 - Modal de análisis: escenario fijo sin paginación ni flechas. Rueda, teclado y
   swipe capturados desde el conductor controlan las capas en el mismo viewport;
+  cuando no queda contenido interno por recorrer, cada gesto de rueda/trackpad
+  o pulsación de navegación cambia una sola escena;
   las escenas permanecen nítidas, sin blur ni escalado, y solo el contenido que
   excede la altura conserva scroll interno.
-- Cargas: skeleton de superficie. `BrandLogoMedia` utiliza el WebM original y
-  entrega la misma animación en WebP con alfa a WebKit/iOS para evitar el fondo negro.
+- Cargas: skeleton de superficie. `BrandLogoMedia` utiliza un VP9 optimizado
+  con alfa real en Chromium y una imagen WebP estática transparente en
+  WebKit/iOS o movimiento reducido.
 
 ## Motion y rendimiento
 
@@ -47,8 +50,9 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - Solo los estados realmente en vivo pueden mantener un pulso continuo.
 - `prefers-reduced-motion` elimina transiciones y animaciones no esenciales.
 - Las rutas `/dashboard` y `/dashboard/baseball` se precargan desde el selector deportivo.
-- Las transiciones del análisis responden al gesto sin bloqueo temporal y
-  respetan `prefers-reduced-motion`.
+- Las transiciones del análisis responden al gesto y respetan
+  `prefers-reduced-motion`; la inercia de un trackpad se agrupa como un único
+  gesto, sin introducir una espera perceptible entre gestos consecutivos.
 
 ## Responsive
 

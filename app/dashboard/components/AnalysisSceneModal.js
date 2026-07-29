@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import BrandLogoMedia from '../../../components/BrandLogoMedia';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const WHEEL_GESTURE_IDLE_MS = 80;
 
 export default function AnalysisSceneModal({
   children,
@@ -80,6 +81,8 @@ export default function AnalysisSceneModal({
     if (!shell || !stage || !scroller) return undefined;
 
     let syncFrame;
+    let wheelUnlockTimer;
+    let wheelSceneLocked = false;
     let pointerGestureActive = false;
     let pointerCaptured = false;
     let activePointerId = null;
@@ -112,7 +115,19 @@ export default function AnalysisSceneModal({
       paintProgress(progressRef.current + delta / sceneTravel);
     };
 
-    const routeScrollDelta = (delta) => {
+    const moveOuterScene = (direction) => {
+      const scenes = scenesRef.current;
+      if (scenes.length <= 1 || direction === 0) return false;
+
+      const current = Math.round(progressRef.current);
+      const next = clamp(current + Math.sign(direction), 0, scenes.length - 1);
+      if (next === current) return false;
+
+      paintProgress(next);
+      return true;
+    };
+
+    const consumeInnerScroll = (delta) => {
       const active = scenesRef.current[Math.round(progressRef.current)];
       let remaining = delta;
 
@@ -129,7 +144,19 @@ export default function AnalysisSceneModal({
         }
       }
 
+      return remaining;
+    };
+
+    const routeScrollDelta = (delta) => {
+      const remaining = consumeInnerScroll(delta);
       if (Math.abs(remaining) >= 1) moveOuterScroll(remaining);
+    };
+
+    const keepWheelGestureLocked = () => {
+      window.clearTimeout(wheelUnlockTimer);
+      wheelUnlockTimer = window.setTimeout(() => {
+        wheelSceneLocked = false;
+      }, WHEEL_GESTURE_IDLE_MS);
     };
 
     const canUseNativeInnerScroll = (scene, delta) => {
@@ -148,7 +175,22 @@ export default function AnalysisSceneModal({
       if (Math.abs(delta) < 1) return;
 
       event.preventDefault();
-      routeScrollDelta(delta);
+
+      // Una rueda física emite normalmente un evento; un trackpad emite una
+      // ráfaga con inercia. Agrupamos esa ráfaga hasta que quede en reposo para
+      // que un gesto cambie exactamente una escena y no atraviese varias.
+      if (wheelSceneLocked) {
+        keepWheelGestureLocked();
+        return;
+      }
+
+      const remaining = consumeInnerScroll(delta);
+      if (Math.abs(remaining) < 1) return;
+
+      if (moveOuterScene(remaining)) {
+        wheelSceneLocked = true;
+        keepWheelGestureLocked();
+      }
     };
 
     const onTouchStart = (event) => {
@@ -235,7 +277,7 @@ export default function AnalysisSceneModal({
       event.preventDefault();
       if (event.key === 'Home') paintProgress(0);
       else if (event.key === 'End') paintProgress(Math.max(0, scenesRef.current.length - 1));
-      else moveOuterScroll(scroller.clientHeight * (forward ? .32 : -.32));
+      else moveOuterScene(forward ? 1 : -1);
     };
 
     syncScenes();
@@ -254,6 +296,7 @@ export default function AnalysisSceneModal({
 
     return () => {
       cancelAnimationFrame(syncFrame);
+      window.clearTimeout(wheelUnlockTimer);
       observer.disconnect();
       scroller.removeEventListener('wheel', onWheel, true);
       scroller.removeEventListener('pointerdown', onPointerDown, true);

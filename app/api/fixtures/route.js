@@ -1,6 +1,6 @@
 import { getFixtures, getQuota, getCachedStandingsPositions } from '../../../lib/api-football';
 import { getAnalyzedMatchesFull, getAnalyzedFixtureIds } from '../../../lib/sanity-cache';
-import { redisGet, redisSet, KEYS, TTL } from '../../../lib/redis';
+import { redisGet, redisMGet, redisSet, KEYS, TTL } from '../../../lib/redis';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { userHasActivePlan } from '../../../lib/require-active-plan';
 import { supabaseAdmin } from '../../../lib/supabase';
@@ -14,7 +14,6 @@ export const dynamic = 'force-dynamic';
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 
 // Redis TTLs for cache layers (seconds)
-const ANALYSIS_CACHE_TTL = 4 * 3600;   // 4 hours
 const ODDS_CACHE_TTL = 4 * 3600;       // 4 hours
 const STANDINGS_CACHE_TTL = 12 * 3600; // 12 hours
 
@@ -278,13 +277,16 @@ export async function GET(request) {
             !FINISHED_STATUSES.includes(f.fixture?.status?.short);
         });
         if (liveInCache.length > 0) {
-          await Promise.all(liveInCache.map(async (f) => {
+          const cachedStats = await redisMGet(
+            liveInCache.map(f => KEYS.fixtureStats(f.fixture.id)),
+          );
+          liveInCache.forEach((f, index) => {
             const fid = f.fixture.id;
-            const stats = await redisGet(KEYS.fixtureStats(fid));
+            const stats = cachedStats[index];
             if (stats && FINISHED_STATUSES.includes(stats.status?.short)) {
               initialLiveStats[fid] = stats;
             }
-          }));
+          });
         }
       }
 
@@ -340,26 +342,46 @@ export async function GET(request) {
       });
 
       if (needStats.length > 0) {
-        await Promise.all(needStats.map(async (f) => {
+        const redisStats = await redisMGet(
+          needStats.map(f => KEYS.fixtureStats(f.fixture.id)),
+        );
+        const statsByFixture = new Map();
+        const missingFromRedis = [];
+
+        needStats.forEach((f, index) => {
           const fid = f.fixture.id;
-          // L1: Redis
-          let stats = await redisGet(KEYS.fixtureStats(fid));
-          // L2: Supabase fallback (permanent storage)
-          if (!stats || !FT_STATS_FIELDS.some(k => stats[k])) {
-            try {
-              const { data: row } = await supabaseAdmin
-                .from('match_analysis')
-                .select('live_stats')
-                .eq('fixture_id', fid)
-                .not('live_stats', 'is', null)
-                .limit(1)
-                .single();
-              if (row?.live_stats && FT_STATS_FIELDS.some(k => row.live_stats[k])) {
-                stats = row.live_stats;
-                redisSet(KEYS.fixtureStats(fid), stats, TTL.yesterday).catch(() => {});
-              }
-            } catch {}
+          const stats = redisStats[index];
+          if (stats && FT_STATS_FIELDS.some(k => stats[k])) {
+            statsByFixture.set(fid, stats);
+          } else {
+            missingFromRedis.push(fid);
           }
+        });
+
+        if (missingFromRedis.length > 0) {
+          try {
+            const { data: rows } = await supabaseAdmin
+              .from('match_analysis')
+              .select('fixture_id, live_stats, created_at')
+              .in('fixture_id', missingFromRedis)
+              .not('live_stats', 'is', null)
+              .order('created_at', { ascending: false });
+            for (const row of (rows || [])) {
+              if (statsByFixture.has(row.fixture_id)) continue;
+              if (row.live_stats && FT_STATS_FIELDS.some(k => row.live_stats[k])) {
+                statsByFixture.set(row.fixture_id, row.live_stats);
+                redisSet(KEYS.fixtureStats(row.fixture_id), row.live_stats, TTL.yesterday).catch(() => {});
+              }
+            }
+          } catch {}
+        }
+
+        const fixtureIndexById = new Map(
+          fixtures.map((fixture, index) => [fixture.fixture.id, index]),
+        );
+        for (const f of needStats) {
+          const fid = f.fixture.id;
+          const stats = statsByFixture.get(fid);
           if (stats && FT_STATS_FIELDS.some(k => stats[k])) {
             // MERGE stats (corners/cards/scorers) into existing liveStats
             // but NEVER overwrite a more advanced status (FT > 2H > 1H > NS)
@@ -389,7 +411,7 @@ export async function GET(request) {
               initialLiveStats[fid] = stats;
               // Update fixture status if stats is more recent
               if (stats.status) {
-                const idx = fixtures.findIndex(x => x.fixture.id === fid);
+                const idx = fixtureIndexById.get(fid) ?? -1;
                 if (idx >= 0) {
                   const curElapsed = fixtures[idx].fixture.status.elapsed || 0;
                   const newElapsed = stats.status.elapsed || 0;
@@ -404,7 +426,7 @@ export async function GET(request) {
               }
             }
           }
-        }));
+        }
       }
     }
 
@@ -462,15 +484,25 @@ export async function GET(request) {
         let analyzedData = {};
         if (cachedAnalysisData?.globallyAnalyzed?.length > 0) {
           globallyAnalyzed = cachedAnalysisData.globallyAnalyzed.filter(id => fixtureIdSet.has(id));
-          analyzedOdds = { ...(cachedAnalysisData.analyzedOdds || {}) };
-          analyzedData = { ...(cachedAnalysisData.analyzedData || {}) };
+          analyzedOdds = Object.fromEntries(
+            Object.entries(cachedAnalysisData.analyzedOdds || {})
+              .filter(([id]) => fixtureIdSet.has(Number(id))),
+          );
+          analyzedData = Object.fromEntries(
+            Object.entries(cachedAnalysisData.analyzedData || {})
+              .filter(([id]) => fixtureIdSet.has(Number(id))),
+          );
         }
 
-        // Always check adjacent dates for cross-midnight fixtures (the cache
-        // for `date` does not contain them because the cron analyzed them
-        // under a different date key).
-        const datesToCheck = [];
-        if (globallyAnalyzed.length === 0) datesToCheck.push(date);
+        // Contrastar SIEMPRE el día solicitado con el índice canónico de BD.
+        // Además de completar un cache miss, esto autorrepara caches parciales
+        // creados por versiones antiguas que sobrescribían `analysis:${date}`
+        // con la vista filtrada de la zona horaria del último usuario.
+        //
+        // También revisamos los días adyacentes: un partido de la noche en
+        // Bogotá ya pertenece al día siguiente en Madrid, aunque ambas cuentas
+        // deban verlo analizado dentro de su respectiva jornada local.
+        const datesToCheck = [date];
         if (userTimezone !== 'UTC') {
           const d = new Date(date + 'T12:00:00Z');
           const prevDay = new Date(d.getTime() - 86400000).toISOString().split('T')[0];
@@ -491,9 +523,10 @@ export async function GET(request) {
           }
         }
 
-        const result = { globallyAnalyzed, analyzedOdds, analyzedData };
-        redisSet(analysisRedisKey, result, ANALYSIS_CACHE_TTL).catch(() => {});
-        return result;
+        // `analysis:${date}` is the canonical, timezone-agnostic cache written
+        // by the worker. Do not overwrite it with this fixture-filtered view:
+        // another timezone may legitimately need IDs excluded from this response.
+        return { globallyAnalyzed, analyzedOdds, analyzedData };
       })(),
 
       // Odds: use Redis cache (populated by cron/odds)
@@ -529,7 +562,9 @@ export async function GET(request) {
     if (userId) {
       const [hiddenRes, favRes] = await Promise.all([
         supabaseAdmin.from('user_hidden').select('fixture_id').eq('user_id', userId).eq('date', date),
-        supabaseAdmin.from('user_favorites').select('fixture_id').eq('user_id', userId),
+        fixtureIds.length > 0
+          ? supabaseAdmin.from('user_favorites').select('fixture_id').eq('user_id', userId).in('fixture_id', fixtureIds)
+          : Promise.resolve({ data: [] }),
       ]);
       hidden = (hiddenRes.data || []).map(r => r.fixture_id);
       favorites = (favRes.data || []).map(r => r.fixture_id);
@@ -606,6 +641,22 @@ export async function GET(request) {
       }
     }
 
+    // Los caches de live/standings son globales por fecha o temporada. Enviar
+    // solo las entradas que esta respuesta puede pintar evita arrastrar datos
+    // de otros días/ligas, especialmente en jornadas de cientos de partidos.
+    const responseFixtureIds = new Set(fixtures.map(f => Number(f.fixture?.id)));
+    initialLiveStats = Object.fromEntries(
+      Object.entries(initialLiveStats || {})
+        .filter(([id]) => responseFixtureIds.has(Number(id))),
+    );
+    const responseTeamIds = new Set(
+      fixtures.flatMap(f => [Number(f.teams?.home?.id), Number(f.teams?.away?.id)]),
+    );
+    const responseStandings = Object.fromEntries(
+      Object.entries(standingsResult || {})
+        .filter(([id]) => responseTeamIds.has(Number(id))),
+    );
+
     return Response.json({
       fixtures,
       fromCache,
@@ -617,7 +668,7 @@ export async function GET(request) {
       analyzed: userAnalyzed,
       analyzedOdds,
       analyzedData,
-      standings: standingsResult,
+      standings: responseStandings,
       initialLiveStats,
       batchStatus: batchFlag ? {
         started: batchFlag.started || false,
