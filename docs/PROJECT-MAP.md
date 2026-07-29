@@ -135,9 +135,12 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - 2026-07-29: el dashboard recibe identidad inicial desde su layout de servidor y precarga ambas rutas deportivas.
 - 2026-07-29: el análisis completo de Fútbol y Baseball se abre en un modal
   nativo con escenario sticky. El scroll interno es continuo y sin cooldown;
-  su progreso funde las capas en el mismo viewport, sin flechas ni scroll-snap.
-  El controlador debe reenviar rueda/swipe al conductor exterior cuando la
-  escena activa no tenga overflow o ya esté en su borde; `overscroll-behavior`
-  por sí solo no encadena elementos posicionados de forma absoluta.
+  su progreso cambia capas nítidas en el mismo viewport, sin blur, escalado,
+  flechas ni scroll-snap. El controlador captura rueda/swipe en el conductor y
+  actualiza el progreso inmediatamente; debe reenviar el sobrante exterior
+  cuando la escena activa no tenga overflow o ya esté en su borde.
+- 2026-07-29: `BrandLogoMedia` conserva `/logo-metalizado.webm` como fuente
+  principal y usa `/logo-metalizado-alpha.webp` en WebKit/iOS, donde el VP9 con
+  `alpha_mode=1` puede reproducirse con el plano transparente en negro.
 - 2026-06: los nombres `supabaseAdmin`/`createSupabaseServerClient` son shims PG, no Supabase activo.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.

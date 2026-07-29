@@ -21,6 +21,7 @@ import {
   purchasePlanLabel,
   purchaseRoute,
 } from '../../../lib/purchase-flow';
+import BrandLogoMedia from '../../../components/BrandLogoMedia';
 import { useAuth } from '../../../components/providers';
 
 export default function SignUpPage() {
@@ -115,17 +116,9 @@ export default function SignUpPage() {
         <section className="signup-panel">
           <header className="signup-header">
             <Link href="/" className="signup-logo-link" aria-label="Volver a CF Análisis">
-              <video
+              <BrandLogoMedia
                 className="signup-logo-video"
-                autoPlay
-                muted
-                loop
-                playsInline
-                preload="auto"
-                aria-label="CF Análisis"
-              >
-                <source src="/logo-metalizado.webm" type="video/webm" />
-              </video>
+              />
             </Link>
 
             <div className="signup-journey" aria-label="Proceso de acceso">

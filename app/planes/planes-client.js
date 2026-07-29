@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
+import BrandLogoMedia from '../../components/BrandLogoMedia';
 import MercadoPagoModal from './MercadoPagoModal';
 import PaymentModal from './PaymentModal';
 
@@ -344,17 +345,9 @@ export default function PlanesClient({
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.08, duration: 0.5 }}
         >
-          <video
+          <BrandLogoMedia
             className="planes-logo"
-            autoPlay
-            muted
-            loop
-            playsInline
-            preload="auto"
-            aria-label="CF Análisis"
-          >
-            <source src="/logo-metalizado.webm" type="video/webm" />
-          </video>
+          />
           <p className="planes-eyebrow">
             <Sparkles size={14} aria-hidden="true" />
             Activa tu ventaja

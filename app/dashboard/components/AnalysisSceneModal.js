@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import BrandLogoMedia from '../../../components/BrandLogoMedia';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -33,20 +34,11 @@ export default function AnalysisSceneModal({
     setActiveScene(nearest);
 
     scenes.forEach((scene, index) => {
-      const distance = index - progress;
-      const absoluteDistance = Math.abs(distance);
-      const opacity = clamp(1 - absoluteDistance * 1.08, 0, 1);
-      const shift = clamp(distance * 7, -10, 10);
-      const scale = 1 - Math.min(absoluteDistance, 1) * 0.035;
-      const blur = Math.min(absoluteDistance * 8, 10);
       const isActive = index === nearest;
 
       scene.classList.add('analysis-apple-scene');
       scene.classList.toggle('is-scene-active', isActive);
-      scene.style.setProperty('--analysis-scene-opacity', opacity.toFixed(3));
-      scene.style.setProperty('--analysis-scene-shift', `${shift.toFixed(3)}%`);
-      scene.style.setProperty('--analysis-scene-scale', scale.toFixed(4));
-      scene.style.setProperty('--analysis-scene-blur', `${blur.toFixed(2)}px`);
+      scene.style.setProperty('--analysis-scene-opacity', isActive ? '1' : '0');
       scene.setAttribute('aria-hidden', isActive ? 'false' : 'true');
       if ('inert' in scene) scene.inert = !isActive;
 
@@ -107,6 +99,17 @@ export default function AnalysisSceneModal({
       });
     };
 
+    const moveOuterScroll = (delta) => {
+      const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      const nextTop = clamp(scroller.scrollTop + delta, 0, maxScroll);
+      scroller.scrollTop = nextTop;
+
+      const scenes = scenesRef.current;
+      if (scenes.length > 0 && maxScroll > 0) {
+        paintProgress((nextTop / maxScroll) * (scenes.length - 1));
+      }
+    };
+
     const routeScrollDelta = (delta) => {
       const active = scenesRef.current[Math.round(progressRef.current)];
       let remaining = delta;
@@ -124,7 +127,7 @@ export default function AnalysisSceneModal({
         }
       }
 
-      if (Math.abs(remaining) >= 1) scroller.scrollTop += remaining;
+      if (Math.abs(remaining) >= 1) moveOuterScroll(remaining);
     };
 
     const onWheel = (event) => {
@@ -171,11 +174,11 @@ export default function AnalysisSceneModal({
     const observer = new MutationObserver(syncScenes);
     observer.observe(stage, { childList: true, subtree: true });
     scroller.addEventListener('scroll', readNativeScroll, { passive: true });
-    stage.addEventListener('wheel', onWheel, { passive: false });
-    stage.addEventListener('touchstart', onTouchStart, { passive: true });
-    stage.addEventListener('touchmove', onTouchMove, { passive: false });
-    stage.addEventListener('touchend', onTouchEnd, { passive: true });
-    stage.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    scroller.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    scroller.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
+    scroller.addEventListener('touchmove', onTouchMove, { passive: false, capture: true });
+    scroller.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
+    scroller.addEventListener('touchcancel', onTouchEnd, { passive: true, capture: true });
     scroller.addEventListener('keydown', onKeyDown);
     window.addEventListener('resize', readNativeScroll, { passive: true });
 
@@ -184,11 +187,11 @@ export default function AnalysisSceneModal({
       cancelAnimationFrame(scrollFrame);
       observer.disconnect();
       scroller.removeEventListener('scroll', readNativeScroll);
-      stage.removeEventListener('wheel', onWheel);
-      stage.removeEventListener('touchstart', onTouchStart);
-      stage.removeEventListener('touchmove', onTouchMove);
-      stage.removeEventListener('touchend', onTouchEnd);
-      stage.removeEventListener('touchcancel', onTouchEnd);
+      scroller.removeEventListener('wheel', onWheel, true);
+      scroller.removeEventListener('touchstart', onTouchStart, true);
+      scroller.removeEventListener('touchmove', onTouchMove, true);
+      scroller.removeEventListener('touchend', onTouchEnd, true);
+      scroller.removeEventListener('touchcancel', onTouchEnd, true);
       scroller.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', readNativeScroll);
     };
@@ -210,9 +213,7 @@ export default function AnalysisSceneModal({
       >
         <header className="analysis-native-header">
           <div className="analysis-native-brand is-logo-only">
-            <video autoPlay muted loop playsInline preload="auto" aria-label="CF Análisis">
-              <source src="/logo-metalizado.webm" type="video/webm" />
-            </video>
+            <BrandLogoMedia />
           </div>
           <button
             ref={closeRef}
@@ -240,7 +241,7 @@ export default function AnalysisSceneModal({
           </div>
           <div
             className="analysis-native-scroll-spacer"
-            style={{ height: `${Math.max(0, sceneCount - 1) * 48}dvh` }}
+            style={{ height: `${Math.max(0, sceneCount - 1) * 32}dvh` }}
             aria-hidden="true"
           />
         </div>

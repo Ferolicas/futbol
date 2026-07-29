@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { LockKeyhole, ShieldCheck, WalletCards, X } from 'lucide-react';
+import BrandLogoMedia from '../../components/BrandLogoMedia';
 
 // Carga el SDK de Mercado Pago (v2) una sola vez.
 let mpSdkPromise = null;
@@ -123,17 +124,9 @@ export default function MercadoPagoModal({ plan, planLabel, amountCop, email, pu
         </button>
 
         <header className="payment-modal-header">
-          <video
+          <BrandLogoMedia
             className="payment-modal-logo"
-            autoPlay
-            muted
-            loop
-            playsInline
-            preload="auto"
-            aria-label="CF Análisis"
-          >
-            <source src="/logo-metalizado.webm" type="video/webm" />
-          </video>
+          />
           <p className="payment-modal-eyebrow">
             <ShieldCheck size={14} aria-hidden="true" />
             Checkout seguro en Colombia

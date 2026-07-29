@@ -18,6 +18,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useAuth } from '../components/providers';
+import BrandLogoMedia from '../components/BrandLogoMedia';
 import { createPurchaseIntent, purchaseRoute } from '../lib/purchase-flow';
 
 const FEATURES = [
@@ -264,17 +265,9 @@ export default function LandingPage() {
         <span className="apple-grid" />
       </div>
 
-      <video
+      <BrandLogoMedia
         className={`apple-brand-video ${activeScene === 0 ? 'is-hero' : activeScene === FINAL_SCENE ? 'is-finale' : 'is-away'}`}
-        autoPlay
-        muted
-        loop
-        playsInline
-        preload="auto"
-        aria-label="CF Análisis"
-      >
-        <source src="/logo-metalizado.webm" type="video/webm" />
-      </video>
+      />
 
       <div className="apple-stage">
         <section className={`apple-scene apple-hero-scene ${sceneState(0)}`} aria-hidden={activeScene !== 0}>

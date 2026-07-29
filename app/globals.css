@@ -3113,6 +3113,21 @@ body {
   }
 }
 
+/* El VP9 conserva el alfa en Chromium. WebKit móvil puede decodificar el
+   movimiento sin componer ese plano y mostrarlo negro; antes de hidratar,
+   ocultamos ese frame y BrandLogoMedia entrega la misma animación en WebP. */
+.brand-logo-alpha-fallback {
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+@supports (-webkit-touch-callout: none) {
+  .brand-logo-alpha-video {
+    visibility: hidden !important;
+  }
+}
+
 /* =====================================================================
    DASHBOARD MOBILE-FIRST — sistema visual compartido Fútbol / Baseball
    ===================================================================== */
@@ -3146,7 +3161,7 @@ body {
   border-radius: 0;
 }
 
-.dashboard-brand video {
+.dashboard-brand :is(video, .brand-logo-alpha-fallback) {
   width: 96px;
   max-width: 100%;
   margin-left: 0;
@@ -4427,7 +4442,7 @@ body {
   min-width: 0;
 }
 
-.analysis-native-brand video {
+.analysis-native-brand :is(video, .brand-logo-alpha-fallback) {
   flex: 0 0 auto;
   width: 82px;
   height: auto;
@@ -4655,7 +4670,7 @@ body {
     height: 54px;
   }
 
-  .dashboard-brand video {
+  .dashboard-brand :is(video, .brand-logo-alpha-fallback) {
     width: 126px;
     margin-left: 0;
   }
@@ -4697,7 +4712,7 @@ body {
     gap: 3px;
   }
 
-  .dashboard-brand video {
+  .dashboard-brand :is(video, .brand-logo-alpha-fallback) {
     width: 88px;
   }
 
@@ -4754,7 +4769,7 @@ body {
     width: 100%;
   }
 
-  .dashboard-brand video {
+  .dashboard-brand :is(video, .brand-logo-alpha-fallback) {
     width: 78px;
   }
 
@@ -8646,7 +8661,7 @@ input:checked + .cb-mark::after {
   border-radius: 13px;
 }
 
-.dashboard-brand video {
+.dashboard-brand :is(video, .brand-logo-alpha-fallback) {
   display: block;
   width: 116px;
   max-width: none;
@@ -9376,7 +9391,7 @@ input:checked + .cb-mark::after {
     padding: 5px 10px 5px 7px;
   }
   .dashboard-brand { height: 58px; }
-  .dashboard-brand video { width: 150px; margin-left: -18px; }
+  .dashboard-brand :is(video, .brand-logo-alpha-fallback) { width: 150px; margin-left: -18px; }
   .sport-menu-trigger { min-width: 136px; font-size: .78rem; }
   .dashboard-account-trigger { max-width: 170px; }
   .dashboard-account-name { font-size: .73rem; }
@@ -9396,7 +9411,7 @@ input:checked + .cb-mark::after {
     gap: 3px;
     padding-right: 4px;
   }
-  .dashboard-brand video { width: 103px; margin-left: -16px; }
+  .dashboard-brand :is(video, .brand-logo-alpha-fallback) { width: 103px; margin-left: -16px; }
   .sport-menu-trigger {
     min-width: 88px;
     padding-right: 7px;
@@ -9451,7 +9466,7 @@ input:checked + .cb-mark::after {
   border-radius: 0 !important;
 }
 
-.dashboard-brand video {
+.dashboard-brand :is(video, .brand-logo-alpha-fallback) {
   width: 82px !important;
   max-width: 82px !important;
   margin-left: 4px !important;
@@ -9703,7 +9718,7 @@ input:checked + .cb-mark::after {
     padding-left: 10px !important;
   }
 
-  .dashboard-brand video {
+  .dashboard-brand :is(video, .brand-logo-alpha-fallback) {
     width: 110px !important;
     max-width: 110px !important;
     margin-left: 6px !important;
@@ -9720,7 +9735,7 @@ input:checked + .cb-mark::after {
     padding-left: 6px !important;
   }
 
-  .dashboard-brand video {
+  .dashboard-brand :is(video, .brand-logo-alpha-fallback) {
     width: 72px !important;
     max-width: 72px !important;
     margin-left: 4px !important;
@@ -9859,7 +9874,7 @@ input:checked + .cb-mark::after {
   overflow: visible;
 }
 
-.analysis-native-brand.is-logo-only video {
+.analysis-native-brand.is-logo-only :is(video, .brand-logo-alpha-fallback) {
   width: 116px;
   max-width: 116px;
   margin: 0;
@@ -9894,7 +9909,7 @@ input:checked + .cb-mark::after {
   overflow-x: hidden !important;
   overflow-y: auto !important;
   overscroll-behavior: contain;
-  touch-action: pan-y;
+  touch-action: none;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
@@ -9945,7 +9960,7 @@ input:checked + .cb-mark::after {
   overflow: hidden !important;
   scroll-behavior: auto !important;
   scroll-snap-type: none !important;
-  touch-action: pan-y;
+  touch-action: none;
 }
 
 .analysis-apple-scene {
@@ -9960,19 +9975,15 @@ input:checked + .cb-mark::after {
   overflow-y: auto !important;
   opacity: var(--analysis-scene-opacity, 0) !important;
   visibility: visible !important;
-  filter: blur(var(--analysis-scene-blur, 8px)) !important;
-  transform:
-    translate3d(0, var(--analysis-scene-shift, 8%), 0)
-    scale(var(--analysis-scene-scale, .965)) !important;
+  filter: none !important;
+  transform: none !important;
   transform-origin: 50% 52%;
   pointer-events: none !important;
   scrollbar-width: thin;
   scrollbar-color: rgba(94,230,177,.28) transparent;
-  will-change: opacity, transform, filter;
-  transition:
-    opacity .16s ease,
-    transform .2s cubic-bezier(.22,1,.36,1),
-    filter .18s ease;
+  touch-action: none;
+  will-change: opacity;
+  transition: opacity .12s ease;
 }
 
 .analysis-apple-scene.is-scene-active {
@@ -9994,18 +10005,16 @@ input:checked + .cb-mark::after {
 }
 
 .analysis-apple-scene.is-scene-active > .analysis-apple-piece {
-  animation: analysisApplePieceIn .44s cubic-bezier(.22,1,.36,1) both;
-  animation-delay: calc(var(--analysis-piece-index, 0) * 34ms + 40ms);
+  animation: analysisApplePieceIn .18s ease-out both;
+  animation-delay: calc(var(--analysis-piece-index, 0) * 16ms);
 }
 
 @keyframes analysisApplePieceIn {
   from {
-    opacity: 0;
-    transform: translate3d(0, 14px, 0) scale(.985);
+    opacity: .35;
   }
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
@@ -10019,7 +10028,7 @@ input:checked + .cb-mark::after {
     padding-left: 8px;
   }
 
-  .analysis-native-brand.is-logo-only video {
+  .analysis-native-brand.is-logo-only :is(video, .brand-logo-alpha-fallback) {
     width: 132px;
     max-width: 132px;
   }
@@ -10039,7 +10048,7 @@ input:checked + .cb-mark::after {
     height: 52px;
   }
 
-  .analysis-native-brand.is-logo-only video {
+  .analysis-native-brand.is-logo-only :is(video, .brand-logo-alpha-fallback) {
     width: 98px;
     max-width: 98px;
   }

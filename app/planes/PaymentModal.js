@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { Check, LockKeyhole, ShieldCheck, X } from 'lucide-react';
+import BrandLogoMedia from '../../components/BrandLogoMedia';
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
 
@@ -75,17 +76,9 @@ function PaymentForm({ plan, displayAmount, onClose }) {
       </button>
 
       <div className="payment-modal-header">
-        <video
+        <BrandLogoMedia
           className="payment-modal-logo"
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="auto"
-          aria-label="CF Análisis"
-        >
-          <source src="/logo-metalizado.webm" type="video/webm" />
-        </video>
+        />
         <p className="payment-modal-eyebrow">
           <ShieldCheck size={14} aria-hidden="true" />
           Checkout seguro

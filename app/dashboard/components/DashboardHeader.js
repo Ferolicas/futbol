@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, LogOut, UserRound } from 'lucide-react';
+import BrandLogoMedia from '../../../components/BrandLogoMedia';
 import { useAuth } from '../../../components/providers';
 import SportToggle from './SportToggle';
 
@@ -47,16 +48,7 @@ export default function DashboardHeader({ initialUser }) {
   return (
     <header className="dashboard-topbar">
       <Link href="/dashboard" className="dashboard-brand" aria-label="Ir al dashboard">
-        <video
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="auto"
-          aria-label="CF Análisis"
-        >
-          <source src="/logo-metalizado.webm" type="video/webm" />
-        </video>
+        <BrandLogoMedia />
       </Link>
 
       <SportToggle />

@@ -28,6 +28,7 @@ import { buildCombinada } from '../../lib/combinada';
 import { marketLabel } from '../../lib/market-labels';
 import { setAnalysisCache } from '../../lib/analysis-cache';
 import { fetcher } from '../../lib/fetcher';
+import BrandLogoMedia from '../../components/BrandLogoMedia';
 import { useLiveStats } from './live-stats-context';
 import { useSelectedMarkets } from './selected-markets-context';
 import { DateCaption, LeaguePicker, StatusPicker } from './components/DashboardFilters';
@@ -1155,17 +1156,9 @@ export default function Dashboard() {
       <div className={`splash ${splashFade ? 'fade-out' : ''}`}>
         <div className="splash-content">
           <div className="splash-logo-wrap">
-            <video
+            <BrandLogoMedia
               className="splash-logo splash-logo-video"
-              autoPlay
-              muted
-              loop
-              playsInline
-              preload="auto"
-              aria-label="CF Análisis"
-            >
-              <source src="/logo-metalizado.webm" type="video/webm" />
-            </video>
+            />
           </div>
           <p className="splash-almost">Ya casi estamos…</p>
         </div>

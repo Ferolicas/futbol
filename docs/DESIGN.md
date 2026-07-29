@@ -33,14 +33,16 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - Tarjetas: una sola capa de profundidad, sin `backdrop-filter` ni animaciones de sombra repetidas por tarjeta.
 - Checkout: hoja inferior en móvil y modal centrado en escritorio. Stripe y Mercado Pago comparten la misma carcasa visual.
 - Modal de análisis: escenario fijo sin paginación ni flechas. Rueda, teclado y
-  swipe controlan un progreso continuo que construye las capas en el mismo
-  viewport; solo el contenido que excede la altura conserva scroll interno.
-- Cargas: skeleton de superficie; el splash principal utiliza exclusivamente `/logo-metalizado.webm`.
+  swipe capturados desde el conductor controlan las capas en el mismo viewport;
+  las escenas permanecen nítidas, sin blur ni escalado, y solo el contenido que
+  excede la altura conserva scroll interno.
+- Cargas: skeleton de superficie. `BrandLogoMedia` utiliza el WebM original y
+  entrega la misma animación en WebP con alfa a WebKit/iOS para evitar el fondo negro.
 
 ## Motion y rendimiento
 
 - Interacciones táctiles: 150–220 ms.
-- Cambios de escena: 340 ms con `cubic-bezier(.22,1,.36,1)`.
+- Cambios de escena del análisis: fundido nítido de 120–180 ms, sin escalado.
 - El scroll de Home y planes se desbloquea a los 110 ms para aceptar gestos rápidos.
 - Solo los estados realmente en vivo pueden mantener un pulso continuo.
 - `prefers-reduced-motion` elimina transiciones y animaciones no esenciales.
