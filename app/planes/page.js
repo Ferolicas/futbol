@@ -1,16 +1,25 @@
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '../../lib/supabase-auth';
 import { supabaseAdmin } from '../../lib/supabase';
+import {
+  normalizePurchaseIntent,
+  normalizePurchasePlan,
+  purchaseRoute,
+} from '../../lib/purchase-flow';
 import PlanesClient from './planes-client';
 
 export const metadata = {
   title: 'Selecciona tu Plan - CFanalisis',
 };
 
-export default async function PlanesPage() {
+export default async function PlanesPage({ searchParams }) {
+  const autoCheckoutPlan = normalizePurchasePlan(searchParams?.checkout);
+  const purchaseIntent = normalizePurchaseIntent(searchParams?.intent);
   const supabase = createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/sign-in');
+  if (!user) {
+    redirect(purchaseRoute('/sign-in', 'plan', autoCheckoutPlan, purchaseIntent));
+  }
 
   const { data: profile } = await supabaseAdmin
     .from('user_profiles')
@@ -29,9 +38,10 @@ export default async function PlanesPage() {
 
   return (
     <PlanesClient
-      userId={user.id}
       email={profile?.email || user.email}
       mpPublicKey={mpPublicKey}
+      autoCheckoutPlan={autoCheckoutPlan}
+      purchaseIntent={purchaseIntent}
     />
   );
 }

@@ -19,10 +19,23 @@
  */
 
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
 import useSWR, { mutate as globalMutate } from 'swr';
+import {
+  ArrowRight,
+  BarChart3,
+  CalendarDays,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Layers3,
+  Sparkles,
+  Target,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { BASEBALL_FLAGS } from '../../../lib/baseball-leagues';
 import {
   buildBaseballApuestaDelDia,
@@ -30,6 +43,17 @@ import {
 } from '../../../lib/baseball-combinada';
 import { fetcher } from '../../../lib/fetcher';
 import { usePusherEvent } from '../../../lib/use-pusher';
+import { DateCaption, LeaguePicker, StatusPicker } from '../components/DashboardFilters';
+import DashboardBuffer from '../components/DashboardBuffer';
+import AnalysisSceneModal from '../components/AnalysisSceneModal';
+
+const BaseballAnalysisExperience = dynamic(
+  () => import('./analisis/[id]/page').then((module) => module.BaseballAnalysisExperience),
+  {
+    ssr: false,
+    loading: () => <DashboardBuffer compact />,
+  },
+);
 
 // =====================================================================
 // HELPERS
@@ -52,6 +76,17 @@ const fmtTimeInTz = (iso, tz = 'UTC') => {
     return new Date(iso).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', timeZone: tz });
   } catch {
     return new Date(iso).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+  }
+};
+const fmtDateLabel = (date) => {
+  try {
+    return new Date(`${date}T12:00:00`).toLocaleDateString('es-ES', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
+  } catch {
+    return date;
   }
 };
 const statusText = (g) => {
@@ -86,8 +121,6 @@ function toggleSubAndReveal(e, isOpen, id, setOpenSub) {
 // DASHBOARD
 // =====================================================================
 export default function BaseballDashboard() {
-  const router = useRouter();
-
   // userTz/date arrancan en UTC (SSR) y se corrigen a la TZ REAL del navegador
   // en el cliente (useEffect). Sin esto, el initializer corría en SSR → UTC y
   // se quedaba en UTC para siempre → el frontend mostraba todo en horario UTC.
@@ -100,7 +133,7 @@ export default function BaseballDashboard() {
     setUserTz(tz);
     setDate(todayInTz(tz));
   }, []);
-  const [sortBy, setSortBy] = useState('time');
+  const [sortBy] = useState('time');
   const [statusFilter, setStatusFilter] = useState('all');
   const [leagueFilter, setLeagueFilter] = useState('');
   const [selected, setSelected] = useState(new Set());
@@ -108,6 +141,7 @@ export default function BaseballDashboard() {
   const [expandedMatch, setExpandedMatch] = useState(null);
   const [showApuesta, setShowApuesta] = useState(true);
   const [error, setError] = useState('');
+  const [analysisModalId, setAnalysisModalId] = useState(null);
 
   // Custom combinada — manual selections by user
   const [selectedMarkets, setSelectedMarkets] = useState({});
@@ -328,14 +362,26 @@ export default function BaseballDashboard() {
 
   const liveCount = games.filter(g => !hidden.includes(g.id) && isLive(g.status?.short)).length;
   const upcomingCount = games.filter(g => !hidden.includes(g.id) && g.status?.short === 'NS').length;
+  const finishedCount = games.filter(g => !hidden.includes(g.id) && isFinished(g.status?.short)).length;
   const favoriteCount = games.filter(g => favorites.includes(g.id) && !hidden.includes(g.id)).length;
+  const allVisibleCount = games.filter((game) => {
+    if (hidden.includes(game.id)) return false;
+    if (isPostponed(game.status?.short)) return false;
+    if (leagueFilter && String(game.league?.id) !== leagueFilter) return false;
+    return true;
+  }).length;
 
   const leagueOptions = useMemo(() => {
     const map = new Map();
     for (const g of games) {
       if (hidden.includes(g.id)) continue;
       if (!g.league?.id) continue;
-      map.set(g.league.id, { id: g.league.id, name: g.league.name, country: g.country?.name || g.leagueMeta?.country });
+      map.set(g.league.id, {
+        id: g.league.id,
+        name: g.league.name,
+        country: g.country?.name || g.leagueMeta?.country,
+        logo: g.league.logo,
+      });
     }
     return Array.from(map.values()).sort((a, b) => (a.country || '').localeCompare(b.country || ''));
   }, [games, hidden]);
@@ -359,70 +405,60 @@ export default function BaseballDashboard() {
 
   // ─── RENDER ─────────────────────────────────────────────────────────
   return (
-    <div className="app-baseball" style={{ maxWidth: 1200, margin: '0 auto', padding: '0 16px 80px' }}>
+    <div className="app-baseball">
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-        <h1 style={{
-          margin: 0, fontSize: '1.5rem', fontWeight: 800,
-          background: 'linear-gradient(135deg, #fcd34d, #f59e0b, #b45309)',
-          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-        }}>⚾ Baseball</h1>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <span style={badgePill('#fbbf24')}>API {quota.used}/{quota.limit}</span>
+      <div className="baseball-context-row">
+        <span className="baseball-context-kicker">MLB · Datos en tiempo real</span>
+        <span className="baseball-quota">API {quota.used}/{quota.limit}</span>
+      </div>
+
+      <div className="baseball-controls">
+        <div className="baseball-date-nav">
+        <button className="baseball-control-btn" onClick={() => changeDate(-1)} aria-label="Día anterior"><ChevronLeft size={17} aria-hidden="true" /></button>
+        <label className="date-picker-label">
+          <DateCaption isToday={date === todayInTz(userTz)} label={fmtDateLabel(date)} />
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => { setDate(e.target.value); setSelected(new Set()); setSelectedMarkets({}); }}
+          />
+        </label>
+        <button className="baseball-control-btn" onClick={() => changeDate(1)} aria-label="Día siguiente"><ChevronRight size={17} aria-hidden="true" /></button>
+        {date !== todayInTz(userTz) && (
+          <button className="baseball-today-btn" onClick={() => setDate(todayInTz(userTz))}><CalendarDays size={14} aria-hidden="true" /> Hoy</button>
+        )}
+        </div>
+
+        <div className="baseball-filter-row">
+          <LeaguePicker
+            leagues={leagueOptions}
+            value={leagueFilter}
+            onChange={setLeagueFilter}
+          />
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-        <button onClick={() => changeDate(-1)} style={btn()}>‹</button>
-        <input
-          type="date" value={date}
-          onChange={(e) => { setDate(e.target.value); setSelected(new Set()); setSelectedMarkets({}); }}
-          style={{ ...btn(), minWidth: 140 }}
+      <div className="baseball-tabs">
+        <button className={tab === 'partidos' ? 'is-active' : ''} onClick={() => setTab('partidos')}>
+          Partidos
+          {allVisibleCount > 0 && <span>{allVisibleCount}</span>}
+        </button>
+        <button className={tab === 'combinada' ? 'is-active' : ''} onClick={() => setTab('combinada')}>
+          Combinada
+          {totalSel > 0 && <span>{totalSel}</span>}
+        </button>
+        <StatusPicker
+          value={statusFilter}
+          onChange={setStatusFilter}
+          counts={{
+            all: allVisibleCount,
+            live: liveCount,
+            upcoming: upcomingCount,
+            finished: finishedCount,
+            favorites: favoriteCount,
+          }}
         />
-        <button onClick={() => changeDate(1)} style={btn()}>›</button>
-        <button onClick={() => setDate(todayInTz(userTz))} style={btn()}>Hoy</button>
-
-        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ ...btn(), minWidth: 120 }}>
-          <option value="time">Hora</option>
-          <option value="probability">Análisis</option>
-        </select>
-        <select value={leagueFilter} onChange={(e) => setLeagueFilter(e.target.value)} style={{ ...btn(), minWidth: 200 }}>
-          <option value="">Todas las ligas</option>
-          {leagueOptions.map(l => (
-            <option key={l.id} value={l.id}>
-              {BASEBALL_FLAGS[l.country] || ''} {l.country} — {l.name}
-            </option>
-          ))}
-        </select>
       </div>
-
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12, borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: 6 }}>
-        {[
-          { key: 'partidos', label: 'Partidos', count: visible.length },
-          { key: 'combinada', label: 'Combinada', count: totalSel },
-        ].map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)} style={tabBtn(tab === t.key)}>
-            {t.label}
-            {t.count > 0 && <span style={tabBadge(tab === t.key)}>{t.count}</span>}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'partidos' && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-          {[
-            { key: 'all', label: 'Todos', count: visible.length },
-            { key: 'live', label: '🔴 En Vivo', count: liveCount },
-            { key: 'upcoming', label: 'Próximos', count: upcomingCount },
-            { key: 'finished', label: 'Finalizados' },
-            { key: 'favoritos', label: '⭐ Favoritos', count: favoriteCount },
-          ].map(c => (
-            <button key={c.key} onClick={() => setStatusFilter(c.key)} style={chip(statusFilter === c.key)}>
-              {c.label}{c.count > 0 ? ` · ${c.count}` : ''}
-            </button>
-          ))}
-        </div>
-      )}
 
       {apuestaDelDia && tab === 'partidos' && (
         <ApuestaDelDiaBlock apuesta={apuestaDelDia} show={showApuesta} onToggle={() => setShowApuesta(!showApuesta)} />
@@ -436,7 +472,7 @@ export default function BaseballDashboard() {
       )}
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: 48, color: '#94a3b8' }}>Cargando partidos…</div>
+        <DashboardBuffer compact />
       ) : (
         <>
           {tab === 'partidos' && (
@@ -457,6 +493,7 @@ export default function BaseballDashboard() {
                     onSelect={toggleSelect}
                     onFavorite={toggleFavorite}
                     onDismiss={dismissMatch}
+                    onViewFull={setAnalysisModalId}
                     selectedMarkets={selectedMarkets}
                     onToggleMarket={toggleMarket}
                   />
@@ -486,33 +523,44 @@ export default function BaseballDashboard() {
 
       {tab === 'partidos' && selected.size > 0 && (
         <button
+          className="baseball-float-action"
           onClick={analyzeSelected}
           disabled={analyzing}
-          style={{
-            position: 'fixed', bottom: 80, right: 24, padding: '14px 22px', borderRadius: 999,
-            background: 'linear-gradient(135deg, #fcd34d, #f59e0b, #b45309)', color: '#1c1410',
-            fontWeight: 800, border: 'none', cursor: analyzing ? 'wait' : 'pointer',
-            boxShadow: '0 8px 24px rgba(245,158,11,0.45)', fontSize: '.95rem', zIndex: 50,
-          }}
         >
           {analyzing ? `Analizando ${selected.size}…` : `Analizar ${selected.size} ${selected.size === 1 ? 'partido' : 'partidos'}`}
+          <ArrowRight size={18} aria-hidden="true" />
         </button>
       )}
 
       {tab !== 'combinada' && totalSel > 0 && (
         <button
+          className="baseball-comb-action"
           onClick={() => setTab('combinada')}
-          style={{
-            position: 'fixed', bottom: 24, right: 24, padding: '12px 18px', borderRadius: 999,
-            background: 'linear-gradient(135deg, #fbbf24, #d97706)', color: '#1c1410',
-            fontWeight: 800, border: 'none', cursor: 'pointer',
-            boxShadow: '0 6px 18px rgba(251,191,36,0.4)', zIndex: 50,
-          }}
         >
-          🎯 Mi combinada · {totalSel}
+          <span><Layers3 size={18} aria-hidden="true" /></span>
+          <span><small>Tu selección</small><strong>Mi combinada · {totalSel}</strong></span>
+          <ArrowRight size={18} aria-hidden="true" />
         </button>
       )}
+
+      {analysisModalId && (
+        <BaseballAnalysisModal id={analysisModalId} onClose={() => setAnalysisModalId(null)} />
+      )}
     </div>
+  );
+}
+
+function BaseballAnalysisModal({ id, onClose }) {
+  return (
+    <AnalysisSceneModal
+      onClose={onClose}
+      sceneSelector=".baseball-analysis-page.is-embedded > .baseball-analysis-hero, .baseball-analysis-page.is-embedded > .baseball-analysis-section"
+      variant="baseball"
+      bodyClassName="baseball-analysis-modal-body"
+      ariaLabel="Análisis completo de baseball"
+    >
+      <BaseballAnalysisExperience fixtureId={id} embedded onClose={onClose} />
+    </AnalysisSceneModal>
   );
 }
 
@@ -520,18 +568,18 @@ export default function BaseballDashboard() {
 // LEAGUE GROUP + GAME CARD (con acordeón inline cuando isAnalyzed)
 // =====================================================================
 function LeagueGroup({ group, userTz, selected, favorites, analyzed, expandedMatch,
-                      onExpand, onSelect, onFavorite, onDismiss, selectedMarkets, onToggleMarket }) {
+                      onExpand, onSelect, onFavorite, onDismiss, onViewFull, selectedMarkets, onToggleMarket }) {
   return (
-    <div style={{ marginBottom: 22 }}>
-      <h3 style={{
+    <div className="baseball-league-group" style={{ marginBottom: 22 }}>
+      <h3 className="baseball-league-heading" style={{
         fontSize: '.92rem', fontWeight: 800, color: '#cbd5e1',
         margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 6,
-        borderBottom: '1px solid rgba(245,158,11,0.18)',
+        borderBottom: '1px solid rgba(94,230,177,0.18)',
       }}>
         <span>{BASEBALL_FLAGS[group.country] || '🌍'}</span>
         <span style={{ color: '#94a3b8' }}>{group.country}</span>
-        <span style={{ color: '#fbbf24' }}>·</span>
-        <span style={{ color: '#fde68a' }}>{group.leagueName}</span>
+        <span style={{ color: '#5ee6b1' }}>·</span>
+        <span style={{ color: '#bff4df' }}>{group.leagueName}</span>
         <span style={{ marginLeft: 'auto', fontSize: '.7rem', color: '#64748b', fontWeight: 600 }}>
           {group.games.length} {group.games.length === 1 ? 'partido' : 'partidos'}
         </span>
@@ -550,6 +598,7 @@ function LeagueGroup({ group, userTz, selected, favorites, analyzed, expandedMat
             onSelect={onSelect}
             onFavorite={onFavorite}
             onDismiss={onDismiss}
+            onViewFull={() => onViewFull(g.id)}
             selectedMarkets={selectedMarkets[g.id] || {}}
             onToggleMarket={(key, data) => onToggleMarket(g.id, key, data)}
           />
@@ -563,8 +612,8 @@ function LeagueGroup({ group, userTz, selected, favorites, analyzed, expandedMat
 const diamondBase = (occupied, left, top) => ({
   position: 'absolute', width: 12, height: 12, left, top,
   transform: 'translate(-50%,-50%) rotate(45deg)', borderRadius: 2,
-  background: occupied ? '#fbbf24' : 'rgba(255,255,255,0.12)',
-  boxShadow: occupied ? '0 0 6px rgba(251,191,36,0.6)' : 'none',
+  background: occupied ? '#5ee6b1' : 'rgba(255,255,255,0.12)',
+  boxShadow: occupied ? '0 0 6px rgba(94,230,177,0.6)' : 'none',
   transition: 'background .3s, box-shadow .3s',
 });
 
@@ -577,17 +626,17 @@ function LiveDiamond({ live }) {
   const outs = live.outs ?? 0;
   const arrow = live.inning_half === 'top' ? '↑' : live.inning_half === 'bottom' ? '↓' : '';
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.16)' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(94,230,177,0.06)', border: '1px solid rgba(94,230,177,0.16)' }}>
       <div style={{ position: 'relative', width: 40, height: 40, flexShrink: 0 }}>
         <span style={diamondBase(b.second, '50%', '22%')} />
         <span style={diamondBase(b.third, '22%', '50%')} />
         <span style={diamondBase(b.first, '78%', '50%')} />
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontFamily: 'JetBrains Mono, monospace' }}>
-        <span style={{ fontSize: '.72rem', color: '#fbbf24', fontWeight: 800 }}>
+        <span style={{ fontSize: '.72rem', color: '#5ee6b1', fontWeight: 800 }}>
           {arrow}{live.inning ?? ''}  ·  {balls}-{strikes}
         </span>
-        <span style={{ fontSize: '.64rem', color: '#fcd34d', letterSpacing: 1 }}>
+        <span style={{ fontSize: '.64rem', color: '#bff4df', letterSpacing: 1 }}>
           {'●'.repeat(Math.min(outs, 3))}{'○'.repeat(Math.max(0, 2 - outs))} outs
         </span>
       </div>
@@ -640,7 +689,7 @@ function ScoreCenter({ live, hasScore, homeScore, awayScore, statusLabel, time, 
           <span className="ap2-live-dot live-dot-pulse" /> {inningTxt || 'EN VIVO'}
         </span>
       ) : (
-        <span style={{ padding: '3px 10px', borderRadius: 999, background: 'rgba(255,255,255,.08)', fontSize: '.62rem', fontWeight: 800, color: '#fde68a', letterSpacing: '.05em', fontFamily: 'JetBrains Mono, monospace' }}>
+        <span style={{ padding: '3px 10px', borderRadius: 999, background: 'rgba(255,255,255,.08)', fontSize: '.62rem', fontWeight: 800, color: '#bff4df', letterSpacing: '.05em', fontFamily: 'JetBrains Mono, monospace' }}>
           {statusLabel}
         </span>
       )}
@@ -651,7 +700,7 @@ function ScoreCenter({ live, hasScore, homeScore, awayScore, statusLabel, time, 
           <span>{awayScore}</span>
         </div>
       ) : (
-        <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fde68a', fontFamily: 'JetBrains Mono, monospace' }}>{time}</span>
+        <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#bff4df', fontFamily: 'JetBrains Mono, monospace' }}>{time}</span>
       )}
     </div>
   );
@@ -696,7 +745,7 @@ function PlayerPropsBlock({ players }) {
           <span style={{ flex: 1, fontSize: '.78rem', color: '#f1f5f9', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {r.cat.emoji} {r.name} <span style={{ color: '#94a3b8' }}>— {r.best.line}+ {r.cat.label}</span>
           </span>
-          <span style={{ fontSize: '.84rem', fontWeight: 800, color: r.best.prob >= 65 ? '#22c55e' : '#fde68a', fontFamily: 'JetBrains Mono, monospace' }}>{r.best.prob}%</span>
+          <span style={{ fontSize: '.84rem', fontWeight: 800, color: r.best.prob >= 65 ? '#22c55e' : '#bff4df', fontFamily: 'JetBrains Mono, monospace' }}>{r.best.prob}%</span>
         </div>
       ))}
     </div>
@@ -704,7 +753,7 @@ function PlayerPropsBlock({ players }) {
 }
 
 function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded,
-                    onExpand, onSelect, onFavorite, onDismiss,
+                    onExpand, onSelect, onFavorite, onDismiss, onViewFull,
                     selectedMarkets, onToggleMarket }) {
   // Estado EXCLUSIVO de sub-acordeón (solo uno abierto: Mercados o Probabilidades).
   const [openSub, setOpenSub] = useState(null);
@@ -768,9 +817,9 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
             <button
               onClick={(e) => onFavorite(e, game.id)}
               style={{
-                width: 26, height: 26, borderRadius: 6, border: '1px solid rgba(252,211,77,0.25)',
-                background: isFavorite ? 'rgba(252,211,77,0.20)' : 'transparent',
-                color: isFavorite ? '#fcd34d' : '#94a3b8', cursor: 'pointer', fontSize: 14,
+                width: 26, height: 26, borderRadius: 6, border: '1px solid rgba(94,230,177,0.25)',
+                background: isFavorite ? 'rgba(94,230,177,0.18)' : 'transparent',
+                color: isFavorite ? '#5ee6b1' : '#94a3b8', cursor: 'pointer', fontSize: 14,
               }}
             >★</button>
           </div>
@@ -817,7 +866,7 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
             const favName = favHome ? (home?.name || 'Local') : (away?.name || 'Visitante');
             const favPct = Math.round(favHome ? homePct : awayPct);
             return (
-              <span style={miniChip(favPct >= 65 ? '#fbbf24' : '#fde68a')}>
+              <span style={miniChip()}>
                 🏆 {favName} {favPct}%
               </span>
             );
@@ -829,20 +878,20 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
             const side = overWins ? 'Over' : 'Under';
             const pct = overWins ? t.over : t.under;
             return (
-              <span style={miniChip(pct >= 65 ? '#fbbf24' : '#fde68a')}>
+              <span style={miniChip()}>
                 {side} {totals.bestLine} carreras — {pct}%
               </span>
             );
           })()}
 
           {combinada && combinada.combinedProbability >= 60 && (
-            <span style={miniChip('#f59e0b')}>
+            <span style={miniChip()}>
               🎯 Combinada {combinada.selections?.length || 0} picks · {combinada.combinedProbability}%
               {combinada.combinedOdd ? ` @${combinada.combinedOdd}` : ''}
             </span>
           )}
           {isAnalyzed && (
-            <span style={miniChip(isExpanded ? '#fcd34d' : '#fde68a')}>
+            <span style={miniChip()}>
               {isExpanded ? 'Ocultar análisis ▲' : 'Ver análisis ▼'}
             </span>
           )}
@@ -868,8 +917,9 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
               <>
                 <SubAccordion
                   id="markets"
-                  title="🎯 Selecciona para tu combinada"
-                  color="#fcd34d"
+                  title="Mercados para tu combinada"
+                  icon={Layers3}
+                  color="#5ee6b1"
                   openSub={openSub}
                   setOpenSub={setOpenSub}
                   defaultOpen
@@ -883,8 +933,8 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
 
                 <SubAccordion
                   id="probs"
-                  title="📊 % Probabilidades calculadas"
-                  color="#fbbf24"
+                  title="Probabilidades calculadas"
+                  color="#5ee6b1"
                   openSub={openSub}
                   setOpenSub={setOpenSub}
                 >
@@ -898,7 +948,8 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
 
                 <SubAccordion
                   id="players"
-                  title="⚾ Recomendaciones de jugadores"
+                  title="Recomendaciones de jugadores"
+                  icon={Sparkles}
                   color="#22c55e"
                   openSub={openSub}
                   setOpenSub={setOpenSub}
@@ -906,16 +957,10 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
                   <PlayerPropsBlock players={game.analysis.probabilities?.players} />
                 </SubAccordion>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-                  <a
-                    href={`/dashboard/baseball/analisis/${game.id}`}
-                    style={{
-                      padding: '6px 12px', borderRadius: 8, fontSize: '.78rem', fontWeight: 700,
-                      background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(252,211,77,0.4)',
-                      color: '#fde68a', textDecoration: 'none',
-                    }}
-                  >Ver análisis completo →</a>
-                </div>
+                <button className="baseball-view-full" onClick={onViewFull}>
+                  <span><small>Explora cada indicador</small><strong>Ver análisis completo</strong></span>
+                  <ArrowRight size={18} aria-hidden="true" />
+                </button>
               </>
             )}
           </div>
@@ -929,7 +974,7 @@ function TeamLine({ team, score, winner, live }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0',
-      color: winner ? '#fde68a' : '#cbd5e1', fontWeight: winner ? 700 : 500,
+      color: winner ? '#bff4df' : '#cbd5e1', fontWeight: winner ? 700 : 500,
     }}>
       {team?.logo
         ? <Image src={team.logo} alt={team.name} width={20} height={20} style={{ objectFit: 'contain' }} unoptimized />
@@ -948,37 +993,28 @@ function TeamLine({ team, score, winner, live }) {
 // SUB-ACORDEÓN EXCLUSIVO (CSS grid 0fr→1fr, 150ms en compositor)
 // Children siempre montados → toggle = solo cambio de atributo.
 // =====================================================================
-function SubAccordion({ id, title, color, openSub, setOpenSub, defaultOpen, children }) {
+function SubAccordion({ id, title, color, icon: Icon = BarChart3, openSub, setOpenSub, defaultOpen, children }) {
   // Si openSub nunca se ha tocado (null) y este sub tiene defaultOpen, lo
   // tratamos como abierto. Pero en cuanto el usuario toggle CUALQUIER sub,
   // el padre setea openSub a algo no-null y la regla deja de aplicar.
   const isOpen = openSub === id || (openSub === null && !!defaultOpen);
   return (
-    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(245,158,11,.12)' }}>
-      <div
-        role="button"
+    <section className="subacc-section is-baseball" style={{ '--subacc-accent': color || '#5ee6b1' }}>
+      <button
+        type="button"
+        className="subacc-trigger"
         onClick={(e) => toggleSubAndReveal(e, isOpen, id, setOpenSub)}
-        style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          width: '100%', cursor: 'pointer', gap: 8, textAlign: 'left',
-          WebkitTapHighlightColor: 'transparent',
-        }}
+        aria-expanded={isOpen}
       >
-        <span style={{ fontSize: '.75rem', fontWeight: 800, color: color || '#fde68a', textTransform: 'uppercase', letterSpacing: '.05em' }}>
-          {title}
-        </span>
-        <span style={{
-          color: color || '#fde68a', fontSize: '.85rem',
-          display: 'inline-block', transform: isOpen ? 'rotate(180deg)' : 'none',
-          transition: 'transform .15s ease',
-        }}>▾</span>
-      </div>
+        <span><i><Icon size={17} aria-hidden="true" /></i><strong>{title}</strong></span>
+        <ChevronDown className={isOpen ? 'is-open' : ''} size={17} aria-hidden="true" />
+      </button>
       <div className="subacc-grid" data-open={isOpen ? '1' : '0'}>
-        <div>
-          <div style={{ paddingTop: 10 }}>{children}</div>
+        <div className="subacc-overflow">
+          <div className="subacc-body">{children}</div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1069,7 +1105,7 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
     <div>
       {Object.entries(byCat).map(([cat, items]) => (
         <div key={cat} style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: '.7rem', color: '#fbbf24', fontWeight: 800, letterSpacing: 1, marginBottom: 4, textTransform: 'uppercase' }}>{cat}</div>
+          <div style={{ fontSize: '.7rem', color: '#5ee6b1', fontWeight: 800, letterSpacing: 1, marginBottom: 4, textTransform: 'uppercase' }}>{cat}</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 6 }}>
             {items.map(m => {
               const sel = !!selectedMarkets[m.key];
@@ -1079,23 +1115,23 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
                   onClick={() => onToggleMarket(m.key, m)}
                   style={{
                     padding: '6px 10px', borderRadius: 8, cursor: 'pointer',
-                    background: sel ? 'rgba(252,211,77,0.18)' : 'rgba(255,255,255,0.03)',
-                    border: sel ? '1px solid #fcd34d' : '1px solid rgba(245,158,11,0.10)',
+                    background: sel ? 'rgba(94,230,177,0.16)' : 'rgba(255,255,255,0.03)',
+                    border: sel ? '1px solid #5ee6b1' : '1px solid rgba(94,230,177,0.10)',
                     textAlign: 'left', display: 'flex', alignItems: 'center', gap: 6,
                   }}
                 >
                   <span style={{
                     width: 14, height: 14, borderRadius: 3,
-                    background: sel ? '#fcd34d' : 'transparent',
+                    background: sel ? '#5ee6b1' : 'transparent',
                     border: sel ? 'none' : '1px solid #475569',
                     color: '#1c1410', fontSize: 10, fontWeight: 800,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}>{sel ? '✓' : ''}</span>
                   <span style={{ flex: 1, fontSize: '.78rem', color: '#cbd5e1' }}>{m.label}</span>
-                  <span style={{ fontWeight: 800, fontSize: '.78rem', color: m.probability >= 75 ? '#fcd34d' : m.probability >= 60 ? '#fbbf24' : '#94a3b8' }}>
+                  <span style={{ fontWeight: 800, fontSize: '.78rem', color: m.probability >= 75 ? '#5ee6b1' : m.probability >= 60 ? '#bff4df' : '#94a3b8' }}>
                     {m.probability}%
                   </span>
-                  {m.odd && <span style={{ fontSize: '.7rem', color: '#fde68a', fontFamily: 'JetBrains Mono, monospace' }}>@{m.odd}</span>}
+                  {m.odd && <span style={{ fontSize: '.7rem', color: '#bff4df', fontFamily: 'JetBrains Mono, monospace' }}>@{m.odd}</span>}
                 </button>
               );
             })}
@@ -1258,23 +1294,23 @@ function BaseballProbBlock({ probabilities: p, bestOdds, homeTeam, awayTeam }) {
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
       {cats.map((cat, ci) => (
         <div key={ci} style={{
-          background: 'rgba(245,158,11,0.05)',
-          border: '1px solid rgba(252,211,77,0.22)',
+          background: 'rgba(94,230,177,0.05)',
+          border: '1px solid rgba(94,230,177,0.22)',
           borderRadius: 10, padding: '10px 12px', flex: '1 1 220px', minWidth: 0,
         }}>
           <div style={{
             fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px',
-            color: '#fbbf24', marginBottom: cat.subtitle ? 2 : 8,
+            color: '#5ee6b1', marginBottom: cat.subtitle ? 2 : 8,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>{cat.title}</div>
-          {cat.subtitle && <div style={{ fontSize: '.65rem', color: '#92400e', marginBottom: 8 }}>{cat.subtitle}</div>}
+          {cat.subtitle && <div style={{ fontSize: '.65rem', color: '#4f7d6e', marginBottom: 8 }}>{cat.subtitle}</div>}
           {cat.items.map((it, i) => {
             const v = Math.round(it.value ?? 0);
             const color = v >= 80 ? '#fcd34d' : v >= 65 ? '#fbbf24' : v >= 50 ? '#f59e0b' : '#94a3b8';
             return (
               <div key={i} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-                padding: '4px 0', borderBottom: '1px solid rgba(245,158,11,0.06)', gap: 8,
+                padding: '4px 0', borderBottom: '1px solid rgba(94,230,177,0.06)', gap: 8,
               }}>
                 <span style={{ fontSize: '.72rem', color: '#cbd5e1', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
                 <span style={{ fontSize: '.85rem', fontWeight: 700, color, fontFamily: 'JetBrains Mono, monospace', fontVariantNumeric: 'tabular-nums' }}>{v}%</span>
@@ -1293,69 +1329,43 @@ function BaseballProbBlock({ probabilities: p, bestOdds, homeTeam, awayTeam }) {
 function ApuestaDelDiaBlock({ apuesta, show, onToggle }) {
   return (
     <motion.div
+      className="baseball-apuesta"
       initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
-      style={{
-        background: 'linear-gradient(135deg, rgba(252,211,77,0.14), rgba(180,83,9,0.08))',
-        border: '1px solid rgba(252,211,77,0.45)', borderRadius: 14, marginBottom: 16, overflow: 'hidden',
-        boxShadow: '0 0 20px rgba(252,211,77,0.10)',
-      }}
     >
-      <button
-        onClick={onToggle}
-        style={{
-          width: '100%', padding: '12px 14px', background: 'transparent', border: 'none',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', color: '#fcd34d',
-        }}
-      >
-        <span style={{ fontWeight: 800, fontSize: '.95rem' }}>🎯 Apuesta del Día</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: '1.3rem', fontWeight: 800 }}>{apuesta.combinedProbability}%</span>
-          {apuesta.combinedOdd && (
-            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '1rem', color: '#fde68a' }}>
-              @{apuesta.combinedOdd}
-            </span>
-          )}
-          <span style={{ transform: show ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>▼</span>
+      <button className="baseball-apuesta-head" onClick={onToggle}>
+        <span className="apuesta-title-block">
+          <span className="apuesta-title-icon"><Target size={19} aria-hidden="true" /></span>
+          <span><small>Selección inteligente</small><strong>Apuesta del día</strong></span>
+        </span>
+        <span className="apuesta-head-metrics">
+          <span><small>Probabilidad</small><strong>{apuesta.combinedProbability}%</strong></span>
+          {apuesta.combinedOdd && <span><small>Cuota</small><strong>{apuesta.combinedOdd}</strong></span>}
+          <ChevronDown className={show ? 'is-open' : ''} size={17} aria-hidden="true" />
         </span>
       </button>
       <AnimatePresence>
         {show && (
           <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} style={{ overflow: 'hidden' }}>
-            <div style={{ padding: '0 14px 14px' }}>
+            <div className="baseball-apuesta-body">
+              <div className="apuesta-summary">
+                <Sparkles size={15} aria-hidden="true" />
+                {apuesta.selections.length} selecciones ordenadas por oportunidad
+              </div>
               {apuesta.selections.map((s, i) => (
-                <div key={i} style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '10px 12px', borderRadius: 8, marginBottom: 4,
-                  background: 'rgba(255,255,255,0.03)',
-                }}>
-                  <span style={{
-                    fontSize: '.65rem', fontWeight: 800, padding: '2px 7px', borderRadius: 4,
-                    background: s.priority === 2 ? 'rgba(252,211,77,0.18)' : s.priority === 1 ? 'rgba(239,68,68,0.15)' : 'rgba(148,163,184,0.15)',
-                    color: s.priority === 2 ? '#fcd34d' : s.priority === 1 ? '#ef4444' : '#94a3b8',
-                    flexShrink: 0,
-                  }}>
-                    {s.priority === 2 ? '●' : s.priority === 1 ? 'LIVE' : 'FIN'}
-                  </span>
-
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '.7rem', color: '#94a3b8', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <article className="baseball-apuesta-item" key={i}>
+                  <span className="apuesta-index">{String(i + 1).padStart(2, '0')}</span>
+                  <span className="apuesta-item-copy">
+                    <span className="apuesta-match">
+                      <i className={s.priority === 1 ? 'is-live' : ''}>{s.priority === 2 ? 'Próximo' : s.priority === 1 ? 'En vivo' : 'Final'}</i>
                       {s.matchName}
-                    </div>
-                    <div style={{ fontSize: '.85rem', color: '#f1f5f9', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {s.name || s.market || 'Pick'}
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
-                    <span style={{
-                      fontWeight: 800, fontSize: '.95rem',
-                      color: s.probability >= 80 ? '#fcd34d' : '#fbbf24',
-                    }}>{s.probability}%</span>
-                    {s.odd && (
-                      <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '.72rem', color: '#fde68a' }}>@{s.odd}</span>
-                    )}
-                  </div>
-                </div>
+                    </span>
+                    <span className="apuesta-mkt">{s.name || s.market || 'Pick'}</span>
+                  </span>
+                  <span className="apuesta-item-metrics">
+                    <span className="apuesta-prob"><small>Prob.</small>{s.probability}%</span>
+                    {s.odd && <span className="apuesta-odd"><small>Cuota</small>{s.odd}</span>}
+                  </span>
+                </article>
               ))}
             </div>
           </motion.div>
@@ -1368,55 +1378,54 @@ function ApuestaDelDiaBlock({ apuesta, show, onToggle }) {
 function CombinadaTab({ customCombinada, onClear, onRemove }) {
   if (!customCombinada || customCombinada.selections.length === 0) {
     return (
-      <div style={{ textAlign: 'center', padding: 48, color: '#94a3b8' }}>
-        <div style={{ fontSize: '2.5rem', opacity: 0.3 }}>🎯</div>
+      <div className="empty-state fade-in">
+        <div className="empty-icon"><Layers3 size={28} aria-hidden="true" /></div>
         <p>Tu combinada está vacía.</p>
-        <p style={{ fontSize: '.85rem', opacity: 0.7 }}>Expande un partido analizado y selecciona mercados.</p>
+        <small>Expande un partido analizado y selecciona mercados.</small>
       </div>
     );
   }
   return (
-    <div>
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '12px 14px', background: 'rgba(252,211,77,0.10)',
-        border: '1px solid rgba(252,211,77,0.35)', borderRadius: 12, marginBottom: 12,
-      }}>
-        <div>
-          <div style={{ fontSize: '.75rem', color: '#94a3b8', fontWeight: 700 }}>Probabilidad combinada</div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#fcd34d' }}>
-            {customCombinada.combinedProbability}%
-            {customCombinada.combinedOdd && (
-              <span style={{ marginLeft: 12, color: '#fde68a', fontFamily: 'JetBrains Mono, monospace' }}>
-                @{customCombinada.combinedOdd}
-              </span>
-            )}
-          </div>
-        </div>
-        <button onClick={onClear} style={{ ...btn('#ef4444'), padding: '8px 14px' }}>Limpiar todo</button>
+    <div className="comb-builder is-baseball fade-in">
+      <div className="comb-hero">
+        <span className="comb-hero-icon"><Layers3 size={21} aria-hidden="true" /></span>
+        <span><small>Constructor inteligente</small><strong>Tu combinada</strong></span>
+        <span className="comb-count">{customCombinada.selections.length} selecciones</span>
       </div>
 
-      <div style={{ display: 'grid', gap: 6 }}>
+      <div className="comb-list">
         {customCombinada.selections.map((s, i) => (
-          <div key={`${s.fixtureId}-${s.marketKey}-${i}`} style={{
-            display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 8, alignItems: 'center',
-            padding: '10px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.03)',
-          }}>
-            <div>
-              <div style={{ fontSize: '.78rem', color: '#94a3b8', marginBottom: 2 }}>{s.matchName}</div>
-              <div style={{ fontSize: '.85rem', color: '#cbd5e1', fontWeight: 600 }}>{s.name || s.market}</div>
+          <article key={`${s.fixtureId}-${s.marketKey}-${i}`} className="comb-item">
+            <span className="comb-item-index">{String(i + 1).padStart(2, '0')}</span>
+            <div className="comb-item-content">
+              <div className="comb-item-match">{s.matchName}</div>
+              <div className="comb-item-name">{s.name || s.market}</div>
             </div>
-            <span style={{ fontWeight: 800, color: s.probability >= 75 ? '#fcd34d' : '#fbbf24' }}>{s.probability}%</span>
-            {s.odd && <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#fde68a' }}>@{s.odd}</span>}
+            <div className="comb-item-metrics">
+              <span className="comb-item-prob"><small>Prob.</small>{s.probability}%</span>
+              <span className="comb-item-odd"><small>Cuota</small>{s.odd || '—'}</span>
+            </div>
             <button
+              className="comb-item-rm"
               onClick={() => onRemove(s.fixtureId, s.marketKey)}
-              style={{
-                width: 24, height: 24, borderRadius: 6, background: 'transparent',
-                color: '#94a3b8', border: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer',
-              }}
-            >✕</button>
-          </div>
+              aria-label={`Quitar ${s.name || s.market}`}
+            ><X size={15} aria-hidden="true" /></button>
+          </article>
         ))}
+      </div>
+
+      <div className="comb-summary">
+        <div className="comb-sum-row">
+          <span>Probabilidad combinada</span>
+          <strong>{customCombinada.combinedProbability}%</strong>
+        </div>
+        <div className="comb-sum-row">
+          <span>Cuota total</span>
+          <strong className="comb-odd-total">{customCombinada.combinedOdd || '—'}</strong>
+        </div>
+      </div>
+      <div className="comb-actions">
+        <button className="btn-clear" onClick={onClear}><Trash2 size={16} aria-hidden="true" /> Limpiar combinada</button>
       </div>
     </div>
   );
@@ -1432,36 +1441,14 @@ function EmptyState() {
 }
 
 // =====================================================================
-// STYLES — paleta amber tierra
+// STYLES — misma paleta verde del dashboard de fútbol
 // =====================================================================
-const btn = (color = '#fde68a') => ({
+const btn = (color = '#bff4df') => ({
   padding: '6px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.04)',
-  border: '1px solid rgba(245,158,11,0.18)',
+  border: '1px solid rgba(94,230,177,0.18)',
   color, fontSize: '.85rem', fontWeight: 600, cursor: 'pointer',
 });
-const tabBtn = (active) => ({
-  padding: '8px 16px', borderRadius: 8,
-  background: active ? 'rgba(252,211,77,0.15)' : 'transparent',
-  border: active ? '1px solid rgba(252,211,77,0.45)' : '1px solid transparent',
-  color: active ? '#fcd34d' : '#94a3b8', fontWeight: active ? 700 : 600, cursor: 'pointer',
-  fontSize: '.9rem', display: 'flex', alignItems: 'center', gap: 8,
-});
-const tabBadge = (active) => ({
-  padding: '1px 7px', borderRadius: 999, fontSize: '.7rem', fontWeight: 800,
-  background: active ? '#fcd34d' : 'rgba(148,163,184,0.2)',
-  color: active ? '#1c1410' : '#94a3b8',
-});
-const chip = (active) => ({
-  padding: '5px 11px', borderRadius: 999,
-  background: active ? 'rgba(252,211,77,0.15)' : 'rgba(255,255,255,0.03)',
-  border: active ? '1px solid #fcd34d' : '1px solid rgba(245,158,11,0.10)',
-  color: active ? '#fcd34d' : '#cbd5e1', fontWeight: 600, fontSize: '.78rem', cursor: 'pointer',
-});
-const badgePill = (color) => ({
-  padding: '4px 10px', borderRadius: 999, background: `${color}1a`,
-  border: `1px solid ${color}55`, color, fontSize: '.72rem', fontWeight: 700,
-});
-const miniChip = (color) => ({
+const miniChip = () => ({
   padding: '2px 8px', borderRadius: 6, fontSize: '.72rem', fontWeight: 700,
-  background: `${color}1a`, border: `1px solid ${color}55`, color,
+  background: 'rgba(94,230,177,.10)', border: '1px solid rgba(94,230,177,.28)', color: '#bff4df',
 });

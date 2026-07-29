@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { LockKeyhole, ShieldCheck, WalletCards, X } from 'lucide-react';
 
 // Carga el SDK de Mercado Pago (v2) una sola vez.
 let mpSdkPromise = null;
@@ -107,48 +108,75 @@ export default function MercadoPagoModal({ plan, planLabel, amountCop, email, pu
   }, [plan, amountCop, email, publicKey]);
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 1000, padding: 16,
-      }}
-    >
+    <div className="payment-modal-overlay" onClick={onClose}>
       <div
+        className="payment-modal-content mp-payment-modal-content"
         onClick={(e) => e.stopPropagation()}
-        style={{
-          background: '#0f1722', borderRadius: 16, padding: 24,
-          width: '100%', maxWidth: 480, maxHeight: '92vh', overflowY: 'auto',
-          boxShadow: '0 20px 60px rgba(0,0,0,.5)',
-        }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: '1.15rem' }}>{planLabel || `Plan ${plan}`}</h2>
-            <p style={{ margin: '4px 0 0', opacity: .85 }}>
-              {amountCop ? `${Math.round(amountCop).toLocaleString('es-CO')} COP` : ''}
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Cerrar"
-            style={{ background: 'none', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer', lineHeight: 1 }}
+        <button
+          type="button"
+          className="payment-modal-close"
+          onClick={onClose}
+          aria-label="Cerrar checkout"
+        >
+          <X size={19} aria-hidden="true" />
+        </button>
+
+        <header className="payment-modal-header">
+          <video
+            className="payment-modal-logo"
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="auto"
+            aria-label="CF Análisis"
           >
-            &times;
-          </button>
-        </div>
+            <source src="/logo-metalizado.webm" type="video/webm" />
+          </video>
+          <p className="payment-modal-eyebrow">
+            <ShieldCheck size={14} aria-hidden="true" />
+            Checkout seguro en Colombia
+          </p>
+          <h2>{planLabel || `Plan ${plan}`}</h2>
+          <div className="payment-modal-summary">
+            <span>Total de hoy</span>
+            <strong>
+              {amountCop ? `${Math.round(amountCop).toLocaleString('es-CO')} COP` : ''}
+            </strong>
+            <small>Selecciona tarjeta, PSE, Nequi o efectivo</small>
+          </div>
+        </header>
 
         {error && (
-          <div className="modal-error" style={{ margin: '8px 0', color: '#ff6b6b', fontSize: '.9rem' }}>{error}</div>
+          <div className="modal-error" role="alert">{error}</div>
         )}
-        {phase === 'loading' && <div style={{ padding: '20px 0', textAlign: 'center', opacity: .8 }}>Cargando pago seguro…</div>}
 
-        <div id={CONTAINER_ID} />
+        <div className="payment-modal-secure-line">
+          <WalletCards size={16} aria-hidden="true" />
+          Elige tu método de pago
+        </div>
+
+        {phase === 'loading' && (
+          <div className="payment-modal-loading">
+            <span className="payment-spinner" aria-hidden="true" />
+            Cargando pago seguro…
+          </div>
+        )}
+
+        <div id={CONTAINER_ID} className="mp-payment-brick" />
 
         {phase === 'processing' && (
-          <div style={{ padding: '12px 0', textAlign: 'center', opacity: .9 }}>Procesando…</div>
+          <div className="payment-modal-processing">
+            <span className="payment-spinner" aria-hidden="true" />
+            Procesando pago…
+          </div>
         )}
+
+        <p className="payment-modal-footnote">
+          <LockKeyhole size={13} aria-hidden="true" />
+          Pago procesado por Mercado Pago. Tus datos financieros permanecen protegidos.
+        </p>
       </div>
     </div>
   );

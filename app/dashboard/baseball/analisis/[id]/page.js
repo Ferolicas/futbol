@@ -4,13 +4,18 @@ import { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Image from 'next/image';
+import DashboardBuffer from '../../../components/DashboardBuffer';
 
 const cap = (v) => Math.min(95, Math.max(0, v ?? 0));
 
-export default function BaseballAnalysisPage() {
+export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClose }) {
   const params = useParams();
   const router = useRouter();
-  const fid = params.id;
+  const fid = fixtureId || params.id;
+  const closeOrBack = () => {
+    if (embedded && onClose) onClose();
+    else router.back();
+  };
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -48,13 +53,13 @@ export default function BaseballAnalysisPage() {
   };
 
   if (loading) {
-    return <div style={{ textAlign: 'center', padding: 48, color: '#94a3b8' }}>Cargando análisis...</div>;
+    return <DashboardBuffer compact={embedded} />;
   }
 
   if (error && !data) {
     return (
       <div style={{ maxWidth: 800, margin: '0 auto', padding: 24 }}>
-        <button onClick={() => router.back()} style={backBtn}>← Volver</button>
+        <button onClick={closeOrBack} style={backBtn}>← Volver</button>
         <div style={{
           marginTop: 24, padding: 16, borderRadius: 10,
           background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
@@ -84,20 +89,21 @@ export default function BaseballAnalysisPage() {
   const bestOdds = a?.best_odds;
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 16px 60px', color: '#e2e8f0' }}>
-      <button onClick={() => router.back()} style={backBtn}>← Volver</button>
+    <div className={`baseball-analysis-page ${embedded ? 'is-embedded' : ''}`} style={{ maxWidth: 1100, margin: '0 auto', padding: '0 16px 60px', color: '#e2e8f0' }}>
+      {!embedded && <button onClick={closeOrBack} style={backBtn}>← Volver</button>}
 
       {/* Header */}
       <motion.div
+        className="baseball-analysis-hero"
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         style={{
-          background: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.18)',
+          background: 'rgba(94,230,177,0.05)', border: '1px solid rgba(94,230,177,0.18)',
           borderRadius: 14, padding: 18, marginTop: 16, marginBottom: 16,
         }}
       >
         <div style={{ fontSize: '.75rem', color: '#94a3b8', fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>
-          ⚾ {a?.country} · {a?.league_name}
+          Baseball · {a?.country} · {a?.league_name}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
           <TeamHeader name={a?.home_team} score={result?.home_score} side="HOME" />
@@ -126,13 +132,13 @@ export default function BaseballAnalysisPage() {
 
       {/* Combinada highlight */}
       {combinada && combinada.combinedProbability >= 60 && (
-        <Section title="🎯 Combinada del partido" accent="#f59e0b">
+        <Section title="Combinada del partido" accent="#5ee6b1">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {combinada.selections.map((s, i) => (
               <div key={i} style={{
                 display: 'flex', alignItems: 'center', gap: 10,
                 padding: '10px 12px', borderRadius: 8,
-                background: 'rgba(245,158,11,0.06)',
+                background: 'rgba(94,230,177,0.06)',
               }}>
                 <span style={{ fontWeight: 700, fontSize: '.9rem', flex: 1 }}>{s.market}: {s.pick}</span>
                 <span style={{ color: '#10b981', fontWeight: 700 }}>{s.probability}%</span>
@@ -142,12 +148,12 @@ export default function BaseballAnalysisPage() {
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '12px 14px', marginTop: 6, borderRadius: 10,
-              background: 'rgba(245,158,11,0.12)',
-              border: '1px solid rgba(245,158,11,0.3)',
+              background: 'rgba(94,230,177,0.12)',
+              border: '1px solid rgba(94,230,177,0.3)',
             }}>
-              <span style={{ fontWeight: 800, color: '#f59e0b' }}>Probabilidad combinada</span>
+              <span style={{ fontWeight: 800, color: '#5ee6b1' }}>Probabilidad combinada</span>
               <div style={{ display: 'flex', gap: 12 }}>
-                <span style={{ fontSize: '1.3rem', fontWeight: 800, color: '#f59e0b' }}>{combinada.combinedProbability}%</span>
+                <span style={{ fontSize: '1.3rem', fontWeight: 800, color: '#5ee6b1' }}>{combinada.combinedProbability}%</span>
                 {combinada.combinedOdd && <span style={{ fontSize: '1.3rem', fontWeight: 800, color: '#22d3ee', fontFamily: 'JetBrains Mono, monospace' }}>@{combinada.combinedOdd}</span>}
               </div>
             </div>
@@ -173,10 +179,10 @@ export default function BaseballAnalysisPage() {
                 <div key={line} style={{
                   display: 'grid', gridTemplateColumns: '60px 1fr', gap: 10, alignItems: 'center',
                   padding: '8px 10px', borderRadius: 8,
-                  background: isBest ? 'rgba(245,158,11,0.08)' : 'rgba(255,255,255,0.03)',
-                  border: isBest ? '1px solid rgba(245,158,11,0.3)' : '1px solid rgba(255,255,255,0.05)',
+                  background: isBest ? 'rgba(94,230,177,0.08)' : 'rgba(255,255,255,0.03)',
+                  border: isBest ? '1px solid rgba(94,230,177,0.3)' : '1px solid rgba(255,255,255,0.05)',
                 }}>
-                  <div style={{ fontWeight: 700, color: isBest ? '#f59e0b' : '#cbd5e1' }}>O/U {line}</div>
+                  <div style={{ fontWeight: 700, color: isBest ? '#5ee6b1' : '#cbd5e1' }}>O/U {line}</div>
                   <ProbBar leftLabel={`Over`} leftPct={val.over} rightLabel={`Under`} rightPct={val.under}
                     leftOdd={bestOdds?.totals?.[line]?.over?.odd} rightOdd={bestOdds?.totals?.[line]?.under?.odd} compact />
                 </div>
@@ -185,7 +191,7 @@ export default function BaseballAnalysisPage() {
           </div>
           {expected && (
             <div style={{ marginTop: 10, fontSize: '.78rem', color: '#94a3b8' }}>
-              Carreras esperadas: <strong style={{ color: '#f59e0b' }}>{expected.lambdaHome} – {expected.lambdaAway}</strong> (total {expected.totalRuns})
+              Carreras esperadas: <strong style={{ color: '#5ee6b1' }}>{expected.lambdaHome} – {expected.lambdaAway}</strong> (total {expected.totalRuns})
             </div>
           )}
         </Section>
@@ -272,7 +278,7 @@ export default function BaseballAnalysisPage() {
                   fontSize: '.85rem',
                 }}>
                   <span style={{ flex: 1, color: '#cbd5e1' }}>{h.teams?.home?.name}</span>
-                  <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#f59e0b' }}>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#5ee6b1' }}>
                     {hsc} – {asc}
                   </span>
                   <span style={{ flex: 1, textAlign: 'right', color: '#cbd5e1' }}>{h.teams?.away?.name}</span>
@@ -298,12 +304,17 @@ export default function BaseballAnalysisPage() {
   );
 }
 
+export default function BaseballAnalysisPage() {
+  return <BaseballAnalysisExperience />;
+}
+
 // =====================================================================
 // SUB COMPONENTS
 // =====================================================================
 function Section({ title, children, accent }) {
   return (
     <motion.section
+      className="baseball-analysis-section"
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       style={{
@@ -314,7 +325,7 @@ function Section({ title, children, accent }) {
     >
       <h2 style={{
         margin: '0 0 12px', fontSize: '.95rem', fontWeight: 800,
-        color: accent || '#f59e0b', letterSpacing: '.3px',
+        color: accent || '#5ee6b1', letterSpacing: '.3px',
       }}>{title}</h2>
       {children}
     </motion.section>
@@ -367,7 +378,7 @@ function TeamHeader({ name, score, side }) {
         <div style={{ fontSize: '1.15rem', fontWeight: 800 }}>{name}</div>
       </div>
       {score != null && (
-        <div style={{ fontSize: '2rem', fontWeight: 800, color: '#f59e0b', fontFamily: 'JetBrains Mono, monospace' }}>{score}</div>
+        <div style={{ fontSize: '2rem', fontWeight: 800, color: '#5ee6b1', fontFamily: 'JetBrains Mono, monospace' }}>{score}</div>
       )}
     </div>
   );
@@ -386,17 +397,17 @@ function Badge({ label, color }) {
 // Se renderiza solo si probs.players != null (cuando se conecte MLB Stats API).
 function PlayerMarketsSection({ players }) {
   const groups = [
-    { key: 'strikeouts', title: '🎯 Ponches por pitcher',     emoji: 'K', color: '#a78bfa', unit: 'K' },
-    { key: 'hits',       title: '💥 Hits por bateador',        emoji: 'H', color: '#f59e0b', unit: 'hits' },
-    { key: 'totalBases', title: '🏃 Bases totales',            emoji: 'TB', color: '#22d3ee', unit: 'bases' },
-    { key: 'rbis',       title: '⚾ Carreras impulsadas (RBI)', emoji: 'R', color: '#10b981', unit: 'RBI' },
-    { key: 'homeRuns',   title: '🚀 Home runs',                emoji: 'HR', color: '#ef4444', unit: 'HR' },
+    { key: 'strikeouts', title: 'Ponches por pitcher',     emoji: 'K', color: '#a78bfa', unit: 'K' },
+    { key: 'hits',       title: 'Hits por bateador',       emoji: 'H', color: '#f59e0b', unit: 'hits' },
+    { key: 'totalBases', title: 'Bases totales',            emoji: 'TB', color: '#22d3ee', unit: 'bases' },
+    { key: 'rbis',       title: 'Carreras impulsadas (RBI)', emoji: 'R', color: '#10b981', unit: 'RBI' },
+    { key: 'homeRuns',   title: 'Home runs',                emoji: 'HR', color: '#ef4444', unit: 'HR' },
   ].filter(g => Array.isArray(players[g.key]) && players[g.key].length > 0);
 
   if (groups.length === 0) return null;
 
   return (
-    <Section title="🌟 Mercados de jugador" accent="#a78bfa">
+    <Section title="Mercados de jugador" accent="#a78bfa">
       {groups.map(g => (
         <div key={g.key} style={{ marginBottom: 16 }}>
           <div style={{ fontSize: '.85rem', color: g.color, fontWeight: 700, marginBottom: 8 }}>{g.title}</div>
@@ -442,5 +453,5 @@ const navBtnPlain = {
   color: '#cbd5e1', cursor: 'pointer', fontSize: '.85rem', fontWeight: 600,
 };
 const backBtn = { ...navBtnPlain };
-const primaryBtn = { ...navBtnPlain, background: 'rgba(245,158,11,0.15)', border: '1px solid #f59e0b', color: '#f59e0b' };
+const primaryBtn = { ...navBtnPlain, background: 'rgba(94,230,177,0.15)', border: '1px solid #5ee6b1', color: '#5ee6b1' };
 const secondaryBtn = { ...navBtnPlain, background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.3)', color: '#22d3ee' };

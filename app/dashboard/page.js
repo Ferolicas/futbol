@@ -2,8 +2,23 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import useSWR from 'swr';
-import { useAuth } from '../../components/providers';
+import {
+  ArrowRight,
+  BarChart3,
+  CalendarDays,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Layers3,
+  Save,
+  Scale,
+  Sparkles,
+  Target,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
 import { useWorkerSocketState } from '../../hooks/useWorkerSocket';
@@ -15,6 +30,17 @@ import { setAnalysisCache } from '../../lib/analysis-cache';
 import { fetcher } from '../../lib/fetcher';
 import { useLiveStats } from './live-stats-context';
 import { useSelectedMarkets } from './selected-markets-context';
+import { DateCaption, LeaguePicker, StatusPicker } from './components/DashboardFilters';
+import DashboardBuffer from './components/DashboardBuffer';
+import AnalysisSceneModal from './components/AnalysisSceneModal';
+
+const AnalysisExperience = dynamic(
+  () => import('./analisis/[id]/page').then((module) => module.AnalysisExperience),
+  {
+    ssr: false,
+    loading: () => <DashboardBuffer compact />,
+  },
+);
 
 function detectCountry() {
   try {
@@ -50,7 +76,6 @@ let _splashDone = false;
 
 export default function Dashboard() {
   const router = useRouter();
-  const { user, supabase } = useAuth();
   const [splash, setSplash] = useState(!_splashDone);
   const [splashFade, setSplashFade] = useState(false);
   // Banner de bienvenida tras checkout exitoso (ver efecto checkout=success).
@@ -73,7 +98,7 @@ export default function Dashboard() {
   const [analyzedOdds, setAnalyzedOdds] = useState({});
   const [analyzedData, setAnalyzedData] = useState({});
   const [standings, setStandings] = useState({});
-  const [sortBy, setSortBy] = useState('time');
+  const [sortBy] = useState('time');
   const [statusFilter, setStatusFilter] = useState('all');
   const [leagueFilter, setLeagueFilter] = useState('');
   const [selected, setSelected] = useState(new Set());
@@ -837,7 +862,7 @@ export default function Dashboard() {
       setAnalyzed(prev => [...new Set([...prev, ...newAnalyzed])]);
       setSelected(new Set());
       loadFixtures(date);
-      if (newAnalyzed.length > 0) setTab('analizados');
+      if (newAnalyzed.length > 0) setExpandedMatch(newAnalyzed[0]);
     } catch (e) {
       console.error('[analyzeSelected] error:', e);
       setError('No pudimos analizar ahora, reintenta en unos segundos.');
@@ -954,8 +979,6 @@ export default function Dashboard() {
 
   // Keep backward-compatible aliases
   const doHide = dismissMatch;
-  const removeFromAnalyzed = dismissMatch;
-
   // Save current combinada (optimistic con rollback si falla en backend)
   const saveCombinada = async () => {
     if (!customCombinada || customCombinada.selections.length === 0) return;
@@ -1015,6 +1038,7 @@ export default function Dashboard() {
 
   const liveCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && isLive(f.fixture.status.short)).length;
   const upcomingCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && f.fixture.status.short === 'NS').length;
+  const finishedCount = fixtures.filter(f => !hidden.includes(f.fixture.id) && isFinished(f.fixture.status.short)).length;
   // Bug previo: `favorites.length` contaba TODOS los favoritos del usuario
   // (incluidos partidos pasados). El filtro "Favoritos" solo cruza con
   // `fixtures` del dia visible → contador mostraba "14" pero al hacer click
@@ -1026,9 +1050,21 @@ export default function Dashboard() {
   const leagues = {};
   fixtures.filter(f => !hidden.includes(f.fixture.id)).forEach(f => {
     if (!leagues[f.league.id]) {
-      leagues[f.league.id] = { id: f.league.id, name: f.league.name, country: f.leagueMeta?.country || f.league.country };
+      leagues[f.league.id] = {
+        id: f.league.id,
+        name: f.league.name,
+        country: f.leagueMeta?.country || f.league.country,
+        logo: f.league.logo,
+      };
     }
   });
+
+  const allVisibleCount = fixtures.filter((fixture) => {
+    if (hidden.includes(fixture.fixture.id)) return false;
+    if (isPostponed(fixture.fixture.status.short)) return false;
+    if (leagueFilter && String(fixture.league.id) !== leagueFilter) return false;
+    return true;
+  }).length;
 
   const apuestaDelDia = useMemo(() => {
     // Reglas:
@@ -1114,38 +1150,24 @@ export default function Dashboard() {
   }, [selectedMarkets]);
 
   const totalSel = Object.values(selectedMarkets).reduce((a, m) => a + Object.keys(m).length, 0);
-  const analyzedFixtures = fixtures
-    .filter(f => analyzed.includes(f.fixture.id))
-    .sort((a, b) => new Date(a.fixture.date) - new Date(b.fixture.date));
-
   if (splash) {
-    // Splash premium 100% CSS (sin framer-motion): orbes de fondo, logo con
-    // doble anillo giratorio + glow, marca con shimmer y barra de carga.
     return (
       <div className={`splash ${splashFade ? 'fade-out' : ''}`}>
-        <div className="splash-orbs" aria-hidden="true">
-          <span className="splash-orb o1" />
-          <span className="splash-orb o2" />
-          <span className="splash-orb o3" />
-        </div>
         <div className="splash-content">
           <div className="splash-logo-wrap">
-            <span className="splash-ring" aria-hidden="true" />
-            <span className="splash-ring r2" aria-hidden="true" />
-            <span className="splash-logo-glow" aria-hidden="true" />
-            <img src="/logo.png" alt="CFanalisis" className="splash-logo" />
+            <video
+              className="splash-logo splash-logo-video"
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="auto"
+              aria-label="CF Análisis"
+            >
+              <source src="/logo-metalizado.webm" type="video/webm" />
+            </video>
           </div>
-          <div className="splash-text">
-            <span className="splash-welcome">Bienvenido a tu casa de</span>
-            <span className="splash-brand">Análisis</span>
-          </div>
-          <div className="splash-loader">
-            <div className="splash-bar"><div className="splash-bar-fill" /></div>
-            <span className="splash-loading">Cargando partidos…</span>
-          </div>
-          <div className="splash-dots">
-            <span className="splash-dot" /><span className="splash-dot" /><span className="splash-dot" />
-          </div>
+          <p className="splash-almost">Ya casi estamos…</p>
         </div>
       </div>
     );
@@ -1155,30 +1177,6 @@ export default function Dashboard() {
     <>
     <div className="app app-fade-in">
       <div className="container">
-        {/* HEADER */}
-        <header className="header header-slide-in">
-          <img src="/vflogo.png" alt="CFanalisis" className="brand-logo" />
-          <div className="header-right">
-            {/* Botón "Re-analizar pendientes" (owner) eliminado a pedido del usuario. */}
-            {user && (
-              <div className="user-badge">
-                <span className="user-name">{user?.name?.split(' ')[0] || user?.email?.split('@')[0]}</span>
-                <button className="btn-signout" onClick={async () => { await supabase?.auth.signOut(); window.location.href = '/'; }}>Salir</button>
-              </div>
-            )}
-            {/* La campanita global fue eliminada — las notificaciones se
-                activan automáticamente al marcar un partido como favorito
-                (toggleFavorite pide permiso si está 'default' y suscribe).
-                Solo dejamos el mensaje de error si el flujo de favoritos
-                falló al activar push (p.ej. permisos denied). */}
-            {pushSupported && pushError && (
-              <span style={{ fontSize: 11, color: '#ef4444', maxWidth: 280, textAlign: 'right' }}>{pushError}</span>
-            )}
-            {/* Botón "Actualizar" (recarga manual) eliminado a pedido — los datos
-                en vivo entran por WebSocket + poll de respaldo, no hace falta. */}
-          </div>
-        </header>
-
         {/* WELCOME tras checkout exitoso — reutiliza el banner verde .batch-banner */}
         {welcome && (
           <div className="batch-banner fade-in" role="status" style={{ justifyContent: 'space-between' }}>
@@ -1194,35 +1192,24 @@ export default function Dashboard() {
           </div>
         )}
 
+        {pushSupported && pushError && (
+          <div className="warn fade-in" role="alert">{pushError}</div>
+        )}
+
         {/* CONTROLS: Date + Filters */}
         <div className="controls-row">
-          <div className="date-nav" style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            background: 'var(--bg-2)', border: '1px solid var(--brd)',
-            borderRadius: 10, padding: 4,
-          }}>
+          <div className="date-nav">
             <button
+              className="date-arrow"
               onClick={() => changeDate(-1)}
               aria-label="Día anterior"
-              style={{
-                background: 'var(--bg-3)', border: 'none', borderRadius: 8,
-                color: 'var(--t1)', cursor: 'pointer',
-                width: 36, height: 36, fontSize: '1.05rem',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontWeight: 700, transition: 'background .15s',
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-4)'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-3)'}
-            >‹</button>
+            ><ChevronLeft size={17} aria-hidden="true" /></button>
 
-            <label style={{ position: 'relative', cursor: 'pointer' }}>
-              <span className="date-display" style={{
-                display: 'inline-block', minWidth: 100, textAlign: 'center',
-                padding: '0 10px', fontWeight: 700, fontSize: '.9rem',
-                color: date === today(userTz) ? 'var(--accent-cyan)' : 'var(--t1)',
-              }}>
-                {date === today(userTz) ? 'Hoy' : fmtDateDisplay(date, userTz)}
-              </span>
+            <label className="date-picker-label">
+              <DateCaption
+                isToday={date === today(userTz)}
+                label={fmtDateDisplay(date, userTz)}
+              />
               <input
                 type="date"
                 value={date}
@@ -1245,21 +1232,14 @@ export default function Dashboard() {
             </label>
 
             <button
+              className="date-arrow"
               onClick={() => changeDate(1)}
               aria-label="Día siguiente"
-              style={{
-                background: 'var(--bg-3)', border: 'none', borderRadius: 8,
-                color: 'var(--t1)', cursor: 'pointer',
-                width: 36, height: 36, fontSize: '1.05rem',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontWeight: 700, transition: 'background .15s',
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-4)'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-3)'}
-            >›</button>
+            ><ChevronRight size={17} aria-hidden="true" /></button>
 
             {date !== today(userTz) && (
               <button
+                className="date-today"
                 onClick={() => {
                   const nd = today(userTz);
                   setDate(nd);
@@ -1270,108 +1250,95 @@ export default function Dashboard() {
                   clearLiveOnNextLoadRef.current = true;
                   // setDate(nd) ya cambio la key de SWR → un unico fetch.
                 }}
-                style={{
-                  background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.3)',
-                  color: 'var(--accent-cyan)', cursor: 'pointer',
-                  height: 28, padding: '0 10px', borderRadius: 6,
-                  fontSize: '.72rem', fontWeight: 700, marginLeft: 4,
-                }}
-              >Hoy</button>
+              ><CalendarDays size={14} aria-hidden="true" /> Hoy</button>
             )}
           </div>
           <div className="filters-row">
-            <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="filter-sel">
-              <option value="time">Hora</option>
-              <option value="odds">Cuota</option>
-              <option value="probability">Analisis</option>
-            </select>
-            <select value={leagueFilter} onChange={e => setLeagueFilter(e.target.value)} className="filter-sel">
-              <option value="">Ligas</option>
-              {Object.values(leagues).sort((a, b) => a.name.localeCompare(b.name)).map(l => (
-                <option key={l.id} value={l.id}>{FLAGS[l.country] || ''} {l.name}</option>
-              ))}
-            </select>
+            <LeaguePicker
+              leagues={Object.values(leagues).sort((a, b) => a.name.localeCompare(b.name))}
+              value={leagueFilter}
+              onChange={setLeagueFilter}
+            />
           </div>
         </div>
 
         {/* TABS */}
         <div className="tabs">
-          {[
-            { key: 'partidos', label: 'Partidos', count: visible.length },
-            { key: 'analizados', label: 'Analizados', count: analyzed.length },
-            { key: 'combinada', label: 'Combinada', count: totalSel + savedCombinadas.length },
-          ].map(t => (
-            <button key={t.key} className={`tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
-              {t.label}
-              {t.count > 0 && <span className="tab-badge">{t.count}</span>}
-            </button>
-          ))}
+          <button className={`tab ${tab === 'partidos' ? 'active' : ''}`} onClick={() => setTab('partidos')}>
+            Partidos
+            {allVisibleCount > 0 && <span className="tab-badge">{allVisibleCount}</span>}
+          </button>
+          <button className={`tab ${tab === 'combinada' ? 'active' : ''}`} onClick={() => setTab('combinada')}>
+            Combinada
+            {(totalSel + savedCombinadas.length) > 0 && <span className="tab-badge">{totalSel + savedCombinadas.length}</span>}
+          </button>
+          <StatusPicker
+            value={statusFilter}
+            onChange={setStatusFilter}
+            counts={{
+              all: allVisibleCount,
+              live: liveCount,
+              upcoming: upcomingCount,
+              finished: finishedCount,
+              favorites: favoriteCount,
+            }}
+          />
         </div>
-
-        {/* STATUS CHIPS */}
-        {tab === 'partidos' && (
-          <div className="chips">
-            {[
-              { key: 'all', label: 'Todos', count: visible.length },
-              { key: 'live', label: 'En Vivo', count: liveCount },
-              { key: 'upcoming', label: 'Proximos', count: upcomingCount },
-              { key: 'finished', label: 'Finalizados' },
-              { key: 'favoritos', label: '\u2605 Favoritos', count: favoriteCount },
-            ].map(c => (
-              <button key={c.key} className={`chip ${statusFilter === c.key ? 'active' : ''} ${c.key === 'live' && liveCount > 0 ? 'pulse' : ''}`} onClick={() => setStatusFilter(c.key)}>
-                {c.key === 'live' && liveCount > 0 && <span className="dot-live" />}
-                {c.label}
-                {c.count > 0 && <span className="chip-n">{c.count}</span>}
-              </button>
-            ))}
-          </div>
-        )}
 
         {/* APUESTA DEL DIA */}
         {apuestaDelDia && tab === 'partidos' && (
           <div className={`apuesta ${showApuesta ? 'open' : ''}`}>
             <button className="apuesta-head" onClick={() => setShowApuesta(!showApuesta)}>
-              <span className="apuesta-left">&#127919; Apuesta del Dia</span>
-              <span className="apuesta-right">
-                <span className="apuesta-pct">{cap(apuestaDelDia.combinedProbability)}%</span>
-                <span className={`chev ${showApuesta ? 'up' : ''}`}>&#9662;</span>
+              <span className="apuesta-title-block">
+                <span className="apuesta-title-icon"><Target size={19} aria-hidden="true" /></span>
+                <span>
+                  <small>Selección inteligente</small>
+                  <strong>Apuesta del día</strong>
+                </span>
+              </span>
+              <span className="apuesta-head-metrics">
+                <span><small>Probabilidad</small><strong>{cap(apuestaDelDia.combinedProbability)}%</strong></span>
+                {apuestaDelDia.combinedOdd > 1 && <span><small>Cuota</small><strong>{apuestaDelDia.combinedOdd}</strong></span>}
+                <ChevronDown className={showApuesta ? 'is-open' : ''} size={17} aria-hidden="true" />
               </span>
             </button>
             {showApuesta && (
               <div className="apuesta-body">
+                <div className="apuesta-summary">
+                  <Sparkles size={15} aria-hidden="true" />
+                  {apuestaDelDia.selections.length} selecciones ordenadas por oportunidad
+                </div>
                 <div className="apuesta-scroll">
                 {apuestaDelDia.selections.map((sel, i) => {
                   const pct = cap(sel.probability);
                   const probColor = pct >= 85 ? '#4ade80' : pct >= 80 ? '#fbbf24' : '#d97706';
                   return (
-                    <div key={i} className={`apuesta-item ${sel.priority === 2 ? 'upcoming' : sel.priority === 1 ? 'live' : 'done'}`}>
-                      <span className="apuesta-match">
-                        {sel.priority === 2 && <span className="apuesta-status ns">&#9679;</span>}
-                        {sel.priority === 1 && <span className="apuesta-status live">EN VIVO</span>}
-                        {sel.priority === 0 && <span className="apuesta-status fin">FIN</span>}
-                        {sel.matchName}
-                      </span>
-                      <span className="apuesta-mkt">{(() => {
+                    <article key={i} className={`apuesta-item ${sel.priority === 2 ? 'upcoming' : sel.priority === 1 ? 'live' : 'done'}`}>
+                      <span className="apuesta-index">{String(i + 1).padStart(2, '0')}</span>
+                      <span className="apuesta-item-copy">
+                        <span className="apuesta-match">
+                          {sel.priority === 1 && <span className="apuesta-status live">EN VIVO</span>}
+                          {sel.priority === 2 && <span className="apuesta-status ns">Próximo</span>}
+                          {sel.matchName}
+                        </span>
+                        <span className="apuesta-mkt">{(() => {
                         const sufijos = { 'Goles': 'goles', 'Córners': 'córners', 'Tarjetas': 'tarjetas' };
                         const sufijo = sufijos[sel.cat];
                         if (sufijo && sel.name?.toLowerCase().endsWith(sufijo)) {
                           const valor = sel.name.slice(0, sel.name.length - sufijo.length).trim();
-                          return <><span style={{ color: 'white', fontWeight: 600 }}>{sel.cat} totales — </span><span style={{ color: '#67e8f9' }}>{valor}</span></>;
+                          return <>{sel.cat} totales — {valor}</>;
                         }
                         return sel.name;
-                      })()}</span>
-                      <span className="apuesta-prob" style={{ color: probColor }}>{pct}%</span>
-                      {sel.odd != null && <span className="apuesta-odd">{sel.odd.toFixed(2)}</span>}
-                    </div>
+                        })()}</span>
+                      </span>
+                      <span className="apuesta-item-metrics">
+                        <span className="apuesta-prob" style={{ color: probColor }}><small>Prob.</small>{pct}%</span>
+                        {sel.odd != null && <span className="apuesta-odd"><small>Cuota</small>{sel.odd.toFixed(2)}</span>}
+                      </span>
+                    </article>
                   );
                 })}
                 </div>
-                {apuestaDelDia.combinedOdd > 1 && (
-                  <div className="apuesta-foot">
-                    <span>Cuota: <b>{apuestaDelDia.combinedOdd}</b></span>
-                    <span>Prob: <b>{cap(apuestaDelDia.combinedProbability)}%</b></span>
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -1472,65 +1439,36 @@ export default function Dashboard() {
           </>
         )}
 
-        {/* TAB: ANALIZADOS */}
-        {!loading && tab === 'analizados' && (
-          <>
-            {analyzedFixtures.length === 0 ? (
-              <div className="empty-state fade-in">
-                <div className="empty-icon">&#128269;</div>
-                <h3>Sin analisis</h3>
-                <p>Selecciona partidos y analízalos</p>
-              </div>
-            ) : (
-              <div className="match-list">
-                {analyzedFixtures.map((m, i) => (
-                  <AccordionCard
-                    key={m.fixture.id}
-                    match={m}
-                    data={analyzedData[m.fixture.id]}
-                    odds={analyzedOdds[m.fixture.id]}
-                    standings={standings}
-                    liveStats={liveStats[m.fixture.id]}
-                    isExpanded={expandedMatch === m.fixture.id}
-                    onToggle={() => setExpandedMatch(expandedMatch === m.fixture.id ? null : m.fixture.id)}
-                    selMarkets={selectedMarkets[m.fixture.id] || {}}
-                    onToggleMarket={(mkt) => toggleMarket(m.fixture.id, mkt, `${m.teams.home.name} vs ${m.teams.away.name}`)}
-                    onViewFull={() => openAnalysisModal(m.fixture.id, m)}
-                    onRemove={(e) => removeFromAnalyzed(e, m.fixture.id)}
-                    isFavorite={favorites.includes(m.fixture.id)}
-                    onFavorite={(e) => toggleFavorite(e, m.fixture.id)}
-                    idx={i}
-                    userTz={userTz}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        )}
-
         {/* TAB: COMBINADA */}
         {!loading && tab === 'combinada' && (
           <>
             {!customCombinada ? (
               <div className="empty-state fade-in">
-                <div className="empty-icon">&#127920;</div>
-                <h3>Combinada vacia</h3>
-                <p>Ve a Analizados, abre un partido y selecciona apuestas</p>
+                <div className="empty-icon"><Layers3 size={28} aria-hidden="true" /></div>
+                <h3>Combinada vacía</h3>
+                <p>Abre un partido analizado y selecciona los mercados que quieras combinar</p>
               </div>
             ) : (
               <div className="comb-builder fade-in">
-                <h3 className="comb-title">Tu Combinada &mdash; {customCombinada.selections.length} selecciones</h3>
+                <div className="comb-hero">
+                  <span className="comb-hero-icon"><Layers3 size={21} aria-hidden="true" /></span>
+                  <span><small>Constructor inteligente</small><strong>Tu combinada</strong></span>
+                  <span className="comb-count">{customCombinada.selections.length} selecciones</span>
+                </div>
                 <div className="comb-list">
                   {customCombinada.selections.map((sel, i) => (
-                    <div key={`${sel.fixtureId}-${sel.id}`} className="comb-item">
-                      <div className="comb-item-match">{sel.matchName}</div>
-                      <div className="comb-item-row">
+                    <article key={`${sel.fixtureId}-${sel.id}`} className="comb-item">
+                      <span className="comb-item-index">{String(i + 1).padStart(2, '0')}</span>
+                      <div className="comb-item-content">
+                        <div className="comb-item-match">{sel.matchName}</div>
                         <span className="comb-item-name">{sel.name}</span>
-                        <span className={`comb-item-prob ${sel.probability >= 75 ? 'high' : sel.probability >= 50 ? 'mid' : 'low'}`}>{cap(sel.probability)}%</span>
-                        <span className="comb-item-odd">{sel.odd ? sel.odd.toFixed(2) : ''}</span>
-                        <button className="comb-item-rm" onClick={() => toggleMarket(sel.fixtureId, sel, sel.matchName)}>&#10005;</button>
                       </div>
-                    </div>
+                      <div className="comb-item-metrics">
+                        <span className={`comb-item-prob ${sel.probability >= 75 ? 'high' : sel.probability >= 50 ? 'mid' : 'low'}`}><small>Prob.</small>{cap(sel.probability)}%</span>
+                        <span className="comb-item-odd"><small>Cuota</small>{sel.odd ? sel.odd.toFixed(2) : '—'}</span>
+                      </div>
+                      <button className="comb-item-rm" onClick={() => toggleMarket(sel.fixtureId, sel, sel.matchName)} aria-label={`Quitar ${sel.name}`}><X size={15} aria-hidden="true" /></button>
+                    </article>
                   ))}
                 </div>
                 <div className="comb-summary">
@@ -1552,9 +1490,9 @@ export default function Dashboard() {
                 </div>
                 <div className="comb-actions">
                   <button className="btn-save-comb" onClick={saveCombinada} disabled={savingComb}>
-                    {savingComb ? 'Guardando...' : 'Guardar combinada'}
+                    <Save size={16} aria-hidden="true" /> {savingComb ? 'Guardando...' : 'Guardar combinada'}
                   </button>
-                  <button className="btn-clear" onClick={() => setSelectedMarkets({})}>Limpiar</button>
+                  <button className="btn-clear" onClick={() => setSelectedMarkets({})}><Trash2 size={16} aria-hidden="true" /> Limpiar</button>
                 </div>
 
               </div>
@@ -1593,7 +1531,7 @@ export default function Dashboard() {
 
         {/* FLOATING: Analyze */}
         {selected.size > 0 && tab === 'partidos' && (
-          <div className="float-bar slide-up">
+          <div className="float-bar float-bar-analyze slide-up">
             <button className="btn-analyze" onClick={analyzeSelected} disabled={analyzing}>
               {analyzing ? 'Analizando...' : `Analizar ${selected.size} partido${selected.size > 1 ? 's' : ''}`}
             </button>
@@ -1601,11 +1539,13 @@ export default function Dashboard() {
         )}
 
         {/* FLOATING: Combinada counter */}
-        {totalSel > 0 && (tab === 'analizados' || tab === 'partidos') && (
-          <div className="float-bar slide-up">
+        {totalSel > 0 && tab === 'partidos' && (
+          <div className="float-bar float-bar-combinada slide-up">
             <button className="btn-comb-float" onClick={() => setTab('combinada')}>
-              &#127920; Ver Combinada ({totalSel})
+              <span className="float-comb-icon"><Layers3 size={19} aria-hidden="true" /></span>
+              <span><small>Tu selección</small><strong>Ver combinada · {totalSel}</strong></span>
               {customCombinada && <span className="float-odd">{customCombinada.combinedOdd}x</span>}
+              <ArrowRight size={18} aria-hidden="true" />
             </button>
           </div>
         )}
@@ -1694,18 +1634,32 @@ const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFav
             const bkName = matchData?.odds?.bookmaker;
             const bkLogo = bkName ? (BOOKMAKER_LOGOS[bkName.toLowerCase()] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => bkName.toLowerCase().includes(k))?.[1]) : null;
             return (
-              <div style={{ order: 3, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              <div className="card-odds-row">
                 {bkName && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 999, background: 'linear-gradient(to right, rgba(59,130,246,.2), rgba(168,85,247,.2))', border: '1px solid rgba(59,130,246,.3)' }}>
-                    {bkLogo && <img src={bkLogo} alt={bkName} style={{ height: 12 }} />}
+                  <div className="card-bookmaker" title={bkName}>
+                    {bkLogo && <img className="card-bookmaker-logo" src={bkLogo} alt={bkName} />}
+                    <span>{bkName}</span>
                   </div>
                 )}
-                {odds.home != null && <div style={{ padding: '4px 12px', borderRadius: 8, background: 'linear-gradient(135deg, #22c55e, #16a34a)', fontWeight: 700, fontSize: '.82rem', color: '#fff' }}>{odds.home.toFixed(2)}</div>}
-                {odds.draw != null && <div style={{ padding: '4px 12px', borderRadius: 8, background: 'linear-gradient(135deg, #f59e0b, #d97706)', fontWeight: 700, fontSize: '.82rem', color: '#fff' }}>X {odds.draw.toFixed(2)}</div>}
-                {odds.away != null && <div style={{ padding: '4px 12px', borderRadius: 8, background: 'linear-gradient(135deg, #ef4444, #dc2626)', fontWeight: 700, fontSize: '.82rem', color: '#fff' }}>{odds.away.toFixed(2)}</div>}
+                {odds.home != null && <div className="card-odd is-home">{odds.home.toFixed(2)}</div>}
+                {odds.draw != null && <div className="card-odd is-draw">X {odds.draw.toFixed(2)}</div>}
+                {odds.away != null && <div className="card-odd is-away">{odds.away.toFixed(2)}</div>}
               </div>
             );
           })()}
+
+          {matchData?.referee && (
+            <div className="card-referee">
+              <Scale size={16} aria-hidden="true" />
+              <span><small>Árbitro</small><strong>{matchData.referee}</strong></span>
+              {matchData.refereeStats?.avgYellows != null && (
+                <i className="is-yellow">{Number(matchData.refereeStats.avgYellows).toFixed(1)}</i>
+              )}
+              {matchData.refereeStats?.avgReds != null && (
+                <i className="is-red">{Number(matchData.refereeStats.avgReds).toFixed(2)}</i>
+              )}
+            </div>
+          )}
 
           {/* Visitante — order 2 */}
           <div style={{ order: 2, flex: 1, minWidth: 0, textAlign: 'right' }}>
@@ -1822,39 +1776,14 @@ const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFav
 /* ======================== ANALYSIS MODAL ======================== */
 
 function AnalysisModal({ id, onClose }) {
-  const [loaded, setLoaded] = useState(false);
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.8)', backdropFilter: 'blur(4px)' }} onClick={onClose} />
-      <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', width: '100%', height: '100%', maxWidth: 860, margin: '0 auto' }}>
-        {/* Barra superior con X */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '10px 12px', background: 'var(--bg-1)', borderBottom: '1px solid var(--brd)', flexShrink: 0 }}>
-          <button
-            onClick={onClose}
-            style={{ background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.15)', borderRadius: 8, padding: '5px 14px', color: '#fff', fontSize: '1rem', cursor: 'pointer', fontWeight: 700, lineHeight: 1 }}
-          >&#10005;</button>
-        </div>
-        {/* Spinner mientras carga el iframe */}
-        {!loaded && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, background: 'var(--bg-1)' }}>
-            <div style={{
-              width: 40, height: 40, borderRadius: '50%',
-              border: '3px solid rgba(255,255,255,.1)',
-              borderTopColor: '#2dd4bf',
-              animation: 'spin 0.8s linear infinite',
-            }} />
-            <span style={{ fontSize: '.8rem', color: 'var(--t3)' }}>Cargando análisis…</span>
-          </div>
-        )}
-        <iframe
-          key={id}
-          src={`/dashboard/analisis/${id}`}
-          onLoad={() => setLoaded(true)}
-          style={{ flex: 1, border: 'none', width: '100%', opacity: loaded ? 1 : 0, transition: 'opacity .4s ease' }}
-          title="Análisis completo"
-        />
-      </div>
-    </div>
+    <AnalysisSceneModal
+      onClose={onClose}
+      sceneSelector=".analysis-embedded .ap2-main > .ap2-glass"
+      ariaLabel="Análisis completo"
+    >
+      <AnalysisExperience fixtureId={id} embedded onClose={onClose} />
+    </AnalysisSceneModal>
   );
 }
 
@@ -1882,31 +1811,32 @@ function toggleSubAndReveal(e, open, id, setOpenSub) {
 // en el AccordionCard padre (openSub/setOpenSub), así solo uno está abierto a
 // la vez. children SIEMPRE montados (grid 0fr→1fr), el toggle solo cambia CSS
 // → apertura instantánea garantizada incluso la 1ª vez. Transición 150ms.
-function SubAccordion({ id, title, color, openSub, setOpenSub, children }) {
+function SubAccordion({ id, title, color, icon: Icon = BarChart3, openSub, setOpenSub, children }) {
   const open = openSub === id;
   return (
-    <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
-      <div
-        role="button"
+    <section className="subacc-section" style={{ '--subacc-accent': color || 'var(--dash-green)' }}>
+      <button
+        type="button"
+        className="subacc-trigger"
         onClick={(e) => toggleSubAndReveal(e, open, id, setOpenSub)}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
+        aria-expanded={open}
       >
-        <span style={{ fontSize: '.75rem', fontWeight: 700, color: color || 'var(--t2)', textTransform: 'uppercase', letterSpacing: '.05em' }}>{title}</span>
-        <span style={{ color: color || 'var(--t2)', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s ease' }}>&#9662;</span>
-      </div>
+        <span><i><Icon size={17} aria-hidden="true" /></i><strong>{title}</strong></span>
+        <ChevronDown className={open ? 'is-open' : ''} size={17} aria-hidden="true" />
+      </button>
       <div className="subacc-grid" data-open={open ? '1' : '0'}>
-        <div style={{ overflow: 'hidden' }}>
-          <div style={{ paddingTop: 10 }}>{children}</div>
+        <div className="subacc-overflow">
+          <div className="subacc-body">{children}</div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
 function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, onRemove, isFavorite, onFavorite, idx, userTz }) {
   // Estado de sub-acordeón EXCLUSIVO (solo uno abierto a la vez). Los 3 bloques
   // (Estadísticas / Probabilidades / Jugadores) leen openSub y lo togglean.
-  const [openSub, setOpenSub] = useState(null);
+  const [openSub, setOpenSub] = useState('markets');
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
@@ -1993,29 +1923,30 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
               const bkName = data?.odds?.bookmaker;
               const bkLogo = bkName ? (BOOKMAKER_LOGOS[bkName.toLowerCase()] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => bkName.toLowerCase().includes(k))?.[1]) : null;
               return (
-                <div style={{ order: 3, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                  {bkName && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 999, background: 'linear-gradient(to right, rgba(59,130,246,.2), rgba(168,85,247,.2))', border: '1px solid rgba(59,130,246,.3)' }}>
-                      {bkLogo && <img src={bkLogo} alt={bkName} style={{ height: 12 }} />}
+              <div className="card-odds-row">
+                {bkName && (
+                    <div className="card-bookmaker" title={bkName}>
+                      {bkLogo && <img className="card-bookmaker-logo" src={bkLogo} alt={bkName} />}
+                      <span>{bkName}</span>
                     </div>
                   )}
-                  {odds.home != null && <div style={{ padding: '4px 12px', borderRadius: 8, background: 'linear-gradient(135deg, #22c55e, #16a34a)', fontWeight: 700, fontSize: '.82rem', color: '#fff' }}>{odds.home.toFixed(2)}</div>}
-                  {odds.draw != null && <div style={{ padding: '4px 12px', borderRadius: 8, background: 'linear-gradient(135deg, #f59e0b, #d97706)', fontWeight: 700, fontSize: '.82rem', color: '#fff' }}>X {odds.draw.toFixed(2)}</div>}
-                  {odds.away != null && <div style={{ padding: '4px 12px', borderRadius: 8, background: 'linear-gradient(135deg, #ef4444, #dc2626)', fontWeight: 700, fontSize: '.82rem', color: '#fff' }}>{odds.away.toFixed(2)}</div>}
+                  {odds.home != null && <div className="card-odd is-home">{odds.home.toFixed(2)}</div>}
+                  {odds.draw != null && <div className="card-odd is-draw">X {odds.draw.toFixed(2)}</div>}
+                  {odds.away != null && <div className="card-odd is-away">{odds.away.toFixed(2)}</div>}
                 </div>
               );
             })()}
 
             {/* Árbitro */}
             {data?.referee && (
-              <div style={{ order: 4, width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, fontSize: '.7rem', color: 'rgba(255,255,255,.45)', marginTop: -4 }}>
-                <span>⚖️</span>
-                <span style={{ fontWeight: 500 }}>{data.referee}</span>
+              <div className="card-referee">
+                <Scale size={16} aria-hidden="true" />
+                <span><small>Árbitro</small><strong>{data.referee}</strong></span>
                 {data.refereeStats?.avgYellows != null && (
-                  <span>🟨{Number(data.refereeStats.avgYellows).toFixed(1)}</span>
+                  <i className="is-yellow">{Number(data.refereeStats.avgYellows).toFixed(1)}</i>
                 )}
                 {data.refereeStats?.avgReds != null && (
-                  <span>🟥{Number(data.refereeStats.avgReds).toFixed(2)}</span>
+                  <i className="is-red">{Number(data.refereeStats.avgReds).toFixed(2)}</i>
                 )}
               </div>
             )}
@@ -2137,9 +2068,17 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                   ya los muestra el score box de la tarjeta. Era 100% redundante. */}
 
               {/* Selectable markets — BEFORE auto combinada */}
-              {markets.length > 0 && <div className="markets">
-                <h4 className="markets-title">Selecciona para tu combinada</h4>
-                <div className="markets-grid">
+              {markets.length > 0 && (
+                <SubAccordion
+                  id="markets"
+                  openSub={openSub}
+                  setOpenSub={setOpenSub}
+                  title={`Mercados para tu combinada · ${markets.length}`}
+                  icon={Layers3}
+                  color="#5ee6b1"
+                >
+                  <div className="markets">
+                    <div className="markets-grid">
                   {markets.map(mkt => {
                     const checked = !!selMarkets[mkt.id];
                     // Logo del bookmaker REAL atribuido por el motor (allBookmakerOdds).
@@ -2164,8 +2103,10 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                       </button>
                     );
                   })}
-                </div>
-              </div>}
+                    </div>
+                  </div>
+                </SubAccordion>
+              )}
 
               {/* ── Estadísticas calculadas (extraído del análisis completo) ── */}
               {data.calculatedProbabilities && (() => {
@@ -2187,7 +2128,7 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                   </div>
                 );
                 return (
-                  <SubAccordion id="stats" openSub={openSub} setOpenSub={setOpenSub} title="📊 Estadísticas calculadas" color="#f97316">
+                  <SubAccordion id="stats" openSub={openSub} setOpenSub={setOpenSub} title="Estadísticas calculadas" color="#f97316">
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                       <StatCard title={`Goles — ${hn}`} accent="rgba(0,212,255,.25)">
                         <Cell label="Prom. anotados"      value={p.homeGoals?.avgScored}   color="#4ade80" />
@@ -2235,8 +2176,9 @@ function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, on
                   detalle completo (last5 partidos, goal-timing, etc.) sigue
                   disponible en "Ver analisis completo". */}
 
-              <button className="btn-full" style={{ marginTop: 20 }} onClick={(e) => { e.stopPropagation(); onViewFull(); }}>
-                Ver analisis completo &#8594;
+              <button className="btn-full" onClick={(e) => { e.stopPropagation(); onViewFull(); }}>
+                <span><small>Explora cada indicador</small><strong>Ver análisis completo</strong></span>
+                <ArrowRight size={18} aria-hidden="true" />
               </button>
             </>
           ) : (
@@ -2505,11 +2447,11 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
   ].filter(Boolean).filter(c => c.items && c.items.length > 0);
 
   return [
-    { key: 'goles',    label: '⚽ Goles',            color: '#4ade80' },
-    { key: 'corners',  label: '🚩 Córners',           color: '#fbbf24' },
-    { key: 'tarjetas', label: '🟨 Tarjetas',          color: '#f59e0b' },
-    { key: 'tiros',    label: '🎯 Tiros',             color: '#3b82f6' },
-    { key: 'faltas',   label: '⚠️ Faltas',            color: '#fb923c' },
+    { key: 'goles',    label: 'Goles',     color: '#4ade80' },
+    { key: 'corners',  label: 'Córners',   color: '#fbbf24' },
+    { key: 'tarjetas', label: 'Tarjetas',  color: '#f59e0b' },
+    { key: 'tiros',    label: 'Tiros',     color: '#3b82f6' },
+    { key: 'faltas',   label: 'Faltas',    color: '#fb923c' },
   ].map(g => ({ ...g, cats: allCats.filter(c => c.group === g.key) }))
    .filter(g => g.cats.length > 0);
   }, [p, odds, homeTeam, awayTeam]);
@@ -2529,35 +2471,35 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
   };
 
   return (
-    <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
-      <div
-        role="button"
+    <section className="subacc-section" style={{ '--subacc-accent': '#2dd4bf' }}>
+      <button
+        type="button"
+        className="subacc-trigger"
         onClick={(e) => toggleSubAndReveal(e, open, id, setOpenSub)}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
+        aria-expanded={open}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#2dd4bf', textTransform: 'uppercase', letterSpacing: '.05em' }}>
-          <span>📊</span> % Probabilidades calculadas
-        </div>
-        <span style={{ color: '#2dd4bf', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s ease' }}>&#9662;</span>
-      </div>
+        <span><i><BarChart3 size={17} aria-hidden="true" /></i><strong>Probabilidades calculadas</strong></span>
+        <ChevronDown className={open ? 'is-open' : ''} size={17} aria-hidden="true" />
+      </button>
       <div className="subacc-grid" data-open={open ? '1' : '0'}>
-        <div style={{ overflow: 'hidden' }}>
-          <div style={{ paddingTop: 10 }}>
+        <div className="subacc-overflow">
+          <div className="subacc-body">
             {groupDefs.map(g => (
-              <div key={g.key} style={{ marginBottom: 8, background: 'var(--bg-2)', border: '1px solid rgba(45,212,191,0.12)', borderRadius: 10, overflow: 'hidden' }}>
-                <div
-                  role="button"
+              <section key={g.key} className="subacc-group" style={{ '--subacc-group-accent': g.color }}>
+                <button
+                  type="button"
+                  className="subacc-group-trigger"
                   onClick={(e) => { e.stopPropagation(); setCatOpen(prev => (prev === g.key ? null : g.key)); }}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
+                  aria-expanded={catOpen === g.key}
                 >
-                  <span style={{ fontSize: '.75rem', fontWeight: 700, color: g.color }}>{g.label}</span>
-                  <span style={{ color: g.color, fontSize: '.8rem', display: 'inline-block', transform: catOpen === g.key ? 'rotate(180deg)' : 'none', transition: 'transform .15s ease' }}>&#9662;</span>
-                </div>
+                  <span>{g.label}<small>{g.cats.length} bloques</small></span>
+                  <ChevronDown className={catOpen === g.key ? 'is-open' : ''} size={16} aria-hidden="true" />
+                </button>
                 <div className="subacc-grid" data-open={catOpen === g.key ? '1' : '0'}>
-                  <div style={{ overflow: 'hidden' }}>
-                    <div style={{ padding: '0 12px 12px', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  <div className="subacc-overflow">
+                    <div className="subacc-data-grid">
                       {g.cats.map((cat, ci) => (
-                        <div key={ci} style={{ background: 'var(--bg-1)', border: '1px solid rgba(45,212,191,0.08)', borderRadius: 8, padding: '8px 10px', flex: '1 1 180px', minWidth: 0 }}>
+                        <div key={ci} className="subacc-data-card">
                           <div style={{ fontSize: '.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--t2)', marginBottom: cat.subtitle ? 2 : 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.title}</div>
                           {cat.subtitle && <div style={{ fontSize: '.65rem', color: 'var(--t3)', marginBottom: 6 }}>{cat.subtitle}</div>}
                           {cat.items.map((it, i) => <ProbItem key={i} it={it} />)}
@@ -2566,12 +2508,12 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
                     </div>
                   </div>
                 </div>
-              </div>
+              </section>
             ))}
           </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -2633,46 +2575,43 @@ function AccordionPlayersBlock({ highlights, id, openSub, setOpenSub }) {
   };
 
   return (
-    <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
-      <div
-        role="button"
+    <section className="subacc-section" style={{ '--subacc-accent': '#fbbf24' }}>
+      <button
+        type="button"
+        className="subacc-trigger"
         onClick={(e) => toggleSubAndReveal(e, open, id, setOpenSub)}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
+        aria-expanded={open}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.75rem', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '.05em' }}>
-          <span>⭐</span> Jugadores destacados
-        </div>
-        <span style={{ color: '#fbbf24', fontSize: '.85rem', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s ease' }}>&#9662;</span>
-      </div>
+        <span><i><Sparkles size={17} aria-hidden="true" /></i><strong>Jugadores destacados</strong></span>
+        <ChevronDown className={open ? 'is-open' : ''} size={17} aria-hidden="true" />
+      </button>
       <div className="subacc-grid" data-open={open ? '1' : '0'}>
-        <div style={{ overflow: 'hidden' }}>
-          <div style={{ paddingTop: 10 }}>
+        <div className="subacc-overflow">
+          <div className="subacc-body">
             {groups.map(g => (
-              <div key={g.key} style={{ marginBottom: 8, background: 'var(--bg-2)', border: '1px solid rgba(251,191,36,0.12)', borderRadius: 10, overflow: 'hidden' }}>
-                <div
-                  role="button"
+              <section key={g.key} className="subacc-group" style={{ '--subacc-group-accent': g.dotColor }}>
+                <button
+                  type="button"
+                  className="subacc-group-trigger"
                   onClick={(e) => { e.stopPropagation(); setGrpOpen(prev => (prev === g.key ? null : g.key)); }}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', cursor: 'pointer', padding: '10px 12px', gap: 8, textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}
+                  aria-expanded={grpOpen === g.key}
                 >
-                  <span style={{ fontSize: '.75rem', fontWeight: 700, color: g.dotColor }}>
-                    {g.emoji} {g.label}
-                    <span style={{ fontSize: '.65rem', color: 'var(--t3)', fontWeight: 400, marginLeft: 6 }}>{g.hint}</span>
-                  </span>
-                  <span style={{ color: g.dotColor, fontSize: '.8rem', display: 'inline-block', transform: grpOpen === g.key ? 'rotate(180deg)' : 'none', transition: 'transform .15s ease' }}>&#9662;</span>
-                </div>
+                  <span>{g.label}<small>{g.hint}</small></span>
+                  <ChevronDown className={grpOpen === g.key ? 'is-open' : ''} size={16} aria-hidden="true" />
+                </button>
                 <div className="subacc-grid" data-open={grpOpen === g.key ? '1' : '0'}>
-                  <div style={{ overflow: 'hidden' }}>
-                    <div style={{ padding: '0 12px 12px' }}>
+                  <div className="subacc-overflow">
+                    <div className="subacc-player-list">
                       {g.data.slice(0, 5).map((pl, i) => <PlayerRow key={i} pl={pl} g={g} />)}
                     </div>
                   </div>
                 </div>
-              </div>
+              </section>
             ))}
           </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 

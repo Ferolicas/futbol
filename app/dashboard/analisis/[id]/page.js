@@ -14,6 +14,7 @@ import { useLiveStats } from '../../live-stats-context';
 import { useSelectedMarkets } from '../../selected-markets-context';
 import { getUserTz, fmtTimeInTz, todayInTz } from '../../../../lib/timezone';
 import { useWorkerSocketState } from '../../../../hooks/useWorkerSocket';
+import DashboardBuffer from '../../components/DashboardBuffer';
 
 function detectCountry() {
   try {
@@ -40,10 +41,14 @@ function getProbColor(v) {
   return 'lo';
 }
 
-export default function AnalisisPage() {
+export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, onClose }) {
   const params = useParams();
   const router = useRouter();
-  const fixtureId = params.id;
+  const fixtureId = fixtureIdProp || params.id;
+  const closeOrBack = () => {
+    if (embedded && onClose) onClose();
+    else router.push('/dashboard');
+  };
 
   // Hydrate from hand-off cache so the page renders instantly when arriving
   // from the dashboard — then revalidate in background via fetch.
@@ -251,15 +256,7 @@ export default function AnalisisPage() {
 
   // ── LOADING ──
   if (loading) {
-    return (
-      <div style={{ minHeight: '100vh', position: 'relative', overflow: 'hidden', color: 'white' }}>
-        <div style={{ position: 'fixed', inset: 0, zIndex: 0, background: 'linear-gradient(181deg, #030000 10%, #000009 14%, #1E8769 67%)' }} />
-        <div style={{ position: 'relative', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', flexDirection: 'column', gap: 16 }}>
-          <div className="ap2-spinner" />
-          <span style={{  color: 'white', fontSize: '.9rem' }}>Cargando análisis…</span>
-        </div>
-      </div>
-    );
+    return <DashboardBuffer compact={embedded} />;
   }
 
   // ── NOT ANALYZED YET ──
@@ -280,7 +277,7 @@ export default function AnalisisPage() {
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
               <motion.button
                 className="ap2-back-btn"
-                onClick={() => router.push('/dashboard')}
+                onClick={closeOrBack}
                 whileHover={{ scale: 1.05 }} whileTap={{ scale: .95 }}
               >
                 <ChevronLeft size={16} /> Volver
@@ -318,7 +315,7 @@ export default function AnalisisPage() {
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
               <motion.button
                 className="ap2-back-btn"
-                onClick={() => router.push('/dashboard')}
+                onClick={closeOrBack}
                 whileHover={{ scale: 1.05 }} whileTap={{ scale: .95 }}
               >
                 <ChevronLeft size={16} /> Volver
@@ -353,7 +350,7 @@ export default function AnalisisPage() {
   const liveSec = clockRunning ? secsSinceUpdate % 60 : 0;
 
   return (
-    <div className="ap2-page" style={{ minHeight: '100vh', position: 'relative', overflow: 'hidden', color: 'white', fontFamily: "'Inter', -apple-system, sans-serif" }}>
+    <div className={`ap2-page ${embedded ? 'analysis-embedded' : ''}`} style={{ minHeight: embedded ? '100%' : '100vh', position: 'relative', overflow: 'hidden', color: 'white', fontFamily: "var(--font-jakarta), -apple-system, sans-serif" }}>
       {/* ── Fixed Animated Background ── */}
       <div style={{ position: 'fixed', inset: 0, zIndex: 0, background: 'linear-gradient(181deg, #030000 10%, #000009 14%, #1E8769 67%)' }} />
       <motion.div
@@ -382,7 +379,7 @@ export default function AnalisisPage() {
           <div className="ap2-header-inner">
             <motion.button
               className="ap2-back-btn"
-              onClick={() => router.push('/dashboard')}
+              onClick={closeOrBack}
               whileHover={{ scale: 1.05, x: -4 }}
               whileTap={{ scale: .95 }}
             >
@@ -1185,6 +1182,10 @@ export default function AnalisisPage() {
       </div>
     </div>
   );
+}
+
+export default function AnalisisPage() {
+  return <AnalysisExperience />;
 }
 
 // ══════════════════════════════════════════
