@@ -134,11 +134,12 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - 2026-07-29: `/planes` usa un escenario fijo; scroll, teclado y swipe cambian la tarjeta activa sin crear una lista vertical.
 - 2026-07-29: el dashboard recibe identidad inicial desde su layout de servidor y precarga ambas rutas deportivas.
 - 2026-07-29: el análisis completo de Fútbol y Baseball se abre en un modal
-  nativo con escenario sticky. El scroll interno es continuo y sin cooldown;
+  nativo con escenario fijo. El scroll interno es continuo y sin cooldown;
   su progreso cambia capas nítidas en el mismo viewport, sin blur, escalado,
   flechas ni scroll-snap. El controlador captura rueda/swipe en el conductor y
-  actualiza el progreso inmediatamente; debe reenviar el sobrante exterior
-  cuando la escena activa no tenga overflow o ya esté en su borde.
+  actualiza un progreso virtual inmediatamente, sin depender de `scrollTop`
+  nativo. En iOS usa `PointerEvent` + `setPointerCapture`, conserva Touch Events
+  como fallback y reenvía el sobrante cuando la escena activa llega a su borde.
 - 2026-07-29: `BrandLogoMedia` conserva `/logo-metalizado.webm` como fuente
   principal y usa `/logo-metalizado-alpha.webp` en WebKit/iOS, donde el VP9 con
   `alpha_mode=1` puede reproducirse con el plano transparente en negro.

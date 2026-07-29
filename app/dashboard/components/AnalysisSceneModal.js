@@ -20,6 +20,7 @@ export default function AnalysisSceneModal({
   const closeRef = useRef(null);
   const scenesRef = useRef([]);
   const progressRef = useRef(0);
+  const activeSceneRef = useRef(-1);
   const touchYRef = useRef(null);
   const [activeScene, setActiveScene] = useState(0);
   const [sceneCount, setSceneCount] = useState(0);
@@ -31,22 +32,26 @@ export default function AnalysisSceneModal({
     const progress = clamp(requestedProgress, 0, scenes.length - 1);
     const nearest = Math.round(progress);
     progressRef.current = progress;
-    setActiveScene(nearest);
 
-    scenes.forEach((scene, index) => {
-      const isActive = index === nearest;
+    if (nearest !== activeSceneRef.current) {
+      activeSceneRef.current = nearest;
+      setActiveScene(nearest);
 
-      scene.classList.add('analysis-apple-scene');
-      scene.classList.toggle('is-scene-active', isActive);
-      scene.style.setProperty('--analysis-scene-opacity', isActive ? '1' : '0');
-      scene.setAttribute('aria-hidden', isActive ? 'false' : 'true');
-      if ('inert' in scene) scene.inert = !isActive;
+      scenes.forEach((scene, index) => {
+        const isActive = index === nearest;
 
-      Array.from(scene.children).forEach((piece, pieceIndex) => {
-        piece.classList.add('analysis-apple-piece');
-        piece.style.setProperty('--analysis-piece-index', String(Math.min(pieceIndex, 10)));
+        scene.classList.add('analysis-apple-scene');
+        scene.classList.toggle('is-scene-active', isActive);
+        scene.style.setProperty('--analysis-scene-opacity', isActive ? '1' : '0');
+        scene.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+        if ('inert' in scene) scene.inert = !isActive;
+
+        Array.from(scene.children).forEach((piece, pieceIndex) => {
+          piece.classList.add('analysis-apple-piece');
+          piece.style.setProperty('--analysis-piece-index', String(Math.min(pieceIndex, 10)));
+        });
       });
-    });
+    }
 
     const percent = scenes.length <= 1 ? 100 : (progress / (scenes.length - 1)) * 100;
     shellRef.current?.style.setProperty('--analysis-progress', `${percent.toFixed(2)}%`);
@@ -75,12 +80,16 @@ export default function AnalysisSceneModal({
     if (!shell || !stage || !scroller) return undefined;
 
     let syncFrame;
-    let scrollFrame;
+    let pointerGestureActive = false;
+    let pointerCaptured = false;
+    let activePointerId = null;
+    let pointerY = null;
     const syncScenes = () => {
       cancelAnimationFrame(syncFrame);
       syncFrame = requestAnimationFrame(() => {
         const nextScenes = Array.from(shell.querySelectorAll(sceneSelector));
         scenesRef.current = nextScenes;
+        activeSceneRef.current = -1;
         setSceneCount(nextScenes.length);
         if (nextScenes.length > 0) {
           paintProgress(clamp(progressRef.current, 0, nextScenes.length - 1));
@@ -88,26 +97,14 @@ export default function AnalysisSceneModal({
       });
     };
 
-    const readNativeScroll = () => {
-      cancelAnimationFrame(scrollFrame);
-      scrollFrame = requestAnimationFrame(() => {
-        const scenes = scenesRef.current;
-        if (scenes.length === 0) return;
-        const maxScroll = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
-        const progress = (scroller.scrollTop / maxScroll) * Math.max(0, scenes.length - 1);
-        paintProgress(progress);
-      });
-    };
-
     const moveOuterScroll = (delta) => {
-      const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-      const nextTop = clamp(scroller.scrollTop + delta, 0, maxScroll);
-      scroller.scrollTop = nextTop;
-
       const scenes = scenesRef.current;
-      if (scenes.length > 0 && maxScroll > 0) {
-        paintProgress((nextTop / maxScroll) * (scenes.length - 1));
-      }
+      if (scenes.length <= 1) return;
+
+      // El progreso es virtual: no depende del scrollTop nativo, que Safari
+      // puede congelar mientras un gesto toca un hijo absoluto/scrollable.
+      const sceneTravel = Math.max(96, scroller.clientHeight * .32);
+      paintProgress(progressRef.current + delta / sceneTravel);
     };
 
     const routeScrollDelta = (delta) => {
@@ -141,10 +138,12 @@ export default function AnalysisSceneModal({
     };
 
     const onTouchStart = (event) => {
+      if (pointerGestureActive) return;
       touchYRef.current = event.touches[0]?.clientY ?? null;
     };
 
     const onTouchMove = (event) => {
+      if (pointerGestureActive) return;
       const nextY = event.touches[0]?.clientY;
       if (nextY == null || touchYRef.current == null) return;
       const delta = touchYRef.current - nextY;
@@ -159,41 +158,86 @@ export default function AnalysisSceneModal({
       touchYRef.current = null;
     };
 
+    const onPointerDown = (event) => {
+      if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
+      pointerGestureActive = true;
+      pointerCaptured = false;
+      activePointerId = event.pointerId;
+      pointerY = event.clientY;
+    };
+
+    const onPointerMove = (event) => {
+      if (!pointerGestureActive || event.pointerId !== activePointerId || pointerY == null) return;
+      const delta = pointerY - event.clientY;
+      pointerY = event.clientY;
+      if (Math.abs(delta) < 1) return;
+
+      if (!pointerCaptured) {
+        try {
+          scroller.setPointerCapture(event.pointerId);
+          pointerCaptured = true;
+        } catch {
+          // El movimiento también se escucha en window, así que Safari
+          // mantiene el gesto aunque rechace la captura explícita.
+        }
+      }
+      if (event.cancelable) event.preventDefault();
+      routeScrollDelta(delta);
+    };
+
+    const onPointerEnd = (event) => {
+      if (event.pointerId !== activePointerId) return;
+      try {
+        if (pointerCaptured && scroller.hasPointerCapture(event.pointerId)) {
+          scroller.releasePointerCapture(event.pointerId);
+        }
+      } catch {
+        // La captura puede haberse liberado al cancelar el gesto.
+      }
+      pointerGestureActive = false;
+      pointerCaptured = false;
+      activePointerId = null;
+      pointerY = null;
+    };
+
     const onKeyDown = (event) => {
       const forward = ['ArrowDown', 'PageDown'].includes(event.key) || (event.key === ' ' && !event.shiftKey);
       const backward = ['ArrowUp', 'PageUp'].includes(event.key) || (event.key === ' ' && event.shiftKey);
       if (!forward && !backward && event.key !== 'Home' && event.key !== 'End') return;
 
       event.preventDefault();
-      if (event.key === 'Home') scroller.scrollTo({ top: 0, behavior: 'auto' });
-      else if (event.key === 'End') scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'auto' });
-      else scroller.scrollBy({ top: scroller.clientHeight * (forward ? .5 : -.5), behavior: 'auto' });
+      if (event.key === 'Home') paintProgress(0);
+      else if (event.key === 'End') paintProgress(Math.max(0, scenesRef.current.length - 1));
+      else moveOuterScroll(scroller.clientHeight * (forward ? .32 : -.32));
     };
 
     syncScenes();
     const observer = new MutationObserver(syncScenes);
     observer.observe(stage, { childList: true, subtree: true });
-    scroller.addEventListener('scroll', readNativeScroll, { passive: true });
     scroller.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    scroller.addEventListener('pointerdown', onPointerDown, { passive: true, capture: true });
+    window.addEventListener('pointermove', onPointerMove, { passive: false, capture: true });
+    window.addEventListener('pointerup', onPointerEnd, { passive: true, capture: true });
+    window.addEventListener('pointercancel', onPointerEnd, { passive: true, capture: true });
     scroller.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
     scroller.addEventListener('touchmove', onTouchMove, { passive: false, capture: true });
     scroller.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
     scroller.addEventListener('touchcancel', onTouchEnd, { passive: true, capture: true });
     scroller.addEventListener('keydown', onKeyDown);
-    window.addEventListener('resize', readNativeScroll, { passive: true });
 
     return () => {
       cancelAnimationFrame(syncFrame);
-      cancelAnimationFrame(scrollFrame);
       observer.disconnect();
-      scroller.removeEventListener('scroll', readNativeScroll);
       scroller.removeEventListener('wheel', onWheel, true);
+      scroller.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('pointermove', onPointerMove, true);
+      window.removeEventListener('pointerup', onPointerEnd, true);
+      window.removeEventListener('pointercancel', onPointerEnd, true);
       scroller.removeEventListener('touchstart', onTouchStart, true);
       scroller.removeEventListener('touchmove', onTouchMove, true);
       scroller.removeEventListener('touchend', onTouchEnd, true);
       scroller.removeEventListener('touchcancel', onTouchEnd, true);
       scroller.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('resize', readNativeScroll);
     };
   }, [paintProgress, sceneSelector]);
 
@@ -239,11 +283,6 @@ export default function AnalysisSceneModal({
               {children}
             </div>
           </div>
-          <div
-            className="analysis-native-scroll-spacer"
-            style={{ height: `${Math.max(0, sceneCount - 1) * 32}dvh` }}
-            aria-hidden="true"
-          />
         </div>
       </section>
     </div>
