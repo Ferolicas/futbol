@@ -9908,7 +9908,7 @@ input:checked + .cb-mark::after {
   min-height: 0;
   overflow: hidden !important;
   overscroll-behavior: contain;
-  touch-action: none;
+  touch-action: pan-y;
   scrollbar-width: none;
   -webkit-overflow-scrolling: auto;
 }
@@ -9945,7 +9945,7 @@ input:checked + .cb-mark::after {
   overflow: hidden !important;
   scroll-behavior: auto !important;
   scroll-snap-type: none !important;
-  touch-action: none;
+  touch-action: pan-y;
 }
 
 .analysis-apple-scene {
@@ -9966,7 +9966,9 @@ input:checked + .cb-mark::after {
   pointer-events: none !important;
   scrollbar-width: thin;
   scrollbar-color: rgba(94,230,177,.28) transparent;
-  touch-action: none;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
   will-change: opacity;
   transition: opacity .12s ease;
 }

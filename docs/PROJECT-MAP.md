@@ -138,8 +138,10 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   su progreso cambia capas nítidas en el mismo viewport, sin blur, escalado,
   flechas ni scroll-snap. El controlador captura rueda/swipe en el conductor y
   actualiza un progreso virtual inmediatamente, sin depender de `scrollTop`
-  nativo. En iOS usa `PointerEvent` + `setPointerCapture`, conserva Touch Events
-  como fallback y reenvía el sobrante cuando la escena activa llega a su borde.
+  nativo. En iOS, cada gesto elige un solo motor: WebKit cinético para el
+  contenido que desborda o progreso virtual al iniciar desde un borde; así no
+  mezcla `scrollTop` manual con la inercia nativa. Pointer Events permanece
+  como controlador táctil para el resto de plataformas.
 - 2026-07-29: `BrandLogoMedia` conserva `/logo-metalizado.webm` como fuente
   principal y usa `/logo-metalizado-alpha.webp` en WebKit/iOS, donde el VP9 con
   `alpha_mode=1` puede reproducirse con el plano transparente en negro.

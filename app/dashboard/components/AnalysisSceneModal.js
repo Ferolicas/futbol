@@ -84,6 +84,11 @@ export default function AnalysisSceneModal({
     let pointerCaptured = false;
     let activePointerId = null;
     let pointerY = null;
+    let touchMode = null;
+    const userAgent = window.navigator.userAgent;
+    const isAppleTouchDevice =
+      /iPad|iPhone|iPod/.test(userAgent) ||
+      (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
     const syncScenes = () => {
       cancelAnimationFrame(syncFrame);
       syncFrame = requestAnimationFrame(() => {
@@ -127,6 +132,15 @@ export default function AnalysisSceneModal({
       if (Math.abs(remaining) >= 1) moveOuterScroll(remaining);
     };
 
+    const canUseNativeInnerScroll = (scene, delta) => {
+      if (!scene) return false;
+      const maxInnerScroll = scene.scrollHeight - scene.clientHeight;
+      if (maxInnerScroll <= 2) return false;
+      if (delta > 0) return scene.scrollTop < maxInnerScroll - 1;
+      if (delta < 0) return scene.scrollTop > 1;
+      return false;
+    };
+
     const onWheel = (event) => {
       let delta = event.deltaY;
       if (event.deltaMode === 1) delta *= 24;
@@ -140,6 +154,7 @@ export default function AnalysisSceneModal({
     const onTouchStart = (event) => {
       if (pointerGestureActive) return;
       touchYRef.current = event.touches[0]?.clientY ?? null;
+      touchMode = null;
     };
 
     const onTouchMove = (event) => {
@@ -150,15 +165,27 @@ export default function AnalysisSceneModal({
       touchYRef.current = nextY;
       if (Math.abs(delta) < 1) return;
 
-      event.preventDefault();
-      routeScrollDelta(delta);
+      if (touchMode == null) {
+        const active = scenesRef.current[Math.round(progressRef.current)];
+        touchMode = canUseNativeInnerScroll(active, delta) ? 'native-inner' : 'virtual';
+      }
+
+      // En iPhone el contenido largo conserva durante todo el gesto el scroll
+      // cinético nativo de WebKit. Al llegar al borde, un gesto nuevo entra en
+      // modo virtual y cambia de escena sin mezclar ambos motores.
+      if (touchMode === 'native-inner') return;
+
+      if (event.cancelable) event.preventDefault();
+      moveOuterScroll(delta);
     };
 
     const onTouchEnd = () => {
       touchYRef.current = null;
+      touchMode = null;
     };
 
     const onPointerDown = (event) => {
+      if (isAppleTouchDevice) return;
       if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
       pointerGestureActive = true;
       pointerCaptured = false;
