@@ -35,6 +35,7 @@ import { useSelectedMarkets } from './selected-markets-context';
 import { DateCaption, LeaguePicker, StatusPicker } from './components/DashboardFilters';
 import DashboardBuffer from './components/DashboardBuffer';
 import AnalysisFullModal from './components/AnalysisFullModal';
+import { displayBettingText } from './utils/display-betting-text';
 
 const AnalysisExperience = dynamic(
   () => import('./analisis/[id]/page').then((module) => module.AnalysisExperience),
@@ -1532,13 +1533,13 @@ export default function Dashboard() {
                       <span className="comb-item-index">{String(i + 1).padStart(2, '0')}</span>
                       <div className="comb-item-content">
                         <div className="comb-item-match">{sel.matchName}</div>
-                        <span className="comb-item-name">{sel.name}</span>
+                        <span className="comb-item-name">{displayBettingText(sel.name)}</span>
                       </div>
                       <div className="comb-item-metrics">
                         <span className={`comb-item-prob ${sel.probability >= 75 ? 'high' : sel.probability >= 50 ? 'mid' : 'low'}`}><small>Prob.</small>{cap(sel.probability)}%</span>
                         <span className="comb-item-odd"><small>Cuota</small>{sel.odd ? sel.odd.toFixed(2) : '—'}</span>
                       </div>
-                      <button className="comb-item-rm" onClick={() => toggleMarket(sel.fixtureId, sel, sel.matchName)} aria-label={`Quitar ${sel.name}`}><X size={15} aria-hidden="true" /></button>
+                      <button className="comb-item-rm" onClick={() => toggleMarket(sel.fixtureId, sel, sel.matchName)} aria-label={`Quitar ${displayBettingText(sel.name)}`}><X size={15} aria-hidden="true" /></button>
                     </article>
                   ))}
                 </div>
@@ -1589,7 +1590,7 @@ export default function Dashboard() {
                     <div className="saved-comb-sels">
                       {(comb.selections || []).map((s, i) => (
                         <span key={i} className="saved-sel-chip">
-                          {s.name || s.market} {s.odd ? `(${Number(s.odd).toFixed(2)})` : ''}
+                          {displayBettingText(s.name || s.market)} {s.odd ? `(${Number(s.odd).toFixed(2)})` : ''}
                         </span>
                       ))}
                     </div>
@@ -1657,7 +1658,7 @@ function ApuestaSelectionList({ selections }) {
   const virtualizer = useVirtualizer({
     count: selections.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 60,
+    estimateSize: () => 96,
     overscan: 5,
     getItemKey: index => `${selections[index]?.fixtureId || 'fixture'}-${selections[index]?.id || index}-${index}`,
   });
@@ -1674,6 +1675,7 @@ function ApuestaSelectionList({ selections }) {
           const marketName = suffix && sel.name?.toLowerCase().endsWith(suffix)
             ? `${sel.cat} totales — ${sel.name.slice(0, sel.name.length - suffix.length).trim()}`
             : sel.name;
+          const displayMarketName = displayBettingText(marketName);
           return (
             <div
               key={row.key}
@@ -1696,7 +1698,7 @@ function ApuestaSelectionList({ selections }) {
                     {sel.priority === 2 && <span className="apuesta-status ns">Próximo</span>}
                     {sel.matchName}
                   </span>
-                  <span className="apuesta-mkt">{marketName}</span>
+                  <span className="apuesta-mkt">{displayMarketName}</span>
                 </span>
                 <span className="apuesta-item-metrics">
                   <span className="apuesta-prob" style={{ color: probColor }}><small>Prob.</small>{pct}%</span>
@@ -2223,7 +2225,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                         className={`mkt ${checked ? 'on' : ''} ${mkt.probability >= 75 ? 'hi' : mkt.probability >= 50 ? 'md' : 'lo'}`}
                         onClick={(e) => { e.stopPropagation(); onToggleMarket(fixtureId, mkt, matchName); }}
                       >
-                        <span className="mkt-name">{mkt.name}</span>
+                        <span className="mkt-name">{displayBettingText(mkt.name)}</span>
                         <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${cap(mkt.probability)}%` }} /></div>
                         <div className="mkt-nums">
                           <span className="mkt-pct">{cap(mkt.probability)}%</span>

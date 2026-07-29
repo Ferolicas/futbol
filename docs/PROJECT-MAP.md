@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-07-29 · Commit base: `44c76aa`
+Actualizado: 2026-07-29 · Commit base: `027b831`
 
 ## Identidad y stack
 
@@ -121,6 +121,8 @@ snapshots live a los IDs de la jornada antes de serializar la respuesta.
 - `app/dashboard/components/DashboardHeader.js`: encabezado autenticado compartido.
 - `app/dashboard/components/SportToggle.js`: selector desplegable y precarga de fútbol/béisbol.
 - `app/dashboard/components/AnalysisFullModal.js`: carcasa compartida del análisis completo con scroll vertical nativo.
+- `app/dashboard/utils/display-betting-text.js`: traducción exclusivamente
+  visual de términos de mercados heredados; no modifica IDs ni payloads.
 - `components/providers.js`: sesión global y sincronización de zona horaria.
 - `lib/db.js`: pool y compatibilidad de queries; afecta casi toda la app.
 - `lib/auth-pg.js` y `lib/auth-session.js`: cualquier cambio afecta login, layouts y APIs.
@@ -156,6 +158,10 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   en el flujo normal y el único contenedor desplazable usa el comportamiento
   nativo de rueda, trackpad, teclado e iOS/Android, sin controlador de gestos,
   escenas, progreso virtual ni scroll-snap.
+- 2026-07-29: “Apuesta del día” permite que partido y recomendación envuelvan
+  libremente y reserva una segunda fila para probabilidad/cuota. Los términos
+  visibles `Over`, `Under` y `O/U` se traducen al renderizar; nunca renombrar
+  las claves internas `over`/`under` porque alimentan el motor y las cuotas.
 - 2026-07-29: `BrandLogoMedia` usa `/logo-metalizado-fast.webm` (512 px/15 fps,
   VP9 con plano alfa real) y `/logo-metalizado-alpha-fast.webp` como primer
   frame/fallback estático en WebKit/iOS. Un coordinador permite reproducir un

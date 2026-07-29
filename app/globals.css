@@ -3689,8 +3689,9 @@ body {
 .app .apuesta-item,
 .baseball-apuesta-item {
   display: grid !important;
-  grid-template-columns: 30px minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: 30px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: start;
   gap: 8px !important;
   min-height: 55px;
   margin: 0 !important;
@@ -3720,9 +3721,16 @@ body {
 }
 
 .apuesta-item-copy {
+  grid-column: 2;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+.apuesta-item > .apuesta-index {
+  grid-column: 1;
+  grid-row: 1 / span 2;
 }
 
 .app .apuesta-match,
@@ -3731,12 +3739,13 @@ body {
   align-items: center;
   gap: 5px;
   min-width: 0;
-  overflow: hidden;
+  flex-wrap: wrap;
   color: #7f9299;
   font-size: .56rem;
   font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .baseball-apuesta .apuesta-match i {
@@ -3754,12 +3763,12 @@ body {
 .app .apuesta-mkt,
 .baseball-apuesta .apuesta-mkt {
   margin-top: 4px;
-  overflow: hidden;
   color: #e4eeeb;
   font-size: .67rem;
   font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .apuesta-item-metrics,
@@ -3767,6 +3776,12 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.apuesta-item > .apuesta-item-metrics {
+  grid-column: 2;
+  grid-row: 2;
+  justify-content: flex-start;
 }
 
 .app .apuesta-prob,
@@ -4741,6 +4756,7 @@ body {
 
   .apuesta-item-metrics {
     grid-column: 2;
+    grid-row: 2;
     justify-content: flex-start;
   }
 }

@@ -46,6 +46,7 @@ import { usePusherEvent } from '../../../lib/use-pusher';
 import { DateCaption, LeaguePicker, StatusPicker } from '../components/DashboardFilters';
 import DashboardBuffer from '../components/DashboardBuffer';
 import AnalysisFullModal from '../components/AnalysisFullModal';
+import { displayBettingText } from '../utils/display-betting-text';
 
 const BaseballAnalysisExperience = dynamic(
   () => import('./analisis/[id]/page').then((module) => module.BaseballAnalysisExperience),
@@ -874,7 +875,7 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
           {totals?.bestLine && totals.lines?.[totals.bestLine] && (() => {
             const t = totals.lines[totals.bestLine];
             const overWins = (t.over || 0) >= (t.under || 0);
-            const side = overWins ? 'Over' : 'Under';
+            const side = overWins ? 'Más de' : 'Menos de';
             const pct = overWins ? t.over : t.under;
             return (
               <span style={miniChip()}>
@@ -1358,7 +1359,7 @@ function ApuestaDelDiaBlock({ apuesta, show, onToggle }) {
                       <i className={s.priority === 1 ? 'is-live' : ''}>{s.priority === 2 ? 'Próximo' : s.priority === 1 ? 'En vivo' : 'Final'}</i>
                       {s.matchName}
                     </span>
-                    <span className="apuesta-mkt">{s.name || s.market || 'Pick'}</span>
+                    <span className="apuesta-mkt">{displayBettingText(s.name || s.market || 'Pick')}</span>
                   </span>
                   <span className="apuesta-item-metrics">
                     <span className="apuesta-prob"><small>Prob.</small>{s.probability}%</span>
@@ -1398,7 +1399,7 @@ function CombinadaTab({ customCombinada, onClear, onRemove }) {
             <span className="comb-item-index">{String(i + 1).padStart(2, '0')}</span>
             <div className="comb-item-content">
               <div className="comb-item-match">{s.matchName}</div>
-              <div className="comb-item-name">{s.name || s.market}</div>
+              <div className="comb-item-name">{displayBettingText(s.name || s.market)}</div>
             </div>
             <div className="comb-item-metrics">
               <span className="comb-item-prob"><small>Prob.</small>{s.probability}%</span>
@@ -1407,7 +1408,7 @@ function CombinadaTab({ customCombinada, onClear, onRemove }) {
             <button
               className="comb-item-rm"
               onClick={() => onRemove(s.fixtureId, s.marketKey)}
-              aria-label={`Quitar ${s.name || s.market}`}
+              aria-label={`Quitar ${displayBettingText(s.name || s.market)}`}
             ><X size={15} aria-hidden="true" /></button>
           </article>
         ))}

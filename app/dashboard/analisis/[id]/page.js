@@ -15,6 +15,7 @@ import { useSelectedMarkets } from '../../selected-markets-context';
 import { getUserTz, fmtTimeInTz, todayInTz } from '../../../../lib/timezone';
 import { useWorkerSocketState } from '../../../../hooks/useWorkerSocket';
 import DashboardBuffer from '../../components/DashboardBuffer';
+import { displayBettingText } from '../../utils/display-betting-text';
 
 function detectCountry() {
   try {
@@ -1120,7 +1121,7 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
                               {String(i + 1).padStart(2, '0')}
                             </span>
                             <div style={{ minWidth: 0 }}>
-                              <div style={{ fontWeight: 700, fontSize: '1rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sel.name}</div>
+                              <div style={{ fontWeight: 700, fontSize: '1rem', lineHeight: 1.35, overflowWrap: 'anywhere' }}>{displayBettingText(sel.name)}</div>
                               {sel.odd && sel.odd >= 1.20 && <div style={{ fontSize: '.78rem',  color: 'white' }}>Cuota: {sel.odd.toFixed(2)}</div>}
                             </div>
                           </div>

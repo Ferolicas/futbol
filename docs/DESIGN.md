@@ -34,6 +34,12 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - Constructor de combinadas: cada selección reserva una fila completa para
   partido/mercado y coloca probabilidad + cuota en una segunda fila estable;
   los títulos largos envuelven y nunca se truncan para hacer sitio a métricas.
+- Apuesta del día: partido y recomendación pueden ocupar tantas líneas como
+  necesiten; probabilidad y cuota viven siempre debajo del texto, nunca encima
+  ni a su derecha.
+- Terminología de mercados: la interfaz muestra `Más de` y `Menos de`. Los
+  nombres históricos que todavía contengan `Over`, `Under` u `O/U` se traducen
+  justo antes de renderizarse, sin alterar claves, cálculos ni datos del motor.
 - Checkout: hoja inferior en móvil y modal centrado en escritorio. Stripe y Mercado Pago comparten la misma carcasa visual.
 - Modal de análisis: documento vertical continuo, sin escenas, paginación ni
   revelado progresivo. Fútbol y Baseball mantienen todas sus secciones en el

@@ -169,15 +169,19 @@ export default function BaseballMatchCard({
 
       {/* Market chips */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-        {totals?.bestLine && totals.lines?.[totals.bestLine] && (
-          <span style={{
-            fontSize: '.7rem', padding: '2px 8px', borderRadius: 999,
-            background: 'rgba(34,211,238,0.08)', color: '#22d3ee',
-            fontWeight: 600, border: '1px solid rgba(34,211,238,0.18)',
-          }}>
-            O/U {totals.bestLine}: {Math.max(totals.lines[totals.bestLine].over, totals.lines[totals.bestLine].under)}%
-          </span>
-        )}
+        {totals?.bestLine && totals.lines?.[totals.bestLine] && (() => {
+          const total = totals.lines[totals.bestLine];
+          const moreLikely = (total.over || 0) >= (total.under || 0);
+          return (
+            <span style={{
+              fontSize: '.7rem', padding: '2px 8px', borderRadius: 999,
+              background: 'rgba(34,211,238,0.08)', color: '#22d3ee',
+              fontWeight: 600, border: '1px solid rgba(34,211,238,0.18)',
+            }}>
+              {moreLikely ? 'Más de' : 'Menos de'} {totals.bestLine}: {Math.max(total.over, total.under)}%
+            </span>
+          );
+        })()}
         {combinada && <CombinadaChip combinada={combinada} />}
       </div>
 

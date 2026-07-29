@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import DashboardBuffer from '../../../components/DashboardBuffer';
+import { displayBettingText } from '../../../utils/display-betting-text';
 
 const cap = (v) => Math.min(95, Math.max(0, v ?? 0));
 
@@ -140,7 +141,7 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
                 padding: '10px 12px', borderRadius: 8,
                 background: 'rgba(94,230,177,0.06)',
               }}>
-                <span style={{ fontWeight: 700, fontSize: '.9rem', flex: 1 }}>{s.market}: {s.pick}</span>
+                <span style={{ fontWeight: 700, fontSize: '.9rem', flex: 1 }}>{displayBettingText(`${s.market}: ${s.pick}`)}</span>
                 <span style={{ color: '#10b981', fontWeight: 700 }}>{s.probability}%</span>
                 {s.odd && <span style={{ color: '#22d3ee', fontFamily: 'JetBrains Mono, monospace' }}>@{s.odd}</span>}
               </div>
@@ -171,7 +172,7 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
 
       {/* Totals */}
       {totals?.lines && (
-        <Section title="Total de carreras (Over / Under)">
+        <Section title="Total de carreras (Más de / Menos de)">
           <div style={{ display: 'grid', gap: 8 }}>
             {Object.entries(totals.lines).map(([line, val]) => {
               const isBest = Number(line) === totals.bestLine;
@@ -182,8 +183,8 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
                   background: isBest ? 'rgba(94,230,177,0.08)' : 'rgba(255,255,255,0.03)',
                   border: isBest ? '1px solid rgba(94,230,177,0.3)' : '1px solid rgba(255,255,255,0.05)',
                 }}>
-                  <div style={{ fontWeight: 700, color: isBest ? '#5ee6b1' : '#cbd5e1' }}>O/U {line}</div>
-                  <ProbBar leftLabel={`Over`} leftPct={val.over} rightLabel={`Under`} rightPct={val.under}
+                  <div style={{ fontWeight: 700, color: isBest ? '#5ee6b1' : '#cbd5e1' }}>Línea {line}</div>
+                  <ProbBar leftLabel={`Más de ${line}`} leftPct={val.over} rightLabel={`Menos de ${line}`} rightPct={val.under}
                     leftOdd={bestOdds?.totals?.[line]?.over?.odd} rightOdd={bestOdds?.totals?.[line]?.under?.odd} compact />
                 </div>
               );
@@ -228,7 +229,7 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
               <div style={{ fontSize: '.8rem', color: '#94a3b8', marginBottom: 6, fontWeight: 700 }}>Total F5</div>
               <div style={{ display: 'grid', gap: 6 }}>
                 {Object.entries(f5.totals).map(([line, val]) => (
-                  <ProbBar key={line} leftLabel={`O ${line}`} leftPct={val.over} rightLabel={`U ${line}`} rightPct={val.under} compact />
+                  <ProbBar key={line} leftLabel={`Más de ${line}`} leftPct={val.over} rightLabel={`Menos de ${line}`} rightPct={val.under} compact />
                 ))}
               </div>
             </div>
@@ -243,13 +244,13 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
             <div>
               <div style={{ fontSize: '.85rem', fontWeight: 700, marginBottom: 6 }}>{a.home_team}</div>
               {Object.entries(teamTotals.home).map(([line, val]) => (
-                <ProbBar key={line} leftLabel={`O ${line}`} leftPct={val.over} rightLabel={`U ${line}`} rightPct={val.under} compact />
+                <ProbBar key={line} leftLabel={`Más de ${line}`} leftPct={val.over} rightLabel={`Menos de ${line}`} rightPct={val.under} compact />
               ))}
             </div>
             <div>
               <div style={{ fontSize: '.85rem', fontWeight: 700, marginBottom: 6 }}>{a.away_team}</div>
               {Object.entries(teamTotals.away).map(([line, val]) => (
-                <ProbBar key={line} leftLabel={`O ${line}`} leftPct={val.over} rightLabel={`U ${line}`} rightPct={val.under} compact />
+                <ProbBar key={line} leftLabel={`Más de ${line}`} leftPct={val.over} rightLabel={`Menos de ${line}`} rightPct={val.under} compact />
               ))}
             </div>
           </div>
