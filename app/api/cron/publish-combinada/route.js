@@ -1,9 +1,10 @@
 /**
  * GET/POST /api/cron/publish-combinada?secret=CRON_SECRET[&date=YYYY-MM-DD][&status=draft|published]
  *
- * Recorre todos los partidos analizados del dia, reconstruye la combinada
- * con buildCombinada(), filtra >=90% probabilidad Y >=1.20 cuota, y guarda
- * el snapshot en la tabla `combinada_dia` (upsert por fecha).
+ * Recorre todos los partidos analizados del día y elige una apuesta publicable:
+ * probabilidad individual >=95%, únicamente goles/córners/tarjetas/remates a
+ * puerta y cuota total entre 1.50 y 2.00. Prefiere una sola selección; si no
+ * alcanza el mínimo, combina hasta tres partidos distintos.
  *
  * Status semantics:
  *   - 'draft'     = creada/calculada pero NO lista para publicar
@@ -32,17 +33,17 @@ import { supabaseAdmin } from '../../../../lib/supabase';
 import { buildCombinada } from '../../../../lib/combinada';
 import { getAnalyzedFixtureIds, getAnalyzedMatchesFull } from '../../../../lib/sanity-cache';
 import { jsonError } from '../../../../lib/api-error';
+import {
+  selectTelegramDailyPick,
+  TELEGRAM_DAILY_PICK_RULES,
+} from '../../../../lib/telegram-daily-pick';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// Fase 6a: con el motor de contexto el gate es ≥90% sobre prob_final + piso de
-// confianza (ya aplicado en buildContextCombinada); sin el flag, ruta DC ≥95%.
 const CONTEXT_ENGINE_ENABLED = process.env.CONTEXT_ENGINE_ENABLED === 'true';
-const MIN_PROB = CONTEXT_ENGINE_ENABLED ? 90 : 95;
-const MIN_ODD  = 1.20;
 const VISUAL_PROB_CAP = 95; // no mostrar nunca 100% para no dar falsa certeza
-const FINISHED_STATUSES = new Set(['FT', 'AET', 'PEN', 'AWD', 'WO', 'CANC', 'PST', 'ABD', 'SUSP']);
+const BETTABLE_STATUSES = new Set(['NS', 'TBD']);
 
 async function handle(request) {
   const url = new URL(request.url);
@@ -65,18 +66,17 @@ async function handle(request) {
   // 2. Cargar analisis completos (Redis L1 + Supabase L2)
   const { analyzedData } = await getAnalyzedMatchesFull(fixtureIds).catch(() => ({ analyzedData: {} }));
 
-  // 3. Construir combinada por partido y juntar selecciones que cumplan thresholds
+  // 3. Reunir candidatos de partidos que todavía no hayan empezado. La selección
+  // final (mercados permitidos y cuota 1.50–2.00) se hace de forma determinista
+  // al terminar de recorrer la jornada.
   const nowMs = Date.now();
   const all = [];
   for (const [fid, data] of Object.entries(analyzedData || {})) {
     if (!data?.calculatedProbabilities) continue;
-    // Excluir partidos ya jugados o cancelados — la combinada del dia solo
-    // debe contener selecciones que el usuario todavia puede apostar.
     const statusShort = data.status?.short || data.status;
-    if (statusShort && FINISHED_STATUSES.has(statusShort)) continue;
-    // Backup defensivo por si el status venia stale: kickoff + 110min de margen.
+    if (statusShort && !BETTABLE_STATUSES.has(statusShort)) continue;
     const kickoffMs = data.kickoff ? new Date(data.kickoff).getTime() : 0;
-    if (kickoffMs > 0 && (nowMs - kickoffMs) > 110 * 60 * 1000) continue;
+    if (kickoffMs > 0 && kickoffMs <= nowMs + 5 * 60 * 1000) continue;
     // Con el motor de contexto, data.combinada ya viene gateada (≥90% prob_final
     // + piso + cuota ≥1.20) por buildContextCombinada → se usa directo. Sin el
     // flag, se reconstruye con buildCombinada (ruta DC).
@@ -98,8 +98,6 @@ async function handle(request) {
       selections = comb?.selections || [];
     }
     for (const sel of selections) {
-      if (sel.probability < MIN_PROB) continue;
-      if (!sel.odd || sel.odd < MIN_ODD) continue;
       all.push({
         ...sel,
         fixtureId:    Number(fid),
@@ -114,7 +112,7 @@ async function handle(request) {
         leagueId:     data.leagueId || null,
         leagueLogo:   data.leagueLogo || null,
         kickoff:      data.kickoff  || null,
-        probability:  Math.min(VISUAL_PROB_CAP, sel.probability),
+        probability:  Number(sel.probability),
       });
     }
   }
@@ -122,30 +120,40 @@ async function handle(request) {
   if (all.length === 0) {
     return Response.json({
       ok: false,
-      reason: 'no selections meet thresholds',
+      reason: 'no analyzed selections',
       date,
       analyzedCount: fixtureIds.length,
-      thresholds: { minProb: MIN_PROB, minOdd: MIN_ODD },
+      rules: TELEGRAM_DAILY_PICK_RULES,
     });
   }
 
-  // 4. Ordenar: probabilidad desc, despues cuota desc
-  all.sort((a, b) =>
-    b.probability - a.probability ||
-    (b.odd || 0) - (a.odd || 0)
-  );
+  // 4. Una sola selección si ya queda entre 1.50 y 2.00. Si no, buscar la
+  // combinación mínima (máximo tres partidos distintos) que entre en el rango.
+  const dailyPick = selectTelegramDailyPick(all);
+  if (dailyPick.selections.length === 0) {
+    return Response.json({
+      ok: false,
+      reason: 'no allowed combination in target odds',
+      date,
+      analyzedCount: fixtureIds.length,
+      eligibleCount: dailyPick.eligibleCount,
+      rules: TELEGRAM_DAILY_PICK_RULES,
+    });
+  }
 
-  const combinedOdd = all.reduce((acc, m) => acc * (m.odd || 1), 1);
-  const combinedProbability = all.reduce((acc, m) => acc + m.probability, 0) / all.length;
+  const publishedSelections = dailyPick.selections.map(selection => ({
+    ...selection,
+    probability: Math.min(VISUAL_PROB_CAP, selection.probability),
+  }));
 
   // 5. Upsert en combinada_dia (UNIQUE por fecha)
   const { data: row, error } = await supabaseAdmin
     .from('combinada_dia')
     .upsert({
       fecha: date,
-      selections: all,
-      combined_odd:         +combinedOdd.toFixed(2),
-      combined_probability: +combinedProbability.toFixed(1),
+      selections: publishedSelections,
+      combined_odd:         dailyPick.combinedOdd,
+      combined_probability: dailyPick.combinedProbability,
       status,
     }, { onConflict: 'fecha' })
     .select()
@@ -159,11 +167,19 @@ async function handle(request) {
     ok: true,
     date,
     id: row.id,
-    selections: all.length,
-    combinedOdd:         +combinedOdd.toFixed(2),
-    combinedProbability: +combinedProbability.toFixed(1),
+    selections: publishedSelections.length,
+    combinedOdd:         dailyPick.combinedOdd,
+    combinedProbability: dailyPick.combinedProbability,
     status,
-    thresholds: { minProb: MIN_PROB, minOdd: MIN_ODD },
+    eligibleCount: dailyPick.eligibleCount,
+    rules: TELEGRAM_DAILY_PICK_RULES,
+    data: {
+      fecha: row.fecha,
+      selections: publishedSelections,
+      combinedOdd: dailyPick.combinedOdd,
+      combinedProbability: dailyPick.combinedProbability,
+      status,
+    },
   });
 }
 

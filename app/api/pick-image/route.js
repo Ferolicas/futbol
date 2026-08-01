@@ -1,25 +1,9 @@
 /**
  * GET /api/pick-image
  *
- * Genera dinamicamente una imagen PNG VERTICAL 800x1422 (ratio 9:16) del
- * "pick del dia". Ideal para Instagram/TikTok Stories, Reels, WhatsApp
- * Status. Layout single-column con secciones fluidas (sin split rigido).
- *
- * Query params:
- *   ?home=...&away=...
- *   &homeLogo=https://media.api-sports.io/football/teams/541.png
- *   &awayLogo=https://media.api-sports.io/football/teams/531.png
- *   &leagueLogo=https://media.api-sports.io/football/leagues/140.png
- *   &league=La Liga
- *   &pick=Mas de 2.5 goles
- *   &prob=85
- *   &odd=1.85
- *   &fecha=23 Mayo 2026
- *   &hora=14:30
- *   &analysis=Texto del analisis IA (opcional)
- *
- * Pre-requisito: public/fonts/Inter-Bold.ttf
- * Runtime: nodejs.
+ * Genera la tarjeta PNG vertical que n8n publica en Telegram. Acepta una
+ * selección legacy o `selections=<JSON>` con hasta tres partidos. El render es
+ * deliberadamente determinista: no contiene análisis generado por IA.
  */
 
 import satori from 'satori';
@@ -28,300 +12,284 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
 export const runtime = 'nodejs';
-// Usa request.url (query params) → siempre dinámico. El Cache-Control de la
-// respuesta sigue permitiendo cache en CDN/navegador por URL.
 export const dynamic = 'force-dynamic';
 
-const W = 800;
-const H = 1422;
-
-// R25 FIX (anti-SSRF): solo se permiten los hosts de logos oficiales. Antes se
-// hacía fetch a CUALQUIER URL del query param → un atacante podía apuntar a
-// servicios internos del VPS o endpoints de metadata.
+const WIDTH = 800;
+const MAX_SELECTIONS = 3;
+const MAX_PAYLOAD_LENGTH = 12_000;
 const ALLOWED_IMG_HOSTS = new Set([
   'media.api-sports.io',
   'www.mlbstatic.com',
   'mlbstatic.com',
 ]);
 
-async function toBase64(url) {
-  try {
-    let host;
-    try { host = new URL(url).hostname; } catch { return null; }
-    if (!ALLOWED_IMG_HOSTS.has(host)) return null;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6000);
-    const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!res.ok) return null;
-    const buf = await res.arrayBuffer();
-    const mime = res.headers.get('content-type') || 'image/png';
-    return `data:${mime};base64,${Buffer.from(buf).toString('base64')}`;
-  } catch { return null; }
+function cleanText(value, maxLength = 120) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+function cleanOdd(value) {
+  const odd = Number(value);
+  return Number.isFinite(odd) && odd > 0 ? odd.toFixed(2) : '—';
+}
+
+function cleanProbability(value) {
+  const probability = Number(value);
+  if (!Number.isFinite(probability)) return '—';
+  return String(Math.min(95, Math.max(0, +probability.toFixed(1))));
 }
 
 function initials(name) {
-  if (!name) return '?';
-  const w = name.trim().split(/\s+/);
-  if (w.length === 1) return w[0].substring(0, 2).toUpperCase();
-  return (w[0][0] + w[w.length - 1][0]).toUpperCase();
+  const words = cleanText(name, 80).split(/\s+/).filter(Boolean);
+  if (!words.length) return '?';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return `${words[0][0]}${words.at(-1)[0]}`.toUpperCase();
 }
 
-function badge(logoB64, name, accentColor, bgColor) {
-  if (logoB64) {
-    return {
-      type: 'div', props: {
-        style: {
-          width: '130px', height: '130px', borderRadius: '24px',
-          background: bgColor, border: `2px solid ${accentColor}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        },
-        children: [{ type: 'img', props: { src: logoB64, width: 100, height: 100, style: { objectFit: 'contain' } } }],
-      },
-    };
-  }
+function sanitizeSelection(selection = {}) {
   return {
-    type: 'div', props: {
+    homeTeam: cleanText(selection.homeTeam || selection.home, 60),
+    awayTeam: cleanText(selection.awayTeam || selection.away, 60),
+    homeLogo: cleanText(selection.homeLogo, 500),
+    awayLogo: cleanText(selection.awayLogo, 500),
+    leagueLogo: cleanText(selection.leagueLogo, 500),
+    league: cleanText(selection.league, 70),
+    name: cleanText(selection.name || selection.pick, 150),
+    probability: cleanProbability(selection.probability),
+    odd: cleanOdd(selection.odd),
+    time: cleanText(selection.time || selection.hora, 24),
+  };
+}
+
+function readSelections(searchParams) {
+  const raw = searchParams.get('selections');
+  if (raw) {
+    if (raw.length > MAX_PAYLOAD_LENGTH) throw new Error('Payload de selecciones demasiado grande');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('Selecciones inválidas');
+    const selections = parsed.slice(0, MAX_SELECTIONS).map(sanitizeSelection);
+    if (selections.length) return selections;
+  }
+
+  const match = cleanText(searchParams.get('match') || 'Partido del día', 120);
+  const [fallbackHome = '', fallbackAway = ''] = match.split(/\s+vs\s+/i);
+  return [sanitizeSelection({
+    homeTeam: searchParams.get('home') || fallbackHome,
+    awayTeam: searchParams.get('away') || fallbackAway,
+    homeLogo: searchParams.get('homeLogo'),
+    awayLogo: searchParams.get('awayLogo'),
+    leagueLogo: searchParams.get('leagueLogo'),
+    league: searchParams.get('league'),
+    name: searchParams.get('pick'),
+    probability: searchParams.get('prob'),
+    odd: searchParams.get('odd'),
+    time: searchParams.get('hora'),
+  })];
+}
+
+async function toBase64(url) {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    if (!ALLOWED_IMG_HOSTS.has(parsed.hostname)) return null;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+    const response = await fetch(parsed, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!response.ok) return null;
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.startsWith('image/')) return null;
+    const declaredLength = Number(response.headers.get('content-length') || 0);
+    if (declaredLength > 2_000_000) return null;
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > 2_000_000) return null;
+    return `data:${contentType};base64,${buffer.toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
+
+function logoBadge(logo, team, accent) {
+  return {
+    type: 'div',
+    props: {
       style: {
-        width: '130px', height: '130px', borderRadius: '24px',
-        background: bgColor, border: `2px solid ${accentColor}`,
+        width: '72px', height: '72px', borderRadius: '18px', flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: `${accent}18`, border: `1px solid ${accent}70`,
       },
-      children: [{ type: 'span', props: { style: { color: accentColor, fontSize: '38px', fontWeight: 'bold' }, children: initials(name) } }],
+      children: logo
+        ? [{ type: 'img', props: { src: logo, width: 56, height: 56, style: { objectFit: 'contain' } } }]
+        : [{ type: 'span', props: { style: { color: accent, fontSize: '22px', fontWeight: 700 }, children: initials(team) } }],
     },
   };
 }
 
-export async function GET(req) {
+function metric(label, value, color) {
+  return {
+    type: 'div',
+    props: {
+      style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', flex: 1 },
+      children: [
+        { type: 'span', props: { style: { color: '#93a4bd', fontSize: '15px', letterSpacing: '3px' }, children: label } },
+        { type: 'span', props: { style: { color, fontSize: '54px', fontWeight: 700 }, children: value } },
+      ],
+    },
+  };
+}
+
+function selectionCard(selection, logos, index, total) {
+  const compact = total === 3;
+  return {
+    type: 'div',
+    props: {
+      style: {
+        width: '100%', display: 'flex', flexDirection: 'column',
+        padding: compact ? '20px 22px' : '24px 26px',
+        borderRadius: '20px', border: '1px solid rgba(0,212,255,0.24)',
+        background: 'linear-gradient(135deg, rgba(0,212,255,0.08), rgba(124,58,237,0.08))',
+        gap: compact ? '14px' : '18px',
+      },
+      children: [
+        {
+          type: 'div', props: {
+            style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' },
+            children: [
+              { type: 'span', props: { style: { color: '#00d4ff', fontSize: '15px', fontWeight: 700, letterSpacing: '2px' }, children: total === 1 ? 'SELECCIÓN' : `SELECCIÓN ${index + 1}` } },
+              { type: 'span', props: { style: { color: '#93a4bd', fontSize: '15px' }, children: [selection.league, selection.time].filter(Boolean).join(' · ') } },
+            ],
+          },
+        },
+        {
+          type: 'div', props: {
+            style: { display: 'flex', alignItems: 'center', width: '100%', gap: '18px' },
+            children: [
+              logoBadge(logos.home, selection.homeTeam, '#00d4ff'),
+              {
+                type: 'div', props: {
+                  style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: '5px' },
+                  children: [
+                    { type: 'span', props: { style: { color: '#ffffff', fontSize: compact ? '18px' : '21px', fontWeight: 700, textAlign: 'center' }, children: selection.homeTeam || 'Local' } },
+                    { type: 'span', props: { style: { color: '#64748b', fontSize: '13px', letterSpacing: '2px' }, children: 'VS' } },
+                    { type: 'span', props: { style: { color: '#ffffff', fontSize: compact ? '18px' : '21px', fontWeight: 700, textAlign: 'center' }, children: selection.awayTeam || 'Visitante' } },
+                  ],
+                },
+              },
+              logoBadge(logos.away, selection.awayTeam, '#a78bfa'),
+            ],
+          },
+        },
+        {
+          type: 'div', props: {
+            style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: '16px' },
+            children: [
+              { type: 'span', props: { style: { color: '#ffffff', fontSize: compact ? '22px' : '27px', fontWeight: 700, lineHeight: 1.25, flex: 1 }, children: selection.name || 'Pronóstico disponible' } },
+              {
+                type: 'div', props: {
+                  style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0, gap: '4px' },
+                  children: [
+                    { type: 'span', props: { style: { color: '#00d4ff', fontSize: '20px', fontWeight: 700 }, children: `${selection.probability}%` } },
+                    { type: 'span', props: { style: { color: '#f59e0b', fontSize: '20px', fontWeight: 700 }, children: `${selection.odd}x` } },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      ],
+    },
+  };
+}
+
+export async function GET(request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const match      = searchParams.get('match')      || 'Partido del día';
-    const pick       = searchParams.get('pick')       || '';
-    const prob       = searchParams.get('prob')       || '0';
-    const odd        = searchParams.get('odd')        || '0';
-    const league     = searchParams.get('league')     || '';
-    const fecha      = searchParams.get('fecha')      || '';
-    const hora       = searchParams.get('hora')       || '';
-    const analysis   = searchParams.get('analysis')   || '';
-    const home       = searchParams.get('home')       || match.split(' vs ')[0] || '';
-    const away       = searchParams.get('away')       || match.split(' vs ')[1] || '';
-    const homeLogo   = searchParams.get('homeLogo')   || '';
-    const awayLogo   = searchParams.get('awayLogo')   || '';
-    const leagueLogo = searchParams.get('leagueLogo') || '';
+    const { searchParams } = new URL(request.url);
+    const selections = readSelections(searchParams);
+    const combinedOdd = cleanOdd(searchParams.get('odd'));
+    const combinedProbability = cleanProbability(searchParams.get('prob'));
+    const date = cleanText(searchParams.get('fecha'), 40);
+    const height = selections.length === 1 ? 1000 : selections.length === 2 ? 1220 : 1422;
 
     const fontPath = join(process.cwd(), 'public/fonts/Inter-Bold.ttf');
     if (!existsSync(fontPath)) {
-      return new Response(
-        JSON.stringify({ error: `Font missing at ${fontPath}` }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } },
-      );
+      return Response.json({ error: `Font missing at ${fontPath}` }, { status: 500 });
     }
     const fontData = readFileSync(fontPath);
 
     let cfLogo = null;
-    for (const p of [
-      join(process.cwd(), 'public/vflogo.png'),
-      join(process.cwd(), '../public/vflogo.png'),
-    ]) {
-      if (existsSync(p)) {
-        cfLogo = `data:image/png;base64,${readFileSync(p).toString('base64')}`;
-        break;
-      }
+    for (const path of [join(process.cwd(), 'public/vflogo.png'), join(process.cwd(), '../public/vflogo.png')]) {
+      if (!existsSync(path)) continue;
+      cfLogo = `data:image/png;base64,${readFileSync(path).toString('base64')}`;
+      break;
     }
 
-    const [homeB64, awayB64, leagueB64] = await Promise.all([
-      homeLogo   ? toBase64(homeLogo)   : Promise.resolve(null),
-      awayLogo   ? toBase64(awayLogo)   : Promise.resolve(null),
-      leagueLogo ? toBase64(leagueLogo) : Promise.resolve(null),
-    ]);
+    const selectionLogos = await Promise.all(selections.map(async selection => ({
+      home: await toBase64(selection.homeLogo),
+      away: await toBase64(selection.awayLogo),
+    })));
 
-    const filled = Math.min(10, Math.round(Number(prob) / 10));
-    const probBar = '█'.repeat(filled) + '░'.repeat(10 - filled);
-
-    const svg = await satori(
-      {
-        type: 'div',
-        props: {
-          style: {
-            width: `${W}px`, height: `${H}px`,
-            background: 'linear-gradient(180deg, #04040e 0%, #080f22 50%, #04040e 100%)',
-            display: 'flex', flexDirection: 'column',
-            alignItems: 'center',
-            fontFamily: 'Inter',
-            padding: '44px 40px 32px 40px',
-            gap: '0px',
-          },
-          children: [
-
-            // ── CF LOGO ──
-            {
-              type: 'div', props: {
-                style: { display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%', marginBottom: '28px' },
-                children: [
-                  cfLogo
-                    ? { type: 'img', props: { src: cfLogo, width: 300, height: 150, style: { objectFit: 'contain' } } }
-                    : { type: 'span', props: { style: { color: '#00d4ff', fontSize: '48px', fontWeight: 'bold', letterSpacing: '6px' }, children: 'CF ANALISIS' } },
-                ],
-              },
-            },
-
-            // ── DIVIDER ──
-            { type: 'div', props: { style: { height: '1px', width: '100%', background: 'linear-gradient(90deg, transparent, #00d4ff50, transparent)', marginBottom: '36px' } } },
-
-            // ── ESCUDOS ──
-            {
-              type: 'div', props: {
-                style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: '32px' },
-                children: [
-                  // Home
-                  {
-                    type: 'div', props: {
-                      style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', flex: '1' },
-                      children: [
-                        badge(homeB64, home, '#00d4ff', 'rgba(0,212,255,0.10)'),
-                        { type: 'span', props: { style: { color: '#ffffff', fontSize: '16px', textAlign: 'center', maxWidth: '140px', fontWeight: 'bold' }, children: home } },
-                      ],
-                    },
-                  },
-                  // Centro
-                  {
-                    type: 'div', props: {
-                      style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', flex: '1' },
-                      children: [
-                        leagueB64
-                          ? { type: 'img', props: { src: leagueB64, width: 40, height: 40, style: { objectFit: 'contain' } } }
-                          : null,
-                        { type: 'span', props: { style: { color: '#ffffff40', fontSize: '22px', fontWeight: 'bold', letterSpacing: '3px' }, children: 'VS' } },
-                        fecha ? { type: 'span', props: { style: { color: '#ffffff', fontSize: '22px', fontWeight: 'bold' }, children: fecha } } : null,
-                        hora  ? { type: 'span', props: { style: { color: '#00d4ff', fontSize: '26px', fontWeight: 'bold' }, children: hora } } : null,
-                        { type: 'span', props: { style: { color: '#ffffff', fontSize: '18px', textAlign: 'center', maxWidth: '130px' }, children: league.toUpperCase() } },
-                      ].filter(Boolean),
-                    },
-                  },
-                  // Away
-                  {
-                    type: 'div', props: {
-                      style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', flex: '1' },
-                      children: [
-                        badge(awayB64, away, '#a78bfa', 'rgba(167,139,250,0.10)'),
-                        { type: 'span', props: { style: { color: '#ffffff', fontSize: '16px', textAlign: 'center', maxWidth: '140px', fontWeight: 'bold' }, children: away } },
-                      ],
-                    },
-                  },
-                ],
-              },
-            },
-
-            // ── TARJETA CUOTA + PROB ──
-            {
-              type: 'div', props: {
-                style: {
-                  width: '100%',
-                  background: 'linear-gradient(135deg, rgba(0,212,255,0.08), rgba(124,58,237,0.08))',
-                  border: '1px solid rgba(0,212,255,0.25)',
-                  borderRadius: '20px',
-                  padding: '28px 32px',
-                  display: 'flex',
-                  justifyContent: 'space-around',
-                  alignItems: 'center',
-                  marginBottom: '32px',
-                },
-                children: [
-                  {
-                    type: 'div', props: {
-                      style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' },
-                      children: [
-                        { type: 'span', props: { style: { color: '#ffffff', fontSize: '14px', letterSpacing: '4px' }, children: 'CUOTA' } },
-                        { type: 'span', props: { style: { color: '#f59e0b', fontSize: '60px', fontWeight: 'bold' }, children: `${odd}x` } },
-                      ],
-                    },
-                  },
-                  { type: 'div', props: { style: { width: '1px', height: '70px', background: 'rgba(255,255,255,0.12)' } } },
-                  {
-                    type: 'div', props: {
-                      style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' },
-                      children: [
-                        { type: 'span', props: { style: { color: '#ffffff', fontSize: '14px', letterSpacing: '4px' }, children: 'PROBABILIDAD' } },
-                        { type: 'span', props: { style: { color: '#00d4ff', fontSize: '60px', fontWeight: 'bold' }, children: `${prob}%` } },
-                        { type: 'span', props: { style: { color: '#00d4ff40', fontSize: '14px', letterSpacing: '3px' }, children: probBar } },
-                      ],
-                    },
-                  },
-                ],
-              },
-            },
-
-            // ── APUESTA ──
-            {
-              type: 'div', props: {
-                style: { width: '100%', display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '36px' },
-                children: [
-                  { type: 'span', props: { style: { color: '#ffffff', fontSize: '14px', letterSpacing: '4px' }, children: '✅  APUESTA' } },
-                  { type: 'span', props: { style: { color: '#ffffff', fontSize: '40px', fontWeight: 'bold', lineHeight: '1.2' }, children: pick } },
-                ],
-              },
-            },
-
-            // ── DIVIDER ──
-            { type: 'div', props: { style: { height: '1px', width: '100%', background: 'rgba(0,212,255,0.20)', marginBottom: '28px' } } },
-
-            // ── ANALISIS IA ──
-            {
-              type: 'div', props: {
-                style: { width: '100%', display: 'flex', flexDirection: 'column', gap: '16px', flex: '1' },
-                children: [
-                  {
-                    type: 'div', props: {
-                      style: { display: 'flex', alignItems: 'center', gap: '12px' },
-                      children: [
-                        { type: 'span', props: { style: { color: '#00d4ff', fontSize: '22px', fontWeight: 'bold', letterSpacing: '4px' }, children: 'ANALISIS IA' } },
-                        { type: 'div', props: { style: { flex: '1', height: '1px', background: 'rgba(0,212,255,0.25)' } } },
-                      ],
-                    },
-                  },
-                  {
-                    type: 'span', props: {
-                      style: { color: '#ffffff', fontSize: '22px', lineHeight: '1.75', flex: '1' },
-                      children: analysis || 'Analisis no disponible.',
-                    },
-                  },
-                ],
-              },
-            },
-
-            // ── FOOTER ──
-            {
-              type: 'div', props: {
-                style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', paddingTop: '20px', borderTop: '1px solid rgba(255,255,255,0.06)', marginTop: 'auto' },
-                children: [
-                  { type: 'span', props: { style: { color: '#ffffff30', fontSize: '13px' }, children: 'Juega con responsabilidad' } },
-                  { type: 'span', props: { style: { color: '#00d4ff', fontSize: '16px', fontWeight: 'bold' }, children: 'cfanalisis.com' } },
-                ],
-              },
-            },
-
-          ],
+    const svg = await satori({
+      type: 'div',
+      props: {
+        style: {
+          width: `${WIDTH}px`, height: `${height}px`, padding: '42px 40px 34px',
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          background: 'linear-gradient(180deg, #030712 0%, #081126 52%, #030712 100%)',
+          color: '#ffffff', fontFamily: 'Inter',
         },
+        children: [
+          cfLogo
+            ? { type: 'img', props: { src: cfLogo, width: 260, height: 126, style: { objectFit: 'contain' } } }
+            : { type: 'span', props: { style: { color: '#00d4ff', fontSize: '42px', fontWeight: 700, letterSpacing: '5px' }, children: 'CF ANÁLISIS' } },
+          { type: 'div', props: { style: { width: '100%', height: '1px', margin: '18px 0 26px', background: 'linear-gradient(90deg, transparent, #00d4ff70, transparent)' } } },
+          { type: 'span', props: { style: { color: '#ffffff', fontSize: '34px', fontWeight: 700, letterSpacing: '3px' }, children: 'APUESTA DEL DÍA' } },
+          date ? { type: 'span', props: { style: { color: '#93a4bd', fontSize: '18px', marginTop: '8px' }, children: date } } : null,
+          {
+            type: 'div', props: {
+              style: {
+                width: '100%', display: 'flex', alignItems: 'center',
+                margin: '28px 0', padding: '22px 30px', borderRadius: '20px',
+                background: 'rgba(15,23,42,0.92)', border: '1px solid rgba(255,255,255,0.10)',
+              },
+              children: [
+                metric('CUOTA TOTAL', `${combinedOdd}x`, '#f59e0b'),
+                { type: 'div', props: { style: { width: '1px', height: '68px', background: 'rgba(255,255,255,0.12)' } } },
+                metric('PROBABILIDAD', `${combinedProbability}%`, '#00d4ff'),
+              ],
+            },
+          },
+          {
+            type: 'div', props: {
+              style: { width: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: selections.length === 3 ? '14px' : '20px', flex: 1 },
+              children: selections.map((selection, index) => selectionCard(selection, selectionLogos[index], index, selections.length)),
+            },
+          },
+          {
+            type: 'div', props: {
+              style: { width: '100%', display: 'flex', justifyContent: 'center', paddingTop: '24px', marginTop: 'auto', borderTop: '1px solid rgba(255,255,255,0.08)' },
+              children: [{ type: 'span', props: { style: { color: '#00d4ff', fontSize: '19px', fontWeight: 700, letterSpacing: '2px' }, children: 'CFANALISIS.COM' } }],
+            },
+          },
+        ].filter(Boolean),
       },
-      { width: W, height: H, fonts: [{ name: 'Inter', data: fontData, weight: 700, style: 'normal' }] }
-    );
-
-    const png = await sharp(Buffer.from(svg))
-      .png({ quality: 100, compressionLevel: 3 })
-      .toBuffer();
-
-    // R25 FIX: la imagen es función pura de los query params → cacheable. Antes
-    // 'no-store' regeneraba (satori+sharp, CPU pesado) en CADA request → DoS fácil
-    // en un endpoint público. Cache 24h reduce el coste a 1 render por variante.
-    return new Response(png, {
-      headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400, immutable' },
+    }, {
+      width: WIDTH,
+      height,
+      fonts: [{ name: 'Inter', data: fontData, weight: 700, style: 'normal' }],
     });
 
-  } catch (err) {
-    console.error('[pick-image]', err);
-    return new Response(
-      JSON.stringify({ error: err.message }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } },
-    );
+    const png = await sharp(Buffer.from(svg)).png({ quality: 100, compressionLevel: 3 }).toBuffer();
+    return new Response(png, {
+      headers: {
+        'Content-Type': 'image/png',
+        'Cache-Control': 'public, max-age=86400, immutable',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  } catch (error) {
+    console.error('[pick-image]', error);
+    return Response.json({ error: 'No se pudo generar la imagen' }, { status: 400 });
   }
 }

@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-01 · Commit base: `a07eef8`
+Actualizado: 2026-08-01 · Commit base: `cf929d4`
 
 ## Identidad y stack
 
@@ -51,6 +51,8 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `DELETE /api/payments/attempt` | `app/api/payments/attempt/route.js` | Checkout/estado | Cancela primero en proveedor y libera intento |
 | `POST /api/payments/cancel` | `app/api/payments/cancel/route.js` | Cuenta | Cancela renovación conservando periodo pagado |
 | `GET/POST /api/cron/payments` | `app/api/cron/payments/route.js` | Cron VPS | Reconcilia operaciones, perfiles y emails |
+| `GET/POST /api/cron/publish-combinada` | `app/api/cron/publish-combinada/route.js` | n8n | Elige y guarda la apuesta Telegram dentro de las reglas comerciales |
+| `GET /api/pick-image` | `app/api/pick-image/route.js` | n8n/Telegram | Renderiza la tarjeta PNG sin IA, con hasta tres selecciones y escudos |
 | `GET /api/fixtures` | `app/api/fixtures/route.js` | Dashboard | Partidos y análisis diarios |
 | `GET /api/match/[id]` | `app/api/match/[id]/route.js` | Análisis | Detalle estadístico |
 | `GET/POST /api/refresh-live` | `app/api/refresh-live/route.js` | Dashboard | GET lee Redis; POST fuerza proveedor |
@@ -70,7 +72,7 @@ Las migraciones viven en `scripts/`. Tablas clave:
 - `payment_exchange_rates`: última tasa EUR→COP válida para tolerar caídas del proveedor FX.
 - `fixtures_cache`, `match_schedule`, `match_results`, `match_analysis`, `match_predictions`: núcleo de fútbol.
 - `baseball_*`: fixtures, resultados, análisis, predicciones, favoritos y ocultos.
-- `combinadas`, `tickets`, `chat_messages`, `push_subscriptions`.
+- `combinadas`, `combinada_dia`, `tickets`, `chat_messages`, `push_subscriptions`.
 - Esquema `model`: entidades, hechos, perfiles y señales del motor estadístico.
 
 `lib/supabase.js` ya no conecta Supabase: conserva la API antigua y delega en `lib/db.js`.
@@ -108,6 +110,17 @@ El Brick recoge el método → `subscribe` valida sesión/plan/geografía y reca
 
 Tras login o registro, las pantallas cliente llaman `refreshSession()` antes de navegar. El layout autenticado también entrega nombre y email iniciales a `DashboardHeader`, por lo que avatar y menú de salida no dependen de una recarga posterior.
 
+### Apuesta diaria en Telegram
+
+El workflow n8n `COMBINADA DEL DIA` se ejecuta diariamente a las 13:00 de
+Madrid. Una sola llamada autenticada a `/api/cron/publish-combinada` reúne los
+análisis y devuelve la selección final. `lib/telegram-daily-pick.js` exige 95%
+por opción, admite únicamente goles, córners, tarjetas o remates a puerta,
+prioriza una sola apuesta y, si hace falta, combina hasta tres partidos
+distintos para una cuota total entre 1.50 y 2.00. El workflow no usa IA:
+construye la URL de `/api/pick-image` y Telegram publica la tarjeta con escudos,
+cuota, probabilidad y un único enlace a CF Análisis.
+
 ### Realtime
 
 `apps/cfanalisis-worker` ingiere y publica actualizaciones. El cliente WebSocket
@@ -142,6 +155,7 @@ snapshots live a los IDs de la jornada antes de serializar la respuesta.
 - `lib/auth-pg.js` y `lib/auth-session.js`: cualquier cambio afecta login, layouts y APIs.
 - `lib/stripe.js`: fuente única de IDs, precios, periodos y moneda base.
 - `lib/payment-store.js`, `lib/payment-reconcile.js` y `lib/entitlements.js`: estado durable, recuperación y única regla de acceso.
+- `lib/telegram-daily-pick.js`: whitelist y selector determinista de la publicación diaria de Telegram.
 - `lib/mercadopago.js`: API, firma, PSE, recurrencia, cancelación y fallback EUR→COP.
 - `lib/currency.js`: conversión y fallback de cobro.
 - `lib/redis.js`: cache, deduplicación y realtime.
@@ -168,6 +182,7 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - 2026-08-01: nunca probar cobros locales con credenciales LIVE. QA llega al formulario o usa base/proveedor sandbox aislados.
 - 2026-08-01: la migración `migrate-payment-reliability.sql` debe ejecutarse antes del build; incluye permisos explícitos para el rol `cfanalisis`.
 - 2026-08-01: Stripe escucha facturas, suscripciones y compatibilidad de PaymentIntent legado. Añadir eventos con `scripts/configure-stripe-webhook.mjs` solo después de desplegar el handler.
+- 2026-08-01: n8n ejecuta la versión publicada de cada workflow, no necesariamente el borrador visible en `workflow_entity`. Tras importar un cambio hay que publicarlo y reiniciar n8n; de lo contrario puede seguir activa una URL o conexión antigua.
 - 2026-08-01: no liberar un intento pendiente por tiempo ni marcar terminal un cobro recurrente que MP pueda reintentar; primero cancelar el recurso remoto.
 - 2026-07-29: el checkout automático requiere deduplicación persistente ante Strict Mode/Fast Refresh.
 - 2026-07-29: solo el plan viaja por URL; el servidor vuelve a calcular precio, moneda y proveedor.
