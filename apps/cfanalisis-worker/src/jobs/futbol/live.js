@@ -31,7 +31,12 @@ async function apiFetch(endpoint) {
     const result = await footballApiRequest(endpoint, { apiKey: key, timeoutMs: 20_000, retries: 2 });
     return result.response;
   } catch (e) {
-    console.error('[live] apiFetch error:', endpoint, e.message);
+    // El primer DAILY_LIMIT real sí se registra. Durante el cooldown, el
+    // cliente devuelve un skip local esperado (retryAfterMs) y no debe llenar
+    // el error log tres veces por minuto ni una vez por fixture.
+    if (!(e?.code === 'DAILY_LIMIT' && Number(e?.retryAfterMs) > 0)) {
+      console.error('[live] apiFetch error:', endpoint, e.message);
+    }
     return null;
   }
 }

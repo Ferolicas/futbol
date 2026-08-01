@@ -28,7 +28,9 @@ async function fetchFromApi(endpoint) {
     const result = await footballApiRequest(endpoint, { apiKey: key, timeoutMs: 20_000, retries: 2 });
     return result.response;
   } catch (error) {
-    console.error('[lineups] API:', endpoint, error?.message || error);
+    if (!(error?.code === 'DAILY_LIMIT' && Number(error?.retryAfterMs) > 0)) {
+      console.error('[lineups] API:', endpoint, error?.message || error);
+    }
     return null;
   }
 }

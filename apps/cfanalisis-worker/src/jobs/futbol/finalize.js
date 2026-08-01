@@ -46,7 +46,9 @@ async function apiGet(path, apiKey) {
     const result = await footballApiRequest(path, { apiKey, timeoutMs: 15_000, retries: 2 });
     return result.response;
   } catch (error) {
-    console.error('[finalize] API:', path, error?.message || error);
+    if (!(error?.code === 'DAILY_LIMIT' && Number(error?.retryAfterMs) > 0)) {
+      console.error('[finalize] API:', path, error?.message || error);
+    }
     return null;
   }
 }
