@@ -18,7 +18,7 @@ const schedule = byName.get('Schedule Trigger');
 const publish = byName.get('HTTP Request');
 const code = byName.get('Code1');
 const telegram = byName.get('Send a photo message');
-const finalize = byName.get('Code in JavaScript1');
+const finalize = byName.get('Registrar envio') || byName.get('Code in JavaScript1');
 if (!schedule || !publish || !code || !telegram || !finalize) {
   throw new Error('Faltan nodos esenciales en el workflow original');
 }
