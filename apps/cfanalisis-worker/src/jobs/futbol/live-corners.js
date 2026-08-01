@@ -9,22 +9,17 @@
  *
  * Payload: {}
  */
-import { triggerEvent, redisGet, redisSet, KEYS, TTL, incrementApiCallCount } from '../../shared.js';
+import { triggerEvent, redisGet, redisSet, KEYS, TTL, incrementApiCallCount, footballApiRequest } from '../../shared.js';
 
-const API_HOST = 'v3.football.api-sports.io';
 const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
 
 async function apiFetch(endpoint) {
   const key = process.env.FOOTBALL_API_KEY;
   if (!key) return null;
-  const res = await fetch(`https://${API_HOST}${endpoint}`, {
-    headers: { 'x-apisports-key': key },
-    cache: 'no-store',
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  if (data.errors && Object.keys(data.errors).length > 0) return null;
-  return data.response || [];
+  try {
+    const result = await footballApiRequest(endpoint, { apiKey: key, timeoutMs: 20_000, retries: 2 });
+    return result.response;
+  } catch { return null; }
 }
 
 export async function runLiveCorners(_payload = {}) {

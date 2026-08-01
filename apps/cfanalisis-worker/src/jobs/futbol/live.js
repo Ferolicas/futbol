@@ -12,9 +12,9 @@ import {
   redisGet, redisSet, redisDel, KEYS, TTL,
   incrementApiCallCount, sendPushNotification,
   supabaseAdmin, getMatchSchedule, pgQuery,
+  footballApiRequest,
 } from '../../shared.js';
 
-const API_HOST = 'v3.football.api-sports.io';
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
 
@@ -22,20 +22,10 @@ async function apiFetch(endpoint) {
   const key = process.env.FOOTBALL_API_KEY;
   if (!key) return null;
   try {
-    const res = await fetch(`https://${API_HOST}${endpoint}`, {
-      headers: { 'x-apisports-key': key },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(20000),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.errors && Object.keys(data.errors).length > 0) {
-      console.error('[live] API error:', data.errors);
-      return null;
-    }
-    return data.response || [];
+    const result = await footballApiRequest(endpoint, { apiKey: key, timeoutMs: 20_000, retries: 2 });
+    return result.response;
   } catch (e) {
-    console.error('[live] apiFetch network error:', endpoint, e.message);
+    console.error('[live] apiFetch error:', endpoint, e.message);
     return null;
   }
 }
@@ -940,6 +930,18 @@ async function persistHalfStatsSnapshot(match, data) {
       capturedAt: new Date().toISOString(),
       capturedAtMinute: match.fixture?.status?.elapsed ?? null,
     };
+    // El snapshot relacionado nunca debe quedar huérfano. `match` ya es el
+    // fixture real del feed live, por lo que persistimos también su crudo base
+    // sin gastar otra llamada. Un FT/AET/PEN ya guardado jamás se degrada con
+    // una versión HT tardía.
+    await pgQuery(
+      `INSERT INTO raw_api_payloads (endpoint, ref_type, ref_id, season, sub_key, payload, fetched_at)
+       VALUES ('fixtures','fixture',$1,$2,'',$3::jsonb,NOW())
+       ON CONFLICT (endpoint, ref_id, sub_key) DO UPDATE
+       SET payload=EXCLUDED.payload,season=EXCLUDED.season,fetched_at=NOW()
+       WHERE COALESCE(raw_api_payloads.payload#>>'{fixture,status,short}','')
+             NOT IN ('FT','AET','PEN')`,
+      [fid, payload.season, JSON.stringify(match)]);
     await pgQuery(
       `INSERT INTO raw_api_payloads (endpoint, ref_type, ref_id, season, sub_key, payload, fetched_at)
        VALUES ('fixtures/halfstats','fixture',$1,$2,'',$3::jsonb,NOW())

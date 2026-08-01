@@ -1,8 +1,8 @@
 // @ts-nocheck
 /**
- * Job: futbol-retrain — ciclo nocturno de auto-mejora del meta-modelo CONTEXTUAL.
+ * Job: futbol-retrain — ciclo nocturno del motor empírico contextual.
  *
- * Corre DESPUÉS de finalize (03:00/04:00) y calibrate (05:00), a las 06:30
+ * Corre DESPUÉS de finalize (03:00/04:00), a las 06:30
  * España (= 23:30 Bogotá, baja actividad live para no starvear los polls
  * mientras entrena). Cuatro pasos SECUENCIALES en un solo job (orden
  * garantizado, un solo lock):
@@ -10,9 +10,12 @@
  *   1. capture  → crudos por-fixture de los partidos recién finalizados
  *                 (raw_api_payloads). SIN esto, reenrich/profiles/train no ven
  *                 los partidos nuevos (ningún otro cron los persiste).
- *   2. reenrich → features_full point-in-time de esos fixtures, desde los crudos.
- *   3. profiles → reconstruye team_market_profiles (ADN runtime) con datos nuevos.
- *   4. train    → re-entrena los mercados y re-activa los que superan baseline.
+ *   2. ingest   → raw_api_payloads a hechos model.* sin degradar datos válidos.
+ *   3. profiles → refresca perfiles descriptivos.
+ *   4. train    → walk-forward del peso de actualidad; solo activa si mejora
+ *                 Brier/calibración fuera de muestra.
+ *   El XI se aprende directamente como similitud entre alineaciones históricas
+ *   point-in-time; no se aplica una tabla agregada de impacto contrafactual.
  *
  * Idempotente. Gated por FUTBOL_RETRAIN_ENABLED (default ON; ='false' lo apaga).
  *
@@ -25,7 +28,10 @@ import {
   pgQuery,
   pgPool,
   captureFinalizedFixturesRaw,
-  computeMarketBaseRates,
+  ingestFixtures,
+  buildModelTeamProfiles,
+  buildModelPlayerProfiles,
+  trainFootballEmpiricalEngine,
   redisSet,
 } from '../../shared.js';
 
@@ -36,7 +42,9 @@ export async function runFutbolRetrain(payload = {}) {
   }
 
   const hours = Number(payload?.hours) || 30;
-  const captureH2H = payload?.captureH2H !== false;
+  // Los H2H ya son hechos en model.team_match_stats (opponent_id); pedir el
+  // endpoint /headtohead los duplicaría y gastaría cuota sin aportar evidencia.
+  const captureH2H = payload?.captureH2H === true;
 
   // 1) Fixtures recién finalizados (o set explícito del payload). FUENTE:
   //    match_results — finalize.js la escribe para CADA partido terminado. (Ya
@@ -62,26 +70,52 @@ export async function runFutbolRetrain(payload = {}) {
   result.capture = fixtureIds.length
     ? await captureFinalizedFixturesRaw({ fixtureIds, captureH2H })
     : { skipped: 'no-new-fixtures' };
-
-  // 3) (Etapa 4) El re-entreno del ML de ruptura (trainMetaModels) se ELIMINÓ: el
-  //    motor viejo (context-engine + su capa ML) fue reemplazado por el motor del
-  //    schema `model`, que NO usa modelos de ruptura/familia. La captura (paso 2) se
-  //    CONSERVA: alimenta raw_api_payloads → el sync nocturno del modelo (07:00).
-
-  // 4) Tasas base por mercado (prior del shrink de calibración) — DESDE EL CRUDO,
-  //    ya con los partidos recién finalizados. Auto-ajusta la base con cada
-  //    jornada. Idempotente y FALLA SUAVE: si truena, el motor sigue con las
-  //    bases previas (no rompe el retrain ni el análisis).
-  try {
-    result.baseRates = await computeMarketBaseRates({ pool: pgPool });
-  } catch (e) {
-    console.error('[futbol-retrain] base-rates falló (no crítico):', e?.message || e);
-    result.baseRates = { ok: false, error: String(e?.message || e) };
+  if (Number(result.capture?.failed || 0) > 0) {
+    throw new Error(`captura nocturna incompleta: ${result.capture.failed} endpoints fallaron`);
   }
+
+  // 3) Ingesta inmediata: el entrenamiento de esta misma corrida ya ve los
+  // partidos recién finalizados (antes esperaba al model-sync de las 07:00).
+  result.ingest = fixtureIds.length
+    ? await ingestFixtures(pgPool, fixtureIds)
+    : { skipped: 'no-new-fixtures' };
+  if (Number(result.ingest?.failed || 0) > 0 || Number(result.ingest?.missingFixtureRaw || 0) > 0) {
+    throw new Error(
+      `ingesta nocturna incompleta: failed=${result.ingest?.failed || 0} ` +
+      `missingFixtureRaw=${result.ingest?.missingFixtureRaw || 0}`
+    );
+  }
+
+  // 4) Perfiles descriptivos incrementales de equipos/jugadores afectados.
+  const teamIds = new Set();
+  let playerIds = [];
+  if (fixtureIds.length) {
+    const { rows: teams } = await pgQuery(
+      `SELECT DISTINCT home_team_id,away_team_id FROM model.matches WHERE fixture_id=ANY($1::bigint[])`,
+      [fixtureIds]);
+    for (const row of teams) { if (row.home_team_id) teamIds.add(Number(row.home_team_id)); if (row.away_team_id) teamIds.add(Number(row.away_team_id)); }
+    const { rows: players } = await pgQuery(
+      `SELECT DISTINCT player_id FROM model.player_match_stats WHERE fixture_id=ANY($1::bigint[])`,
+      [fixtureIds]);
+    playerIds = players.map((row) => Number(row.player_id));
+  }
+  const teamProfiles = teamIds.size ? await buildModelTeamProfiles(pgPool, { teamIds: [...teamIds], minN: 1 }) : { written: 0 };
+  const playerProfiles = playerIds.length ? await buildModelPlayerProfiles(pgPool, { playerIds, minN: 1 }) : { written: 0 };
+  result.profiles = { teams: teamProfiles.written, players: playerProfiles.written };
+
+  // 5) Entrenamiento real point-in-time. Un candidato malo queda registrado
+  // inactivo y el campeón sigue sirviendo; nunca se degrada producción.
+  result.training = await trainFootballEmpiricalEngine({
+    pool: pgPool,
+    // 1.200 partidos recientes → 840 para elegir pesos + 360 cronológicos
+    // intocables para validación. En VPS tarda ~5 min dentro del lock maratón.
+    limit: Number(payload?.trainLimit) || 1200,
+  });
 
   console.log(
     `[futbol-retrain] OK · capturados=${result.capture?.fixturesDone ?? 0} · ` +
-      `tasas_base=${result.baseRates?.markets ?? 0}`
+      `ingest=${result.ingest?.done ?? 0} · trainVersion=${result.training?.version ?? 'sin-cambio'} ` +
+      `share=${result.training?.candidateShare ?? '—'} active=${result.training?.activates ?? false}`
   );
   // JS-1: dejar rastro para el watchdog (dead-man's switch). TTL 48h.
   await redisSet('lastRun:futbol-retrain', { completedAt: new Date().toISOString() }, 172800);

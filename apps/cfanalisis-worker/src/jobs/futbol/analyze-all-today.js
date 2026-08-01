@@ -144,12 +144,9 @@ export async function runAnalyzeAllToday(payload = {}, job = null) {
     // cacheado en Supabase/Redis y la re-analizacion no hace nada (termina
     // en 1 seg porque solo lee de cache).
     const result = await analyzeMatch(fixture, { date, force: forceAll });
-    // ⚠️ NO skipeamos si dataQuality='insufficient' — el modelo usa fallbacks
-    // (lambda=1.2 etc.) y produce probabilidades aproximadas. El frontend
-    // muestra la advertencia "Datos limitados" en esos partidos. Si los
-    // skipeamos, quedan eternamente como "pendientes" en /ferney aunque
-    // el usuario presione "Re-analizar todos". Mejor analizar partial que
-    // dejar el partido sin analisis.
+    // Un fixture sin hechos sigue persistiendo como analizado, pero con cero
+    // recomendaciones: así no queda eternamente pendiente y el motor tampoco
+    // inventa probabilidades. Con uno o más hechos calcula sin veto de muestra.
     if (!result) {
       processed++;
       await reportProgress({
@@ -158,6 +155,9 @@ export async function runAnalyzeAllToday(payload = {}, job = null) {
       });
       await new Promise(r => setImmediate(r));
       return { fid, kind: 'skip' };
+    }
+    if (!result.fromCache && result.persist?.db !== true) {
+      throw new Error(`persistencia de análisis falló: ${result.persist?.error || 'sin confirmación de PostgreSQL'}`);
     }
     const a = result.analysis || result;
     success++;

@@ -1,4 +1,7 @@
-import { getQuota, refreshLineups, refreshInjuries, fetchMatchStats, analyzeMatch } from '../../../../lib/api-football';
+import {
+  getQuota, refreshLineups, refreshInjuries, fetchMatchStats, analyzeMatch,
+  recomputeAnalysisWithConfirmedLineups,
+} from '../../../../lib/api-football';
 import { getCachedAnalysis, cacheAnalysis, getCachedFixtures } from '../../../../lib/sanity-cache';
 import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
 import { supabaseAdmin } from '../../../../lib/supabase';
@@ -44,21 +47,12 @@ export async function GET(request, { params }) {
           const result = await analyzeMatch(fixture, { date });
           const doc = result?.analysis || result;
           if (doc) {
-            // analyzeMatch ya persiste internamente. Re-persistimos por visibilidad
-            // SOLO si hay datos suficientes: un insufficient ya quedó guardado con
-            // combinada vacía y no merece un segundo upsert.
-            // (Spread DESANIDADO: combinada/calculatedProbabilities/odds viven en
-            // result.analysis.*, no en result.* → { ...doc } las persiste bien.)
-            if (result.dataQuality !== 'insufficient') {
-              const _cache = await cacheAnalysis(id, { ...doc, date }).catch((e) => {
-                console.error('[cacheAnalysis:THREW]', { fixtureId: id, date, error: e.message });
-                return { db: false, redis: false };
+            if (!result.fromCache && result.persist?.db === false) {
+              console.error('[cacheAnalysis:PG_FAILED]', {
+                fixtureId: id, date, error: result.persist?.error,
               });
-              if (_cache && _cache.db === false) {
-                console.error('[cacheAnalysis:PG_FAILED]', { fixtureId: id, date, error: _cache.error });
-              }
             }
-            // Mostrar el partido aunque sea insufficient (combinada vacía, sin picks).
+            // Sin datos también es un análisis válido: se muestra sin picks.
             analysis = doc;
           }
         }
@@ -146,9 +140,15 @@ export async function POST(request, { params }) {
       if (lineups.available) {
         const existing = await getCachedAnalysis(id, date);
         if (existing) {
+          const targetDate = date || existing.date || new Date().toISOString().split('T')[0];
+          const fixtures = await getCachedFixtures(targetDate);
+          const fixture = fixtures?.find((item) => item.fixture?.id === Number(id));
+          const updated = fixture
+            ? await recomputeAnalysisWithConfirmedLineups(fixture, existing, lineups.data)
+            : { ...existing, lineups };
           // A-2 FIX: captar db:false y excepción (antes sin catch; un fallo de
           // PG quedaba invisible). El usuario sigue recibiendo los lineups.
-          const _cache = await cacheAnalysis(id, { ...existing, lineups }).catch((e) => {
+          const _cache = await cacheAnalysis(id, updated).catch((e) => {
             console.error('[cacheAnalysis:THREW]', { fixtureId: id, date, error: e.message });
             return { db: false, redis: false };
           });
@@ -225,22 +225,13 @@ export async function POST(request, { params }) {
         return Response.json({ error: 'Fixture not found in cache for this date.' }, { status: 404 });
       }
       const result = await analyzeMatch(fixture, { date });
-      if (!result || result.dataQuality === 'insufficient') {
-        return Response.json({ error: 'Insufficient data to analyze this match.' }, { status: 422 });
+      if (!result) {
+        return Response.json({ error: 'No fue posible analizar este partido.' }, { status: 422 });
       }
-      // A-2 FIX: visibilidad si la persistencia a PG falla (se sigue sirviendo
-      // desde Redis, pero sin esto desaparece al expirar el TTL).
-      // POR QUÉ FALLABA: analyzeMatch devuelve { analysis, fromCache, apiCalls,
-      // persist }. combinada/calculatedProbabilities/odds viven en result.analysis.*,
-      // NO en result.*. Con `{ ...result }`, cacheAnalysis leía data.combinada=
-      // undefined → columnas combinada/probabilities a NULL y JSON doble-anidado
-      // (el caso de 1546805). Se persiste el doc DESANIDADO (result.analysis).
-      const _cache = await cacheAnalysis(id, { ...(result.analysis || result), date }).catch((e) => {
-        console.error('[cacheAnalysis:THREW]', { fixtureId: id, date, error: e.message });
-        return { db: false, redis: false };
-      });
-      if (_cache && _cache.db === false) {
-        console.error('[cacheAnalysis:PG_FAILED]', { fixtureId: id, date, error: _cache.error });
+      if (!result.fromCache && result.persist?.db === false) {
+        console.error('[cacheAnalysis:PG_FAILED]', {
+          fixtureId: id, date, error: result.persist?.error,
+        });
       }
       const quota = await getQuota();
       return Response.json({ analysis: result.analysis || result, quota });

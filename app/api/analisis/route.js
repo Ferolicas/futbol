@@ -1,5 +1,4 @@
 import { analyzeMatch, getQuota } from '../../../lib/api-football';
-import { cacheAnalysis } from '../../../lib/sanity-cache';
 import { redisGet, redisSet } from '../../../lib/redis';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { userHasActivePlan } from '../../../lib/require-active-plan';
@@ -41,15 +40,15 @@ export async function POST(request) {
         try {
           const result = await analyzeMatch(fixture, { date });
           totalApiCalls += result.apiCalls || 0;
-          // A-2 FIX: visibilidad si la persistencia a PG falla (el análisis se
-          // sigue sirviendo desde Redis, pero sin esto desaparece al expirar el
-          // TTL sin que nadie se entere).
-          const _cache = await cacheAnalysis(fixture.fixture.id, { ...result, date }).catch((e) => {
-            console.error('[cacheAnalysis:THREW]', { fixtureId: fixture.fixture.id, date, error: e.message });
-            return { db: false, redis: false };
-          });
-          if (_cache && _cache.db === false) {
-            console.error('[cacheAnalysis:PG_FAILED]', { fixtureId: fixture.fixture.id, date, error: _cache.error });
+          // analyzeMatch ya persiste una sola vez el documento desanidado. Un
+          // segundo upsert aquí antes envolvía {analysis:{...}} y borraba las
+          // columnas top-level de combinada/probabilidades.
+          if (!result.fromCache && result.persist?.db === false) {
+            console.error('[cacheAnalysis:PG_FAILED]', {
+              fixtureId: fixture.fixture.id,
+              date,
+              error: result.persist?.error,
+            });
           }
           return { fixtureId: fixture.fixture.id, success: true, ...result };
         } catch (e) {

@@ -67,7 +67,7 @@ const opts: Record<QueueName, JobsOptions> = {
   'futbol-live-corners':     liveJobOpts,
   'futbol-odds':             defaultJobOpts,
   'futbol-raw-backfill':     { ...defaultJobOpts, attempts: 1 },
-  // Ciclo nocturno de auto-mejora (capture→reenrich→profiles→train). Los 4
+  // Ciclo nocturno de auto-mejora (capture→ingest→profiles→train). Los 4
   // pasos son idempotentes, así que reintentar es seguro; pero cada intento
   // re-corre todo el ciclo pesado → tope 2 intentos.
   'futbol-retrain':          { ...defaultJobOpts, attempts: 2 },

@@ -74,7 +74,7 @@ export async function GET(request) {
  * POST body shapes (action-routed):
  *   { action: 'retry',     queue, jobId }          → re-run a failed job
  *   { action: 'enqueue',   queue, payload }        → kick off a fresh job (e.g. force re-analysis)
- *   { action: 'calibrate', sport: 'futbol'|'baseball' }  → synchronous calibration (slow, up to ~30s)
+ *   { action: 'calibrate', sport: 'baseball' }            → synchronous baseball calibration
  */
 export async function POST(request) {
   const user = await requireAdmin();

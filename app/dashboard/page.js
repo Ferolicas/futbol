@@ -27,6 +27,7 @@ import { BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
 import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/timezone';
 import { buildCombinada } from '../../lib/combinada';
 import { marketLabel } from '../../lib/market-labels';
+import { isTelegramMarketAllowed as isDailyPickMarketAllowed } from '../../lib/telegram-daily-pick';
 import { setAnalysisCache } from '../../lib/analysis-cache';
 import { fetcher } from '../../lib/fetcher';
 import BrandLogoMedia from '../../components/BrandLogoMedia';
@@ -1121,17 +1122,18 @@ export default function Dashboard() {
       const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
 
-      // Con el motor de contexto, data.combinada ya viene gateada (≥90% prob_final
-      // + piso + cuota ≥1.20) → se usa directo. Sin el flag (ruta DC), se
-      // reconstruye en vivo con buildCombinada y se exige ≥95%.
+      // La combinada general contiene recomendaciones desde 80%, pero la
+      // Apuesta del Día exige siempre 95% + cuota real ≥1.20.
       const isEngine = data?.combinada?.source === 'context-engine';
       const liveComb = (!isEngine && data.calculatedProbabilities)
         ? buildCombinada(data.calculatedProbabilities, data.odds, data.playerHighlights, { home: homeTeam, away: awayTeam })
         : null;
       const selections = liveComb?.selections || data?.combinada?.selections || [];
-      const minProb = isEngine ? 90 : MIN_PROB;
+      const minProb = MIN_PROB;
 
       selections.forEach(sel => {
+        if (sel.dailyValidated !== true) return;
+        if (!isDailyPickMarketAllowed(sel)) return;
         if (sel.probability < minProb) return;
         if (!sel.odd || sel.odd < MIN_ODD) return;
         all.push({
@@ -1994,7 +1996,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
     if (!isExpanded) return [];
     // "Selecciona para tu combinada": usa data.combinada.SELECTABLE — TODA línea con
     // prob≥70% y cuota real ≥1.20 (bet365/bwin, con equivalencia de línea entera). NO
-    // el gate ≥90% de la "Combinada del Día" (eso es `selections`). Fallback a
+    // el gate ≥80% de recomendaciones generales (eso es `selections`). Fallback a
     // selections (combinadas viejas sin selectable) o buildCombinada (no-engine).
     const isEngine = data?.combinada?.source === 'context-engine';
     const sels = isEngine

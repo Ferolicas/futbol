@@ -28,8 +28,8 @@ try { require('dotenv').config({ path: '.env' }); } catch {}
 
 const { Pool } = require('pg');
 const { buildFeatureSnapshot } = require('../lib/feature-snapshot');
+const { footballApiRequest, closeFootballApiClient } = require('../lib/football-api-client.cjs');
 
-const API_HOST = 'v3.football.api-sports.io';
 const API_KEY = process.env.FOOTBALL_API_KEY;
 const FINISHED = new Set(['FT', 'AET', 'PEN']);
 
@@ -51,27 +51,11 @@ const pgPool = new Pool({
 
 // ─── API con reintentos ───────────────────────────────────────────────────
 let apiCalls = 0;
-async function apiGet(path, tries = 3) {
-  for (let i = 0; i < tries; i++) {
-    try {
-      apiCalls++;
-      const res = await fetch(`https://${API_HOST}${path}`, {
-        headers: { 'x-apisports-key': API_KEY },
-        signal: AbortSignal.timeout(20000),
-      });
-      if (res.status === 429) { await sleep(2000 * (i + 1)); continue; }
-      if (!res.ok) return [];
-      const json = await res.json();
-      if (json.errors && Object.keys(json.errors).length > 0) return [];
-      return json.response || [];
-    } catch (e) {
-      if (i === tries - 1) { console.warn(`  api fail ${path}: ${e.message}`); return []; }
-      await sleep(1000 * (i + 1));
-    }
-  }
-  return [];
+async function apiGet(path) {
+  apiCalls++;
+  const result = await footballApiRequest(path, { apiKey: API_KEY, timeoutMs: 20_000, retries: 2 });
+  return result.response;
 }
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // ─── Cachés (recortan miles de llamadas a un orden manejable) ───────────────
 const leagueFixturesCache = new Map(); // `${league}:${season}` → fixtures[]
@@ -298,7 +282,7 @@ async function processMatch(row, leagueFixtures) {
   if (LIMIT) { params.push(LIMIT); q += ` LIMIT $${params.length}`; }
   const { rows } = await pgPool.query(q, params);
   console.log(`Partidos a enriquecer: ${rows.length}`);
-  if (rows.length === 0) { await pgPool.end(); return; }
+  if (rows.length === 0) { await pgPool.end(); await closeFootballApiClient(); return; }
 
   // Agrupar por liga-temporada para reutilizar la llamada de fixtures de liga.
   const groups = new Map();
@@ -335,6 +319,7 @@ async function processMatch(row, leagueFixtures) {
   console.log(`Cobertura → odds: ${pct(cov.odds, done)}  xG: ${pct(cov.xg, done)}  tabla: ${pct(cov.table, done)}`);
   console.log(`Llamadas API totales: ${apiCalls}`);
   await pgPool.end();
-})().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
+  await closeFootballApiClient();
+})().catch(async e => { console.error('FATAL:', e.message); await closeFootballApiClient(); process.exit(1); });
 
 function pct(n, d) { return d > 0 ? `${Math.round((n / d) * 100)}%` : 'n/a'; }

@@ -1994,7 +1994,8 @@ const GoalTimingSection = memo(function GoalTimingSection({ goalTiming, homeTeam
     if (!data || !data.length) return 0;
     let sum = 0;
     for (let i = s; i <= e; i++) sum += data[i]?.probability || 0;
-    return Math.min(95, Math.round(sum / (e - s + 1)));
+    const value = sum / (e - s + 1);
+    return value >= 95 ? 95 : Math.floor((value + 1e-9) * 10) / 10;
   };
 
   const home1H = aggregate(goalTiming.home, 0, 2);

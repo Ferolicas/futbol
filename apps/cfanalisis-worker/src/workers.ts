@@ -119,7 +119,7 @@ const lockOpts: Record<QueueName, LockOpts> = {
   'futbol-live-corners':     LIGHT,
   'futbol-odds':             LIGHT,
   'futbol-raw-backfill':     MARATHON,
-  // Ciclo capture(API)→reenrich(CPU)→profiles(CPU)→train(CPU pesado). Puede
+  // Ciclo capture(API)→ingest(DB)→profiles(CPU)→train(CPU pesado). Puede
   // tardar 10-20 min; lock MARATÓN para que no lo marquen stalled.
   'futbol-retrain':          MARATHON,
   'futbol-watchdog':         LIGHT,

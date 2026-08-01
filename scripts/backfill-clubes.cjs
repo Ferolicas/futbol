@@ -10,7 +10,7 @@ try { require('dotenv').config({ path: '.env.local' }); } catch {}
 try { require('dotenv').config({ path: '.env' }); } catch {}
 const fs = require('fs');
 const { Pool } = require('pg');
-const HOST = 'v3.football.api-sports.io';
+const { footballApiRequest, closeFootballApiClient } = require('../lib/football-api-client.cjs');
 const KEY = process.env.FOOTBALL_API_KEY || process.env.NEXT_PUBLIC_API_FOOTBALL_KEY;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false }, max: 4 });
 const CHECKPOINT = '/tmp/bf_clubes_checkpoint.json';
@@ -35,17 +35,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const log = (...a) => console.log(`[${new Date().toISOString()}]`, ...a);
 
 async function apiGet(path) {
-  for (let i = 0; i < 4; i++) {
-    try {
-      callsLocal++;
-      const r = await fetch(`https://${HOST}${path}`, { headers: { 'x-apisports-key': KEY } });
-      if (r.status === 429) { await sleep(3000 * (i + 1)); continue; }
-      if (!r.ok) return { __http: r.status, response: [] };
-      return await r.json();
-    } catch (e) { if (i === 3) return { __error: e.message, response: [] }; await sleep(1500 * (i + 1)); }
-    await sleep(110);
-  }
-  return { response: [] };
+  callsLocal++;
+  return (await footballApiRequest(path, { apiKey: KEY, timeoutMs: 30_000, retries: 3 })).payload;
 }
 async function quota() {
   const j = await apiGet('/status');
@@ -157,4 +148,5 @@ async function upsertClub(teamId) {
   const { rows: tot } = await pool.query(`SELECT count(*)::int n FROM clubes`);
   log(`=== FIN === clubes en tabla: ${tot[0].n} · fixtures nuevos totales: ${newFixtures} · llamadas locales: ${callsLocal}`);
   await pool.end();
-})().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
+  await closeFootballApiClient();
+})().catch(async e => { console.error('FATAL:', e.message); await closeFootballApiClient(); process.exit(1); });

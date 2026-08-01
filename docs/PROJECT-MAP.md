@@ -74,6 +74,10 @@ Las migraciones viven en `scripts/`. Tablas clave:
 - `baseball_*`: fixtures, resultados, análisis, predicciones, favoritos y ocultos.
 - `combinadas`, `combinada_dia`, `tickets`, `chat_messages`, `push_subscriptions`.
 - Esquema `model`: entidades, hechos, perfiles y señales del motor estadístico.
+- `raw_api_payloads` + `api_capture_failures`: crudo válido e histórico durable
+  de reintentos; un error HTTP/rate-limit nunca se guarda como evidencia.
+- `prediction_models` + `market_segment_diagnostics`: pesos versionados del
+  motor y validación fuera de muestra por mercado, dirección y línea exacta.
 
 `lib/supabase.js` ya no conecta Supabase: conserva la API antigua y delega en `lib/db.js`.
 
@@ -121,6 +125,39 @@ distintos para una cuota total entre 1.50 y 2.00. El workflow no usa IA:
 construye la URL de `/api/pick-image` y Telegram publica la tarjeta con escudos,
 cuota, probabilidad y un único enlace a CF Análisis.
 
+Una opción de equipo solo puede entrar si su misma clave exacta (por ejemplo,
+`goals_total_over_1_5`) sostuvo al menos 95% en la ventana cronológica de
+validación. Ese control no cambia el porcentaje calculado: si faltan métricas o
+la validación no alcanza el umbral, el sistema falla cerrado y no recomienda.
+Los props de jugador siguen visibles en el constructor, pero no llegan a la
+Apuesta del día hasta disponer de backtest point-in-time propio.
+
+### Motor empírico de fútbol
+
+`lib/model-engine.js` cuenta directamente hechos de `model.team_match_stats`.
+Usa todos los partidos anteriores al kickoff sin mínimo ni máximo: una sola
+muestra real sirve y cero muestras produce “sin dato”. Temporada actual e
+histórico se calculan por separado; si ambos existen, `currentShare` siempre es
+mayor a 0.50. Localía, nivel del rival, fase, H2H, árbitro y similitud del XI son
+pesos sobre cumplimientos observados, nunca puntos añadidos/restados a una
+probabilidad. H2H se deduplica por fixture; el árbitro solo pondera tarjetas,
+faltas y rojas; el XI confirmado pondera alineaciones históricas reales.
+
+`scripts/train-football-empirical-engine.js` hace walk-forward nocturno sobre
+1.200 partidos: 70% para escoger pesos y 30% cronológico intocable para aceptar
+o rechazar el candidato y renovar 755 diagnósticos exactos. Un candidato peor
+queda inactivo; el campeón conserva producción y refresca su propia validación.
+`apps/cfanalisis-worker/src/jobs/futbol/retrain.js` ejecuta captura → ingesta →
+perfiles → entrenamiento, falla si cualquier etapa queda incompleta y deja un
+sello Redis que comprueba el watchdog.
+
+`lib/football-api-client.cjs` es la única salida a API-Football para web,
+workers y scripts activos. Reserva slots globales con Lua/Redis a 420 peticiones
+por minuto (plan: 450), reintenta con backoff y usa un fallback local conservador
+si Redis cae. `scripts/audit-football-model-data.js` verifica de punta a punta
+crudo, ledger, hechos, dimensiones, marcadores y contadores de jugador; código
+de salida 2 significa una invariancia crítica rota.
+
 ### Realtime
 
 `apps/cfanalisis-worker` ingiere y publica actualizaciones. El cliente WebSocket
@@ -156,6 +193,11 @@ snapshots live a los IDs de la jornada antes de serializar la respuesta.
 - `lib/stripe.js`: fuente única de IDs, precios, periodos y moneda base.
 - `lib/payment-store.js`, `lib/payment-reconcile.js` y `lib/entitlements.js`: estado durable, recuperación y única regla de acceso.
 - `lib/telegram-daily-pick.js`: whitelist y selector determinista de la publicación diaria de Telegram.
+- `lib/model-engine.js`, `lib/model-to-scored.js` y
+  `lib/model-probabilities.js`: frecuencia empírica, validación exacta y contrato
+  de probabilidades/combinadas. No añadir calibradores o priors al serving.
+- `lib/football-api-client.cjs`: limitador distribuido y validación de respuestas
+  de API-Football; toda nueva llamada al proveedor debe pasar por aquí.
 - `lib/mercadopago.js`: API, firma, PSE, recurrencia, cancelación y fallback EUR→COP.
 - `lib/currency.js`: conversión y fallback de cobro.
 - `lib/redis.js`: cache, deduplicación y realtime.
@@ -183,6 +225,12 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - 2026-08-01: la migración `migrate-payment-reliability.sql` debe ejecutarse antes del build; incluye permisos explícitos para el rol `cfanalisis`.
 - 2026-08-01: Stripe escucha facturas, suscripciones y compatibilidad de PaymentIntent legado. Añadir eventos con `scripts/configure-stripe-webhook.mjs` solo después de desplegar el handler.
 - 2026-08-01: n8n ejecuta la versión publicada de cada workflow, no necesariamente el borrador visible en `workflow_entity`. Tras importar un cambio hay que publicarlo y reiniciar n8n; de lo contrario puede seguir activa una URL o conexión antigua.
+- 2026-08-01: fútbol no usa calibración isotónica, shrinkage ni mínimos de
+  muestra. El panel “Reentrenar fútbol” encola `futbol-retrain`; la calibración
+  administrativa queda exclusivamente para baseball.
+- 2026-08-01: `FOOTBALL_CACHE_VERSION=19` invalida análisis sin el gate exacto
+  de validación. Si `prediction_models.metrics.candidate.families` no está
+  disponible, se muestran frecuencias pero no se publican recomendaciones.
 - 2026-08-01: no liberar un intento pendiente por tiempo ni marcar terminal un cobro recurrente que MP pueda reintentar; primero cancelar el recurso remoto.
 - 2026-07-29: el checkout automático requiere deduplicación persistente ante Strict Mode/Fast Refresh.
 - 2026-07-29: solo el plan viaja por URL; el servidor vuelve a calcular precio, moneda y proveedor.

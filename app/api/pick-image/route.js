@@ -35,7 +35,8 @@ function cleanOdd(value) {
 function cleanProbability(value) {
   const probability = Number(value);
   if (!Number.isFinite(probability)) return '—';
-  return String(Math.min(95, Math.max(0, +probability.toFixed(1))));
+  const safe = Math.max(0, probability);
+  return String(safe >= 95 ? 95 : Math.floor((safe + 1e-9) * 10) / 10);
 }
 
 function initials(name) {

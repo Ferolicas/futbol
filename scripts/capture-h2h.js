@@ -14,14 +14,13 @@ try { require('dotenv').config({ path: '.env.local' }); } catch {}
 try { require('dotenv').config({ path: '.env' }); } catch {}
 
 const { Pool } = require('pg');
+const { footballApiRequest, payloadQuality, closeFootballApiClient } = require('../lib/football-api-client.cjs');
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = a.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] || true] : [a, true]; }));
 const RUN = !!args.run;
 const LAST = Number(args.last) || 8;
 const CONCURRENCY = Number(args.concurrency) || 6;
 
-const API_HOST = 'v3.football.api-sports.io';
 const API_KEY = process.env.FOOTBALL_API_KEY;
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -30,31 +29,25 @@ const pool = new Pool({
 });
 
 let calls = 0;
-async function apiGet(path, tries = 3) {
-  for (let i = 0; i < tries; i++) {
-    try {
-      calls++;
-      const res = await fetch(`https://${API_HOST}${path}`, { headers: { 'x-apisports-key': API_KEY }, signal: AbortSignal.timeout(20000) });
-      if (res.status === 429) { await sleep(2000 * (i + 1)); continue; }
-      if (!res.ok) return { response: [] };
-      const json = await res.json();
-      if (json.errors && Object.keys(json.errors).length) return { response: [] };
-      return json;
-    } catch (e) { if (i === tries - 1) return { response: [] }; await sleep(1000 * (i + 1)); }
-  }
-  return { response: [] };
+async function apiGet(path) {
+  calls++;
+  const result = await footballApiRequest(path, { apiKey: API_KEY, timeoutMs: 20_000, retries: 2 });
+  return result.payload;
 }
 
 async function exists(endpoint, refId, subKey = '') {
-  const { rows } = await pool.query(`SELECT 1 FROM raw_api_payloads WHERE endpoint=$1 AND ref_id=$2 AND sub_key=$3`, [endpoint, refId, subKey]);
-  return rows.length > 0;
+  const { rows } = await pool.query(`SELECT payload FROM raw_api_payloads WHERE endpoint=$1 AND ref_id=$2 AND sub_key=$3`, [endpoint, refId, subKey]);
+  return rows.length > 0 && payloadQuality(rows[0].payload) === 2;
 }
 async function save(endpoint, refType, refId, season, subKey, payload) {
+  if (payloadQuality(payload) === 0) return false;
   await pool.query(
     `INSERT INTO raw_api_payloads (endpoint, ref_type, ref_id, season, sub_key, payload, fetched_at)
-     VALUES ($1,$2,$3,$4,$5,$6::jsonb,NOW()) ON CONFLICT (endpoint, ref_id, sub_key) DO NOTHING`,
+     VALUES ($1,$2,$3,$4,$5,$6::jsonb,NOW()) ON CONFLICT (endpoint, ref_id, sub_key)
+     DO UPDATE SET payload=EXCLUDED.payload,season=EXCLUDED.season,ref_type=EXCLUDED.ref_type,fetched_at=NOW()`,
     [endpoint, refType, refId, season ?? null, subKey, JSON.stringify(payload)]
   );
+  return true;
 }
 async function captureFixtureContext(fid) {
   // Contexto de un cruce H2H para el análisis de excepciones. Idempotente.
@@ -108,6 +101,7 @@ async function mapPool(items, limit, fn) {
     console.log(`  ~${est} llamadas en el peor caso; real mucho menor por dedupe con 25/26.`);
     console.log(`  Para ejecutar: node --env-file=.env scripts/capture-h2h.js --run\n`);
     await pool.end();
+    await closeFootballApiClient();
     return;
   }
 
@@ -120,4 +114,5 @@ async function mapPool(items, limit, fn) {
   });
   console.log(`\n✓ H2H capturado: ${pairs.length} pares · ${calls} llamadas.`);
   await pool.end();
-})().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
+  await closeFootballApiClient();
+})().catch(async e => { console.error('FATAL:', e.message); await closeFootballApiClient(); process.exit(1); });

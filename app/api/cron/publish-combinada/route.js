@@ -77,9 +77,8 @@ async function handle(request) {
     if (statusShort && !BETTABLE_STATUSES.has(statusShort)) continue;
     const kickoffMs = data.kickoff ? new Date(data.kickoff).getTime() : 0;
     if (kickoffMs > 0 && kickoffMs <= nowMs + 5 * 60 * 1000) continue;
-    // Con el motor de contexto, data.combinada ya viene gateada (≥90% prob_final
-    // + piso + cuota ≥1.20) por buildContextCombinada → se usa directo. Sin el
-    // flag, se reconstruye con buildCombinada (ruta DC).
+    // La combinada del motor trae candidatos desde 80% y cuota ≥1.20. La
+    // selección final de Telegram aplica aquí el requisito estricto de 95%.
     let selections;
     if (CONTEXT_ENGINE_ENABLED && data.combinada?.source === 'context-engine') {
       selections = data.combinada.selections || [];

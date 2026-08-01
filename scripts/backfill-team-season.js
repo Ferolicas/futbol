@@ -18,6 +18,7 @@ try { require('dotenv').config({ path: '.env' }); } catch {}
 
 const { Pool } = require('pg');
 const { isYouthTeam } = require('../lib/leagues');
+const { footballApiRequest, closeFootballApiClient } = require('../lib/football-api-client.cjs');
 
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = a.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] || true] : [a, true]; }));
 const SEASON = Number(args.season) || 2025;
@@ -26,7 +27,6 @@ const RUN = !!args.run;
 const RESUME = !!args.resume;
 const SEASON_START = `${SEASON}-07-01`;
 
-const API_HOST = 'v3.football.api-sports.io';
 const API_KEY = process.env.FOOTBALL_API_KEY;
 const FINISHED = new Set(['FT', 'AET', 'PEN']);
 
@@ -37,20 +37,10 @@ const pgPool = new Pool({
 });
 
 let apiCalls = 0;
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-async function apiGet(path, tries = 3) {
-  for (let i = 0; i < tries; i++) {
-    try {
-      apiCalls++;
-      const res = await fetch(`https://${API_HOST}${path}`, { headers: { 'x-apisports-key': API_KEY }, signal: AbortSignal.timeout(20000) });
-      if (res.status === 429) { await sleep(2000 * (i + 1)); continue; }
-      if (!res.ok) return [];
-      const json = await res.json();
-      if (json.errors && Object.keys(json.errors).length > 0) return [];
-      return json.response || [];
-    } catch (e) { if (i === tries - 1) { console.warn(`  api fail ${path}: ${e.message}`); return []; } await sleep(1000 * (i + 1)); }
-  }
-  return [];
+async function apiGet(path) {
+  apiCalls++;
+  const result = await footballApiRequest(path, { apiKey: API_KEY, timeoutMs: 20_000, retries: 2 });
+  return result.response;
 }
 
 const statsCache = new Map();
@@ -160,6 +150,7 @@ async function mapPool(items, limit, fn) {
     console.log(`  Tiempo aprox (concurrency ${CONCURRENCY})    : ~${Math.round((seasonCalls + statsCalls) / 350)}-${Math.round((seasonCalls + statsCalls) / 150)} min (según cap por minuto)`);
     console.log(`\n  Para ejecutar:  node --env-file=.env scripts/backfill-team-season.js --run\n`);
     await pgPool.end();
+    await closeFootballApiClient();
     return;
   }
 
@@ -183,4 +174,5 @@ async function mapPool(items, limit, fn) {
 
   console.log(`\n✓ team_season_history poblada: ${totalSaved} filas de ${teams.length} equipos. apiCalls=${apiCalls}`);
   await pgPool.end();
-})().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
+  await closeFootballApiClient();
+})().catch(async e => { console.error('FATAL:', e.message); await closeFootballApiClient(); process.exit(1); });

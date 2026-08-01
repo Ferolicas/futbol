@@ -164,6 +164,27 @@ export default function FerneyDashboard({ user }) {
     } finally { setActionBusy(null); }
   };
 
+  const onRetrainFootball = async () => {
+    if (!confirm('¿Reentrenar ahora el motor empírico de fútbol con los datos disponibles?')) return;
+    setActionBusy('retrain-futbol'); setActionMsg(null);
+    try {
+      const res = await fetch('/api/admin/ferney', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'enqueue', queue: 'futbol-retrain', payload: {} }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setActionMsg({ kind: 'ok', text: `Reentrenamiento de fútbol encolado (job #${data.enqueued || data.jobId || '?'}).` });
+        await fetchOnce();
+      } else {
+        setActionMsg({ kind: 'bad', text: `Error: ${data.error || `HTTP ${res.status}`}` });
+      }
+    } catch (e) {
+      setActionMsg({ kind: 'bad', text: `Error: ${e.message}` });
+    } finally { setActionBusy(null); }
+  };
+
   const queues     = status?.queues     || [];
   const activeJobs = status?.activeJobs || [];
   const failedJobs = status?.failedJobs || [];
@@ -635,9 +656,9 @@ export default function FerneyDashboard({ user }) {
               <span>{actionBusy === 'analyze-baseball' ? '⏳' : '⚾'}</span>
               <span>{actionBusy === 'analyze-baseball' ? 'Encolando…' : `Analizar baseball ${date}`}</span>
             </button>
-            <button onClick={() => onCalibrate('futbol')} disabled={!!actionBusy} className="fw-action-btn cyan">
-              <span>{actionBusy === 'calibrate-futbol' ? '⏳' : '⚙'}</span>
-              <span>{actionBusy === 'calibrate-futbol' ? 'Calibrando fútbol…' : 'Recalibrar fútbol'}</span>
+            <button onClick={onRetrainFootball} disabled={!!actionBusy} className="fw-action-btn cyan">
+              <span>{actionBusy === 'retrain-futbol' ? '⏳' : '⚙'}</span>
+              <span>{actionBusy === 'retrain-futbol' ? 'Encolando entrenamiento…' : 'Reentrenar fútbol'}</span>
             </button>
             <button onClick={() => onCalibrate('baseball')} disabled={!!actionBusy} className="fw-action-btn yellow">
               <span>{actionBusy === 'calibrate-baseball' ? '⏳' : '⚾'}</span>

@@ -2,8 +2,8 @@
 /**
  * Job: futbol-lineups
  * Port of /api/cron/lineups. Runs near match kickoff — fetches lineups + injuries
- * for matches starting within ~50 minutes, derives usualXI if missing, computes
- * lineup impact (missing starters), and refreshes analysis.
+ * for matches starting within ~50 minutes, derives usualXI if missing, applies
+ * empirical historical-lineup similarity, and refreshes analysis.
  *
  * Payload: {}
  */
@@ -11,7 +11,8 @@ import {
   getCachedAnalysis, cacheAnalysis, incrementApiCallCount,
   triggerEvent,
   redisGet, redisSet, KEYS, getMatchSchedule,
-  warmPlayerPhotos, buildPlayerMarkets, buildModelCombinada, pgPool,
+  warmPlayerPhotos, recomputeAnalysisWithConfirmedLineups,
+  footballApiRequest,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
@@ -20,19 +21,16 @@ import { logError } from '../../errors-log.js';
 // rate limiter in lib/api-football.js still throttles actual HTTP starts.
 const LINEUPS_CONCURRENCY = 15;
 
-const API_HOST = 'v3.football.api-sports.io';
-
 async function fetchFromApi(endpoint) {
   const key = process.env.FOOTBALL_API_KEY;
   if (!key) return null;
-  const res = await fetch(`https://${API_HOST}${endpoint}`, {
-    headers: { 'x-apisports-key': key },
-    cache: 'no-store',
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  if (data.errors && Object.keys(data.errors).length > 0) return null;
-  return data.response || [];
+  try {
+    const result = await footballApiRequest(endpoint, { apiKey: key, timeoutMs: 20_000, retries: 2 });
+    return result.response;
+  } catch (error) {
+    console.error('[lineups] API:', endpoint, error?.message || error);
+    return null;
+  }
 }
 
 async function deriveUsualXIOnTheFly(teamId) {
@@ -187,7 +185,7 @@ export async function runLineups(_payload = {}, _job = null) {
 
     const existing = await getCachedAnalysis(fixtureId, today);
     if (existing) {
-      const updatedAnalysis = {
+      let updatedAnalysis = {
         ...existing,
         lineups: { available: true, data: lineups },
         injuries: injuries || existing.injuries,
@@ -205,40 +203,20 @@ export async function runLineups(_payload = {}, _job = null) {
         awayMissing: awayMissing.missing,
         checkedAt: new Date().toISOString(),
       };
-      // Dixon-Coles purgado: NO recalculamos probabilidades aquí. Conservamos las
-      // del motor de contexto (calculatedProbabilities + combinada) ya en `existing`
-      // y solo refrescamos la metadata de alineación (lineupImpact/lineupCheck).
-      // Etapa 3: mercados de JUGADOR del startXI confirmado (gate duro: solo titulares).
-      // Guarda T-20: solo si faltan ≥20 min al kickoff (el sondeo de XI finaliza a T-20;
-      // si el XI no salió a tiempo, el fixture queda solo con mercados de equipo).
+      // El XI confirmado cambia de inmediato tanto los props de jugador como
+      // los mercados del equipo. Se recalcula con la misma evidencia del
+      // análisis diario y la capa empírica con/sin cada titular habitual.
       try {
-        if (new Date(match.fixture.date).getTime() - now >= 20 * 60 * 1000) {
-          const startXI = [];
-          for (const tl of lineups) for (const pl of (tl.startXI || [])) if (pl?.player?.id) startXI.push({ player_id: pl.player.id, team_id: tl.team?.id, name: pl.player?.name, position: pl.player?.pos });
-          if (startXI.length) {
-            const playerMarkets = await buildPlayerMarkets(pgPool, startXI, { cutoff: new Date() }); // serving: cutoff=ahora
-            updatedAnalysis.playerMarkets = playerMarkets;
-            updatedAnalysis.playerMarketsUpdatedAt = new Date().toISOString();
-            // ARREGLO TIMING (Etapa 4): el XI confirmado llega DESPUÉS de que analyzeMatch armó
-            // la combinada, así que la REARMA aquí con los player props — reusando el `scored` ya
-            // cacheado (analysis._scored). NO recalcula el motor: solo la combinada con jugadores.
-            if (existing._scored && existing.dataQuality !== 'insufficient') {
-              const teamNames = { home: existing.homeTeam, away: existing.awayTeam, homeId: eHomeId, awayId: eAwayId };
-              const rebuilt = buildModelCombinada(existing._scored, existing.odds, teamNames, playerMarkets, existing.calculatedProbabilities, existing.cornerCardData);
-              // existing._scored viene RECORTADO a prob_final≥0.70 (las <0.70 no son pick ni
-              // seleccionable) → selections/selectable IDÉNTICAS. Solo los contadores totales del
-              // embudo (scored/sinDatos) contarían de menos; se preservan del análisis original
-              // para que _funnel también quede idéntico.
-              const f0 = existing.combinada && existing.combinada._funnel;
-              if (f0 && rebuilt._funnel) {
-                if (f0.scored != null) rebuilt._funnel.scored = f0.scored;
-                if (f0.sinDatos != null) rebuilt._funnel.sinDatos = f0.sinDatos;
-              }
-              updatedAnalysis.combinada = rebuilt;
-            }
-          }
-        }
-      } catch (e) { console.error(`[futbol-lineups] playerMarkets ${fixtureId}:`, e.message); }
+        updatedAnalysis = await recomputeAnalysisWithConfirmedLineups(match, updatedAnalysis, lineups);
+      } catch (e) {
+        console.error(`[futbol-lineups] recálculo completo ${fixtureId}:`, e.message);
+        errors.push({ fixtureId, error: e.message, stage: 'recompute-confirmed-lineup' });
+        await logError(today, {
+          job: 'futbol-lineups', fixtureId, homeTeam, awayTeam,
+          league: match.league?.name, kickoff: match.fixture?.date,
+          error: `recompute-confirmed-lineup: ${e.message}`,
+        }).catch(() => {});
+      }
       await cacheAnalysis(fixtureId, updatedAnalysis);
       updated++;
       updatedFixtureIds.push(fixtureId);

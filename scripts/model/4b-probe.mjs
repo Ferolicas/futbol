@@ -1,15 +1,15 @@
 // scripts/model/4b-probe.mjs
 // FASE 4B/4C — sonda del motor: imprime la escalera de probabilidades de un fixture
-// (núcleo de conteo 4B + capa H2H 4C-1). Función pura, sin escrituras.
+// Motor empírico contextual con cadena auditable. Función pura, sin escrituras.
 //   node --env-file=.env.local scripts/model/4b-probe.mjs --fixture=1234567
 //   node --env-file=.env.local scripts/model/4b-probe.mjs --fixture=1234567 --pit
 //     --pit = point-in-time (cutoff = kickoff del partido, ranks = rank_before).
 //             Sin --pit = serving (cutoff = ahora, rank oficial→before como fallback).
 //   --json  imprime el objeto completo (con la cadena de pooling auditable).
-//   --no-h2h     apaga la capa H2H (ON por defecto tras Etapa 1: solo temporada actual); --h2h la fuerza.
-//   --no-player  NO aplica la capa de jugador (ON por defecto) — para inspeccionar el núcleo solo.
+//   --no-h2h     apaga el mayor peso de duelos directos; --h2h lo fuerza.
+//   --no-lineup  omite la similitud empírica del XI objetivo.
 import pg from 'pg';
-import { predict, fetchH2HRows, fetchPlayerContext, computePlayerShifts } from '../../lib/model-engine.js';
+import { predict, fetchH2HRows } from '../../lib/model-engine.js';
 
 const args = Object.fromEntries(process.argv.slice(2).map(s => { const m = s.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] === '' ? true : m[2]] : [s, true]; }));
 const fixtureId = Number(args.fixture);
@@ -44,24 +44,36 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: proc
   };
 
   const t0 = Date.now();
-  // mismo orquestador que servirá 4F: H2H OFF por defecto, jugador ON; --h2h / --no-player lo cambian.
-  const res = await predict(pool, ctx, { h2h: args['no-h2h'] ? false : (args.h2h ? true : undefined), player: !args['no-player'] });
-  // diagnóstico SIEMPRE (aunque la capa esté off): reusa lo que predict trajo, rellena lo que falte.
+  const { rows: targetLineupRows } = args['no-lineup'] ? { rows: [] } : await pool.query(
+    `SELECT team_id,player_id FROM model.lineups
+     WHERE fixture_id=$1 AND is_starter=TRUE ORDER BY team_id,player_id`, [fixtureId]);
+  const groupedLineups = new Map();
+  for (const row of targetLineupRows) {
+    const teamId = Number(row.team_id);
+    if (!groupedLineups.has(teamId)) groupedLineups.set(teamId, []);
+    groupedLineups.get(teamId).push({ player: { id: Number(row.player_id) } });
+  }
+  const currentLineups = [...groupedLineups.entries()]
+    .map(([teamId, startXI]) => ({ team: { id: teamId }, startXI, substitutes: [] }));
+  const res = await predict(pool, ctx, {
+    h2h: args['no-h2h'] ? false : (args.h2h ? true : undefined),
+    currentLineups,
+    includeH2HRows: true,
+  });
   const h2hRows = res.h2hRows ?? await fetchH2HRows(pool, ctx.homeTeamId, ctx.awayTeamId, ctx.cutoff);
-  const pctx = res.pctx ?? await fetchPlayerContext(pool, fixtureId, ctx);
-  const ps = computePlayerShifts(pctx, ctx);
   const ms = Date.now() - t0;
-  const nCur = h2hRows.filter(r => Number(r.comp_season) === Number(ctx.season)).length;   // modo (a): temporada actual (cualquier comp)
-  const nHist = h2hRows.length - nCur;                                                       // otras temporadas: YA NO se usan (modo b eliminado)
+  const nCur = h2hRows.filter(r => Number(r.comp_season) === Number(ctx.season)).length;
+  const nHist = h2hRows.length - nCur;
 
-  if (args.json) { console.log(JSON.stringify({ fixture: res.fixture, markets: res.markets, applied: res.applied, h2h: { total: h2hRows.length, cur: nCur, hist: nHist }, player: ps }, null, 2)); await pool.end(); return; }
+  if (args.json) { console.log(JSON.stringify({ fixture: res.fixture, markets: res.markets, applied: res.applied, h2h: { total: h2hRows.length, cur: nCur, hist: nHist } }, null, 2)); await pool.end(); return; }
 
   const f = res.fixture;
   console.log(`\n${m.home_name} vs ${m.away_name}  ·  ${m.comp_name} ${ctx.season ?? ''}  ·  fixture ${fixtureId}`);
   console.log(`modo=${pit ? 'POINT-IN-TIME' : 'serving'}  cutoff=${f.cutoff}  phase=${f.phase}${f.isKnockout ? '(KO)' : ''}`);
-  console.log(`rank hoy: local=${f.homeRank ?? '—'} visita=${f.awayRank ?? '—'}  nTeams=${f.nTeams ?? '—'}  ·  filas: local=${f.homeRows} visita=${f.awayRows} liga=${f.leagueRows}  ·  ${ms}ms`);
-  console.log(`H2H directos (H vs A): total=${h2hRows.length}  ·  temporada actual(a)=${nCur}  ·  otras(no usadas)=${nHist}  ·  aplicado=${res.applied.h2h ? 'sí' : 'NO (--no-h2h)'}${res.applied.h2h ? `  ·  1X2 mode=${process.env.H2H_1X2_MODE || 'softweight'}` : ''}`);
-  console.log(`Jugador: aplicado=${res.applied.player ? 'sí' : 'NO (--no-player)'}  ·  lineup=${ps.hasLineup ? 'sí' : 'no'}  ·  local[gf=${ps.home.shift_gf} ga=${ps.home.shift_ga} cards=${ps.home.shift_cards} merma=${ps.home.merma} aus=${ps.home.ausentes.length}]  ·  visita[gf=${ps.away.shift_gf} ga=${ps.away.shift_ga} cards=${ps.away.shift_cards} merma=${ps.away.merma} aus=${ps.away.ausentes.length}]\n`);
+  console.log(`rank hoy: local=${f.homeRank ?? '—'} visita=${f.awayRank ?? '—'}  nTeams=${f.nTeams ?? '—'}  ·  filas: local=${f.homeRows} (${f.currentHomeRows} actuales) visita=${f.awayRows} (${f.currentAwayRows} actuales)  ·  ${ms}ms`);
+  console.log(`H2H directos (H vs A): total=${h2hRows.length}  ·  temporada actual=${nCur}  ·  históricas=${nHist}  ·  peso contextual=${res.applied.h2h ? 'sí' : 'NO (--no-h2h)'}`);
+  const lc = f.lineupContext;
+  console.log(`XI empírico: aplicado=${res.applied.lineup ? 'sí' : 'no'}  ·  titulares=${lc ? `${lc.homeStarters}+${lc.awayStarters}` : 'sin XI'}  ·  antecedentes con lineup=${lc?.historicalRows ?? 0}  ·  boost=${f.engineConfig.lineupBoost}\n`);
 
   const r1x2 = res.markets['1x2'];
   if (r1x2) console.log(`1X2   local ${pct(r1x2.home)}  empate ${pct(r1x2.draw)}  visita ${pct(r1x2.away)}   (n=${r1x2.n} conf=${r1x2.conf})\n`);
@@ -89,19 +101,6 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: proc
     }
   }
 
-  if (res.applied.player && ps.hasLineup && (ps.home.ausentes.length || ps.away.ausentes.length)) {
-    console.log('\n— Jugador aplicado (antes → después) —');
-    console.log(`  local  gf=${ps.home.shift_gf} ga=${ps.home.shift_ga} cards=${ps.home.shift_cards} merma=${ps.home.merma} ausentes=[${ps.home.ausentes.join(',')}]`);
-    console.log(`  visita gf=${ps.away.shift_gf} ga=${ps.away.shift_ga} cards=${ps.away.shift_cards} merma=${ps.away.merma} ausentes=[${ps.away.ausentes.join(',')}]`);
-    for (const s of (res.markets['1x2'].chain || []).filter(c => c.step === 'player')) console.log(`  1x2 (merma): ${trip(s.before)} → ${trip(s.after)} (n=${s.n})`);
-    for (const key of ['goals_total', 'goals_home', 'goals_away', 'cards_total']) {
-      const mkt = res.markets[key]; if (!mkt) continue;
-      for (const ln of mkt.lines) {
-        const st = (ln.chain || []).filter(c => c.step === 'player');
-        if (st.length) console.log(`  ${key} o${ln.line}: ${pct(st[0].before)} → ${pct(st[st.length - 1].after)} (n=${st[0].n})`);
-      }
-    }
-  }
   console.log('');
   await pool.end();
 })().catch(e => { console.error('FATAL', e); process.exit(1); });

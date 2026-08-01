@@ -10,7 +10,7 @@
 try { require('dotenv').config({ path: '.env.local' }); } catch {}
 try { require('dotenv').config({ path: '.env' }); } catch {}
 const { Pool } = require('pg');
-const HOST = 'v3.football.api-sports.io';
+const { footballApiRequest, closeFootballApiClient } = require('../lib/football-api-client.cjs');
 const KEY = process.env.FOOTBALL_API_KEY || process.env.NEXT_PUBLIC_API_FOOTBALL_KEY;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false }, max: 4 });
 
@@ -62,17 +62,13 @@ const CONF = {
 let calls = 0, saved = 0, skipped = 0, errors = 0;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function apiGet(path) {
-  for (let i = 0; i < 4; i++) {
-    try {
-      calls++;
-      const r = await fetch(`https://${HOST}${path}`, { headers: { 'x-apisports-key': KEY } });
-      if (r.status === 429) { await sleep(2000 * (i + 1)); continue; }
-      if (!r.ok) return { __http: r.status, response: [] };
-      return await r.json();
-    } catch (e) { if (i === 3) { errors++; return { __error: e.message, response: [] }; } await sleep(1000 * (i + 1)); }
-    await sleep(90);
+  calls++;
+  try {
+    return (await footballApiRequest(path, { apiKey: KEY, timeoutMs: 30_000, retries: 3 })).payload;
+  } catch (error) {
+    errors++;
+    throw error;
   }
-  return { response: [] };
 }
 async function existsRaw(endpoint, refId, subKey) {
   const { rows } = await pool.query(`SELECT 1 FROM raw_api_payloads WHERE endpoint=$1 AND ref_id=$2 AND sub_key=$3`, [endpoint, refId, subKey]);
@@ -156,4 +152,5 @@ async function existsRaw(endpoint, refId, subKey) {
   console.log(`[bf-sel] FASE3 done: statistics+events. llamadas totales ${calls}, saved ${saved}, skip ${skipped}, errores ${errors}`);
   console.log(`[bf-sel] FIN ${new Date().toISOString()} · total ${Math.round((Date.now()-t0)/1000)}s`);
   await pool.end();
-})().catch(e => { console.error('[bf-sel] FATAL:', e.message); process.exit(1); });
+  await closeFootballApiClient();
+})().catch(async e => { console.error('[bf-sel] FATAL:', e.message); await closeFootballApiClient(); process.exit(1); });

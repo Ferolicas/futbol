@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS prediction_models (
 CREATE INDEX IF NOT EXISTS idx_prediction_models_active
   ON prediction_models (sport, market_key) WHERE active;
 
--- Diagnóstico por segmento — para ENTENDER por qué falla un mercado (no excluirlo).
+-- Diagnóstico por segmento: además de observabilidad, `validation-high` y
+-- `validation-elite95` sustentan el gate de recomendación sin alterar p.
 CREATE TABLE IF NOT EXISTS market_segment_diagnostics (
   sport             TEXT NOT NULL DEFAULT 'football',
   market_key        TEXT NOT NULL,

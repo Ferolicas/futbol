@@ -34,23 +34,21 @@ import {
   getMatchSchedule,
   captureFinalizedFixturesRaw,
   bogotaToday,
+  footballApiRequest,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 
 const FINALIZE_CONCURRENCY = 10;
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
-const API_HOST = 'v3.football.api-sports.io';
-
 async function apiGet(path, apiKey) {
-  const res = await fetch(`https://${API_HOST}${path}`, {
-    headers: { 'x-apisports-key': apiKey },
-    cache: 'no-store',
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) return null;
-  const json = await res.json();
-  return json.response || null;
+  try {
+    const result = await footballApiRequest(path, { apiKey, timeoutMs: 15_000, retries: 2 });
+    return result.response;
+  } catch (error) {
+    console.error('[finalize] API:', path, error?.message || error);
+    return null;
+  }
 }
 
 async function fetchFixture(fid, apiKey) {
@@ -146,10 +144,10 @@ function extractResult(match) {
     detail: e.detail || null,
   }));
 
-  // Construir actuals_full — JSON unificado con TODO lo necesario para
-  // calibrar cualquier mercado en build-calibration.js. Distinguimos
+  // Construir actuals_full — JSON unificado con los resultados observados para
+  // auditar/validar cada mercado. Distinguimos
   // valores "90min" (fulltime, lo que paga el bookmaker) de "AET" (incluye
-  // prorroga). Casas pagan a 90min, asi que para calibracion correcta de
+  // prorroga). Casas pagan a 90min, asi que para validación correcta de
   // over/under usamos goals.totalFt no goals.total.
   const actualsFull = {
     status: statusShort,                          // FT / AET / PEN

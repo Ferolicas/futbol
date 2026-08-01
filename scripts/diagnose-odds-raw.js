@@ -11,7 +11,7 @@
 try { require('dotenv').config({ path: '.env.local' }); } catch {}
 try { require('dotenv').config({ path: '.env' }); } catch {}
 
-const API_HOST = 'v3.football.api-sports.io';
+const { footballApiRequest, closeFootballApiClient } = require('../lib/football-api-client.cjs');
 const KEY = process.env.FOOTBALL_API_KEY || process.env.NEXT_PUBLIC_API_FOOTBALL_KEY;
 const fixtureId = process.argv[2];
 const bkFilter = (process.argv[3] || '').toLowerCase();
@@ -73,8 +73,7 @@ const isHandicap = (name) => /handicap/i.test(name || '');
   if (!KEY) { console.error('Falta FOOTBALL_API_KEY.'); process.exit(1); }
   if (!fixtureId) { console.error('Uso: node scripts/diagnose-odds-raw.js <fixtureId> [bookmaker]'); process.exit(1); }
 
-  const res = await fetch(`https://${API_HOST}/odds?fixture=${fixtureId}`, { headers: { 'x-apisports-key': KEY } });
-  const json = await res.json();
+  const json = (await footballApiRequest(`/odds?fixture=${fixtureId}`, { apiKey: KEY, timeoutMs: 30_000, retries: 2 })).payload;
   const bookmakers = json?.response?.[0]?.bookmakers || [];
   console.log(`\nfixture ${fixtureId} · bookmakers en respuesta: ${bookmakers.length}`);
   if (json?.errors && Object.keys(json.errors).length) console.log('errors:', JSON.stringify(json.errors));
@@ -102,4 +101,5 @@ const isHandicap = (name) => /handicap/i.test(name || '');
   }
   console.log('\nAhora TODO mercado de bet365/bwin excepto hándicap queda capturado: los de familia');
   console.log('en allBookmakerOdds[bk].<familia>, el resto en allBookmakerOdds[bk].extraMarkets.');
-})().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
+  await closeFootballApiClient();
+})().catch(async e => { console.error('FATAL:', e.message); await closeFootballApiClient(); process.exit(1); });

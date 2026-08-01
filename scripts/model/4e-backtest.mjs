@@ -5,36 +5,32 @@
 //
 //   node --env-file=.env.local scripts/model/4e-backtest.mjs --limit=200
 //   node --env-file=.env.local scripts/model/4e-backtest.mjs --liga=39 --season=2023
-//   node --env-file=.env.local scripts/model/4e-backtest.mjs --variant=nucleo    (tabla de buckets: nucleo|h2h)
+//   node --env-file=.env.local scripts/model/4e-backtest.mjs --variant=empirical
 //   node --env-file=.env.local scripts/model/4e-backtest.mjs --resume             (reanuda checkpoint)
 //   flags: --limit N · --liga ID · --season YYYY · --batch N (progreso/checkpoint) · --variant · --fresh
 //
-// Universo: fixtures finalizados (result + ft no nulos) donde AMBOS equipos cumplen el veto
-// de producción (≥5 finalizados antes del cutoff). 2 variantes LIMPIAS por fixture: nucleo
-// y h2h. Diagrama de fiabilidad (buckets finos arriba) + ECE + Brier por (familia × variante)
-// y (cobertura × variante). Lento; usar --limit para validar primero.
+// Universo: todos los fixtures finalizados (result + ft no nulos). No existe un
+// mínimo de historial: cualquier antecedente real entra y cero datos produce
+// simplemente cero mercados para esa familia. Diagrama de fiabilidad + ECE +
+// Brier por familia y cobertura. Lento; usar --limit para validar primero.
 //
-// FUGA CONOCIDA — variantes con JUGADOR pendientes: model.player_impact se construyó sobre
-// TODO el histórico (sin cutoff), así que sus deltas incluyen partidos POSTERIORES al fixture
-// que se predice → fuga de futuro. Por eso aquí NO se corren "jugador"/"completo" ni se llama
-// fetchPlayerContext/applyPlayer (el cutoff de filas/H2H/ranks SÍ es correcto; el agujero es
-// solo esa tabla pre-agregada). Pendiente: sub-fase que recalcule player_impact point-in-time
-// (cutoff por fixture) para poder medir esas variantes sin fuga.
+// La antigua variante contrafactual de player_impact fue retirada del serving.
+// Este backtest mide el núcleo; el entrenador canónico añade similitud del XI
+// usando exclusivamente lineups anteriores al cutoff y la valida aparte.
 import fs from 'fs';
 import pg from 'pg';
-import { computeBaseMarkets, fetchH2HRows, applyH2H } from '../../lib/model-engine.js';
+import { computeBaseMarkets } from '../../lib/model-engine.js';
 
 const args = Object.fromEntries(process.argv.slice(2).map(s => { const m = s.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] === '' ? true : m[2]] : [s, true]; }));
 const LIMIT = args.limit ? Number(args.limit) : null;
 const LIGA = args.liga ? Number(args.liga) : null;
 const SEASON = args.season ? Number(args.season) : null;
 const BATCH = args.batch ? Number(args.batch) : 100;
-const VARIANT_TABLE = args.variant || 'h2h';        // variante para la tabla de buckets
+const VARIANT_TABLE = args.variant || 'empirical';
 const CKPT = 'scripts/model/.4e-checkpoint.json';
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false }, max: 3 });
 
-const MIN_HISTORY = 5;                                // veto de producción: ≥5 finalizados por equipo
-const VARIANTS = ['nucleo', 'h2h'];   // jugador/completo OMITIDAS: fuga en player_impact (ver header), pendientes
+const VARIANTS = ['empirical'];
 // buckets: gruesos abajo, FINOS arriba (zona alta es la que importa para apostar)
 const EDGES = [0, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.85, 0.90, 0.95, 1.0001];
 const BLABEL = ['0-10', '10-20', '20-30', '30-40', '40-50', '50-60', '60-70', '70-80', '80-85', '85-90', '90-95', '95-100'];
@@ -44,7 +40,6 @@ const num = (x) => (x == null ? null : Number(x));
 const add = (a, b) => (a == null || b == null ? null : Number(a) + Number(b));
 const cardsOne = (y, r) => (y == null ? null : Number(y) + (r == null ? 0 : Number(r)));
 const cardsTot = (y1, r1, y2, r2) => (y1 == null || y2 == null ? null : Number(y1) + (r1 ? Number(r1) : 0) + Number(y2) + (r2 ? Number(r2) : 0));
-const clone = (m) => JSON.parse(JSON.stringify(m));
 const pct = (x) => (x == null ? '  —  ' : `${(x * 100).toFixed(1)}%`);
 const bucketIdx = (p) => { for (let i = 0; i < BLABEL.length; i++) if (p >= EDGES[i] && p < EDGES[i + 1]) return i; return -1; };
 
@@ -109,7 +104,7 @@ function score(variant, markets, row, tier) {
   if (LIGA) { params.push(LIGA); where.push(`m.competition_id = $${params.length}`); }
   if (SEASON) { params.push(SEASON); where.push(`m.season = $${params.length}`); }
   const { rows: U } = await pool.query(
-    `SELECT m.fixture_id, m.home_team_id, m.away_team_id, m.competition_id, m.season, m.phase, m.kickoff,
+    `SELECT m.fixture_id, m.home_team_id, m.away_team_id, m.competition_id, m.season, m.phase, m.kickoff, m.referee,
             m.home_rank_before, m.away_rank_before, cs.n_teams, m.ft_home, m.ft_away, m.result,
             t.corners_for, t.corners_against, t.shots_for, t.shots_against, t.sot_for, t.sot_against,
             t.fouls_for, t.fouls_against, t.offsides_for, t.offsides_against,
@@ -134,46 +129,40 @@ function score(variant, markets, row, tier) {
 
   // reanudación opcional (checkpoint local)
   let startIdx = 0;
-  const filterKey = `${LIGA || '*'}:${SEASON || '*'}:${LIMIT || '*'}`;
+  const filterKey = `empirical-v2:${LIGA || '*'}:${SEASON || '*'}:${LIMIT || '*'}`;
   if (args.resume && !args.fresh && fs.existsSync(CKPT)) {
     const ck = JSON.parse(fs.readFileSync(CKPT, 'utf8'));
     if (ck.filterKey === filterKey) { Object.assign(acc, ck.acc); startIdx = ck.idx; console.log(`[4E] reanudando desde fixture #${startIdx}/${U.length}`); }
   }
 
-  console.log(`[4E] universo: ${U.length} fixtures finalizados${LIGA ? ` liga=${LIGA}` : ''}${SEASON ? ` season=${SEASON}` : ''} · veto≥${MIN_HISTORY} · point-in-time`);
-  const t0 = Date.now(); let done = 0, vetoed = 0, errs = 0;
+  console.log(`[4E] universo: ${U.length} fixtures finalizados${LIGA ? ` liga=${LIGA}` : ''}${SEASON ? ` season=${SEASON}` : ''} · sin mínimo de muestra · point-in-time`);
+  const t0 = Date.now(); let done = 0, errs = 0;
 
   for (let idx = startIdx; idx < U.length; idx++) {
     const r = U[idx];
     const ctx = {
       homeTeamId: Number(r.home_team_id), awayTeamId: Number(r.away_team_id),
       competitionId: Number(r.competition_id), season: r.season != null ? Number(r.season) : null,
-      phase: r.phase, nTeams: r.n_teams != null ? Number(r.n_teams) : null,
+      phase: r.phase, referee: r.referee || null, nTeams: r.n_teams != null ? Number(r.n_teams) : null,
       homeRank: r.home_rank_before != null ? Number(r.home_rank_before) : null,   // point-in-time
       awayRank: r.away_rank_before != null ? Number(r.away_rank_before) : null,
       cutoff: new Date(r.kickoff),
     };
     try {
-      // cache FRESCA por fixture: el base-rate liga/global es point-in-time (cutoff distinto c/u)
-      const base = await computeBaseMarkets(pool, ctx, { cache: new Map() });
-      if (base.fixture.homeRows < MIN_HISTORY || base.fixture.awayRows < MIN_HISTORY) { vetoed++; continue; } // mismo veto de prod
-      const h2hRows = await fetchH2HRows(pool, ctx.homeTeamId, ctx.awayTeamId, ctx.cutoff);
+      const base = await computeBaseMarkets(pool, ctx);
       const tier = tierOf(r.competition_id);
-      // ── (3) variantes LIMPIAS sobre copias del núcleo (las capas mutan in-place) ──
-      // jugador/completo OMITIDAS: player_impact tiene fuga (deltas sin cutoff) — ver header.
-      score('nucleo', clone(base.markets), r, tier);
-      score('h2h', applyH2H(clone(base.markets), h2hRows, ctx), r, tier);
+      score('empirical', base.markets, r, tier);
       done++;
     } catch (e) { errs++; if (errs <= 5) console.error(`  err fixture ${r.fixture_id}: ${e.message}`); }
 
     if ((idx + 1) % BATCH === 0 || idx === U.length - 1) {
       const el = (Date.now() - t0) / 1000, rate = (idx + 1 - startIdx) / el, eta = (U.length - idx - 1) / rate;
-      const ov = acc.fam[`h2h|goals_total`];
-      console.log(`[4E] ${idx + 1}/${U.length} · ok=${done} veto=${vetoed} err=${errs} · ${el.toFixed(0)}s (${rate.toFixed(1)}/s, ETA ${eta.toFixed(0)}s) · ECE h2h|goals_total=${eceOf(ov) != null ? (eceOf(ov) * 100).toFixed(2) + '%' : '—'}`);
+      const ov = acc.fam[`empirical|goals_total`];
+      console.log(`[4E] ${idx + 1}/${U.length} · ok=${done} err=${errs} · ${el.toFixed(0)}s (${rate.toFixed(1)}/s, ETA ${eta.toFixed(0)}s) · ECE empirical|goals_total=${eceOf(ov) != null ? (eceOf(ov) * 100).toFixed(2) + '%' : '—'}`);
       try { fs.writeFileSync(CKPT, JSON.stringify({ filterKey, idx: idx + 1, acc })); } catch {}
     }
   }
-  console.log(`[4E] FIN · procesados=${done} vetados=${vetoed} errores=${errs} · ${((Date.now() - t0) / 1000).toFixed(0)}s\n`);
+  console.log(`[4E] FIN · procesados=${done} errores=${errs} · ${((Date.now() - t0) / 1000).toFixed(0)}s\n`);
   printTables();
   await pool.end();
 })().catch(e => { console.error('FATAL', e); process.exit(1); });
@@ -186,7 +175,7 @@ function printTables() {
   console.log(['familia'.padEnd(18), ...VARIANTS.map(v => v.padEnd(16))].join(''));
   for (const fam of families) {
     const cells = VARIANTS.map(v => { const e = acc.fam[`${v}|${fam}`]; if (!e) return ''.padEnd(16); const ece = eceOf(e), br = brierOf(e); return `${(ece * 100).toFixed(1)}%/${br.toFixed(3)}`.padEnd(16); });
-    const nrep = totalN(acc.fam[`h2h|${fam}`] || { b: [] });
+    const nrep = totalN(acc.fam[`empirical|${fam}`] || { b: [] });
     console.log([`${fam}`.padEnd(18), ...cells].join('') + `  (n=${nrep})`);
   }
   // B) fiabilidad por (familia × bucket) para la variante elegida

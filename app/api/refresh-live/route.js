@@ -3,6 +3,9 @@ import { ALL_LEAGUE_IDS, isYouthTeam } from '../../../lib/leagues';
 import { getCurrentUser } from '../../../lib/auth-pg';
 import { statLookup, STAT_ALIASES } from '../../../lib/match-stats';
 import { jsonError } from '../../../lib/api-error';
+import footballApiClient from '../../../lib/football-api-client.cjs';
+
+const { footballApiRequest } = footballApiClient;
 
 // Force-refresh live data — direct API call, no cron chaining.
 // Rate-limited to once every 15s via Redis lock.
@@ -14,7 +17,6 @@ export const maxDuration = 30;
 
 const LOCK_KEY = 'refresh-live:lock';
 const LOCK_TTL = 15;
-const API_HOST = 'v3.football.api-sports.io';
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'INT'];
 
@@ -97,13 +99,8 @@ function extractLiveStats(match) {
 
 async function apiFetchFixture(apiKey, fixtureId) {
   try {
-    const res = await fetch(`https://${API_HOST}/fixtures?id=${fixtureId}`, {
-      headers: { 'x-apisports-key': apiKey },
-      cache: 'no-store',
-    });
-    if (!res.ok) return null;
-    const json = await res.json();
-    return json.response?.[0] || null;
+    const result = await footballApiRequest(`/fixtures?id=${fixtureId}`, { apiKey, timeoutMs: 20_000, retries: 2 });
+    return Array.isArray(result.response) ? result.response[0] || null : null;
   } catch { return null; }
 }
 
@@ -146,25 +143,20 @@ export async function POST(request) {
       return Response.json({ success: false, error: 'No API key configured' }, { status: 500 });
     }
 
-    const res = await fetch(`https://${API_HOST}/fixtures?live=all`, {
-      headers: { 'x-apisports-key': apiKey },
-      cache: 'no-store',
-    });
-
     let apiCalls = 1;
-
-    if (!res.ok) {
+    let liveResponse;
+    try {
+      liveResponse = await footballApiRequest('/fixtures?live=all', { apiKey, timeoutMs: 20_000, retries: 2 });
+    } catch (error) {
       const cached = await redisGet(KEYS.liveStats(today));
       return Response.json({
         success: false,
-        error: `API returned ${res.status}`,
+        error: error?.message || 'API-Football no disponible',
         liveStats: cached && typeof cached === 'object' ? cached : {},
         timestamp: new Date().toISOString(),
       });
     }
-
-    const json = await res.json();
-    const tracked = (json.response || []).filter(m =>
+    const tracked = (liveResponse.response || []).filter(m =>
       ALL_LEAGUE_IDS.includes(m.league.id) && !YOUTH_RE.test(m.league.name || '') &&
       !isYouthTeam(m.teams?.home?.name) && !isYouthTeam(m.teams?.away?.name)
     );

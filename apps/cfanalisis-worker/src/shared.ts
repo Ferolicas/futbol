@@ -30,6 +30,7 @@ const SCRIPTS = '../../../scripts/';
 const [
   _redis,
   _apiFootball,
+  _footballApiClient,
   _supabase,
   _supabaseCache,
   _sanityCache,
@@ -45,19 +46,17 @@ const [
   _mlbStatsApi,
   _rawBackfill,
   _playerPhotos,
-  _reenrich,
-  _buildProfiles,
-  _baseRates,
   _reenrichBaseball,
   _trainBaseballMeta,
   _modelIngest,
   _modelProfiles,
-  _modelImpact,
   _modelPlayerMarkets,
   _modelProbabilities,
+  _trainFootballEmpirical,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
+  import(LIB + 'football-api-client.cjs'),
   import(LIB + 'supabase.js'),
   import(LIB + 'supabase-cache.js'),
   import(LIB + 'sanity-cache.js'),
@@ -73,19 +72,16 @@ const [
   import(LIB + 'mlb-stats-api.js'),
   import(LIB + 'raw-backfill.js'),
   import(LIB + 'player-photos.js'),
-  // Scripts del pipeline de retrain — refactorizados a funciones exportadas
-  // (CommonJS, con guard require.main para uso CLI). Se cargan vía import()
-  // dinámico igual que los lib/*; el guard NO se dispara dentro del worker.
-  import(SCRIPTS + 'reenrich-features.js'),
-  import(SCRIPTS + 'build-team-profiles.js'),
-  import(SCRIPTS + 'compute-market-base-rates.js'),
+  // Scripts activos de entrenamiento. Las rutas antiguas de fútbol basadas en
+  // shrinkage/prior ya no se cargan en el worker: el único motor de fútbol es
+  // ahora el empírico point-in-time definido al final de esta lista.
   import(SCRIPTS + 'reenrich-baseball.js'),
   import(SCRIPTS + 'train-baseball-meta-models.js'),
   import(LIB + 'model-ingest.js'),
   import(LIB + 'model-profiles.js'),
-  import(LIB + 'model-impact.js'),
   import(LIB + 'model-player-markets.js'),
   import(LIB + 'model-probabilities.js'),
+  import(SCRIPTS + 'train-football-empirical-engine.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -106,6 +102,12 @@ export const TTL = _redis.TTL;
 export const getFixtures = _apiFootball.getFixtures;
 export const analyzeMatch = _apiFootball.analyzeMatch;
 export const getQuota = _apiFootball.getQuota;
+export const recomputeAnalysisWithConfirmedLineups = _apiFootball.recomputeAnalysisWithConfirmedLineups;
+
+// Cliente distribuido único de API-Football (Redis, 420/min por defecto).
+const footballApiClient = _footballApiClient.default || _footballApiClient;
+export const footballApiRequest = footballApiClient.footballApiRequest;
+export const payloadQuality = footballApiClient.payloadQuality;
 
 // (api-baseball.js purgado — baseball es 100% MLB Stats API + The Odds API,
 //  ver lib/mlb-stats-api.js y lib/odds-api.js)
@@ -141,6 +143,7 @@ export const warmPlayerPhotos = _playerPhotos.warmPlayerPhotos;
 export const getPlayerPhoto = _playerPhotos.getPlayerPhoto;
 // Captura focalizada por fixture (cron nocturno de retrain).
 export const captureFinalizedFixturesRaw = _rawBackfill.captureFinalizedFixturesRaw;
+export const retryDueCaptureFailures = _rawBackfill.retryDueCaptureFailures;
 
 // lib/model-ingest.js (FASE 2E) — ingesta crudo → schema `model` (compartida con 2B).
 export const ingestFixtures = _modelIngest.ingestFixtures;
@@ -152,10 +155,6 @@ export const ingestFixtureObjects = _modelIngest.ingestFixtureObjects;
 export const buildModelTeamProfiles = _modelProfiles.buildTeamProfiles;
 export const buildModelPlayerProfiles = _modelProfiles.buildPlayerProfiles;
 
-// lib/model-impact.js (FASE 4A) — builder de player_impact (impacto con/sin del
-// jugador en su equipo). Refrescado incremental cada noche por model-sync.
-export const buildPlayerImpact = _modelImpact.buildPlayerImpact;
-
 // lib/model-player-markets.js (Etapa 3) — mercados de jugador del startXI confirmado
 // (frecuencia empírica cruda de player_match_stats, 70/30). Lo llama futbol-lineups.
 export const buildPlayerMarkets = _modelPlayerMarkets.buildPlayerMarkets;
@@ -163,14 +162,7 @@ export const buildPlayerMarkets = _modelPlayerMarkets.buildPlayerMarkets;
 // lib/model-probabilities.js (Etapa 4) — rearma la combinada con los player props del
 // modelo cuando el XI confirma (arreglo de timing), reusando el scored ya cacheado.
 export const buildModelCombinada = _modelProbabilities.buildModelCombinada;
-
-// scripts/* del pipeline de retrain (CommonJS → import() dinámico).
-export const reenrichFeatures = _reenrich.reenrichFeatures;
-export const buildTeamProfiles = _buildProfiles.buildTeamProfiles;
-// trainMetaModels (ML del motor viejo) ELIMINADO en Etapa 4 — context-engine borrado.
-// scripts/compute-market-base-rates.js — prior del shrink de calibración. Lo
-// re-corre el cron nocturno (futbol-retrain) tras entrenar, con el pgPool.
-export const computeMarketBaseRates = _baseRates.computeMarketBaseRates;
+export const trainFootballEmpiricalEngine = _trainFootballEmpirical.trainFootballEmpiricalEngine;
 
 // scripts/reenrich-baseball.js + scripts/train-baseball-meta-models.js —
 // se invocan desde el cron baseball-retrain. Mismo guard CLI que los de fútbol.

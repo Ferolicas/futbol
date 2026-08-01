@@ -8,13 +8,15 @@
 // re-correr --run continúa con lo que falte. Vacío de la API (response:[]) se guarda
 // (no se re-pide) y se reporta por liga; null/429/red NO se guarda → se reintenta.
 import pg from 'pg';
+import footballApiClient from '../../lib/football-api-client.cjs';
+
+const { footballApiRequest, closeFootballApiClient } = footballApiClient;
 
 const args = Object.fromEntries(process.argv.slice(2).map(s => { const m = s.match(/^--([^=]+)=?(.*)$/); return m ? [m[1], m[2] === '' ? true : m[2]] : [s, true]; }));
 const RUN = !!args.run;
 const RPS = Number(args.rps) || 3;
 const DAILY_CAP = Number(args['daily-cap']) || 80000;
 const MIN_INTERVAL = Math.ceil(1000 / RPS);
-const API = 'v3.football.api-sports.io';
 const KEY = process.env.FOOTBALL_API_KEY;
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false }, max: 3 });
 
@@ -31,10 +33,7 @@ async function gate() { const w = MIN_INTERVAL - (Date.now() - lastReq); if (w >
 async function apiGet(path) {
   await gate();
   try {
-    const res = await fetch(`https://${API}${path}`, { headers: { 'x-apisports-key': KEY }, cache: 'no-store', signal: AbortSignal.timeout(20000) });
-    if (res.status === 429) return { rateLimited: true };
-    if (!res.ok) return null;
-    return await res.json();
+    return (await footballApiRequest(path, { apiKey: KEY, timeoutMs: 20_000, retries: 2 })).payload;
   } catch { return null; }
 }
 async function setCk(last, done, total, status) {
@@ -49,9 +48,9 @@ async function setCk(last, done, total, status) {
     console.log(`  requests API : ${n} (1/fixture)`);
     console.log(`  a ${RPS} req/s → ~${h} h continuas · días con cap ${DAILY_CAP}: ${Math.ceil(n / DAILY_CAP)}`);
     console.log(`  cuota Mega   : ${n} de ~140k libres/día = ${(100 * n / 140000).toFixed(1)}% de un día`);
-    await pool.end(); return;
+    await pool.end(); await closeFootballApiClient(); return;
   }
-  if (!RUN) { console.log('Usa --estimate (no gasta API) o --run'); await pool.end(); return; }
+  if (!RUN) { console.log('Usa --estimate (no gasta API) o --run'); await pool.end(); await closeFootballApiClient(); return; }
   if (!KEY) throw new Error('FOOTBALL_API_KEY no está en el env');
 
   const { rows } = await pool.query(MISSING_SQL);
@@ -62,9 +61,7 @@ async function setCk(last, done, total, status) {
     if (today >= DAILY_CAP) { console.log(`[2C] daily-cap ${DAILY_CAP} alcanzado → paro. Re-corre --run mañana (reanuda solo lo que falte).`); break; }
     const fid = Number(r.fixture_id);
     let json = await apiGet(`/fixtures/players?fixture=${fid}`); today++;
-    let t = 0;
-    while (json?.rateLimited && t < 5) { const b = 2000 * (t + 1); console.log(`  429 fid=${fid} → backoff ${b}ms`); await new Promise(x => setTimeout(x, b)); json = await apiGet(`/fixtures/players?fixture=${fid}`); today++; t++; }
-    if (!json || json.rateLimited) { errors++; done++; continue; }   // transitorio → no guardar → se reintenta luego
+    if (!json) { errors++; done++; continue; }   // transitorio → no guardar → se reintenta luego
     const arr = json.response || [];
     await pool.query(`INSERT INTO raw_api_payloads (endpoint, ref_type, ref_id, season, sub_key, payload, fetched_at) VALUES ('fixtures/players','fixture',$1,NULL,'',$2::jsonb,NOW()) ON CONFLICT (endpoint, ref_id, sub_key) DO UPDATE SET payload=EXCLUDED.payload, fetched_at=NOW()`, [fid, JSON.stringify(json)]);
     if (arr.length > 0) withPlayers++; else { empty++; emptyByLeague[r.league] = (emptyByLeague[r.league] || 0) + 1; }
@@ -77,4 +74,5 @@ async function setCk(last, done, total, status) {
   if (top.length) { console.log(`[2C] ligas SIN players devueltos por la API (quedan sin perfil de jugador, es correcto):`); for (const [lg, n] of top) console.log(`   ${String(n).padStart(5)}  ${lg}`); }
   console.log(`\n→ Ahora ingiere: node --env-file=.env.local scripts/model/2b-ingest-facts.mjs --reset`);
   await pool.end();
-})().catch(e => { console.error('FATAL', e); process.exit(1); });
+  await closeFootballApiClient();
+})().catch(async e => { console.error('FATAL', e); await closeFootballApiClient(); process.exit(1); });
