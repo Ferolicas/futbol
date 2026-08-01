@@ -31,6 +31,17 @@ test('extrae remates y faltas por jugador sin convertir null en datos inventados
   });
 });
 
+test('agrupa detalles de fixtures en lotes de máximo 20 sin duplicar IDs', async () => {
+  const { fixtureDetailBatches } = await helperPromise;
+  const fixtures = Array.from({ length: 41 }, (_, index) => ({ fixture: { id: index + 1 } }));
+  fixtures.push({ fixture: { id: 1 } }, { fixture: { id: null } });
+
+  const batches = fixtureDetailBatches(fixtures);
+  assert.deepEqual(batches.map(batch => batch.length), [20, 20, 1]);
+  assert.equal(new Set(batches.flat()).size, 41);
+  assert.equal(fixtureDetailBatches(Array.from({ length: 400 }, (_, index) => index + 1)).length, 20);
+});
+
 test('atribuye solo incrementos nuevos y separa remate de remate a puerta', async () => {
   const { diffPlayerActivity } = await helperPromise;
   const previous = [{ key: 'id:7', playerId: 7, player: 'Ana Gol', teamId: 10, teamName: 'Local', shots: 1, shotsOnTarget: 0, fouls: 0 }];

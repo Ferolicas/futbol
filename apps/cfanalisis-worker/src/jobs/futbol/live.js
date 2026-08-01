@@ -17,6 +17,7 @@ import {
 import {
   diffPlayerActivity,
   extractPlayerActivity,
+  fixtureDetailBatches,
   mergePlayerActivity,
 } from './live-player-activity.js';
 
@@ -122,8 +123,8 @@ function extractLiveStats(match, events, stats) {
 
   // Corners: ligas exóticas (Ucrania, China, Serbia, etc.) a veces NO devuelven
   // stats en /fixtures?live=all. Cuando getVal devuelve null, dejamos null
-  // explícito para que el caller (live.js) sepa que tiene que hacer fetch al
-  // endpoint dedicado /fixtures/statistics?fixture=X. NO usamos 0 como default
+  // explícito para que el detalle batched `/fixtures?ids=...` o el snapshot
+  // anterior puedan completarlo. NO usamos 0 como default
   // porque "0 corners en el min 80" sería un dato real, mientras que null = "no
   // sabemos". Esto distingue "API no reporta" vs "el partido realmente no tuvo".
   const hCornersRaw = getVal(homeStats, 'Corner Kicks', 'Corners', 'Corner');
@@ -404,21 +405,20 @@ async function markSent(key) {
   try { await redisSet(key, 1, ttlForKey(key)); } catch {}
 }
 
-// Igual que markSent pero con TTL explícito (usado por el throttle de
-// stats-fetch, que necesita una ventana distinta a la dedup de eventos).
+// Igual que markSent pero con TTL explícito (usado por gates internos que
+// necesitan una ventana distinta a la dedup de eventos).
 async function markSentTTL(key, ttlSec) {
   try { await redisSet(key, 1, ttlSec); } catch {}
 }
 
 // ─── Remates y faltas con autor ───────────────────────────────────────────
 // `/fixtures/events` no contiene esas acciones. `/fixtures?ids=...` sí incluye
-// el bloque `players` con contadores individuales, actualizado aproximadamente
-// cada minuto. Lo consultamos en lotes de hasta 20 fixtures para no multiplicar
-// llamadas. El snapshot anterior vive separado del liveStats que consume la UI,
-// evitando engordar los payloads del dashboard con decenas de jugadores.
-const PLAYER_ACTIVITY_REFRESH_SEC = 55;
+// `events`, `statistics` y el bloque `players` con contadores individuales. Una
+// sola descarga batched alimenta goleadores, córners, tarjetas, remates y faltas:
+// nunca hacemos una segunda ronda de llamadas solo para actividad de jugadores.
+// El snapshot vive separado del liveStats que consume la UI, evitando engordar
+// los payloads del dashboard con decenas de jugadores.
 const PLAYER_ACTIVITY_TTL_SEC = 4 * 3600;
-const PLAYER_ACTIVITY_BATCH_SIZE = 20;
 
 function playerActivityRedisKey(fid) {
   return `live:playeractivity:${fid}`;
@@ -433,37 +433,30 @@ async function persistPlayerActivitySnapshot(fid, snapshot) {
   }
 }
 
-async function fetchPlayerActivityUpdates(tracked) {
-  const updates = new Map();
-  if (!Array.isArray(tracked) || tracked.length === 0) return { updates, apiCalls: 0 };
+async function fetchDetailedLiveMatches(fixturesOrIds, label = 'live') {
+  const batches = fixtureDetailBatches(fixturesOrIds);
+  if (batches.length === 0) return { matches: [], apiCalls: 0, failedBatches: 0 };
 
-  // Un solo ciclo global cada ~minuto aunque el job live corra cada 20s.
-  const gateKey = 'live:playeractivity:fetch';
-  if (await alreadySent(gateKey)) return { updates, apiCalls: 0 };
-  await markSentTTL(gateKey, PLAYER_ACTIVITY_REFRESH_SEC);
-
-  const ids = [...new Set(tracked.map(m => Number(m.fixture?.id)).filter(Number.isFinite))];
-  const batches = [];
-  for (let i = 0; i < ids.length; i += PLAYER_ACTIVITY_BATCH_SIZE) {
-    batches.push(ids.slice(i, i + PLAYER_ACTIVITY_BATCH_SIZE));
-  }
-
+  const matches = [];
   let apiCalls = 0;
-  const detailed = [];
+  let failedBatches = 0;
   await Promise.all(batches.map(async batch => {
     apiCalls++;
-    try {
-      const rows = await apiFetch(`/fixtures?ids=${batch.join('-')}`);
-      if (Array.isArray(rows)) detailed.push(...rows);
-    } catch (e) {
-      // Esta fuente enriquece el push, pero nunca puede tumbar el marcador,
-      // córners, tarjetas ni el resto del ciclo live por un fallo transitorio.
-      console.error(`[live:players] lote ${batch[0]}…${batch.at(-1)} falló:`, e.message);
-    }
+    const rows = await apiFetch(`/fixtures?ids=${batch.join('-')}`);
+    if (Array.isArray(rows)) matches.push(...rows);
+    else failedBatches++;
   }));
 
+  console.log(`[live:details] ${label} lotes=${batches.length} fixtures=${batches.flat().length} recibidos=${matches.length} fallidos=${failedBatches}`);
+  return { matches, apiCalls, failedBatches };
+}
+
+async function buildPlayerActivityUpdates(detailedMatches) {
+  const updates = new Map();
+  if (!Array.isArray(detailedMatches) || detailedMatches.length === 0) return updates;
+
   const observedAt = new Date().toISOString();
-  await Promise.all(detailed.map(async match => {
+  await Promise.all(detailedMatches.map(async match => {
     const fid = Number(match?.fixture?.id);
     if (!Number.isFinite(fid)) return;
     const extracted = extractPlayerActivity(match?.players || []);
@@ -491,8 +484,8 @@ async function fetchPlayerActivityUpdates(tracked) {
     updates.set(String(fid), { snapshot, changes });
   }));
 
-  console.log(`[live:players] lotes=${batches.length} fixtures=${ids.length} conCambios=${updates.size}`);
-  return { updates, apiCalls };
+  console.log(`[live:players] fixturesDetallados=${detailedMatches.length} conCambios=${updates.size}`);
+  return updates;
 }
 
 async function buildEventBundle(fid, data, prev, playerActivityUpdate = null) {
@@ -1370,7 +1363,7 @@ export async function runLive(_payload = {}) {
   }
 
   // NT8: broadcast TEMPRANO del marcador (del feed principal /fixtures?live=all)
-  // ANTES de los fetches de detalle (needsEvents/needsStats/stale), que pueden
+  // ANTES del detalle batched y la reconciliación stale, que pueden
   // tardar varios segundos. Así la UI ve el gol/marcador por WS lo antes posible;
   // el broadcast final (con córners/stats enriquecidos) va igual al terminar el tick.
   // Fire-and-forget — no bloquea el tick.
@@ -1399,131 +1392,40 @@ export async function runLive(_payload = {}) {
 
   const existingLive = (await redisGet(KEYS.liveStats(today))) || {};
 
-  // Arranca en paralelo la consulta batched de actividad individual. No toca
-  // liveDetailsMap hasta que terminen los rescates de eventos/stats de abajo,
-  // así evitamos carreras y mantenemos rápido el marcador temprano.
-  const playerActivityPromise = fetchPlayerActivityUpdates(tracked);
+  // Un único fan-out en lotes de 20 sustituye las dos rondas legacy por partido
+  // (`/fixtures?id=X` para goleador + `/fixtures/statistics?fixture=X`). Cada
+  // fixture detallado ya contiene events, statistics y players, así que el mismo
+  // payload alimenta TODO el canal live. Para 36 partidos: 2 llamadas en vez de
+  // 36–72; para 400 simultáneos: 20, siempre con el mismo refresco de 20 s.
+  const detailResult = await fetchDetailedLiveMatches(tracked);
+  apiCalls += detailResult.apiCalls;
+  const detailedById = new Map(detailResult.matches
+    .map(match => [Number(match?.fixture?.id), match])
+    .filter(([fid]) => Number.isFinite(fid)));
 
-  const needsEventsFetchCandidates = tracked.filter(m => {
-    const fid = m.fixture.id;
-    const totalGoals = (m.goals?.home || 0) + (m.goals?.away || 0);
-    if (totalGoals === 0) return false;
-    // BUG FIX (goleador faltante): antes saltábamos el fetch dedicado si
-    // `events.length > 0` — pero /fixtures?live=all a veces trae el array de
-    // events SIN el evento de gol con jugador (o con player=null) para ligas
-    // sin cobertura completa. Resultado: goalScorers vacío → push "⚽ Equipo
-    // (marcador)" sin nombre. Ahora contamos cuántos goleadores conocemos
-    // (events inline de este tick + cache) y pedimos /fixtures?id=X mientras
-    // ese número sea MENOR que el total de goles, para conseguir el jugador.
-    const inlineScorers = (m.events || []).filter(e => e.type === 'Goal' && e.detail !== 'Missed Penalty').length;
-    const cached = existingLive[fid];
-    const cachedScorers = (cached?.goalScorers || []).length;
-    const knownScorers = Math.max(inlineScorers, cachedScorers);
-    if (knownScorers >= totalGoals) return false; // ya conocemos un goleador por gol
-    return true;
-  });
-
-  // Throttle 15s (igual que stats): si la API NUNCA expone el goleador para esa
-  // liga, evita pedir /fixtures?id=X en cada tick de 20s eternamente. Permite
-  // el fetch en el tick del gol (común) y cap­a el caso patológico.
-  const needsEventsFetch = [];
-  for (const m of needsEventsFetchCandidates) {
-    const tkey = `live:eventsfetch:${m.fixture.id}`;
-    if (await alreadySent(tkey)) continue;
-    await markSentTTL(tkey, 15);
-    needsEventsFetch.push(m);
-  }
-
-  if (needsEventsFetch.length > 0) {
-    await Promise.all(needsEventsFetch.map(async (match) => {
-      const fid = match.fixture.id;
-      const data = await apiFetch(`/fixtures?id=${fid}`);
-      apiCalls++;
-      if (data?.[0]) {
-        const full = data[0];
-        const fullData = extractLiveStats(full, full.events || [], full.statistics || []);
-        fullData.date = today;
-        liveDetailsMap[fid] = fullData;
-      }
-    }));
-  }
-
-  const alreadyFetched = new Set(needsEventsFetch.map(m => m.fixture.id));
-  // PARTE 1: una sola pasada por tick (20s) trae goles + córners + stats juntos.
-  // /fixtures/statistics?fixture=X es LA fuente fiable de córners, así que lo
-  // pedimos para TODOS los partidos en vivo cada tick — sin gatear por elapsed
-  // ni por "el feed principal ya trajo córners reales". Todas las llamadas
-  // pasan por el limitador distribuido; la actividad individual añade solo
-  // ceil(partidos/20) llamadas por minuto gracias al endpoint batched.
-  // Única exclusión: los fixtures que ESTE tick ya pidieron /fixtures?id=X para
-  // el goleador — esa respuesta ya trae statistics, y volver a extraer aquí
-  // (con un array sin events) pisaría el goleador recién obtenido.
-  const needsStatsFetchCandidates = tracked.filter(m => !alreadyFetched.has(m.fixture.id));
-
-  // Throttle anti-solape: máx 1 stats-fetch por fixture cada 15s. El cron de
-  // live corre cada 20s, así que con TTL 15s (< 20s) cada tick legítimo SÍ
-  // re-consulta (córners frescos cada ~20s), pero si dos ejecuciones se solapan
-  // (un run que tarda >15s + el siguiente tick) NO se duplica la llamada.
-  const STATS_FETCH_THROTTLE_SEC = 15;
-  const needsStatsFetch = [];
-  for (const m of needsStatsFetchCandidates) {
-    const tkey = `live:statsfetch:${m.fixture.id}`;
-    if (await alreadySent(tkey)) {
-      console.log(`${LL} stats-fetch throttle: fid=${m.fixture.id} consultado hace <${STATS_FETCH_THROTTLE_SEC}s ⇒ skip este tick`);
-      continue;
-    }
-    await markSentTTL(tkey, STATS_FETCH_THROTTLE_SEC);
-    needsStatsFetch.push(m);
-  }
-
-  if (needsStatsFetch.length > 0) {
-    // AISLAMIENTO DE ERRORES (PARTE 1): cada fetch de stats va en su propio
-    // try/catch. /fixtures/statistics es LA fuente fiable de córners, pero si
-    // falla en UN partido (fetch failed / rate puntual / payload raro) NO debe
-    // tumbar el tick: los goles ya se extrajeron del feed principal ANTES de
-    // este bloque y el push se construye igual más abajo (sendBundledPushes).
-    // Prioridad goles: nunca se pierden por un fallo de stats. Si un partido
-    // falla, se conserva su extract previo (con sus goles) y el córner se
-    // recoge en el siguiente tick de 20s.
-    await Promise.all(needsStatsFetch.map(async (match) => {
-      const fid = match.fixture.id;
-      try {
-        // Vamos DIRECTO al endpoint dedicado /fixtures/statistics: /fixtures?live=all
-        // NO trae córners para muchísimas ligas. 1 llamada por tick. Si viene vacío
-        // (liga sin cobertura), caemos a las stats del feed principal.
-        const dedicated = await apiFetch(`/fixtures/statistics?fixture=${fid}`);
-        apiCalls++;
-        const statsArr = (Array.isArray(dedicated) && dedicated.length > 0)
-          ? dedicated
-          : (match.statistics || []);
-        if (Array.isArray(dedicated) && dedicated.length > 0) {
-          console.log(`[live] stats dedicado fid=${fid} (${dedicated.length} equipos) — córners frescos`);
-        } else {
-          console.log(`[live] sin stats dedicado para fid=${fid} — liga sin cobertura statistics`);
-        }
-        const fullData = extractLiveStats(match, match.events || [], statsArr);
-        fullData.date = today;
-        liveDetailsMap[fid] = fullData;
-      } catch (e) {
-        // Conserva liveDetailsMap[fid] del feed principal (con sus goles). Solo
-        // se pierde el refresco de córners de ESTE tick; el siguiente lo recoge.
-        console.error(`[live] stats fetch aislado: fallo fid=${fid} ⇒ se conserva extract del feed principal:`, e.message);
-      }
-    }));
+  for (const match of tracked) {
+    const fid = Number(match.fixture.id);
+    const detailed = detailedById.get(fid);
+    if (!detailed) continue; // conserva el extract del feed principal
+    const events = Array.isArray(detailed.events) && detailed.events.length > 0
+      ? detailed.events
+      : (match.events || []);
+    const stats = Array.isArray(detailed.statistics) && detailed.statistics.length > 0
+      ? detailed.statistics
+      : (match.statistics || []);
+    const fullData = extractLiveStats(detailed, events, stats);
+    fullData.date = today;
+    liveDetailsMap[fid] = fullData;
   }
 
   let playerActivityUpdates = new Map();
-  let playerActivityApiCalls = 0;
   try {
-    const activityResult = await playerActivityPromise;
-    playerActivityUpdates = activityResult.updates;
-    playerActivityApiCalls = activityResult.apiCalls;
+    playerActivityUpdates = await buildPlayerActivityUpdates(detailResult.matches);
   } catch (e) {
-    // Defensa adicional: la telemetría individual es opcional para el core
-    // del partido. Un error inesperado se registra y el tick continúa.
+    // La actividad individual enriquece el push, pero un fallo inesperado no
+    // puede interrumpir goles, marcador ni el resto del tick.
     console.error('[live:players] enriquecimiento omitido en este tick:', e.message);
   }
-  apiCalls += playerActivityApiCalls;
 
   // ── BUG FIX (córners monótonos por-lado) ──
   // Los córners SOLO suben dentro de un partido. La API-Football provoca dos
@@ -1603,25 +1505,30 @@ export async function runLive(_payload = {}) {
     .map(([fid]) => Number(fid));
 
   if (staleIds.length > 0) {
+    const staleDetailResult = await fetchDetailedLiveMatches(staleIds, 'stale');
+    apiCalls += staleDetailResult.apiCalls;
+    const staleById = new Map(staleDetailResult.matches
+      .map(match => [Number(match?.fixture?.id), match])
+      .filter(([fid]) => Number.isFinite(fid)));
+
     await Promise.all(staleIds.map(async (fid) => {
-      const data = await apiFetch(`/fixtures?id=${fid}`);
-      apiCalls++;
-      if (data?.[0]) {
-        const fresh = data[0];
+      const fresh = staleById.get(fid);
+      if (fresh) {
         const freshStatus = fresh.fixture.status.short;
         if (FINISHED_STATUSES.includes(freshStatus)) {
-          // Mismo fallback que en needsStatsFetch: si la respuesta principal
-          // no trae statistics (ligas exóticas), pedirlo del endpoint dedicado.
-          let statsArr = fresh.statistics || [];
-          if (statsArr.length === 0) {
-            const dedicated = await apiFetch(`/fixtures/statistics?fixture=${fid}`);
-            apiCalls++;
-            if (Array.isArray(dedicated) && dedicated.length > 0) {
-              statsArr = dedicated;
-              console.log(`[live:stale] stats rescue via /fixtures/statistics for fid=${fid}`);
-            }
-          }
+          const statsArr = fresh.statistics || [];
           const fullStats = extractLiveStats(fresh, fresh.events || [], statsArr);
+          // Si la liga no ofrece estadísticas finales, conservar el último
+          // contador real observado; no hacer otra llamada individual ni
+          // convertir un dato conocido en cero.
+          const previous = existingLive[fid];
+          if (statsArr.length === 0 && previous) {
+            for (const field of ['corners', 'offsides', 'shots', 'sot', 'fouls']) {
+              if (previous[field]?.isReal && !fullStats[field]?.isReal) fullStats[field] = previous[field];
+            }
+            if ((fullStats.goalScorers || []).length === 0) fullStats.goalScorers = previous.goalScorers || [];
+            if ((fullStats.cardEvents || []).length === 0) fullStats.cardEvents = previous.cardEvents || [];
+          }
           fullStats.date = today;
           fullStats.savedAt = new Date().toISOString();
           fullStats.realFinal = true; // stale-detection confirmó FT contra la API → dato real

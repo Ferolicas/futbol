@@ -152,9 +152,11 @@ perfiles → entrenamiento, falla si cualquier etapa queda incompleta y deja un
 sello Redis que comprueba el watchdog.
 
 `lib/football-api-client.cjs` es la única salida a API-Football para web,
-workers y scripts activos. Reserva slots globales con Lua/Redis a 420 peticiones
-por minuto (plan: 450), reintenta con backoff y usa un fallback local conservador
-si Redis cae. `scripts/audit-football-model-data.js` verifica de punta a punta
+workers y scripts activos. Reserva slots globales con Lua/Redis a un techo
+conservador de 420 peticiones por minuto, reintenta con backoff y usa un fallback
+local conservador si Redis cae. Distingue límite por minuto de cuota diaria: la
+segunda no se reintenta y abre un cortacircuito Redis compartido de 60 s.
+`scripts/audit-football-model-data.js` verifica de punta a punta
 crudo, ledger, hechos, dimensiones, marcadores y contadores de jugador; código
 de salida 2 significa una invariancia crítica rota.
 
@@ -170,10 +172,13 @@ como respaldo cada 5 min únicamente para hoy y con el WebSocket caído.
 Las notificaciones Web Push de fútbol se agrupan por partido y tick. Solo
 publican goles, goles anulados, córners, tarjetas, penaltis, remates, remates a
 puerta y faltas; sustituciones, offsides y VAR genérico no generan avisos. Los
-goles/tarjetas usan el evento oficial con jugador y asistencia. Remates y faltas
-comparan snapshots por jugador obtenidos con `/fixtures?ids=...` en lotes de 20,
-como máximo una vez cada 55 s; si una competición no ofrece cobertura individual
-no se inventa autor ni se emite el evento. Sus snapshots viven en claves Redis
+goles/tarjetas usan el evento oficial con jugador y asistencia. Un único detalle
+`/fixtures?ids=...` por lote de hasta 20 partidos alimenta eventos, estadísticas
+y jugadores cada tick: reemplaza las antiguas llamadas individuales de goleador
+y `/fixtures/statistics` (36 partidos pasan de hasta 37 llamadas extra a 2;
+400 simultáneos requieren 20). Remates y faltas comparan snapshots por jugador;
+si una competición no ofrece cobertura individual no se inventa autor ni se
+emite el evento. Sus snapshots viven en claves Redis
 `live:playeractivity:{fixture}` separadas del payload del dashboard.
 
 ### Rendimiento del dashboard

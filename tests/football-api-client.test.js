@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 
 const {
   payloadQuality, responseSize, footballApiPath,
-  SLOT_MS, RATE_PER_MINUTE, FALLBACK_RATE_PER_MINUTE,
+  classifyApiErrorText,
+  SLOT_MS, RATE_PER_MINUTE, FALLBACK_RATE_PER_MINUTE, DAILY_LIMIT_COOLDOWN_MS,
 } = require('../lib/football-api-client.cjs');
 
 test('rechaza errores HTTP/rate-limit y distingue vacío válido de datos', () => {
@@ -13,6 +14,18 @@ test('rechaza errores HTTP/rate-limit y distingue vacío válido de datos', () =
   assert.equal(payloadQuality({ errors: {}, response: [{ id: 1 }] }), 2);
   assert.equal(payloadQuality({ fixture: { id: 1 } }), 2);
   assert.equal(responseSize({ response: { league: { id: 39 } } }), 1);
+});
+
+test('la cuota diaria abre circuito sin reintentos y el límite por minuto sí reintenta', () => {
+  assert.deepEqual(
+    classifyApiErrorText('You have reached the request limit for the day'),
+    { code: 'DAILY_LIMIT', retryable: false },
+  );
+  assert.deepEqual(
+    classifyApiErrorText('Too many requests. You have exceeded the limit of requests per minute'),
+    { code: 'RATE_LIMIT', retryable: true },
+  );
+  assert.ok(DAILY_LIMIT_COOLDOWN_MS >= 10_000);
 });
 
 test('el ritmo por defecto queda por debajo de 450 solicitudes/minuto', () => {

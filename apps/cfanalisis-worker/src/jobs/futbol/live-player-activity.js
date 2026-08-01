@@ -12,6 +12,21 @@ function counter(value) {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
 }
 
+export const FIXTURE_DETAIL_BATCH_SIZE = 20;
+
+// API-Football admite hasta 20 IDs en `/fixtures?ids=id-id-...`. Centralizar
+// aquí el particionado evita volver al patrón costoso de una llamada por
+// partido cuando haya cientos de encuentros en el día.
+export function fixtureDetailBatches(fixturesOrIds, batchSize = FIXTURE_DETAIL_BATCH_SIZE) {
+  const safeSize = Math.max(1, Math.min(FIXTURE_DETAIL_BATCH_SIZE, Math.floor(Number(batchSize)) || FIXTURE_DETAIL_BATCH_SIZE));
+  const ids = [...new Set((fixturesOrIds || [])
+    .map(value => Number(value?.fixture?.id ?? value))
+    .filter(value => Number.isFinite(value) && value > 0))];
+  const batches = [];
+  for (let i = 0; i < ids.length; i += safeSize) batches.push(ids.slice(i, i + safeSize));
+  return batches;
+}
+
 export function playerActivityKey(row) {
   if (row?.key) return String(row.key);
   if (row?.playerId != null) return `id:${row.playerId}`;
