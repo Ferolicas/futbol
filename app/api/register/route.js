@@ -16,7 +16,7 @@ export async function POST(request) {
       return Response.json({ error: 'Demasiados intentos. Espera un momento.' }, { status: 429 });
     }
 
-    const { name, email, password, plan } = await request.json();
+    const { name, email, password } = await request.json();
 
     if (!name || !email || !password) {
       return Response.json({ error: 'Nombre, email y contrasena son obligatorios' }, { status: 400 });
@@ -45,7 +45,8 @@ export async function POST(request) {
 
     const userId = result.user.id;
 
-    // Completar el perfil con plan (signupUser crea el perfil minimal).
+    // Completar el perfil (signupUser crea el perfil minimal). El plan NO se
+    // persiste hasta que el proveedor confirme un pago real.
     // BUG FIX: antes se escribía `country`, columna que NO existe en
     // user_profiles → el upsert fallaba en CADA registro (error tragado) y el
     // perfil se quedaba en 'inactive' (estado mínimo de signupUser) en vez de
@@ -55,8 +56,8 @@ export async function POST(request) {
       email: emailLower,
       name: name.trim(),
       role: 'user',
-      plan: plan || null,
-      subscription_status: 'pending',
+      plan: null,
+      subscription_status: 'inactive',
       created_at: new Date().toISOString(),
     }, { onConflict: 'id' });
     if (profileErr) console.error('[Register] profile:', profileErr.message);

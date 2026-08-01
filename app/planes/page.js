@@ -7,6 +7,7 @@ import {
   purchaseRoute,
 } from '../../lib/purchase-flow';
 import PlanesClient from './planes-client';
+import { hasActiveEntitlement } from '../../lib/entitlements';
 
 export const metadata = {
   title: 'Selecciona tu Plan - CFanalisis',
@@ -23,12 +24,11 @@ export default async function PlanesPage({ searchParams }) {
 
   const { data: profile } = await supabaseAdmin
     .from('user_profiles')
-    .select('subscription_status, plan, email, name')
+    .select('subscription_status, plan, email, name, role, plan_expires_at, subscription_current_period_end, cancel_at_period_end')
     .eq('id', user.id)
     .single();
 
-  const activeStatuses = ['active', 'trialing'];
-  if (profile && activeStatuses.includes(profile.subscription_status)) {
+  if (hasActiveEntitlement(profile)) {
     redirect('/dashboard');
   }
 
@@ -39,6 +39,7 @@ export default async function PlanesPage({ searchParams }) {
   return (
     <PlanesClient
       email={profile?.email || user.email}
+      name={profile?.name || user.user_metadata?.display_name || ''}
       mpPublicKey={mpPublicKey}
       autoCheckoutPlan={autoCheckoutPlan}
       purchaseIntent={purchaseIntent}

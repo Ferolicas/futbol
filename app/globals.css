@@ -7438,6 +7438,70 @@ input:checked + .cb-mark::after {
   border-radius: 16px;
 }
 
+.mp-pse-details {
+  margin: 0 0 13px;
+  padding: 11px 12px;
+  border: 1px solid rgba(94,230,177,.13);
+  border-radius: 14px;
+  color: #9aabb3;
+  background: rgba(3,10,15,.28);
+}
+
+.mp-pse-details summary {
+  color: #c8d8d9;
+  font-size: .7rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.mp-pse-details > p {
+  margin: 8px 0 10px;
+  color: #71838d;
+  font-size: .61rem;
+  line-height: 1.45;
+}
+
+.mp-pse-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.mp-pse-grid label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: #91a2aa;
+  font-size: .61rem;
+  font-weight: 650;
+}
+
+.mp-pse-grid input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px;
+  outline: 0;
+  color: #eef7f4;
+  background: #0b1720;
+  font: inherit;
+  font-size: .72rem;
+}
+
+.mp-pse-grid input:focus {
+  border-color: #5ee6b1;
+  box-shadow: 0 0 0 3px rgba(94,230,177,.09);
+}
+
+.mp-pse-phone {
+  display: grid;
+  grid-column: span 2;
+  grid-template-columns: minmax(0, .65fr) minmax(0, 1.35fr);
+  gap: 9px;
+}
+
 .payment-modal-loading,
 .payment-modal-processing {
   display: flex;
@@ -7463,6 +7527,127 @@ input:checked + .cb-mark::after {
   border-radius: 50%;
   animation: spin .72s linear infinite;
 }
+
+/* Confirmacion durable del pago (Stripe/MP vuelven aqui antes del dashboard). */
+.payment-status-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  color: #eef7f4;
+  background:
+    radial-gradient(circle at 50% 15%, rgba(16,185,129,.14), transparent 36%),
+    linear-gradient(165deg, #07131a, #02070b 72%);
+}
+
+.payment-status-card {
+  width: min(100%, 460px);
+  padding: 28px 22px 24px;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 25px;
+  text-align: center;
+  background: rgba(8,22,29,.92);
+  box-shadow: 0 24px 80px rgba(0,0,0,.38);
+}
+
+.payment-status-logo {
+  display: block;
+  width: 156px;
+  margin: -12px auto 5px;
+}
+
+.payment-status-icon {
+  display: grid;
+  place-items: center;
+  width: 66px;
+  height: 66px;
+  margin: 4px auto 13px;
+  border-radius: 50%;
+  color: #5ee6b1;
+  background: rgba(16,185,129,.1);
+  box-shadow: inset 0 0 0 1px rgba(94,230,177,.14);
+}
+
+.payment-status-card.is-failed .payment-status-icon {
+  color: #fda4af;
+  background: rgba(190,24,93,.1);
+  box-shadow: inset 0 0 0 1px rgba(251,113,133,.15);
+}
+
+.payment-status-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  color: #67e8b7;
+  font-size: .64rem;
+  font-weight: 800;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+
+.payment-status-card h1 {
+  margin: 0 0 9px;
+  font-size: clamp(1.45rem, 7vw, 2rem);
+  letter-spacing: -.04em;
+}
+
+.payment-status-card > p:not(.payment-status-kicker) {
+  margin: 0 auto 20px;
+  color: #93a4ac;
+  font-size: .82rem;
+  line-height: 1.58;
+}
+
+.payment-status-card .modal-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 50px;
+  border: 0;
+  border-radius: 14px;
+  color: #05110d;
+  background: linear-gradient(135deg, #78edc2, #22d98e);
+  font: inherit;
+  font-size: .8rem;
+  font-weight: 850;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.payment-status-cancel {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 0;
+  color: #8fa2ac;
+  background: transparent;
+  font: inherit;
+  font-size: .68rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.payment-status-cancel:disabled {
+  opacity: .48;
+  cursor: wait;
+}
+
+.payment-status-card > small,
+.payment-status-note {
+  display: block;
+  margin-top: 14px;
+  color: #60727e;
+  font-size: .6rem;
+  line-height: 1.45;
+}
+
+.payment-status-note { color: #8be9c4; }
+.is-spinning { animation: spin .72s linear infinite; }
 
 @media (min-width: 480px) {
   .planes-page .plan-features {
@@ -8844,6 +9029,15 @@ input:checked + .cb-mark::after {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.dashboard-account-meta small {
+  margin-top: 5px;
+  color: #fda4af;
+  font-size: .58rem;
+  line-height: 1.35;
+}
+
+.dashboard-account-meta small.is-success { color: #78edc2; }
 
 .dashboard-account-menu > button {
   display: flex;

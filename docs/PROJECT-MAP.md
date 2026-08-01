@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-07-29 · Commit base: `027b831`
+Actualizado: 2026-08-01 · Commit base: `a07eef8`
 
 ## Identidad y stack
 
@@ -26,6 +26,7 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `/forgot-password` | `app/forgot-password/page.js` | No | Solicitud de recuperación |
 | `/reset-password` | `app/reset-password/page.js` | No | Cambio de contraseña con token |
 | `/planes` | `app/planes/page.js` | Sí | Selección y apertura de checkout |
+| `/pago/estado` | `app/pago/estado/` | Sí | Confirmación durable y recuperación del pago |
 | `/dashboard` | `app/dashboard/layout.js`, `page.js` | Plan activo | Partidos, análisis y combinadas |
 | `/dashboard/analisis/[id]` | `app/dashboard/analisis/[id]/page.js` | Plan activo | Análisis de fútbol |
 | `/dashboard/baseball` | `app/dashboard/baseball/page.js` | Plan activo | Producto de béisbol |
@@ -42,10 +43,14 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `POST /api/auth/logout` | `app/api/auth/logout/route.js` | UI | Revoca sesión y borra cookie |
 | `GET /api/detect-country` | `app/api/detect-country/route.js` | Home/planes | Resuelve país por cabecera/IP |
 | `GET /api/currency` | `app/api/currency/route.js` | Home/planes | Convierte los cinco planes |
-| `POST /api/checkout` | `app/api/checkout/route.js` | Planes | Crea PaymentIntent Stripe |
-| `POST /api/webhook` | `app/api/webhook/route.js` | Stripe | Activa plan y crea recurrencia |
+| `POST /api/checkout` | `app/api/checkout/route.js` | Planes | Reserva intento y crea/reutiliza suscripción Stripe |
+| `POST /api/webhook` | `app/api/webhook/route.js` | Stripe | Confirma factura y activa acceso |
 | `POST /api/mercadopago/subscribe` | `app/api/mercadopago/subscribe/route.js` | MP Brick | Crea preapproval/pago local |
 | `POST /api/mercadopago/webhook` | `app/api/mercadopago/webhook/route.js` | Mercado Pago | Confirma y activa el plan |
+| `GET /api/payments/status` | `app/api/payments/status/route.js` | Estado de pago | Relee proveedor y devuelve estado real |
+| `DELETE /api/payments/attempt` | `app/api/payments/attempt/route.js` | Checkout/estado | Cancela primero en proveedor y libera intento |
+| `POST /api/payments/cancel` | `app/api/payments/cancel/route.js` | Cuenta | Cancela renovación conservando periodo pagado |
+| `GET/POST /api/cron/payments` | `app/api/cron/payments/route.js` | Cron VPS | Reconcilia operaciones, perfiles y emails |
 | `GET /api/fixtures` | `app/api/fixtures/route.js` | Dashboard | Partidos y análisis diarios |
 | `GET /api/match/[id]` | `app/api/match/[id]/route.js` | Análisis | Detalle estadístico |
 | `GET/POST /api/refresh-live` | `app/api/refresh-live/route.js` | Dashboard | GET lee Redis; POST fuerza proveedor |
@@ -60,6 +65,9 @@ Las migraciones viven en `scripts/`. Tablas clave:
 - `users`: email, hash, verificación y bloqueos.
 - `auth_sessions`: sesión revocable, expiración, agente/IP y último uso.
 - `user_profiles`: rol, plan, estado, IDs de Stripe/MP y preferencias.
+- `payment_attempts`: intención durable, recurso del proveedor, estado y entrega de email.
+- `payment_webhook_events`: idempotencia persistente y reintentos de webhooks.
+- `payment_exchange_rates`: última tasa EUR→COP válida para tolerar caídas del proveedor FX.
 - `fixtures_cache`, `match_schedule`, `match_results`, `match_analysis`, `match_predictions`: núcleo de fútbol.
 - `baseball_*`: fixtures, resultados, análisis, predicciones, favoritos y ocultos.
 - `combinadas`, `tickets`, `chat_messages`, `push_subscriptions`.
@@ -76,17 +84,23 @@ Las migraciones viven en `scripts/`. Tablas clave:
 3. Registro llama `/api/register`; `signupUser` crea usuario, perfil, sesión y cookie.
 4. Registro redirige a `/planes?checkout=<plan>&intent=<id>`.
 5. `/planes` valida auth e intención, resuelve país/moneda y consume la intención una sola vez.
-6. Colombia abre `MercadoPagoModal`; otros países crean PaymentIntent y abren `PaymentModal`.
-7. Los webhooks activan `user_profiles`; el cliente no puede activarse por sí mismo.
-8. Si el email ya existe, registro y login conservan plan e intención.
+6. Colombia abre `MercadoPagoModal`; otros países crean una suscripción incompleta y abren `PaymentModal`.
+7. Cada operación usa un UUID durable; reintentos, dos pestañas y respuestas perdidas reutilizan el mismo recurso.
+8. Webhook o reconciliación directa releen el proveedor y activan `user_profiles` de forma transaccional; el cliente no puede activarse por sí mismo.
+9. `/pago/estado` confirma sin volver a cobrar. Para cambiar de método cancela primero el recurso pendiente en el proveedor.
+10. Si el email ya existe, registro y login conservan plan e intención.
 
 ### Stripe
 
-`app/api/checkout/route.js` valida usuario, email y plan → `lib/stripe.js` calcula el monto desde la fuente servidor → PaymentElement confirma → webhook firmado activa acceso → se crea recurrencia idempotente.
+`app/api/checkout/route.js` valida sesión, plan y geografía → reserva `payment_attempts` → `lib/stripe.js` crea la suscripción con `default_incomplete`, precio recurrente calculado en servidor e idempotency key estable → PaymentElement confirma la primera factura → webhook firmado o reconciliador activa el mismo recurso que renovará. Nunca existe un cobro nuevo separado de la suscripción.
 
 ### Mercado Pago
 
-El Brick recoge el método → `subscribe` valida sesión/plan y recalcula COP en servidor → tarjeta crea preapproval; PSE/Efecty crea pago → webhook relee el recurso real en MP y actualiza el perfil.
+El Brick recoge el método → `subscribe` valida sesión/plan/geografía y recalcula COP en servidor → tarjeta crea preapproval; PSE/Efecty crea pago con los datos reales exigidos por MP → webhook o `/api/payments/status` releen el recurso real. Un preapproval `authorized` no da acceso hasta encontrar un cobro `approved`. MP también entrega renovaciones por el topic genérico `payment`; el handler conserva el ID del preapproval y el reconciliador contrasta tanto Invoices como Payments API, porque la primera puede tardar en indexar.
+
+### Fiabilidad de pagos
+
+`lib/payment-store.js` serializa la activación con advisory lock y confirma perfil + intento en una sola transacción. Los cambios de estado están ligados al proveedor y al ID de suscripción vigente: un webhook atrasado no puede pisar una compra posterior. `lib/payment-reconcile.js` recupera webhooks perdidos, timeouts y respuestas cortadas. `scripts/run-payment-reconcile.sh` llama el cron cada dos minutos; perfiles sanos se verifican cada seis horas y `past_due` cada quince minutos para no castigar APIs externas. Los emails de activación se reclaman una sola vez y se reintentan hasta seis veces.
 
 ### Auth
 
@@ -127,6 +141,8 @@ snapshots live a los IDs de la jornada antes de serializar la respuesta.
 - `lib/db.js`: pool y compatibilidad de queries; afecta casi toda la app.
 - `lib/auth-pg.js` y `lib/auth-session.js`: cualquier cambio afecta login, layouts y APIs.
 - `lib/stripe.js`: fuente única de IDs, precios, periodos y moneda base.
+- `lib/payment-store.js`, `lib/payment-reconcile.js` y `lib/entitlements.js`: estado durable, recuperación y única regla de acceso.
+- `lib/mercadopago.js`: API, firma, PSE, recurrencia, cancelación y fallback EUR→COP.
 - `lib/currency.js`: conversión y fallback de cobro.
 - `lib/redis.js`: cache, deduplicación y realtime.
 - `lib/purchase-flow.js`: whitelist e intención de compra entre Home/auth/planes.
@@ -140,7 +156,7 @@ snapshots live a los IDs de la jornada antes de serializar la respuesta.
 | Redis | `LOCAL_REDIS_HOST`, `LOCAL_REDIS_PORT`, contraseñas opcionales |
 | Stripe | `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` |
 | Mercado Pago | `MP_ENV`, claves públicas/privadas y `MP_WEBHOOK_SECRET` |
-| App/worker | `NEXT_PUBLIC_APP_URL`, `WORKER_URL`, secretos y URLs WS |
+| App/worker | `NEXT_PUBLIC_APP_URL`, `WORKER_URL`, `CRON_SECRET`, secretos y URLs WS |
 | Datos | `FOOTBALL_API_KEY`, `THE_ODDS_API_KEY` |
 | Email/push | `RESEND_API_KEY`, `FROM_EMAIL`, VAPID |
 
@@ -149,6 +165,10 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 ## Gotchas vivos
 
 - 2026-07-29: el entorno local usa túneles al VPS; auth y pagos son producción real.
+- 2026-08-01: nunca probar cobros locales con credenciales LIVE. QA llega al formulario o usa base/proveedor sandbox aislados.
+- 2026-08-01: la migración `migrate-payment-reliability.sql` debe ejecutarse antes del build; incluye permisos explícitos para el rol `cfanalisis`.
+- 2026-08-01: Stripe escucha facturas, suscripciones y compatibilidad de PaymentIntent legado. Añadir eventos con `scripts/configure-stripe-webhook.mjs` solo después de desplegar el handler.
+- 2026-08-01: no liberar un intento pendiente por tiempo ni marcar terminal un cobro recurrente que MP pueda reintentar; primero cancelar el recurso remoto.
 - 2026-07-29: el checkout automático requiere deduplicación persistente ante Strict Mode/Fast Refresh.
 - 2026-07-29: solo el plan viaja por URL; el servidor vuelve a calcular precio, moneda y proveedor.
 - 2026-07-29: `/planes` usa un escenario fijo; scroll, teclado y swipe cambian la tarjeta activa sin crear una lista vertical.

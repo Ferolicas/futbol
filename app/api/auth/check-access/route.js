@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../../lib/supabase';
+import { hasActiveEntitlement } from '../../../../lib/entitlements';
 
 export async function GET() {
   const supabase = createSupabaseServerClient();
@@ -11,12 +12,12 @@ export async function GET() {
 
   const { data: profile } = await supabaseAdmin
     .from('user_profiles')
-    .select('subscription_status, role')
+    .select('subscription_status, role, plan_expires_at, subscription_current_period_end, cancel_at_period_end')
     .eq('id', user.id)
     .single();
 
   const isAdmin = ['admin', 'owner'].includes(profile?.role);
-  const hasActivePlan = profile?.subscription_status === 'active' || profile?.subscription_status === 'trialing';
+  const hasActivePlan = hasActiveEntitlement(profile);
 
   if (isAdmin || hasActivePlan) {
     return Response.json({ redirect: '/dashboard' });

@@ -359,8 +359,13 @@ function ActiveClientsSection() {
             </div>
             {c.last_payment_amount != null && (
               <div className="admin-ticket-meta">
-                <span>Monto: {(c.last_payment_amount / 100).toFixed(2)} {(c.last_payment_currency || '').toUpperCase()}</span>
-                <span>Estado Stripe: {c.stripe_status || '—'}</span>
+                <span>
+                  Monto: {(c.payment_provider === 'mercadopago'
+                    ? Number(c.last_payment_amount)
+                    : Number(c.last_payment_amount) / 100).toLocaleString('es-ES', { maximumFractionDigits: 2 })}{' '}
+                  {(c.last_payment_currency || '').toUpperCase()}
+                </span>
+                <span>{c.payment_provider === 'mercadopago' ? 'Mercado Pago' : `Estado Stripe: ${c.stripe_status || '—'}`}</span>
               </div>
             )}
           </div>

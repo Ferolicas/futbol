@@ -36,8 +36,22 @@ const PLATFORM_FEATURES = [
   'Corners, tarjetas y BTTS',
 ];
 
+const ZERO_DECIMAL = new Set(['BIF','CLP','DJF','GNF','JPY','KMF','KRW','MGA','PYG','RWF','VND','VUV','XAF','XOF','XPF']);
+
+function formatProviderAmount(amount, currency, fallback) {
+  const code = String(currency || '').toUpperCase();
+  if (!Number.isFinite(Number(amount)) || !/^[A-Z]{3}$/.test(code)) return fallback;
+  const value = Number(amount) / (ZERO_DECIMAL.has(code) ? 1 : 100);
+  try {
+    return new Intl.NumberFormat('es', { style: 'currency', currency: code }).format(value);
+  } catch {
+    return `${value} ${code}`;
+  }
+}
+
 export default function PlanesClient({
   email,
+  name,
   mpPublicKey,
   autoCheckoutPlan,
   purchaseIntent,
@@ -52,6 +66,7 @@ export default function PlanesClient({
   const [mpModal, setMpModal] = useState(null);    // { plan, amountCop } → modal Mercado Pago (Colombia)
   const [paymentData, setPaymentData] = useState(null); // { clientSecret, plan, displayAmount } → modal Stripe (resto)
   const autoCheckoutStartedRef = useRef(false);
+  const checkoutAttemptsRef = useRef(new Map());
   const initialPlanIndex = Math.max(
     0,
     PLAN_ORDER.findIndex((plan) => plan.id === autoCheckoutPlan),
@@ -85,6 +100,26 @@ export default function PlanesClient({
     return `${sym}${p.originalAmount}`;
   };
 
+  const checkoutAttempt = useCallback((provider, planId) => {
+    const key = `${provider}:${planId}`;
+    let id = checkoutAttemptsRef.current.get(key);
+    if (!id) {
+      id = globalThis.crypto?.randomUUID?.()
+        || `${Date.now().toString(16).padStart(12, '0')}-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, '0')}`;
+      checkoutAttemptsRef.current.set(key, id);
+    }
+    return { key, id };
+  }, []);
+
+  const discardAttempt = useCallback((key, attemptId) => {
+    checkoutAttemptsRef.current.delete(key);
+    if (!attemptId) return;
+    fetch(`/api/payments/attempt?attempt=${encodeURIComponent(attemptId)}`, {
+      method: 'DELETE',
+      keepalive: true,
+    }).catch(() => {});
+  }, []);
+
   // Geo-routing del pago:
   //   Colombia → Mercado Pago (PSE/tarjeta) en MODAL embebido.
   //   Resto del mundo → Stripe (tarjeta internacional) en MODAL embebido.
@@ -103,41 +138,67 @@ export default function PlanesClient({
     if (country === 'CO') {
       const copAmount = Math.round(planPrice.local || 0);
       if (!copAmount) { setError('No se pudo calcular el precio. Recarga la página.'); return; }
-      setMpModal({ plan: planId, amountCop: copAmount });
+      const attempt = checkoutAttempt('mercadopago', planId);
+      setMpModal({ plan: planId, amountCop: copAmount, attemptId: attempt.id, attemptKey: attempt.key });
       return;
     }
 
     // ── Resto del mundo → Stripe (PaymentIntent embebido) ──
     setLoading(true);
+    const attempt = checkoutAttempt('stripe', planId);
     try {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan: planId, email, currency: prices?.currency || 'USD' }),
+        body: JSON.stringify({
+          plan: planId,
+          attemptId: attempt.id,
+          country,
+          currency: prices?.currency || 'EUR',
+        }),
+        signal: AbortSignal.timeout(25_000),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (data.attemptId && data.attemptId !== attempt.id) {
+        checkoutAttemptsRef.current.set(attempt.key, data.attemptId);
+      }
+      if (data.active) {
+        window.location.assign(`/pago/estado?attempt=${encodeURIComponent(data.attemptId || attempt.id)}`);
+        return;
+      }
+      if (data.code === 'PAYMENT_IN_PROGRESS' && data.attemptId) {
+        window.location.assign(`/pago/estado?attempt=${encodeURIComponent(data.attemptId)}`);
+        return;
+      }
       if (data.clientSecret) {
         setPaymentData({
           clientSecret: data.clientSecret,
+          attemptId: data.attemptId || attempt.id,
+          attemptKey: attempt.key,
           plan: data.plan,
-          displayAmount: fmtPrice(planId),
+          displayAmount: formatProviderAmount(data.amount, data.currency, fmtPrice(planId)),
         });
       } else {
+        if (data.code === 'ATTEMPT_EXPIRED') checkoutAttemptsRef.current.delete(attempt.key);
         setError(data.error || 'Error al procesar el pago');
       }
-    } catch {
-      setError('Error de conexion');
+    } catch (checkoutError) {
+      setError(checkoutError?.name === 'TimeoutError'
+        ? 'El proveedor tardo en responder. Puedes reintentar: reutilizaremos la misma operacion sin duplicar el cobro.'
+        : 'Error de conexion. Puedes reintentar sin riesgo de doble cobro.');
     } finally {
       setLoading(false);
     }
-  }, [checkoutRoutingReady, country, email, fmtPrice, loading, prices]);
+  }, [checkoutAttempt, checkoutRoutingReady, country, fmtPrice, loading, prices]);
 
   useEffect(() => {
     let cancelled = false;
 
     const resolveCheckoutRouting = async () => {
       try {
-        const countryResponse = await fetch('/api/detect-country');
+        const countryResponse = await fetch('/api/detect-country', {
+          signal: AbortSignal.timeout(12_000),
+        });
         if (!countryResponse.ok) throw new Error('country_detection_failed');
         const countryData = await countryResponse.json();
 
@@ -147,7 +208,9 @@ export default function PlanesClient({
           ? `country=${encodeURIComponent(detectedCountry)}`
           : `currency=${encodeURIComponent(countryData.currency || 'USD')}`;
 
-        const pricesResponse = await fetch(`/api/currency?${priceQuery}`);
+        const pricesResponse = await fetch(`/api/currency?${priceQuery}`, {
+          signal: AbortSignal.timeout(15_000),
+        });
         if (!pricesResponse.ok) throw new Error('currency_detection_failed');
         const resolvedPrices = await pricesResponse.json();
 
@@ -510,8 +573,15 @@ export default function PlanesClient({
           planLabel={`Plan ${mpModal.plan.charAt(0).toUpperCase()}${mpModal.plan.slice(1)}`}
           amountCop={mpModal.amountCop}
           email={email}
+          payerName={name}
           publicKey={mpPublicKey}
-          onClose={() => { setMpModal(null); setSelectedPlan(null); }}
+          attemptId={mpModal.attemptId}
+          country={country}
+          onClose={(currentAttemptId) => {
+            discardAttempt(mpModal.attemptKey, currentAttemptId || mpModal.attemptId);
+            setMpModal(null);
+            setSelectedPlan(null);
+          }}
         />
       )}
 
@@ -519,9 +589,14 @@ export default function PlanesClient({
       {paymentData && (
         <PaymentModal
           clientSecret={paymentData.clientSecret}
+          attemptId={paymentData.attemptId}
           plan={paymentData.plan}
           displayAmount={paymentData.displayAmount}
-          onClose={() => { setPaymentData(null); setSelectedPlan(null); }}
+          onClose={() => {
+            discardAttempt(paymentData.attemptKey, paymentData.attemptId);
+            setPaymentData(null);
+            setSelectedPlan(null);
+          }}
         />
       )}
     </main>

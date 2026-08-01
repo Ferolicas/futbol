@@ -27,6 +27,7 @@ import { fetchMlbOddsByDate, matchMlbOdds } from '../../../../../../lib/odds-api
 import { supabaseAdmin } from '../../../../../../lib/supabase';
 import { createSupabaseServerClient } from '../../../../../../lib/supabase-auth';
 import { jsonError } from '../../../../../../lib/api-error';
+import { hasActiveEntitlement } from '../../../../../../lib/entitlements';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -72,11 +73,9 @@ export async function POST(_request, { params }) {
 
     const { data: profile } = await supabaseAdmin
       .from('user_profiles')
-      .select('role, subscription_status')
+      .select('role, subscription_status, plan_expires_at, subscription_current_period_end, cancel_at_period_end')
       .eq('id', user.id).single();
-    const isAdmin = ['admin', 'owner'].includes(profile?.role);
-    const isActive = ['active', 'trialing'].includes(profile?.subscription_status);
-    if (!isAdmin && !isActive) {
+    if (!hasActiveEntitlement(profile)) {
       return Response.json({ error: 'Subscription required' }, { status: 403 });
     }
 

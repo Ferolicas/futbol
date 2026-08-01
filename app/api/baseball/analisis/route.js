@@ -35,6 +35,7 @@ import { redisGet } from '../../../../lib/redis';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { jsonError } from '../../../../lib/api-error';
+import { hasActiveEntitlement } from '../../../../lib/entitlements';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -71,11 +72,9 @@ export async function POST(request) {
 
     const { data: profile } = await supabaseAdmin
       .from('user_profiles')
-      .select('role, subscription_status')
+      .select('role, subscription_status, plan_expires_at, subscription_current_period_end, cancel_at_period_end')
       .eq('id', user.id).single();
-    const isAdmin = ['admin', 'owner'].includes(profile?.role);
-    const isActive = ['active', 'trialing'].includes(profile?.subscription_status);
-    if (!isAdmin && !isActive) return Response.json({ error: 'Subscription required' }, { status: 403 });
+    if (!hasActiveEntitlement(profile)) return Response.json({ error: 'Subscription required' }, { status: 403 });
 
     const body = await request.json();
     const fixtures = body.fixtures || [];

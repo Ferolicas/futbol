@@ -1,12 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { Check, LockKeyhole, ShieldCheck, X } from 'lucide-react';
 import BrandLogoMedia from '../../components/BrandLogoMedia';
 
-const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
+const stripePromise = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+  ? loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY)
+  : Promise.resolve(null);
 
 const PLATFORM_LINES = [
   'Acceso total a estadísticas, análisis y herramientas',
@@ -27,7 +29,7 @@ const PLAN_META = {
   anual:      { title: 'Plan Anual',      period: 'anual',      per: 'año',     cycle: 'cada 12 meses' },
 };
 
-function PaymentForm({ plan, displayAmount, onClose }) {
+function PaymentForm({ plan, displayAmount, attemptId, onClose }) {
   const stripe = useStripe();
   const elements = useElements();
   const [loading, setLoading] = useState(false);
@@ -47,19 +49,37 @@ function PaymentForm({ plan, displayAmount, onClose }) {
     setLoading(true);
     setError('');
 
-    const returnUrl = `${window.location.origin}/dashboard?checkout=success&plan=${plan}`;
+    const returnUrl = `${window.location.origin}/pago/estado?attempt=${encodeURIComponent(attemptId)}`;
 
-    const { error: stripeError } = await stripe.confirmPayment({
-      elements,
-      confirmParams: { return_url: returnUrl },
-    });
+    try {
+      const confirmation = stripe.confirmPayment({
+        elements,
+        confirmParams: { return_url: returnUrl },
+        redirect: 'if_required',
+      });
+      const timeout = new Promise((_, reject) => {
+        window.setTimeout(() => reject(new Error('STRIPE_CONFIRM_TIMEOUT')), 45_000);
+      });
+      const { error: stripeError } = await Promise.race([confirmation, timeout]);
 
-    if (stripeError) {
-      if (stripeError.type === 'card_error' || stripeError.type === 'validation_error') {
-        setError(stripeError.message);
-      } else {
-        setError('Error al procesar el pago. Intenta de nuevo.');
+      if (stripeError) {
+        if (stripeError.type === 'card_error' || stripeError.type === 'validation_error') {
+          setError(stripeError.message);
+        } else {
+          setError('Stripe no pudo autorizar el pago. Revisa los datos o usa otra tarjeta.');
+        }
+        return;
       }
+      window.location.assign(returnUrl);
+    } catch (confirmationError) {
+      if (confirmationError?.message === 'STRIPE_CONFIRM_TIMEOUT') {
+        // La confirmacion puede haber llegado a Stripe aunque la red del cliente
+        // se cortara. La pantalla de estado relee el proveedor sin volver a cobrar.
+        window.location.assign(returnUrl);
+        return;
+      }
+      setError('No recibimos respuesta de Stripe. Puedes reintentar: el mismo intento se reutilizara sin cobrar dos veces.');
+    } finally {
       setLoading(false);
     }
   };
@@ -70,6 +90,7 @@ function PaymentForm({ plan, displayAmount, onClose }) {
         type="button"
         className="payment-modal-close"
         onClick={onClose}
+        disabled={loading}
         aria-label="Cerrar checkout"
       >
         <X size={19} aria-hidden="true" />
@@ -114,6 +135,7 @@ function PaymentForm({ plan, displayAmount, onClose }) {
           options={{
             layout: 'tabs',
             wallets: { applePay: 'auto', googlePay: 'auto' },
+            fields: { billingDetails: { address: 'auto' } },
           }}
         />
       </div>
@@ -134,8 +156,41 @@ function PaymentForm({ plan, displayAmount, onClose }) {
   );
 }
 
-export default function PaymentModal({ clientSecret, plan, displayAmount, onClose }) {
+export default function PaymentModal({ clientSecret, plan, displayAmount, attemptId, onClose }) {
+  const [stripeLoadError, setStripeLoadError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    Promise.race([
+      stripePromise,
+      new Promise((_, reject) => window.setTimeout(
+        () => reject(new Error('STRIPE_SDK_TIMEOUT')),
+        15_000,
+      )),
+    ]).then((instance) => {
+      if (active && !instance) setStripeLoadError(true);
+    }).catch(() => {
+      if (active) setStripeLoadError(true);
+    });
+    return () => { active = false; };
+  }, []);
+
   if (!clientSecret) return null;
+
+  if (stripeLoadError) {
+    return (
+      <div className="payment-modal-overlay">
+        <div className="payment-modal-content" role="alert">
+          <button type="button" className="payment-modal-close" onClick={onClose} aria-label="Cerrar checkout">
+            <X size={19} aria-hidden="true" />
+          </button>
+          <div className="modal-error">
+            Stripe no pudo cargar en esta red. Cierra el formulario y vuelve a intentarlo; no se realizo ningun cobro.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const appearance = {
     theme: 'night',
@@ -194,7 +249,7 @@ export default function PaymentModal({ clientSecret, plan, displayAmount, onClos
   };
 
   return (
-    <div className="payment-modal-overlay" onClick={onClose}>
+    <div className="payment-modal-overlay">
       <div className="payment-modal-content" onClick={(e) => e.stopPropagation()}>
         <Elements
           stripe={stripePromise}
@@ -203,6 +258,7 @@ export default function PaymentModal({ clientSecret, plan, displayAmount, onClos
           <PaymentForm
             plan={plan}
             displayAmount={displayAmount}
+            attemptId={attemptId}
             onClose={onClose}
           />
         </Elements>

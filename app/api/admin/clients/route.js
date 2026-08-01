@@ -1,9 +1,11 @@
 import { z } from 'zod';
-import { stripe, isValidPlan, PLAN_IDS } from '../../../../lib/stripe';
+import { stripe, cancelStripeSubscription, isValidPlan, PLAN_IDS } from '../../../../lib/stripe';
+import { cancelPreapproval } from '../../../../lib/mercadopago';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { getUserProfile } from '../../../../lib/supabase-auth';
 import { logAction } from '../../../../lib/audit';
 import { jsonError } from '../../../../lib/api-error';
+import { hasActiveEntitlement } from '../../../../lib/entitlements';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,12 +23,11 @@ export async function GET() {
 
   const { data: users, error } = await supabaseAdmin
     .from('user_profiles')
-    .select('id, email, name, role, plan, subscription_status, stripe_customer_id, created_at, updated_at')
+    .select('id, email, name, role, plan, subscription_status, stripe_customer_id, stripe_subscription_id, payment_provider, mp_preapproval_id, plan_expires_at, subscription_current_period_end, cancel_at_period_end, last_payment_at, last_payment_amount, last_payment_currency, created_at, updated_at')
     .order('created_at', { ascending: false });
   if (error) return jsonError(error);
 
-  const isActive = (u) =>
-    u.subscription_status === 'active' || ['admin', 'owner'].includes(u.role);
+  const isActive = (u) => hasActiveEntitlement(u);
 
   const active = users.filter(isActive);
   const pending = users.filter((u) => !isActive(u));
@@ -35,24 +36,31 @@ export async function GET() {
   if (stripe) {
     await Promise.all(
       active.map(async (u) => {
-        if (!u.stripe_customer_id) return;
+        if (u.payment_provider && u.payment_provider !== 'stripe') return;
+        if (!u.stripe_customer_id && !u.stripe_subscription_id) return;
         try {
-          const subs = await stripe.subscriptions.list({
-            customer: u.stripe_customer_id,
-            status: 'all',
-            limit: 5,
-          });
-          const live = subs.data.find((s) =>
-            ['active', 'trialing', 'past_due'].includes(s.status)
-          );
-          if (live?.current_period_end) {
-            u.next_payment_at = new Date(live.current_period_end * 1000).toISOString();
+          const live = u.stripe_subscription_id
+            ? await stripe.subscriptions.retrieve(u.stripe_subscription_id)
+            : (await stripe.subscriptions.list({
+                customer: u.stripe_customer_id,
+                status: 'all',
+                limit: 5,
+              })).data.find((s) => ['active', 'trialing', 'past_due'].includes(s.status));
+          const periodEnd = (live?.items?.data || [])
+            .map((item) => Number(item.current_period_end || 0))
+            .filter(Boolean)
+            .sort((a, b) => a - b)[0];
+          if (periodEnd) {
+            u.next_payment_at = new Date(periodEnd * 1000).toISOString();
             u.subscription_id = live.id;
             u.stripe_status = live.status;
           } else {
             // Fallback: most recent succeeded charge + 30 days
+            const customerId = u.stripe_customer_id
+              || (typeof live?.customer === 'string' ? live.customer : live?.customer?.id);
+            if (!customerId) return;
             const charges = await stripe.charges.list({
-              customer: u.stripe_customer_id,
+              customer: customerId,
               limit: 10,
             });
             const lastPaid = charges.data
@@ -82,6 +90,7 @@ export async function GET() {
       role: u.role,
       plan: u.plan,
       stripe_customer_id: u.stripe_customer_id,
+      payment_provider: u.payment_provider,
       created_at: u.created_at,
       last_payment_at: u.last_payment_at || null,
       last_payment_amount: u.last_payment_amount || null,
@@ -96,6 +105,7 @@ export async function GET() {
       name: u.name,
       subscription_status: u.subscription_status,
       stripe_customer_id: u.stripe_customer_id,
+      payment_provider: u.payment_provider,
       created_at: u.created_at,
     })),
     counts: { active: active.length, pending: pending.length },
@@ -140,7 +150,7 @@ export async function POST(request) {
   // Cargar el usuario destino
   const { data: target, error: targetErr } = await supabaseAdmin
     .from('user_profiles')
-    .select('id, email, name, role, plan, subscription_status, stripe_customer_id')
+    .select('id, email, name, role, plan, subscription_status, stripe_customer_id, stripe_subscription_id, payment_provider, mp_preapproval_id')
     .eq('id', userId)
     .maybeSingle();
   if (targetErr) return jsonError(targetErr);
@@ -155,27 +165,56 @@ export async function POST(request) {
 
   let update;
   if (action === 'set-plan') {
-    update = { plan, subscription_status: 'active', updated_at: new Date().toISOString() };
+    update = {
+      plan,
+      subscription_status: 'active',
+      plan_expires_at: null,
+      subscription_current_period_end: null,
+      cancel_at_period_end: false,
+      updated_at: new Date().toISOString(),
+    };
   } else {
-    // revoke — best-effort: cancelar suscripciones vivas en Stripe para cortar el cobro
-    if (stripe && target.stripe_customer_id) {
+    // Revocar acceso solo DESPUES de que el proveedor confirme que no volvera a
+    // cobrar. Un error remoto ya no se oculta como exito administrativo.
+    if (
+      stripe
+      && target.payment_provider !== 'mercadopago'
+      && (target.stripe_subscription_id || target.stripe_customer_id)
+    ) {
       try {
-        const subs = await stripe.subscriptions.list({
-          customer: target.stripe_customer_id,
-          status: 'all',
-          limit: 10,
-        });
-        await Promise.all(
-          subs.data
-            .filter((s) => ['active', 'trialing', 'past_due', 'unpaid'].includes(s.status))
-            .map((s) => stripe.subscriptions.cancel(s.id).catch((e) =>
-              console.error('[admin/clients] cancel sub', s.id, e.message))),
-        );
+        if (target.stripe_subscription_id) {
+          await cancelStripeSubscription(target.stripe_subscription_id, false);
+        } else {
+          const subs = await stripe.subscriptions.list({ customer: target.stripe_customer_id, status: 'all', limit: 10 });
+          for (const sub of subs.data.filter((s) => ['active', 'trialing', 'past_due', 'unpaid'].includes(s.status))) {
+            await cancelStripeSubscription(sub.id, false);
+          }
+        }
       } catch (e) {
         console.error('[admin/clients] stripe cancel', target.email, e.message);
+        return Response.json({ error: 'Stripe no confirmo la cancelacion. No se revoco el acceso para evitar futuros cobros invisibles.' }, { status: 502 });
       }
     }
-    update = { plan: null, subscription_status: 'inactive', updated_at: new Date().toISOString() };
+    if (
+      target.payment_provider === 'mercadopago'
+      && target.mp_preapproval_id
+      && !/^\d+$/.test(String(target.mp_preapproval_id))
+    ) {
+      try {
+        await cancelPreapproval(target.mp_preapproval_id);
+      } catch (e) {
+        console.error('[admin/clients] mp cancel', target.email, e.message);
+        return Response.json({ error: 'Mercado Pago no confirmo la cancelacion. No se revoco el acceso.' }, { status: 502 });
+      }
+    }
+    update = {
+      plan: null,
+      subscription_status: 'inactive',
+      plan_expires_at: null,
+      subscription_current_period_end: null,
+      cancel_at_period_end: false,
+      updated_at: new Date().toISOString(),
+    };
   }
 
   const { error: updErr } = await supabaseAdmin

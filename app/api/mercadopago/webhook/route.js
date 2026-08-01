@@ -1,118 +1,354 @@
-// POST /api/mercadopago/webhook — notificaciones de Mercado Pago.
-//
-// Maneja:
-//   - preapproval (suscripción con tarjeta): authorized → active, cancelled, etc.
-//   - payment / order (PSE/Efecty, pago del periodo): approved/paid → active.
-//
-// Seguridad doble: 1) valida la firma x-signature con MP_WEBHOOK_SECRET;
-// 2) NO confía en el payload: relee el recurso real desde la API de MP con
-// nuestro token. Idempotente por id+estado.
-import { supabaseAdmin } from '../../../../lib/supabase';
-import { redisGet, redisSet } from '../../../../lib/redis';
-import { sendPlanActivatedEmail } from '../../../../lib/email';
-import { getPreapproval, mpStatusToApp, mpAccessToken, verifyWebhookSignature } from '../../../../lib/mercadopago';
+import { createHash } from 'crypto';
+import {
+  getAuthorizedPayment,
+  getMercadoPagoOrder,
+  getMercadoPagoPayment,
+  getPreapproval,
+  isValidPlan,
+  mercadoPagoPaymentPreapprovalId,
+  mercadoPagoPeriodEnd,
+  mpStatusToApp,
+  verifyWebhookSignature,
+} from '../../../../lib/mercadopago';
+import {
+  activatePaidAccess,
+  claimWebhookEvent,
+  completeWebhookEvent,
+  failWebhookEvent,
+  findPaymentOwner,
+  getPaymentAttemptByResource,
+  getPaymentAccessProfile,
+  syncSubscriptionStatus,
+  updatePaymentAttempt,
+} from '../../../../lib/payment-store';
 
 export const dynamic = 'force-dynamic';
 
-const MP_API = 'https://api.mercadopago.com';
-
-async function mpGet(path) {
-  const res = await fetch(`${MP_API}${path}`, {
-    headers: { Authorization: `Bearer ${mpAccessToken()}` },
-  });
-  return res.ok ? res.json() : null;
+function stableEventId(request, body, type, resourceId) {
+  if (body?.id && String(body.id) !== String(resourceId)) return String(body.id);
+  if (body?.date_created || body?.action) {
+    return createHash('sha256')
+      .update(`${type}:${resourceId}:${body.date_created || ''}:${body.action || ''}:${body.id || ''}`)
+      .digest('hex');
+  }
+  const requestId = request.headers.get('x-request-id');
+  if (requestId) return requestId;
+  return createHash('sha256')
+    .update(`${type}:${resourceId}:${body?.action || body?.date_created || JSON.stringify(body || {})}`)
+    .digest('hex');
 }
 
-async function applyStatus({ externalRef, preapprovalId, appStatus, dedupeKey }) {
-  let query = supabaseAdmin.from('user_profiles').select('id, name, email, plan');
-  query = externalRef ? query.eq('id', externalRef) : query.eq('mp_preapproval_id', preapprovalId);
-  const { data: profile } = await query.single();
-  if (!profile) {
-    console.error('[mp:webhook] usuario no encontrado', { externalRef, preapprovalId });
-    return Response.json({ received: true, unmatched: true });
-  }
+async function ownerForMp({ attemptId = null, userId = null, resourceId = null }) {
+  return findPaymentOwner({
+    attemptId,
+    userId,
+    provider: 'mercadopago',
+    subscriptionId: resourceId,
+    customerId: resourceId,
+  });
+}
 
-  const seen = await redisGet(dedupeKey);
-  if (seen === appStatus) return Response.json({ received: true, deduped: true });
+async function handlePreapproval(id) {
+  const preapproval = await getPreapproval(id);
+  if (!preapproval) throw new Error(`Mercado Pago preapproval not found: ${id}`);
+  const attempt = await getPaymentAttemptByResource('mercadopago', preapproval.id);
+  const owner = await ownerForMp({
+    attemptId: attempt?.id,
+    userId: preapproval.external_reference,
+    resourceId: preapproval.id,
+  });
+  if (!owner) throw new Error(`Mercado Pago owner not found for preapproval ${id}`);
 
-  const patch = {
-    subscription_status: appStatus,
-    payment_provider: 'mercadopago',
-    updated_at: new Date().toISOString(),
-  };
-  if (preapprovalId) patch.mp_preapproval_id = preapprovalId;
-  const { error } = await supabaseAdmin.from('user_profiles').update(patch).eq('id', profile.id);
-  if (error) throw new Error(`update: ${error.message}`);
-
-  if (appStatus === 'active' && seen !== 'active') {
-    try {
-      await sendPlanActivatedEmail({ to: profile.email, name: profile.name, plan: profile.plan || 'mensual' });
-    } catch (e) {
-      console.error('[mp:webhook] email activación falló:', e.message);
+  // authorized solo confirma el vinculo de la suscripcion. El acceso se activa
+  // con subscription_authorized_payment cuando el cobro figure approved.
+  if (preapproval.status === 'authorized') {
+    if (owner.attempt && owner.attempt.status !== 'succeeded') {
+      await updatePaymentAttempt(owner.attempt.id, {
+        status: 'processing',
+        last_provider_status: preapproval.status,
+        last_reconciled_at: new Date().toISOString(),
+      });
     }
+    return;
   }
-  await redisSet(dedupeKey, appStatus, 30 * 24 * 3600);
-  console.log('[mp:webhook]', dedupeKey, '→', appStatus, 'user', profile.id);
-  return Response.json({ received: true });
+
+  const appStatus = mpStatusToApp(preapproval.status);
+  if (['cancelled', 'past_due'].includes(appStatus)) {
+    const profile = await getPaymentAccessProfile(owner.userId);
+    const periodEnd = preapproval.next_payment_date
+      || profile?.subscription_current_period_end
+      || profile?.plan_expires_at
+      || null;
+    const paidPeriodRemaining = periodEnd && new Date(periodEnd).getTime() > Date.now();
+    const hasConfirmedPaidPeriod = owner.attempt?.status === 'succeeded'
+      || profile?.subscription_status === 'active'
+      || (profile?.subscription_status === 'cancelled' && profile?.cancel_at_period_end === true);
+    await syncSubscriptionStatus({
+      userId: owner.userId,
+      provider: 'mercadopago',
+      status: appStatus,
+      subscriptionId: preapproval.id,
+      periodEnd,
+      cancelAtPeriodEnd: appStatus === 'cancelled'
+        && !!paidPeriodRemaining
+        && hasConfirmedPaidPeriod,
+      providerStatus: preapproval.status,
+    });
+  }
+  if (owner.attempt && owner.attempt.status !== 'succeeded') {
+    await updatePaymentAttempt(owner.attempt.id, {
+      status: appStatus === 'cancelled' ? 'cancelled' : appStatus === 'past_due' ? 'failed' : 'processing',
+      last_provider_status: preapproval.status,
+      last_reconciled_at: new Date().toISOString(),
+    });
+  }
+}
+
+async function handleRecurringPayment(payment, preapprovalId, knownPreapproval = null) {
+  const preapproval = knownPreapproval || await getPreapproval(preapprovalId);
+  if (!preapproval) throw new Error(`Mercado Pago preapproval not found: ${preapprovalId}`);
+  const expectedUserId = preapproval.external_reference || payment.external_reference;
+  if (
+    preapproval.external_reference
+    && payment.external_reference
+    && String(preapproval.external_reference) !== String(payment.external_reference)
+  ) {
+    throw new Error(`Mercado Pago ownership mismatch for recurring payment ${payment.id}`);
+  }
+
+  const attempt = await getPaymentAttemptByResource('mercadopago', preapproval.id);
+  const owner = await ownerForMp({
+    attemptId: attempt?.id,
+    userId: expectedUserId,
+    resourceId: preapproval.id,
+  });
+  if (!owner) throw new Error(`Mercado Pago owner not found for recurring payment ${payment.id}`);
+  const plan = owner.attempt?.plan || owner.plan;
+  if (!isValidPlan(plan)) throw new Error(`Invalid plan for recurring payment ${payment.id}`);
+
+  if (payment.status === 'approved') {
+    const parsedPaidAt = new Date(payment.date_approved || payment.date_created || Date.now());
+    const paidAt = Number.isFinite(parsedPaidAt.getTime()) ? parsedPaidAt : new Date();
+    const nextPaymentAt = preapproval.next_payment_date
+      ? new Date(preapproval.next_payment_date)
+      : null;
+    const periodEnd = nextPaymentAt
+      && Number.isFinite(nextPaymentAt.getTime())
+      && nextPaymentAt.getTime() > paidAt.getTime()
+      ? nextPaymentAt.toISOString()
+      : mercadoPagoPeriodEnd(plan, paidAt);
+    await activatePaidAccess({
+      attemptId: owner.attempt?.id || null,
+      userId: owner.userId,
+      plan,
+      provider: 'mercadopago',
+      subscriptionId: preapproval.id,
+      paymentId: String(payment.id),
+      amount: Math.round(Number(payment.transaction_amount || 0)),
+      currency: payment.currency_id || 'COP',
+      periodEnd,
+      providerStatus: payment.status,
+      cancelAtPeriodEnd: mpStatusToApp(preapproval.status) === 'cancelled',
+    });
+    return;
+  }
+
+  const terminal = ['rejected', 'cancelled', 'canceled', 'refunded', 'charged_back'].includes(payment.status);
+  if (!terminal) {
+    if (owner.attempt && owner.attempt.status !== 'succeeded') {
+      await updatePaymentAttempt(owner.attempt.id, {
+        status: 'processing',
+        provider_payment_id: String(payment.id),
+        last_provider_status: payment.status,
+        last_reconciled_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  const reversed = ['refunded', 'charged_back'].includes(payment.status);
+  if (owner.attempt?.status === 'succeeded' || !owner.attempt) {
+    const profile = await getPaymentAccessProfile(owner.userId);
+    const periodEnd = profile?.subscription_current_period_end || profile?.plan_expires_at || null;
+    const paidPeriodRemaining = periodEnd && new Date(periodEnd).getTime() > Date.now();
+    await syncSubscriptionStatus({
+      userId: owner.userId,
+      provider: 'mercadopago',
+      status: reversed ? 'cancelled' : paidPeriodRemaining ? 'active' : 'past_due',
+      subscriptionId: preapproval.id,
+      periodEnd,
+      cancelAtPeriodEnd: !reversed && profile?.cancel_at_period_end === true,
+      providerStatus: payment.status,
+    });
+  }
+  if (owner.attempt) {
+    // Los rechazos de un cobro recurrente pueden ser reintentados por MP. Una
+    // devolucion/contracargo si es terminal y libera una compra futura.
+    await updatePaymentAttempt(owner.attempt.id, {
+      status: reversed ? 'failed' : 'processing',
+      provider_payment_id: String(payment.id),
+      last_provider_status: payment.status,
+      error_code: payment.status_detail || payment.status,
+      last_reconciled_at: new Date().toISOString(),
+    });
+  }
+}
+
+async function handleAuthorizedPayment(id) {
+  const invoice = await getAuthorizedPayment(id);
+  if (!invoice) throw new Error(`Mercado Pago authorized payment not found: ${id}`);
+  const preapproval = await getPreapproval(invoice.preapproval_id);
+  if (!preapproval) throw new Error(`Mercado Pago preapproval not found: ${invoice.preapproval_id}`);
+  const attempt = await getPaymentAttemptByResource('mercadopago', preapproval.id);
+  const owner = await ownerForMp({
+    attemptId: attempt?.id,
+    userId: preapproval.external_reference || invoice.external_reference,
+    resourceId: preapproval.id,
+  });
+  if (!owner) throw new Error(`Mercado Pago owner not found for authorized payment ${id}`);
+  const paymentStatus = invoice.payment?.status || invoice.summarized || invoice.status;
+
+  if (invoice.payment?.id) {
+    const payment = await getMercadoPagoPayment(invoice.payment.id);
+    if (!payment) throw new Error(`Mercado Pago payment not found: ${invoice.payment.id}`);
+    return handleRecurringPayment(payment, preapproval.id, preapproval);
+  }
+  if (owner.attempt && owner.attempt.status !== 'succeeded') {
+    await updatePaymentAttempt(owner.attempt.id, {
+      status: 'processing',
+      last_provider_status: paymentStatus,
+      last_reconciled_at: new Date().toISOString(),
+    });
+  }
+}
+
+async function handleOneTimePayment(id) {
+  const payment = await getMercadoPagoPayment(id);
+  if (!payment) throw new Error(`Mercado Pago payment not found: ${id}`);
+  const recurringPreapprovalId = mercadoPagoPaymentPreapprovalId(payment);
+  if (recurringPreapprovalId) {
+    return handleRecurringPayment(payment, recurringPreapprovalId);
+  }
+  if (payment.operation_type === 'recurring_payment') {
+    throw new Error(`Recurring Mercado Pago payment ${id} has no preapproval reference`);
+  }
+  const attempt = await getPaymentAttemptByResource('mercadopago', String(payment.id));
+  const owner = await ownerForMp({
+    attemptId: attempt?.id,
+    userId: payment.external_reference,
+    resourceId: String(payment.id),
+  });
+  if (!owner) throw new Error(`Mercado Pago owner not found for payment ${id}`);
+  const plan = owner.attempt?.plan || owner.plan;
+  if (!isValidPlan(plan)) throw new Error(`Invalid plan for payment ${id}`);
+
+  if (payment.status === 'approved') {
+    await activatePaidAccess({
+      attemptId: owner.attempt?.id || null,
+      userId: owner.userId,
+      plan,
+      provider: 'mercadopago',
+      subscriptionId: String(payment.id),
+      paymentId: String(payment.id),
+      amount: Math.round(Number(payment.transaction_amount || 0)),
+      currency: payment.currency_id || 'COP',
+      periodEnd: mercadoPagoPeriodEnd(plan, new Date(payment.date_approved || payment.date_created || Date.now())),
+      providerStatus: payment.status,
+    });
+    return;
+  }
+  if (owner.attempt) {
+    const terminal = ['rejected', 'cancelled', 'refunded', 'charged_back'].includes(payment.status);
+    if (owner.attempt.status === 'succeeded' && ['refunded', 'charged_back'].includes(payment.status)) {
+      await syncSubscriptionStatus({
+        userId: owner.userId,
+        provider: 'mercadopago',
+        status: 'cancelled',
+        subscriptionId: String(payment.id),
+        periodEnd: null,
+        cancelAtPeriodEnd: false,
+        providerStatus: payment.status,
+      });
+    }
+    await updatePaymentAttempt(owner.attempt.id, {
+      status: terminal
+        ? (owner.attempt.status === 'succeeded' ? 'cancelled' : 'failed')
+        : 'processing',
+      provider_payment_id: String(payment.id),
+      last_provider_status: payment.status,
+      error_code: terminal ? (payment.status_detail || payment.status) : null,
+      last_reconciled_at: new Date().toISOString(),
+    });
+  }
+}
+
+async function handleOrder(id) {
+  const order = await getMercadoPagoOrder(id);
+  if (!order) throw new Error(`Mercado Pago order not found: ${id}`);
+  const paymentId = order.transactions?.payments?.[0]?.id || order.payments?.[0]?.id;
+  if (paymentId) return handleOneTimePayment(paymentId);
+  if (!['cancelled', 'expired'].includes(order.status)) return;
+  const attempt = await getPaymentAttemptByResource('mercadopago', String(order.id));
+  if (attempt && attempt.status !== 'succeeded') {
+    await updatePaymentAttempt(attempt.id, {
+      status: 'failed',
+      last_provider_status: order.status,
+      error_code: order.status,
+      last_reconciled_at: new Date().toISOString(),
+    });
+  }
 }
 
 export async function POST(request) {
   const url = new URL(request.url);
-  // data.id de la QUERY STRING — es EXACTAMENTE lo que MP firma en x-signature.
-  const dataIdFromQuery = url.searchParams.get('data.id') || url.searchParams.get('id');
+  const queryId = url.searchParams.get('data.id') || url.searchParams.get('id');
   let type = url.searchParams.get('type') || url.searchParams.get('topic');
-
   const body = await request.json().catch(() => null);
-  if (body) {
-    type = body.type || body.topic || type;
-  }
-  // id del recurso a releer: el del query (coincide con la firma) o, si falta, el del body.
-  const id = dataIdFromQuery || body?.data?.id || body?.id;
-  if (!id || !type) return Response.json({ received: true, ignored: true });
+  type = body?.type || body?.topic || type;
+  const resourceId = queryId || body?.data?.id || body?.id;
+  if (!resourceId || !type) return Response.json({ received: true, ignored: true });
 
-  // 1) Firma (defensa en profundidad). La verificamos con el data.id del QUERY,
-  //    que es lo que MP firma. Si NO valida, NO rechazamos: la seguridad real es
-  //    la re-lectura del recurso vía API con nuestro token (un id falso da 404 o
-  //    estado != approved → no activa; un id real activa al titular que pagó, no
-  //    a un atacante). Rechazar con 401 por firma dejaba a clientes que pagaron
-  //    SIN activar — ese era el bug crítico.
-  const sig = verifyWebhookSignature(request, dataIdFromQuery || id);
-  if (sig === false) {
-    console.warn('[mp:webhook] x-signature no validó — se continúa por re-lectura API', { id, type });
+  const signatureValid = verifyWebhookSignature(request, queryId || resourceId);
+  if (signatureValid !== true && process.env.MP_ENV === 'live') {
+    console.warn('[mp:webhook] firma invalida', { resourceId, type });
+    return Response.json({ error: 'Webhook signature failed' }, { status: 401 });
+  }
+
+  const eventId = stableEventId(request, body, type, resourceId);
+  const claim = await claimWebhookEvent({
+    provider: 'mercadopago',
+    eventId,
+    eventType: type,
+    resourceId,
+  });
+  if (claim === 'completed') return Response.json({ received: true, deduped: true });
+  if (claim !== 'claimed') {
+    return Response.json(
+      { error: 'Webhook already processing; retry later' },
+      { status: 503, headers: { 'Retry-After': '10' } },
+    );
   }
 
   try {
-    // 2) Suscripción (tarjeta)
-    if (/preapproval/i.test(type)) {
-      const pa = await getPreapproval(id);
-      if (!pa) return Response.json({ received: true, notfound: true });
-      return await applyStatus({
-        externalRef: pa.external_reference,
-        preapprovalId: id,
-        appStatus: mpStatusToApp(pa.status),
-        dedupeKey: `mp-preapproval:${id}`,
-      });
+    if (/authorized_payment/i.test(type)) {
+      await handleAuthorizedPayment(resourceId);
+    } else if (/preapproval_plan/i.test(type)) {
+      // La app crea suscripciones sin plan remoto; los cambios del catalogo de
+      // planes de MP no representan ni un cobro ni un derecho de acceso.
+    } else if (/preapproval/i.test(type)) {
+      await handlePreapproval(resourceId);
+    } else if (/payment/i.test(type)) {
+      await handleOneTimePayment(resourceId);
+    } else if (/order/i.test(type)) {
+      await handleOrder(resourceId);
     }
-
-    // 3) Pago único (PSE/Efecty) — payment u order
-    if (/payment/i.test(type)) {
-      const p = await mpGet(`/v1/payments/${id}`);
-      if (!p) return Response.json({ received: true, notfound: true });
-      const appStatus = p.status === 'approved' ? 'active'
-        : (p.status === 'rejected' || p.status === 'cancelled') ? 'cancelled' : 'pending';
-      return await applyStatus({ externalRef: p.external_reference, appStatus, dedupeKey: `mp-payment:${id}` });
-    }
-    if (/order/i.test(type)) {
-      const o = await mpGet(`/v1/orders/${id}`);
-      if (!o) return Response.json({ received: true, notfound: true });
-      const paid = o.status === 'processed' || o.status === 'paid' || o.status_detail === 'accredited';
-      const appStatus = paid ? 'active' : (o.status === 'cancelled' ? 'cancelled' : 'pending');
-      return await applyStatus({ externalRef: o.external_reference, appStatus, dedupeKey: `mp-order:${id}` });
-    }
-
-    return Response.json({ received: true, ignored: type });
-  } catch (e) {
-    console.error('[mp:webhook]', e.message);
+    await completeWebhookEvent('mercadopago', eventId);
+    return Response.json({ received: true });
+  } catch (error) {
+    await failWebhookEvent('mercadopago', eventId, error).catch(() => {});
+    console.error('[mp:webhook]', eventId, type, error.message);
+    // Mercado Pago reintenta al no recibir 200/201. No convertimos 429/5xx/404
+    // transitorios de su API en un falso "notfound" exitoso.
     return Response.json({ error: 'Webhook handler failed' }, { status: 500 });
   }
 }
