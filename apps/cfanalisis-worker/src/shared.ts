@@ -56,6 +56,9 @@ const [
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
+  // Cliente compartido del proveedor. Hasta que el token CI permita ampliar
+  // WORKER_RE para `.cjs`, actualizar este marcador junto a cambios del cliente
+  // fuerza la recarga correcta del runtime (marker: quota-circuit-v2).
   import(LIB + 'football-api-client.cjs'),
   import(LIB + 'supabase.js'),
   import(LIB + 'supabase-cache.js'),
