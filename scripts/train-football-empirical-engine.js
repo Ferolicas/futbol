@@ -105,6 +105,7 @@ function emptyMetric() {
   return {
     n: 0, brierSum: 0, loglossSum: 0, absGapSum: 0,
     highN: 0, highPred: 0, highHits: 0,
+    daily90N: 0, daily90Pred: 0, daily90Hits: 0,
     eliteN: 0, elitePred: 0, eliteHits: 0,
     byFamily: {},
   };
@@ -120,14 +121,17 @@ function addObservation(metric, family, p, hit) {
   metric.loglossSum += -(hit * Math.log(q) + (1 - hit) * Math.log(1 - q));
   metric.absGapSum += Math.abs(q - hit);
   if (q >= 0.80) { metric.highN++; metric.highPred += q; metric.highHits += hit; }
+  if (q >= 0.90) { metric.daily90N++; metric.daily90Pred += q; metric.daily90Hits += hit; }
   if (q >= 0.95) { metric.eliteN++; metric.elitePred += q; metric.eliteHits += hit; }
   const f = metric.byFamily[family] || (metric.byFamily[family] = {
     n: 0, pred: 0, hits: 0, brier: 0,
     highN: 0, highPred: 0, highHits: 0,
+    daily90N: 0, daily90Pred: 0, daily90Hits: 0,
     eliteN: 0, elitePred: 0, eliteHits: 0,
   });
   f.n++; f.pred += q; f.hits += hit; f.brier += (q - hit) ** 2;
   if (q >= 0.80) { f.highN++; f.highPred += q; f.highHits += hit; }
+  if (q >= 0.90) { f.daily90N++; f.daily90Pred += q; f.daily90Hits += hit; }
   if (q >= 0.95) { f.eliteN++; f.elitePred += q; f.eliteHits += hit; }
 }
 
@@ -137,6 +141,7 @@ function finishMetric(metric) {
     families[key] = {
       n: f.n, avg_pred: f.pred / f.n, avg_actual: f.hits / f.n, brier: f.brier / f.n,
       high: f.highN ? { n: f.highN, avg_pred: f.highPred / f.highN, avg_actual: f.highHits / f.highN } : { n: 0 },
+      daily90: f.daily90N ? { n: f.daily90N, avg_pred: f.daily90Pred / f.daily90N, avg_actual: f.daily90Hits / f.daily90N } : { n: 0 },
       elite95: f.eliteN ? { n: f.eliteN, avg_pred: f.elitePred / f.eliteN, avg_actual: f.eliteHits / f.eliteN } : { n: 0 },
     };
   }
@@ -146,6 +151,7 @@ function finishMetric(metric) {
     logloss: metric.n ? metric.loglossSum / metric.n : null,
     mean_abs_error: metric.n ? metric.absGapSum / metric.n : null,
     high: metric.highN ? { n: metric.highN, avg_pred: metric.highPred / metric.highN, avg_actual: metric.highHits / metric.highN, gap: Math.abs(metric.highPred - metric.highHits) / metric.highN } : { n: 0 },
+    daily90: metric.daily90N ? { n: metric.daily90N, avg_pred: metric.daily90Pred / metric.daily90N, avg_actual: metric.daily90Hits / metric.daily90N, gap: Math.abs(metric.daily90Pred - metric.daily90Hits) / metric.daily90N } : { n: 0 },
     elite95: metric.eliteN ? { n: metric.eliteN, avg_pred: metric.elitePred / metric.eliteN, avg_actual: metric.eliteHits / metric.eliteN, gap: Math.abs(metric.elitePred - metric.eliteHits) / metric.eliteN } : { n: 0 },
     families,
   };
@@ -153,7 +159,10 @@ function finishMetric(metric) {
 
 function metricScore(metric) {
   if (!metric || metric.brier == null) return Infinity;
-  return metric.brier + (metric.high?.gap || 0) * 0.25 + (metric.elite95?.gap || 0) * 0.50;
+  return metric.brier
+    + (metric.high?.gap || 0) * 0.25
+    + (metric.daily90?.gap || 0) * 0.35
+    + (metric.elite95?.gap || 0) * 0.50;
 }
 
 async function upsertDiagnostics(pool, families) {
@@ -168,6 +177,7 @@ async function upsertDiagnostics(pool, families) {
     const segments = [
       { name: 'validation', ...fm },
       { name: 'validation-high', ...fm.high, brier: null },
+      { name: 'validation-daily90', ...fm.daily90, brier: null },
       { name: 'validation-elite95', ...fm.elite95, brier: null },
     ];
     for (const segment of segments) {
@@ -345,8 +355,11 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
     const configChanged = !sameConfig(config, active.config);
     const baselineEliteGap = baseline.validation.elite95?.n ? baseline.validation.elite95.gap : null;
     const candidateEliteGap = candidate.validation.elite95?.n ? candidate.validation.elite95.gap : null;
+    const baselineDaily90Gap = baseline.validation.daily90?.n ? baseline.validation.daily90.gap : null;
+    const candidateDaily90Gap = candidate.validation.daily90?.n ? candidate.validation.daily90.gap : null;
+    const daily90NotWorse = candidateDaily90Gap == null || baselineDaily90Gap == null || candidateDaily90Gap <= baselineDaily90Gap + 1e-9;
     const eliteNotWorse = candidateEliteGap == null || baselineEliteGap == null || candidateEliteGap <= baselineEliteGap + 1e-9;
-    const notWorse = metricScore(candidate.validation) <= metricScore(baseline.validation) + 1e-9 && eliteNotWorse;
+    const notWorse = metricScore(candidate.validation) <= metricScore(baseline.validation) + 1e-9 && daily90NotWorse && eliteNotWorse;
     const activates = active.version === 0 ? notWorse : (configChanged && notWorse);
     const shouldPersist = active.version === 0 || configChanged;
     const report = {
@@ -354,7 +367,7 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
       train: split, validation: samples.length - split,
       previousVersion: active.version, previousShare: active.config.currentShare,
       previousConfig: active.config, candidateShare: config.currentShare,
-      candidateConfig: config, configChanged, activates, eliteNotWorse, steps,
+      candidateConfig: config, configChanged, activates, daily90NotWorse, eliteNotWorse, steps,
       baseline: baseline.validation, candidate: candidate.validation,
     };
 
@@ -391,6 +404,7 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
               config,
               brier: candidate.validation.brier,
               high: candidate.validation.high,
+              daily90: candidate.validation.daily90,
               elite95: candidate.validation.elite95,
             },
           };
@@ -429,7 +443,7 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
         client.release();
       }
     }
-    console.log(`[train-football-empirical] sample=${rows.length} processed=${samples.length} errors=${errors} · share ${active.config.currentShare}→${config.currentShare} · activate=${activates} · valBrier=${candidate.validation.brier?.toFixed(4)} · elite95=${candidate.validation.elite95?.avg_actual == null ? '—' : (candidate.validation.elite95.avg_actual * 100).toFixed(1) + '%'}`);
+    console.log(`[train-football-empirical] sample=${rows.length} processed=${samples.length} errors=${errors} · share ${active.config.currentShare}→${config.currentShare} · activate=${activates} · valBrier=${candidate.validation.brier?.toFixed(4)} · daily90=${candidate.validation.daily90?.avg_actual == null ? '—' : (candidate.validation.daily90.avg_actual * 100).toFixed(1) + '%'} · elite95=${candidate.validation.elite95?.avg_actual == null ? '—' : (candidate.validation.elite95.avg_actual * 100).toFixed(1) + '%'}`);
     return report;
   } finally {
     if (ownPool) await pool.end();

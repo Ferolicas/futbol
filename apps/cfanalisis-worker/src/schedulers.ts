@@ -97,24 +97,24 @@ const SCHEDULES: Sched[] = [
   // call y exit (~unas decenas de ms).
   { queue: 'baseball-live', id: 'baseball-live-1m', every: 60_000 },
 
-  // ── Baloncesto NBA ──────────────────────────────────────────────────
-  // NBA oficial es primaria; API-NBA entra automáticamente si el CDN bloquea
-  // al VPS. API-Basketball queda para cuotas y último fallback de boxscore.
+  // ── Baloncesto NBA + NCAA ───────────────────────────────────────────
+  // NBA oficial es primaria y NCAA usa calendario/boxscore deportivo público.
+  // API-Basketball queda para cuotas y último fallback de NBA.
   { queue: 'basketball-fixtures', id: 'basketball-fixtures-daily', pattern: '10 1 * * *', tz: TZ },
   { queue: 'basketball-analyze', id: 'basketball-analyze-daily', pattern: '40 1 * * *', tz: TZ },
   { queue: 'basketball-finalize', id: 'basketball-finalize-daily', pattern: '0 8,11 * * *', tz: TZ },
   { queue: 'basketball-retrain', id: 'basketball-retrain-daily', pattern: '30 12 * * *', tz: TZ },
-  // El plan free permite 100 llamadas/día: 10 min + smart-window evita quemar
-  // cuota fuera de juegos y deja margen para cuotas/boxscores.
+  // Smart-window evita trabajo fuera de juegos; los calendarios universitarios
+  // no consumen el presupuesto de API-Basketball.
   { queue: 'basketball-live', id: 'basketball-live-10m', every: 600_000 },
 
-  // ── Fútbol americano NFL ────────────────────────────────────────────
+  // ── Fútbol americano NFL + NCAA FBS/FCS ────────────────────────────
   { queue: 'american-football-fixtures', id: 'american-football-fixtures-daily', pattern: '15 1 * * *', tz: TZ },
   { queue: 'american-football-analyze', id: 'american-football-analyze-daily', pattern: '50 1 * * *', tz: TZ },
   { queue: 'american-football-finalize', id: 'american-football-finalize-daily', pattern: '15 8,11 * * *', tz: TZ },
   { queue: 'american-football-retrain', id: 'american-football-retrain-daily', pattern: '0 13 * * *', tz: TZ },
-  // NFL comparte cuota de datos, boxscores y odds; 30 min conserva margen
-  // incluso en una jornada de 16 partidos para finalizar todos los hechos.
+  // NFL conserva el respaldo existente; FBS/FCS usa su fuente pública y el
+  // mismo smart-window. El intervalo evita trabajo continuo fuera de partidos.
   { queue: 'american-football-live', id: 'american-football-live-30m', every: 1_800_000 },
 ];
 

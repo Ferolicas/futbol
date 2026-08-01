@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-01 · Base auditada: `a2bf799` + notificaciones/identidad PWA actuales
+Actualizado: 2026-08-02 · Base auditada: calendarios multideporte ampliados y paneles móviles unificados
 
 ## Identidad y stack
 
@@ -29,9 +29,9 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `/pago/estado` | `app/pago/estado/` | Sí | Confirmación durable y recuperación del pago |
 | `/dashboard` | `app/dashboard/layout.js`, `page.js` | Plan activo | Partidos, análisis y combinadas |
 | `/dashboard/analisis/[id]` | `app/dashboard/analisis/[id]/page.js` | Plan activo | Análisis de fútbol |
-| `/dashboard/baseball` | `app/dashboard/baseball/page.js` | Plan activo | Producto de béisbol |
-| `/dashboard/baloncesto` | `app/dashboard/baloncesto/page.js` | Plan activo | Partidos y motor independiente NBA |
-| `/dashboard/futbol-americano` | `app/dashboard/futbol-americano/page.js` | Plan activo | Partidos y motor independiente NFL |
+| `/dashboard/baseball` | `app/dashboard/baseball/page.js` | Plan activo | MLB, Triple-A, Double-A, High-A, Single-A y Rookie |
+| `/dashboard/baloncesto` | `app/dashboard/baloncesto/page.js` | Plan activo | Partidos NBA y NCAA |
+| `/dashboard/futbol-americano` | `app/dashboard/futbol-americano/page.js` | Plan activo | NFL, NCAA FBS y NCAA FCS |
 | `/admin` | `app/admin/` | Admin/owner | Operación y clientes |
 | `/ferney` | `app/ferney/` | Privada | Auditoría del propietario |
 
@@ -58,10 +58,10 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `GET /api/fixtures` | `app/api/fixtures/route.js` | Dashboard | Partidos y análisis diarios |
 | `GET /api/match/[id]` | `app/api/match/[id]/route.js` | Análisis | Detalle estadístico |
 | `GET/POST /api/refresh-live` | `app/api/refresh-live/route.js` | Dashboard | GET lee Redis; POST fuerza proveedor |
-| `GET /api/sports/[sport]/fixtures` | `app/api/sports/[sport]/fixtures/route.js` | NBA/NFL | Jornada localizada y análisis persistido |
-| `POST /api/sports/[sport]/analyze` | `app/api/sports/[sport]/analyze/route.js` | NBA/NFL | Encola análisis sin ejecutar trabajo pesado en web |
-| `GET /api/sports/[sport]/match/[id]` | `app/api/sports/[sport]/match/[id]/route.js` | NBA/NFL | Detalle y evidencia almacenados |
-| `GET /api/sports/[sport]/quota` | `app/api/sports/[sport]/quota/route.js` | NBA/NFL | Presupuestos diarios separados por proveedor |
+| `GET /api/sports/[sport]/fixtures` | `app/api/sports/[sport]/fixtures/route.js` | Baloncesto/NFL/NCAA | Jornada localizada, competiciones y análisis persistido |
+| `POST /api/sports/[sport]/analyze` | `app/api/sports/[sport]/analyze/route.js` | Baloncesto/NFL/NCAA | Encola análisis sin ejecutar trabajo pesado en web |
+| `GET /api/sports/[sport]/match/[id]` | `app/api/sports/[sport]/match/[id]/route.js` | Baloncesto/NFL/NCAA | Detalle y evidencia almacenados |
+| `GET /api/sports/[sport]/quota` | `app/api/sports/[sport]/quota/route.js` | Operación interna | Presupuestos separados por proveedor; no se muestra al cliente |
 | `/api/cron/*` | `app/api/cron/` | Cron/worker | Ingesta, análisis y finalización |
 
 El resto de endpoints se agrupa en `app/api/admin`, `baseball`, `chat`, `favorites`, `push`, `quota`, `tickets` y `user`.
@@ -77,12 +77,12 @@ Las migraciones viven en `scripts/`. Tablas clave:
 - `payment_webhook_events`: idempotencia persistente y reintentos de webhooks.
 - `payment_exchange_rates`: última tasa EUR→COP válida para tolerar caídas del proveedor FX.
 - `fixtures_cache`, `match_schedule`, `match_results`, `match_analysis`, `match_predictions`: núcleo de fútbol.
-- `baseball_*`: producto MLB existente más hechos, jugadores, predicciones y
-  pesos empíricos propios en `baseball_engine_*`.
-- `basketball_*`: calendario, análisis y hechos NBA; no consulta tablas de
-  fútbol, MLB ni NFL.
-- `american_football_*`: calendario, análisis y hechos NFL; no consulta tablas
-  de fútbol, MLB ni NBA.
+- `baseball_*`: MLB/MiLB más hechos, jugadores, predicciones y pesos empíricos
+  propios en `baseball_engine_*`.
+- `basketball_*`: calendario, análisis y hechos NBA/NCAA; no consulta tablas de
+  fútbol, béisbol ni fútbol americano.
+- `american_football_*`: calendario, análisis y hechos NFL/FBS/FCS; no consulta
+  tablas de fútbol, béisbol ni baloncesto.
 - `combinadas`, `combinada_dia`, `tickets`, `chat_messages`, `push_subscriptions`.
 - Esquema `model`: entidades, hechos, perfiles y señales del motor estadístico.
 - `raw_api_payloads` + `api_capture_failures`: crudo válido e histórico durable
@@ -129,7 +129,7 @@ Tras login o registro, las pantallas cliente llaman `refreshSession()` antes de 
 
 El workflow n8n `COMBINADA DEL DIA` se ejecuta diariamente a las 13:00 de
 Madrid. Una sola llamada autenticada a `/api/cron/publish-combinada` reúne los
-análisis y devuelve la selección final. `lib/telegram-daily-pick.js` exige 95%
+análisis y devuelve la selección final. `lib/telegram-daily-pick.js` exige 90%
 por opción, admite únicamente goles, córners, tarjetas o remates a puerta,
 prioriza una sola apuesta y, si hace falta, combina hasta tres partidos
 distintos para una cuota total entre 1.50 y 2.00. El workflow no usa IA:
@@ -137,11 +137,15 @@ construye la URL de `/api/pick-image` y Telegram publica la tarjeta con escudos,
 cuota, probabilidad y un único enlace a CF Análisis.
 
 Una opción de equipo solo puede entrar si su misma clave exacta (por ejemplo,
-`goals_total_over_1_5`) sostuvo al menos 95% en la ventana cronológica de
-validación. Ese control no cambia el porcentaje calculado: si faltan métricas o
-la validación no alcanza el umbral, el sistema falla cerrado y no recomienda.
+`goals_total_over_1_5`) sostuvo fuera de muestra al menos el porcentaje que se
+muestra. Para la Apuesta del Día, la banda `daily90` exige además un porcentaje
+calculado de 90% o más. Ese control no cambia el porcentaje: si faltan métricas
+o la validación no alcanza el valor mostrado, el sistema falla cerrado y no
+recomienda.
 Los props de jugador siguen visibles en el constructor, pero no llegan a la
-Apuesta del día hasta disponer de backtest point-in-time propio.
+Apuesta del día ni a la combinada automática hasta disponer de backtest
+point-in-time propio. El constructor identifica expresamente las opciones que
+son recomendaciones validadas y las que son solo referencia estadística.
 
 ### Motor empírico de fútbol
 
@@ -154,9 +158,16 @@ pesos sobre cumplimientos observados, nunca puntos añadidos/restados a una
 probabilidad. H2H se deduplica por fixture; el árbitro solo pondera tarjetas,
 faltas y rojas; el XI confirmado pondera alineaciones históricas reales.
 
+Las medias descriptivas no se presentan como goles “esperados”: la interfaz
+aclara que la media anotadora combinada y la frecuencia de superar una línea
+son medidas diferentes. Los mercados de “menos de” usan el complemento exacto
+del “más de”; no reciben ajustes artificiales y solo se recomiendan cuando su
+línea/dirección exacta sostiene fuera de muestra el porcentaje mostrado.
+
 `scripts/train-football-empirical-engine.js` hace walk-forward nocturno sobre
 1.200 partidos: 70% para escoger pesos y 30% cronológico intocable para aceptar
-o rechazar el candidato y renovar 755 diagnósticos exactos. Un candidato peor
+o rechazar el candidato y renovar cada familia exacta en las bandas general,
+alta, diaria-90 y élite-95. Un candidato peor
 queda inactivo; el campeón conserva producción y refresca su propia validación.
 `apps/cfanalisis-worker/src/jobs/futbol/retrain.js` ejecuta captura → ingesta →
 perfiles → entrenamiento, falla si cualquier etapa queda incompleta y deja un
@@ -172,7 +183,7 @@ segundos después del reinicio oficial de cuota (00:00 UTC).
 crudo, ledger, hechos, dimensiones, marcadores y contadores de jugador; código
 de salida 2 significa una invariancia crítica rota.
 
-### Motores empíricos MLB, NBA y NFL
+### Motores empíricos de béisbol, baloncesto y fútbol americano
 
 `lib/multisport-empirical-engine.js` comparte únicamente la implementación de
 la fórmula de frecuencia observada; cada deporte usa su propio prefijo de
@@ -184,30 +195,40 @@ rival, competición, pitcher/quarterback y alineación solo ponderan hechos
 observados semejantes. Cuotas, Poisson, isotónica, priors y shrinkage no alteran
 el porcentaje.
 
-Las fuentes también están separadas:
+Las fuentes y namespaces de identificadores también están separados:
 
 - NBA: feed/CDN oficial primero; si el servidor recibe bloqueo o timeout,
   `lib/nba-stats-api.js` cambia a API-NBA. API-Basketball queda para cuotas y
-  como último respaldo de boxscores. El índice oficial de `nba.com/players`
+  como último respaldo de boxscores. ESPN completa calendario amplio y cuotas
+  embebidas cuando están publicadas. El índice oficial de `nba.com/players`
   cruza nombres/equipos con el ID NBA y sus headshots CDN, incluso cuando el
   boxscore llega desde API-NBA. IDs y logos canónicos evitan duplicados al
   cambiar de fuente.
-- MLB: MLB Stats oficial aporta calendario, live, boxscores, pitchers,
-  alineaciones, game logs y fotos. API-Baseball se consulta solo para cuotas.
-- NFL: API-NFL aporta jornadas, boxscores, grupos estadísticos de jugadores,
-  fotos y cuotas.
+- NCAA baloncesto: calendario, logos, marcadores, boxscores, jugadores y cuotas
+  publicadas mediante el feed deportivo de ESPN (grupo 50), con IDs aislados de
+  NBA. No depende de la ventana de fechas de API-Sports.
+- MLB/MiLB: MLB Stats oficial aporta calendarios de MLB, Triple-A, Double-A,
+  High-A, Single-A y Rookie, además de live, boxscores y logos. El enriquecido
+  de pitchers, alineaciones y props se reserva para MLB; API-Baseball se consulta
+  solo para cuotas MLB y nunca se inventan cuotas de ligas menores.
+- NFL: API-NFL aporta la ventana reciente cuando está disponible; ESPN garantiza
+  el calendario amplio, IDs y logos canónicos, boxscores, jugadores y cuotas
+  publicadas sin duplicar encuentros al cambiar de fuente.
+- NCAA fútbol americano: ESPN aporta FBS (grupo 80) y FCS (grupo 81), con
+  calendario, logos, marcador, boxscore, jugadores y cuotas cuando existen.
 
 `scripts/train-multisport-empirical-engine.js` realiza selección cronológica
 70/30 por deporte y guarda validación fuera de muestra sin recalibrar el
-porcentaje. `scripts/backfill-multisport-history.js` carga una temporada MLB,
-NBA o NFL por ejecución (MLB usa rangos oficiales de 45 días), y
+porcentaje. `scripts/backfill-multisport-history.js` carga una temporada y una
+o varias competiciones por ejecución (`--competition`; MLB/MiLB usa rangos
+oficiales de 45 días y NCAA consultas diarias concurrentes), y
 `scripts/migrate-multisport-engines.sql` crea los almacenes
 independientes; la migración requiere backup y debe ejecutarse antes de activar
 las nuevas rutas en producción. Tenis permanece deshabilitado hasta aprobar una
 fuente fiable.
 
 Orden operativo de producción: aplicar la migración con backup, ejecutar por temporada
-`npm run backfill:multisport -- <baseball|basketball|american_football> <año>`,
+`npm run backfill:multisport -- <baseball|basketball|american_football> <año> [--competition=...]`,
 entrenar con `npm run train:multisport` y solo entonces desplegar/reiniciar los
 schedulers nuevos. Añadir `--dry` permite verificar cobertura sin escribir DB.
 
@@ -239,6 +260,13 @@ solo se montan las filas próximas al viewport, independientemente de que exista
 20, 100, 400 o más partidos. Una tarjeta analizada cerrada no monta mercados,
 probabilidades ni jugadores; al abrirse, `ResizeObserver` mide solo esa fila sin
 compensar el scroll. Las tarjetas están memoizadas y reciben handlers estables.
+
+Baloncesto y fútbol americano usan el mismo armazón visual móvil de fútbol:
+selector de fecha, competición/estado, pestañas Partidos/Combinada, tarjetas
+expandibles y combinada flotante. Béisbol conserva sus mercados especializados,
+pero comparte encabezado, controles, tabs, espaciado, color y comportamiento de
+tarjetas. Los datos operativos de proveedor/cuota no aparecen en la experiencia
+del cliente.
 
 `GET /api/fixtures` usa `MGET` para documentos Redis, una consulta PostgreSQL
 por lote para los `live_stats` ausentes y filtra análisis, cuotas, standings y

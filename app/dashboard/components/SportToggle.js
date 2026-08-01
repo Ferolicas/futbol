@@ -66,10 +66,10 @@ function TennisIcon({ size = 18, className = '' }) {
 
 const SPORTS = [
   { key: 'futbol', label: 'Fútbol', detail: 'Partidos y combinadas', path: '/dashboard', icon: FootballBallIcon },
-  { key: 'baseball', label: 'Baseball', detail: 'MLB oficial', path: '/dashboard/baseball', icon: BaseballGloveIcon },
-  { key: 'basketball', label: 'Baloncesto', detail: 'NBA', path: '/dashboard/baloncesto', icon: BasketballIcon },
-  { key: 'american_football', label: 'Fútbol americano', detail: 'NFL', path: '/dashboard/futbol-americano', icon: AmericanFootballIcon },
-  { key: 'tennis', label: 'Tenis', detail: 'Fuente pendiente', path: null, icon: TennisIcon, disabled: true },
+  { key: 'baseball', label: 'Baseball', detail: 'MLB y ligas menores', path: '/dashboard/baseball', icon: BaseballGloveIcon },
+  { key: 'basketball', label: 'Baloncesto', detail: 'NBA y NCAA', path: '/dashboard/baloncesto', icon: BasketballIcon },
+  { key: 'american_football', label: 'Fútbol americano', detail: 'NFL y NCAA', path: '/dashboard/futbol-americano', icon: AmericanFootballIcon },
+  { key: 'tennis', label: 'Tenis', detail: 'Próximamente', path: null, icon: TennisIcon, disabled: true },
 ];
 
 /**

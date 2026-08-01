@@ -1,7 +1,7 @@
 /**
  * GET /api/baseball/fixtures?date=YYYY-MM-DD&tz=<IANA>
  *
- * Lista los juegos MLB del día (zona horaria del cliente) desde la MLB Stats
+ * Lista MLB y las categorías oficiales de MiLB del día (zona horaria del cliente) desde MLB Stats
  * API oficial (statsapi.mlb.com) — api-baseball no sirve para MLB (plan free
  * 2022-2024, sin pitchers). Enriquece con el análisis (probabilidades,
  * combinada) y el estado en vivo (baseball_match_results), ambos por gamePk.
@@ -9,7 +9,7 @@
  * Mapea el game de MLB Stats API al shape que el frontend ya consume (id,
  * date, status:{short,long}, teams, scores, league) para no reescribir la UI.
  */
-import { getMlbScheduleByDate } from '../../../../lib/mlb-stats-api';
+import { getMlbScheduleByDate, MLB_SPORT_IDS } from '../../../../lib/mlb-stats-api';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { userHasActivePlan } from '../../../../lib/require-active-plan';
@@ -17,7 +17,7 @@ import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
-const SPORT_IDS = [1]; // MLB (añadir 11/12 para MiLB)
+const SPORT_IDS = Object.keys(MLB_SPORT_IDS).map(Number);
 
 function localDateOf(utcIso, tz) {
   if (!utcIso) return null;
@@ -36,8 +36,8 @@ function toFixtureShape(g) {
     id: g.gamePk,
     date: g.dateUTC,
     status: { short, long: g.status, inning: g.inning },
-    league: { id: 1, name: 'MLB' },
-    country: { name: 'USA' },
+    league: { id: Number(g.sportId || 1), name: g.sportName || MLB_SPORT_IDS[g.sportId] || 'MLB' },
+    country: { name: 'Estados Unidos' },
     teams: {
       home: { id: g.home.id, name: g.home.name, abbreviation: g.home.abbreviation, logo: mlbLogo(g.home.id) },
       away: { id: g.away.id, name: g.away.name, abbreviation: g.away.abbreviation, logo: mlbLogo(g.away.id) },
@@ -81,9 +81,7 @@ export async function GET(request) {
 
     // Schedule MLB de las fechas necesarias (todas en paralelo).
     const schedLists = await Promise.all(
-      fetchDates.flatMap(dt => SPORT_IDS.map(sid =>
-        getMlbScheduleByDate(dt, sid).catch(() => [])
-      ))
+      fetchDates.map((dt) => getMlbScheduleByDate(dt, SPORT_IDS).catch(() => [])),
     );
     const seen = new Set();
     const merged = [];

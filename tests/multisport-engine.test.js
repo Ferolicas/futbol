@@ -11,7 +11,8 @@ const { apiSportsInternals, normalizeApiSportsOdds } = require('../lib/api-sport
 const { normalizeTeamStatistics, multisportStoreInternals } = require('../lib/multisport-store.js');
 const { normalizeApiBasketballGame, normalizeApiNbaGame, nbaStatsInternals } = require('../lib/nba-stats-api.js');
 const { normalizeMlbGame, normalizeNflGame } = require('../lib/multisport-providers.js');
-const { isIsoDate } = require('../lib/multisport-config.js');
+const { normalizeEspnGame, normalizeEspnOdds } = require('../lib/espn-sports-api.js');
+const { getSportCompetitions, isIsoDate } = require('../lib/multisport-config.js');
 
 test('el motor multi-deporte acepta una sola muestra y solo limita 100% en presentación', () => {
   const rate = multisportEngineInternals.empiricalRate(
@@ -129,6 +130,12 @@ test('normaliza boxscores de proveedores a métricas canónicas', () => {
     turnovers: 2, totalYards: 321, passingYards: 240, rushingYards: 81,
   });
   assert.equal(normalizeTeamStatistics({ penalties: { total: '7-55' } }).penalties, 7);
+  assert.deepEqual(normalizeTeamStatistics([
+    { name: 'threePointFieldGoalsMade-threePointFieldGoalsAttempted', value: '11-29' },
+    { name: 'fouls', value: '23' },
+    { name: 'netPassingYards', value: '240' },
+    { name: 'totalPenaltiesYards', value: '6-40' },
+  ]), { personalFouls: 23, threePointersMade: 11, passingYards: 240, penalties: 6 });
 });
 
 test('API-NBA y API-Basketball conservan el mismo ID canónico', () => {
@@ -170,10 +177,42 @@ test('normaliza el contrato anidado real de API-NFL', () => {
     teams: { home: { id: 16, name: 'Chicago Bears' }, away: { id: 26, name: 'Houston Texans' } },
     scores: { home: { quarter_1: 0, quarter_2: 14, quarter_3: 7, quarter_4: null, overtime: null, total: 21 }, away: { quarter_1: 7, quarter_2: 10, quarter_3: 0, quarter_4: null, overtime: null, total: 17 } },
   }, '2024-08-02');
-  assert.equal(game.id, '13146');
+  assert.equal(game.id, 'NFL-2024-08-02-houston-texans-chicago-bears');
+  assert.equal(game.providerFixtureId, '13146');
   assert.equal(game.status.isFinal, true);
   assert.equal(game.scores.home.total, 21);
   assert.deepEqual(game.periods.home, [0, 14, 7, null, null]);
+});
+
+test('ESPN conserva IDs canónicos y separa NCAA de las grandes ligas', () => {
+  const event = {
+    id: '401999999', date: '2026-11-04T00:00:00Z', season: { year: 2026 },
+    status: { type: { state: 'pre', completed: false } },
+    competitions: [{ competitors: [
+      { homeAway: 'home', team: { id: '10', displayName: 'Equipo Universitario A', abbreviation: 'EUA', logo: 'https://example.com/a.png' } },
+      { homeAway: 'away', team: { id: '20', displayName: 'Equipo Universitario B', abbreviation: 'EUB', logo: 'https://example.com/b.png' } },
+    ] }],
+  };
+  const game = normalizeEspnGame(event, 'ncaa', '2026-11-04');
+  assert.equal(game.id, 'NCAAB:401999999');
+  assert.equal(game.league.id, '116');
+  assert.equal(game.teams.home.id, 'NCAAB:10');
+  assert.equal(game.season, '2026-2027');
+  assert.equal(game.scores.home.total, null);
+  assert.deepEqual(getSportCompetitions('american_football').map((competition) => competition.key), ['nfl', 'ncaa-fbs', 'ncaa-fcs']);
+});
+
+test('las cuotas universitarias incluidas se convierten a decimal sin alterar porcentajes', () => {
+  const odds = normalizeEspnOdds({ competitions: [{ odds: [{
+    provider: { id: '100', displayName: 'Sportsbook' }, overUnder: 48.5,
+    moneyline: { home: { close: { odds: '-200' } }, away: { close: { odds: '+175' } } },
+    pointSpread: { home: { close: { line: '-4.5', odds: '-110' } }, away: { close: { line: '+4.5', odds: '-110' } } },
+    total: { over: { close: { odds: '-105' } }, under: { close: { odds: '-115' } } },
+  }] }] });
+  assert.equal(odds.moneyline.home.odd, 1.5);
+  assert.equal(odds.moneyline.away.odd, 2.75);
+  assert.equal(odds.totals[48.5].over.odd, 1.952);
+  assert.equal(odds.spreads.home[-4.5].odd, 1.909);
 });
 
 test('MLB conserva entradas, hits y errores oficiales en los hechos históricos', () => {

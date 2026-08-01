@@ -2,7 +2,7 @@
  * GET/POST /api/cron/publish-combinada?secret=CRON_SECRET[&date=YYYY-MM-DD][&status=draft|published]
  *
  * Recorre todos los partidos analizados del día y elige una apuesta publicable:
- * probabilidad individual >=95%, únicamente goles/córners/tarjetas/remates a
+ * probabilidad individual >=90%, únicamente goles/córners/tarjetas/remates a
  * puerta y cuota total entre 1.50 y 2.00. Prefiere una sola selección; si no
  * alcanza el mínimo, combina hasta tres partidos distintos.
  *
@@ -78,7 +78,7 @@ async function handle(request) {
     const kickoffMs = data.kickoff ? new Date(data.kickoff).getTime() : 0;
     if (kickoffMs > 0 && kickoffMs <= nowMs + 5 * 60 * 1000) continue;
     // La combinada del motor trae candidatos desde 80% y cuota ≥1.20. La
-    // selección final de Telegram aplica aquí el requisito estricto de 95%.
+    // selección final de Telegram aplica aquí el requisito estricto de 90%.
     let selections;
     if (CONTEXT_ENGINE_ENABLED && data.combinada?.source === 'context-engine') {
       selections = data.combinada.selections || [];

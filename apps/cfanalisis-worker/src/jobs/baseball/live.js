@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * Job: baseball-live (MLB-only, MLB Stats API)
+ * Job: baseball-live (MLB + MiLB, MLB Stats API)
  *
  * Polling del estado EN VIVO de los juegos MLB del día desde la MLB Stats API
  * (gratis, sin límite de requests → sin el budget/throttle que api-baseball
@@ -13,11 +13,11 @@
  */
 import {
   getMlbScheduleByDate, getMlbLiveGame, triggerEvent, bogotaToday,
-  supabaseAdmin, redisGet, redisSet, sendPushNotification,
+  supabaseAdmin, redisGet, redisSet, sendPushNotification, MLB_SPORT_IDS,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 
-const SPORT_IDS = [1];
+const SPORT_IDS = Object.keys(MLB_SPORT_IDS).map(Number);
 
 // TTL de dedup por tipo de evento. La regla: TTL > período de polling (1 min)
 // para que dos ticks consecutivos no re-emitan el mismo evento, pero ≤ hasta
@@ -260,10 +260,8 @@ export async function runBaseballLive(payload = {}) {
 
   // 1) Schedule del día (ligero) — ver qué juegos hay y cuáles en vivo.
   let games = [];
-  for (const sid of SPORT_IDS) {
-    try { games.push(...await getMlbScheduleByDate(today, sid)); }
-    catch (e) { console.warn(`[baseball-live] schedule sportId=${sid}: ${e.message}`); }
-  }
+  try { games = await getMlbScheduleByDate(today, SPORT_IDS); }
+  catch (e) { console.warn(`[baseball-live] schedule MLB/MiLB: ${e.message}`); }
   if (games.length === 0) return { ok: true, skipped: true, reason: 'no games today' };
 
   const liveGames = games.filter(g => g.isLive);
@@ -283,7 +281,10 @@ export async function runBaseballLive(payload = {}) {
 
   // 2) Estado detallado en vivo de cada juego (MLB Stats API gratis → sin throttle).
   const detailed = await mapPool(liveGames, 6, async (g) => {
-    try { return await getMlbLiveGame(g.gamePk); } catch (e) { console.warn(`[baseball-live] liveGame ${g.gamePk}: ${e.message}`); return null; }
+    try {
+      const state = await getMlbLiveGame(g.gamePk);
+      return state ? { ...state, sportId: Number(g.sportId || 1) } : null;
+    } catch (e) { console.warn(`[baseball-live] liveGame ${g.gamePk}: ${e.message}`); return null; }
   });
   const states = detailed.filter(r => r.ok && r.value).map(r => r.value);
   if (states.length === 0) return { ok: true, skipped: true, reason: 'no live state' };
@@ -302,7 +303,7 @@ export async function runBaseballLive(payload = {}) {
   await mapPool(states, 8, async (s) => {
     const { error } = await supabaseAdmin.from('baseball_match_results').upsert({
       fixture_id: s.gamePk,
-      league_id: 1,
+      league_id: Number(s.sportId || 1),
       date: today,
       // Códigos compatibles con el frontend (isLive: 'IN', isFinished: 'FT').
       status: s.isFinal ? 'FT' : (s.isLive ? 'IN' : 'NS'),

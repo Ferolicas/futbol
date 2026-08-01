@@ -22,7 +22,7 @@ import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
-import useSWR, { mutate as globalMutate } from 'swr';
+import useSWR from 'swr';
 import {
   ArrowRight,
   BarChart3,
@@ -147,7 +147,7 @@ export default function BaseballDashboard() {
   // Custom combinada — manual selections by user
   const [selectedMarkets, setSelectedMarkets] = useState({});
 
-  // ─── SWR: fixtures (con tz del cliente) + quota ────────────────────
+  // ─── SWR: fixtures (con tz del cliente) ────────────────────────────
   // El endpoint con ?tz= pide 3 fechas UTC adyacentes a la fuente y filtra
   // al día local del usuario. Si abres a las 9am España, ves los games cuya
   // hora local española cae entre 00:00 y 23:59 ES — igual que fútbol.
@@ -164,9 +164,6 @@ export default function BaseballDashboard() {
       keepPreviousData: true,
     },
   );
-  const { data: quotaData } = useSWR('/api/baseball/quota', fetcher, {
-    refreshInterval: 300_000,
-  });
 
   // ─── Estado EN VIVO por WebSocket ──────────────────────────────────
   // El worker (baseball-live) emite 'baseball-live'/'update' con el estado
@@ -203,7 +200,6 @@ export default function BaseballDashboard() {
         const ov = liveOverrides[g.id];
         return ov ? { ...g, liveResult: { ...(g.liveResult || {}), ...ov } } : g;
       });
-  const quota = quotaData || { used: 0, limit: 100, remaining: 100 };
   const hidden = games.filter(g => g.isHidden).map(g => g.id);
   const favorites = games.filter(g => g.isFavorite).map(g => g.id);
   const analyzed = games.filter(g => g.isAnalyzed).map(g => g.id);
@@ -253,7 +249,6 @@ export default function BaseballDashboard() {
 
       setSelected(new Set());
       await fixturesMutate();
-      globalMutate('/api/baseball/quota');
     } catch (e) {
       setError('Error al analizar: ' + e.message);
     } finally {
@@ -406,15 +401,10 @@ export default function BaseballDashboard() {
 
   // ─── RENDER ─────────────────────────────────────────────────────────
   return (
-    <div className="app-baseball">
-
-      <div className="baseball-context-row">
-        <span className="baseball-context-kicker">MLB · Datos en tiempo real</span>
-        <span className="baseball-quota">API {quota.used}/{quota.limit}</span>
-      </div>
-
-      <div className="baseball-controls">
-        <div className="baseball-date-nav">
+    <div className="app app-fade-in">
+      <div className="container app-baseball">
+      <div className="controls-row baseball-controls">
+        <div className="date-nav baseball-date-nav">
         <button className="baseball-control-btn" onClick={() => changeDate(-1)} aria-label="Día anterior"><ChevronLeft size={17} aria-hidden="true" /></button>
         <label className="date-picker-label">
           <DateCaption isToday={date === todayInTz(userTz)} label={fmtDateLabel(date)} />
@@ -430,7 +420,7 @@ export default function BaseballDashboard() {
         )}
         </div>
 
-        <div className="baseball-filter-row">
+        <div className="filters-row baseball-filter-row">
           <LeaguePicker
             leagues={leagueOptions}
             value={leagueFilter}
@@ -439,12 +429,12 @@ export default function BaseballDashboard() {
         </div>
       </div>
 
-      <div className="baseball-tabs">
-        <button className={tab === 'partidos' ? 'is-active' : ''} onClick={() => setTab('partidos')}>
+      <div className="tabs baseball-tabs">
+        <button className={`tab ${tab === 'partidos' ? 'active is-active' : ''}`} onClick={() => setTab('partidos')}>
           Partidos
           {allVisibleCount > 0 && <span>{allVisibleCount}</span>}
         </button>
-        <button className={tab === 'combinada' ? 'is-active' : ''} onClick={() => setTab('combinada')}>
+        <button className={`tab ${tab === 'combinada' ? 'active is-active' : ''}`} onClick={() => setTab('combinada')}>
           Combinada
           {totalSel > 0 && <span>{totalSel}</span>}
         </button>
@@ -547,6 +537,7 @@ export default function BaseballDashboard() {
       {analysisModalId && (
         <BaseballAnalysisModal id={analysisModalId} onClose={() => setAnalysisModalId(null)} />
       )}
+      </div>
     </div>
   );
 }

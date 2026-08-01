@@ -1,5 +1,5 @@
 import { listSportFixtures } from '../../../../../lib/multisport-analysis';
-import { getMultisportConfig, isIsoDate } from '../../../../../lib/multisport-config';
+import { getMultisportConfig, getSportCompetitions, isIsoDate } from '../../../../../lib/multisport-config';
 import { getCurrentUser } from '../../../../../lib/auth-pg';
 import { userHasActivePlan } from '../../../../../lib/require-active-plan';
 import { jsonError } from '../../../../../lib/api-error';
@@ -17,8 +17,23 @@ export async function GET(request, { params }) {
     const date = searchParams.get('date') || new Date().toISOString().slice(0, 10);
     if (!isIsoDate(date)) return Response.json({ error: 'Invalid date' }, { status: 400 });
     const timeZone = searchParams.get('tz') || 'UTC';
-    const fixtures = await listSportFixtures(config.key, date, { timeZone });
-    return Response.json({ success: true, sport: config.key, date, timeZone, fixtures, count: fixtures.length });
+    const competitions = getSportCompetitions(config.key);
+    const requested = searchParams.getAll('competition')
+      .flatMap((value) => value.split(','))
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const allowed = new Set(competitions.flatMap((competition) => [competition.key, String(competition.id)]));
+    const competitionKeys = requested.filter((value) => allowed.has(value));
+    const fixtures = await listSportFixtures(config.key, date, { timeZone, competitionKeys });
+    return Response.json({
+      success: true,
+      sport: config.key,
+      date,
+      timeZone,
+      fixtures,
+      count: fixtures.length,
+      competitions: competitions.map(({ id, key, name, country }) => ({ id, key, name, country })),
+    });
   } catch (error) {
     console.error('[api/sports/fixtures]', error.message);
     return jsonError(error);

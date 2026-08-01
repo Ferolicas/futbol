@@ -11,7 +11,7 @@ async function run(sport, payload) {
   const today = payload.date || bogotaToday();
   const dates = [addDays(today, -1), today];
   const reports = [];
-  for (const date of dates) reports.push(await finalizeSportDate(sport, date, { force: payload.force === true, concurrency: 2 }));
+  for (const date of dates) reports.push(await finalizeSportDate(sport, date, { force: payload.force === true, concurrency: 6 }));
   const failed = reports.reduce((sum, report) => sum + report.failed, 0);
   if (failed) throw new Error(`${sport} finalize incompleto: ${failed}`);
   return { ok: true, sport, ingested: reports.reduce((sum, report) => sum + report.ingested, 0), reports };

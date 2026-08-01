@@ -63,7 +63,6 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
   const [analysis, setAnalysis] = useState(initialAnalysis);
   const [loading, setLoading] = useState(!initialAnalysis);
   const [error, setError] = useState('');
-  const [quota, setQuota] = useState(null);
   const [probabilities, setProbabilities] = useState(initialProbs);
   const [combinada, setCombinada] = useState(initialCombinada);
   const { selectedMarkets, toggleMarket } = useSelectedMarkets();
@@ -107,7 +106,6 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
       if (data.error) { setError(data.error); return; }
       setNotAnalyzed(false);
       setAnalysis(data.analysis);
-      if (data.quota) setQuota(data.quota);
       setProbabilities(data.analysis.calculatedProbabilities || null);
       setCombinada(data.analysis.combinada || null);
     } catch (e) {
@@ -128,7 +126,6 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
       if (data.notFound) { setNotAnalyzed(true); return; }
       if (data.error) { setError(data.error); return; }
       setAnalysis(data.analysis);
-      if (data.quota) setQuota(data.quota);
       setProbabilities(data.analysis.calculatedProbabilities || null);
       setCombinada(data.analysis.combinada || null);
       // Refresh the hand-off cache so a quick back-and-forth uses the fresher data
@@ -234,9 +231,8 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
         setLineupsError(data.error);
       } else if (data.lineups) {
         setAnalysis(prev => ({ ...prev, lineups: data.lineups }));
-        if (!data.lineups.available) setLineupsError('Alineaciones aún no disponibles en la API');
+        if (!data.lineups.available) setLineupsError('Alineaciones aún no publicadas');
       }
-      if (data.quota) setQuota(data.quota);
     } catch (e) {
       setLineupsError('Error de conexión al actualizar alineaciones');
     } finally { setRefreshingLineups(false); }
@@ -251,7 +247,6 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
       });
       const data = await res.json();
       if (data.injuries) setAnalysis(prev => ({ ...prev, injuries: data.injuries }));
-      if (data.quota) setQuota(data.quota);
     } catch {} finally { setRefreshingInjuries(false); }
   };
 
@@ -387,15 +382,6 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
               <ChevronLeft size={18} />
               Volver
             </motion.button>
-            {quota && (
-              <motion.div
-                className="ap2-quota-badge"
-                animate={{ boxShadow: ['0 0 20px rgba(0,212,255,.3)', '0 0 30px rgba(0,212,255,.6)', '0 0 20px rgba(0,212,255,.3)'] }}
-                transition={{ duration: 2, repeat: Infinity }}
-              >
-                Llamadas usadas hoy: <strong style={{ color: '#00d4ff' }}>{quota.used}</strong>
-              </motion.div>
-            )}
           </div>
         </motion.header>
 
@@ -827,7 +813,9 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
               },
               {
                 title: 'Goles totales del partido',
-                subtitle: `Esperado: ${p.overUnder.expectedTotal} goles`,
+                subtitle: p.overUnder?.expectedTotal != null
+                  ? `Media anotadora combinada: ${p.overUnder.expectedTotal} goles por partido`
+                  : null,
                 items: [
                   hasOdd(o.overUnder?.['Over_1_5']) && { label: 'Total partido — Más de 1.5', value: p.overUnder.over15 },
                   hasOdd(o.overUnder?.['Over_2_5']) && { label: 'Total partido — Más de 2.5', value: p.overUnder.over25 },
@@ -888,7 +876,7 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
               // Goles por mitad
               {
                 title: 'Goles 1ª parte',
-                subtitle: p.halfGoals?.firstHalf?.expected != null ? `Esperado: ${p.halfGoals.firstHalf.expected} goles` : null,
+                subtitle: p.halfGoals?.firstHalf?.expected != null ? `Media observada: ${p.halfGoals.firstHalf.expected} goles` : null,
                 items: [
                   hasOdd(o.goals1H?.['Over_0_5']) && p.halfGoals?.firstHalf && { label: '1ª Parte — Más de 0.5', value: p.halfGoals.firstHalf.over05 },
                   hasOdd(o.goals1H?.['Over_1_5']) && p.halfGoals?.firstHalf && { label: '1ª Parte — Más de 1.5', value: p.halfGoals.firstHalf.over15 },
@@ -897,7 +885,7 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
               },
               {
                 title: 'Goles 2ª parte',
-                subtitle: p.halfGoals?.secondHalf?.expected != null ? `Esperado: ${p.halfGoals.secondHalf.expected} goles` : null,
+                subtitle: p.halfGoals?.secondHalf?.expected != null ? `Media observada: ${p.halfGoals.secondHalf.expected} goles` : null,
                 items: [
                   hasOdd(o.goals2H?.['Over_0_5']) && p.halfGoals?.secondHalf && { label: '2ª Parte — Más de 0.5', value: p.halfGoals.secondHalf.over05 },
                   hasOdd(o.goals2H?.['Over_1_5']) && p.halfGoals?.secondHalf && { label: '2ª Parte — Más de 1.5', value: p.halfGoals.secondHalf.over15 },
@@ -934,7 +922,7 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
               // Tiros totales y on target
               p.shots && {
                 title: 'Tiros totales del partido',
-                subtitle: p.shots._mean ? `Esperado: ${p.shots._mean} tiros` : null,
+                subtitle: p.shots._mean ? `Media observada: ${p.shots._mean} tiros` : null,
                 items: (p.shots._lines || []).map(line => {
                   const key = `over${String(line).replace('.', '_')}`;
                   const oddKey = `Over_${String(line).replace('.', '_')}`;
@@ -944,7 +932,7 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
               },
               p.sot && {
                 title: 'Tiros a puerta del partido',
-                subtitle: p.sot._mean ? `Esperado: ${p.sot._mean} tiros a puerta` : null,
+                subtitle: p.sot._mean ? `Media observada: ${p.sot._mean} tiros a puerta` : null,
                 items: (p.sot._lines || []).map(line => {
                   const key = `over${String(line).replace('.', '_')}`;
                   const oddKey = `Over_${String(line).replace('.', '_')}`;
@@ -974,7 +962,7 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
               // Faltas totales
               p.fouls && {
                 title: 'Faltas totales del partido',
-                subtitle: p.fouls._mean ? `Esperado: ${p.fouls._mean} faltas` : null,
+                subtitle: p.fouls._mean ? `Media observada: ${p.fouls._mean} faltas` : null,
                 items: (p.fouls._lines || []).map(line => {
                   const key = `over${String(line).replace('.', '_')}`;
                   const oddKey = `Over_${String(line).replace('.', '_')}`;
@@ -1019,7 +1007,8 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
             if (cats.length === 0) return null;
 
             return (
-              <GlassSection title="% Probabilidades calculadas" icon={<Percent size={22} style={{ color: '#2dd4bf' }} />} sectionKey="probs" collapsed={collapsed} toggle={toggleSection} delay={.8}>
+              <GlassSection title="% Frecuencias calculadas" icon={<Percent size={22} style={{ color: '#2dd4bf' }} />} sectionKey="probs" collapsed={collapsed} toggle={toggleSection} delay={.8}>
+                <p className="probability-explainer">La media resume cuántos eventos hubo por partido; cada porcentaje cuenta en cuántos antecedentes se superó esa línea. Son medidas distintas.</p>
                 <div className="ap2-prob-grid">
                   {cats.map((cat, catIdx) => (
                     <motion.div

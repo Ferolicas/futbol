@@ -128,13 +128,15 @@ export function LeaguePicker({ leagues, value, onChange, variant = 'green' }) {
   );
 }
 
-export function StatusPicker({ value, onChange, counts = {}, variant = 'green' }) {
+export function StatusPicker({ value, onChange, counts = {}, variant = 'green', includeFavorites = true }) {
   const options = [
     { value: 'all', label: 'Todos', meta: 'Vista completa', icon: ListFilter, count: counts.all },
     { value: 'live', label: 'En vivo', meta: 'Ahora mismo', icon: Radio, count: counts.live },
     { value: 'upcoming', label: 'Próximos', meta: 'Por comenzar', icon: Clock3, count: counts.upcoming },
     { value: 'finished', label: 'Finalizados', meta: 'Resultados cerrados', icon: CircleCheck, count: counts.finished },
-    { value: 'favoritos', label: 'Favoritos', meta: 'Tus guardados', icon: Star, count: counts.favorites },
+    ...(includeFavorites
+      ? [{ value: 'favoritos', label: 'Favoritos', meta: 'Tus guardados', icon: Star, count: counts.favorites }]
+      : []),
   ];
 
   return (

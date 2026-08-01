@@ -108,7 +108,7 @@ const formatTime = kickoff => {
 
 const selections = source.map(selection => {
   const probability = Number(selection.probability);
-  if (!allowedMarket(selection) || !Number.isFinite(probability) || probability < 95) {
+  if (!allowedMarket(selection) || !Number.isFinite(probability) || probability < 90) {
     throw new Error('El backend devolvió un mercado fuera de las reglas de Telegram');
   }
   return {

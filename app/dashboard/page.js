@@ -95,8 +95,6 @@ export default function Dashboard() {
   const [fixtures, setFixtures] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [fromCache, setFromCache] = useState(false);
-  const [quota, setQuota] = useState({ used: 0 });
   const [hidden, setHidden] = useState([]);
   const [favorites, setFavorites] = useState([]);
   const [analyzed, setAnalyzed] = useState([]);
@@ -274,7 +272,6 @@ export default function Dashboard() {
     if (data.error && !data.fixtures?.length) {
       console.error('[fixtures] error:', data.error);
       setError('No pudimos cargar los partidos. Reintenta en unos segundos.');
-      if (data.quota) setQuota(data.quota);
       setLoading(false);
       return;
     }
@@ -300,14 +297,12 @@ export default function Dashboard() {
         })
       : fx;
     setFixtures(fxWithLiveOverride);
-    setFromCache(data.fromCache || false);
     setHidden(data.hidden || []);
     setFavorites(data.favorites || []);
     setAnalyzed(data.analyzed || []);
     setAnalyzedOdds(data.analyzedOdds || {});
     setAnalyzedData(data.analyzedData || {});
     setStandings(data.standings || {});
-    if (data.quota) setQuota(data.quota);
     if (data.error) console.warn('[fixtures] degradado:', data.error);
     setError(data.error ? 'Algunos datos podrían estar desactualizados.' : '');
 
@@ -872,7 +867,6 @@ export default function Dashboard() {
         body: JSON.stringify({ fixtures: toAnalyze, date }),
       });
       const data = await res.json();
-      if (data.quota) setQuota(data.quota);
       const newAnalyzed = data.analyses?.filter(a => a.success)?.map(a => a.fixtureId) || [];
       setAnalyzed(prev => [...new Set([...prev, ...newAnalyzed])]);
       setSelected(new Set());
@@ -1100,13 +1094,13 @@ export default function Dashboard() {
 
   const apuestaDelDia = useMemo(() => {
     // Reglas:
-    //  - Solo selecciones con probabilidad ≥ 95% Y cuota real ≥ 1.20
+    //  - Solo selecciones con probabilidad ≥ 90% Y cuota real ≥ 1.20
     //  - SIN límite por partido: si un partido tiene 10 opciones que cumplen,
     //    se muestran las 10
     //  - Solo partidos próximos (NS) o en vivo — los finalizados desaparecen
     //  - Orden: NS > en vivo, dentro de cada grupo prob desc
     //  - Cap visual 95% (nunca se muestra 100% para no dar falsa certeza)
-    const MIN_PROB = 95;
+    const MIN_PROB = 90;
     const MIN_ODD  = 1.20;
     const all = [];
 
@@ -1123,7 +1117,7 @@ export default function Dashboard() {
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
 
       // La combinada general contiene recomendaciones desde 80%, pero la
-      // Apuesta del Día exige siempre 95% + cuota real ≥1.20.
+      // Apuesta del Día exige siempre 90% + validación fuera de muestra + cuota real ≥1.20.
       const isEngine = data?.combinada?.source === 'context-engine';
       const liveComb = (!isEngine && data.calculatedProbabilities)
         ? buildCombinada(data.calculatedProbabilities, data.odds, data.playerHighlights, { home: homeTeam, away: awayTeam })
@@ -1636,12 +1630,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* FOOTER */}
-        <div className="footer">
-          <span>{quota.used} API calls</span>
-          <span>{fromCache ? 'Cache' : 'API'}</span>
-          <span>{visible.length} partidos</span>
-        </div>
       </div>
     </div>
 
@@ -2017,6 +2005,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
         probability: s.probability,
         odd: s.odd,
         bookmaker: s.bookmaker || null,   // bookmaker real atribuido por el motor
+        recommended: s.recommended === true,
         // cat se mantiene para los logos del bookmaker (catMap mas abajo)
         cat: s.scope === 'player' ? 'Player'
            : s.category?.includes('corners') ? 'Corners'
@@ -2228,6 +2217,9 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                         onClick={(e) => { e.stopPropagation(); onToggleMarket(fixtureId, mkt, matchName); }}
                       >
                         <span className="mkt-name">{displayBettingText(mkt.name)}</span>
+                        <span className={`mkt-validation ${mkt.recommended ? 'is-validated' : 'is-reference'}`}>
+                          {mkt.recommended ? 'Recomendación validada' : 'Solo referencia estadística'}
+                        </span>
                         <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${cap(mkt.probability)}%` }} /></div>
                         <div className="mkt-nums">
                           <span className="mkt-pct">{cap(mkt.probability)}%</span>
@@ -2541,7 +2533,7 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
       hasOdd(o.matchWinner?.draw) && { label: 'Empate',  value: p.winner?.draw },
       hasOdd(o.matchWinner?.away) && { label: awayTeam, value: p.winner?.away },
     ].filter(Boolean) },
-    { title: 'Goles totales', group: 'goles', subtitle: p.overUnder?.expectedTotal != null ? `Esperado: ${p.overUnder.expectedTotal} goles` : null,
+    { title: 'Goles totales', group: 'goles', subtitle: p.overUnder?.expectedTotal != null ? `Media anotadora combinada: ${p.overUnder.expectedTotal} goles por partido` : null,
       items: adaptiveCat(p.overUnder, o.overUnder, 'Más de') },
     { title: 'Goles 1ª parte', group: 'goles', items: adaptiveCat(p.halfGoals?.firstHalf, o.goals1H, 'Más de') },
     { title: 'Goles 2ª parte', group: 'goles', items: adaptiveCat(p.halfGoals?.secondHalf, o.goals2H, 'Más de') },
@@ -2563,13 +2555,13 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
     { title: 'Tarjetas totales', group: 'tarjetas', items: adaptiveCat(p.cards, o.cards, 'Más de') },
     { title: `Tarjetas — ${homeTeam}`, group: 'tarjetas', items: adaptiveCat(p.perTeam?.home?.cards, o.homeCards, 'Más de') },
     { title: `Tarjetas — ${awayTeam}`, group: 'tarjetas', items: adaptiveCat(p.perTeam?.away?.cards, o.awayCards, 'Más de') },
-    p.shots && { title: 'Tiros totales', group: 'tiros', subtitle: p.shots._mean ? `Esperado: ${p.shots._mean}` : null,
+    p.shots && { title: 'Tiros totales', group: 'tiros', subtitle: p.shots._mean ? `Media observada: ${p.shots._mean}` : null,
       items: adaptiveCat(p.shots, o.shots, 'Más de') },
-    p.sot && { title: 'Tiros a puerta', group: 'tiros', subtitle: p.sot._mean ? `Esperado: ${p.sot._mean}` : null,
+    p.sot && { title: 'Tiros a puerta', group: 'tiros', subtitle: p.sot._mean ? `Media observada: ${p.sot._mean}` : null,
       items: adaptiveCat(p.sot, o.sot, 'Más de') },
     p.perTeamShots?.home && { title: `Tiros — ${homeTeam}`, group: 'tiros', items: adaptiveCat(p.perTeamShots.home, o.homeShots, 'Más de') },
     p.perTeamShots?.away && { title: `Tiros — ${awayTeam}`, group: 'tiros', items: adaptiveCat(p.perTeamShots.away, o.awayShots, 'Más de') },
-    p.fouls && { title: 'Faltas totales', group: 'faltas', subtitle: p.fouls._mean ? `Esperado: ${p.fouls._mean}` : null,
+    p.fouls && { title: 'Faltas totales', group: 'faltas', subtitle: p.fouls._mean ? `Media observada: ${p.fouls._mean}` : null,
       items: adaptiveCat(p.fouls, o.fouls, 'Más de') },
     p.perTeamFouls?.home && { title: `Faltas — ${homeTeam}`, group: 'faltas', items: adaptiveCat(p.perTeamFouls.home, o.homeFouls, 'Más de') },
     p.perTeamFouls?.away && { title: `Faltas — ${awayTeam}`, group: 'faltas', items: adaptiveCat(p.perTeamFouls.away, o.awayFouls, 'Más de') },
@@ -2613,12 +2605,13 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
         onClick={(e) => toggleSubAndReveal(e, open, id, setOpenSub)}
         aria-expanded={open}
       >
-        <span><i><BarChart3 size={17} aria-hidden="true" /></i><strong>Probabilidades calculadas</strong></span>
+        <span><i><BarChart3 size={17} aria-hidden="true" /></i><strong>Frecuencias calculadas</strong></span>
         <ChevronDown className={open ? 'is-open' : ''} size={17} aria-hidden="true" />
       </button>
       <div className="subacc-grid" data-open={open ? '1' : '0'}>
         <div className="subacc-overflow">
           <div className="subacc-body">
+            <p className="probability-explainer">La media resume cuántos eventos hubo por partido; cada porcentaje cuenta en cuántos antecedentes se superó esa línea. Son medidas distintas.</p>
             {groupDefs.map(g => (
               <section key={g.key} className="subacc-group" style={{ '--subacc-group-accent': g.color }}>
                 <button
@@ -2953,45 +2946,4 @@ function getMinOdd(fixture, analyzedOdds) {
   const odds = analyzedOdds?.[fixture.fixture.id];
   if (!odds) return 0;
   return Math.min(odds.home || 99, odds.draw || 99, odds.away || 99);
-}
-
-/* ======================== API COUNTER (OWNER ONLY) ======================== */
-
-function ApiCounter({ quota }) {
-  const [liveQuota, setLiveQuota] = useState(quota);
-  const [countdown, setCountdown] = useState('');
-
-  // Poll quota every 30 seconds
-  useEffect(() => {
-    setLiveQuota(quota);
-  }, [quota]);
-
-
-  // Countdown to UTC midnight (API-Football daily reset)
-  useEffect(() => {
-    const tick = () => {
-      const now = new Date();
-      const utcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
-      const diff = utcMidnight - now;
-      const h = Math.floor(diff / 3600000);
-      const m = Math.floor((diff % 3600000) / 60000);
-      const s = Math.floor((diff % 60000) / 1000);
-      setCountdown(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
-    };
-    tick();
-    const interval = setInterval(tick, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  return (
-    <div className="api-counter">
-      <div className="api-counter-row">
-        <span className="api-counter-label">API Calls</span>
-        <span className="api-counter-value">{liveQuota.used.toLocaleString()} hoy</span>
-      </div>
-      <div className="api-counter-row">
-        <span className="api-counter-reset">Reset: {countdown}</span>
-      </div>
-    </div>
-  );
 }

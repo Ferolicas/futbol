@@ -159,8 +159,8 @@ export const buildPlayerMarkets = _modelPlayerMarkets.buildPlayerMarkets;
 export const buildModelCombinada = _modelProbabilities.buildModelCombinada;
 export const trainFootballEmpiricalEngine = _trainFootballEmpirical.trainFootballEmpiricalEngine;
 
-// Motores deportivos independientes (MLB/NBA/NFL), todos basados únicamente
-// en frecuencias observadas. El módulo decide la fuente y su fallback.
+// Motores deportivos independientes (MLB/MiLB, NBA/NCAA y NFL/NCAA), todos
+// basados únicamente en frecuencias observadas. El módulo decide la fuente.
 export const analyzeSportDate = _multisportAnalysis.analyzeSportDate;
 export const analyzeSportGame = _multisportAnalysis.analyzeSportGame;
 export const finalizeSportDate = _multisportAnalysis.finalizeSportDate;

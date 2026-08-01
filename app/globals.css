@@ -1049,6 +1049,34 @@ body {
 }
 .mkt-name { font-size: .72rem; font-weight: 500; color: var(--t2); line-height: 1.2; }
 .mkt.on .mkt-name { color: var(--t1); }
+.mkt-validation {
+  width: fit-content;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: .58rem;
+  font-weight: 750;
+  letter-spacing: .02em;
+}
+.mkt-validation.is-validated {
+  color: #8ff5cd;
+  background: rgba(30, 135, 105, .18);
+  border: 1px solid rgba(94, 230, 177, .24);
+}
+.mkt-validation.is-reference {
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, .1);
+  border: 1px solid rgba(148, 163, 184, .16);
+}
+.probability-explainer {
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border: 1px solid rgba(45, 212, 191, .16);
+  border-radius: 10px;
+  color: rgba(226, 232, 240, .78);
+  background: rgba(45, 212, 191, .045);
+  font-size: .72rem;
+  line-height: 1.45;
+}
 .mkt-bar {
   height: 3px;
   background: rgba(255,255,255,.08);
@@ -4761,114 +4789,522 @@ body {
   }
 }
 
-/* ── NBA / NFL: dashboard multi-deporte ─────────────────────────────── */
-.ms-dashboard {
-  width: min(100%, 980px);
-  margin: 0 auto;
-  padding: 22px 16px calc(90px + env(safe-area-inset-bottom));
-  color: #eef7f3;
+/* ── NBA / NCAA / NFL: mismo lenguaje visual y rendimiento de fútbol ── */
+.ms-sport-app .container {
+  padding-bottom: calc(104px + env(safe-area-inset-bottom));
 }
 
-.ms-hero {
+.ms-virtual-list {
+  min-height: 1px;
+  padding-bottom: 88px;
+}
+
+.ms-league-heading {
   display: flex;
-  justify-content: space-between;
-  gap: 18px;
-  align-items: flex-end;
-  padding: 22px;
-  border: 1px solid color-mix(in srgb, var(--ms-accent) 28%, transparent);
-  border-radius: 20px;
-  background: radial-gradient(circle at 90% 10%, color-mix(in srgb, var(--ms-accent) 16%, transparent), transparent 42%), rgba(5,17,16,.82);
-}
-
-.ms-eyebrow { color: var(--ms-accent); font-size: .67rem; font-weight: 900; letter-spacing: .16em; }
-.ms-hero h1 { margin: 5px 0 4px; font-size: clamp(1.45rem, 5vw, 2.35rem); line-height: 1.05; }
-.ms-hero p { margin: 0; color: #8ba09a; font-size: .86rem; }
-.ms-provider { display: flex; align-items: center; gap: 8px; color: var(--ms-accent); font-size: .75rem; font-weight: 750; white-space: nowrap; }
-.ms-provider small { color: #82968f; font-weight: 550; }
-
-.ms-toolbar {
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) 38px auto;
-  gap: 7px;
   align-items: center;
-  margin: 14px 0 8px;
-}
-.ms-toolbar > button,
-.ms-toolbar > div {
+  justify-content: space-between;
   min-height: 40px;
-  border: 1px solid rgba(255,255,255,.09);
-  border-radius: 11px;
-  background: rgba(5,17,16,.82);
-  color: #dce9e4;
+  padding: 8px 4px 6px;
+  border-bottom: 1px solid rgba(94,230,177,.16);
+  color: #e5f5ef;
 }
-.ms-toolbar > button { display: grid; place-items: center; cursor: pointer; }
-.ms-toolbar > div { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 10px; text-transform: capitalize; font-size: .78rem; }
-.ms-toolbar .ms-analyze-button { display: flex; gap: 7px; padding: 0 13px; background: color-mix(in srgb, var(--ms-accent) 14%, rgba(5,17,16,.92)); color: var(--ms-accent); font-weight: 800; }
-.ms-toolbar button:disabled { opacity: .55; cursor: wait; }
-.ms-status-line { display: flex; gap: 12px; flex-wrap: wrap; min-height: 24px; color: #789088; font-size: .68rem; padding: 3px 4px 10px; }
 
-.ms-league { margin-top: 14px; }
-.ms-league > h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; color: #dce9e4; font-size: .83rem; }
-.ms-league > h2 span { padding: 2px 7px; border-radius: 999px; background: rgba(255,255,255,.07); color: #7e968d; font-size: .65rem; }
-.ms-match-card { margin-bottom: 9px; overflow: hidden; border: 1px solid rgba(255,255,255,.075); border-radius: 17px; background: linear-gradient(145deg, rgba(10,26,23,.96), rgba(4,13,12,.97)); content-visibility: auto; contain-intrinsic-size: auto 190px; }
-.ms-match-card.open { border-color: color-mix(in srgb, var(--ms-accent) 36%, transparent); }
-.ms-match-card.live { box-shadow: inset 3px 0 0 var(--ms-accent); }
-.ms-match-head { width: 100%; border: 0; padding: 12px 14px; background: transparent; color: inherit; cursor: pointer; text-align: left; }
-.ms-match-meta { display: flex; justify-content: space-between; color: #779087; font-size: .62rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
-.ms-match-card.live .ms-match-meta span:last-child { color: var(--ms-accent); }
-.ms-score-grid { display: grid; grid-template-columns: minmax(0,1fr) 92px minmax(0,1fr); align-items: center; gap: 8px; margin: 12px 0; }
-.ms-team { min-width: 0; display: flex; align-items: center; gap: 9px; }
-.ms-team.away { flex-direction: row-reverse; text-align: right; }
-.ms-team strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: .78rem; line-height: 1.18; }
-.ms-team-logo,.ms-team-fallback { flex: 0 0 42px; width: 42px; height: 42px; object-fit: contain; }
-.ms-team-fallback { display: grid; place-items: center; border: 1px solid rgba(255,255,255,.1); border-radius: 50%; background: rgba(255,255,255,.04); color: #8ba09a; font-size: .62rem; }
-.ms-score { display: grid; place-items: center; color: #edf7f3; }
-.ms-score strong { display: flex; align-items: center; gap: 7px; font: 900 1.45rem/1 'JetBrains Mono',monospace; }
-.ms-score strong i { color: #4c625b; font-style: normal; }
-.ms-score > span { font: 850 .92rem/1 'JetBrains Mono',monospace; }
-.ms-score small { margin-top: 5px; color: #6f857e; font-size: .54rem; letter-spacing: .08em; }
-.ms-card-summary { display: flex; align-items: center; justify-content: center; gap: 10px; color: #91a69f; font-size: .67rem; }
-.ms-card-summary span { padding: 3px 7px; border-radius: 999px; background: rgba(255,255,255,.045); }
-.ms-card-summary .pending { color: #748a82; }
-.ms-card-summary svg { margin-left: auto; transition: transform .18s ease; }
-.ms-match-card.open .ms-card-summary svg { transform: rotate(180deg); }
-.ms-card-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .18s ease; }
-.ms-card-body > div { min-height: 0; overflow: hidden; }
-.ms-match-card.open .ms-card-body { grid-template-rows: 1fr; }
-.ms-match-card.open .ms-card-body > div { border-top: 1px solid rgba(255,255,255,.065); padding: 11px 13px 14px; }
-.ms-analysis-section { padding: 9px 0; }
-.ms-analysis-section + .ms-analysis-section { border-top: 1px solid rgba(255,255,255,.055); }
-.ms-analysis-section h3 { display: flex; gap: 6px; align-items: center; margin: 0 0 7px; color: #a9bbb5; font-size: .7rem; text-transform: uppercase; letter-spacing: .07em; }
-.ms-prob-row { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 7px 9px; margin-top: 5px; border-radius: 9px; background: rgba(255,255,255,.035); }
-.ms-prob-row > div:first-child { display: flex; flex-direction: column; min-width: 0; }
-.ms-prob-row strong { overflow-wrap: anywhere; font-size: .76rem; }
-.ms-evidence { color: #698078; font-size: .58rem; margin-top: 2px; }
-.ms-evidence.missing { color: #a37c55; }
-.ms-prob-values { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
-.ms-prob-values b { color: var(--ms-accent); font: 850 .88rem 'JetBrains Mono',monospace; }
-.ms-prob-values span { color: #d9b867; font: 700 .68rem 'JetBrains Mono',monospace; }
-.ms-analysis-section.compact p { margin: 0; color: #7e938c; font-size: .68rem; line-height: 1.5; }
-.ms-engine-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
-.ms-engine-tags span { padding: 4px 7px; border-radius: 999px; background: color-mix(in srgb, var(--ms-accent) 9%, transparent); color: #91aaa1; font-size: .58rem; }
-.ms-pick { display: flex; justify-content: space-between; gap: 10px; padding: 7px 9px; color: #dbe8e3; font-size: .7rem; }
-.ms-pick b { color: var(--ms-accent); white-space: nowrap; }
-.ms-empty-analysis,.ms-no-games,.ms-page-error { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 110px; padding: 20px; color: #82978f; font-size: .76rem; text-align: center; }
+.ms-league-heading > span {
+  font-size: .8rem;
+  font-weight: 850;
+}
+
+.ms-league-heading > small {
+  color: rgba(255,255,255,.58);
+  font-size: .62rem;
+  font-weight: 700;
+}
+
+.ms-match-card {
+  padding: 0 !important;
+  border-radius: 20px;
+  cursor: default;
+  contain-intrinsic-size: auto 205px;
+  opacity: 1 !important;
+}
+
+.ms-match-card.open {
+  border-color: rgba(94,230,177,.48);
+  box-shadow: 0 0 24px rgba(30,135,105,.18);
+}
+
+.ms-match-card.live {
+  border-color: rgba(239,68,68,.38);
+}
+
+.ms-match-card::before {
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(30,135,105,.12), rgba(0,0,9,.18), rgba(30,135,105,.06));
+}
+
+.ms-match-head {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ms-match-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: rgba(255,255,255,.68);
+  font-size: .65rem;
+  font-weight: 750;
+  text-transform: capitalize;
+}
+
+.ms-match-meta span:first-child {
+  overflow: hidden;
+  color: #f1f5f9;
+  font-size: .75rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-score-grid {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(74px, 94px) minmax(0,1fr);
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.ms-team {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.ms-team.away {
+  flex-direction: row-reverse;
+  text-align: right;
+}
+
+.ms-team strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #f1f5f9;
+  font-size: .8rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+}
+
+.ms-team-logo,
+.ms-team-fallback {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+}
+
+.ms-team-fallback {
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(94,230,177,.22);
+  border-radius: 50%;
+  color: #b9ead8;
+  background: rgba(94,230,177,.08);
+  font-size: .59rem;
+  font-weight: 850;
+}
+
+.ms-score {
+  display: grid;
+  place-items: center;
+  min-height: 65px;
+  padding: 8px 5px;
+  border: 1px solid rgba(30,135,105,.34);
+  border-radius: 15px;
+  color: #f1f5f9;
+  background: linear-gradient(135deg, rgba(30,135,105,.2), rgba(0,0,9,.34));
+}
+
+.ms-score strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: 900 1.35rem/1 'JetBrains Mono', monospace;
+}
+
+.ms-score strong i {
+  color: rgba(255,255,255,.4);
+  font-style: normal;
+}
+
+.ms-score > span {
+  font: 850 .92rem/1 'JetBrains Mono', monospace;
+}
+
+.ms-score small {
+  margin-top: 5px;
+  color: rgba(255,255,255,.58);
+  font-size: .51rem;
+  font-weight: 850;
+  letter-spacing: .08em;
+}
+
+.ms-score small.is-live {
+  color: #fb7185;
+}
+
+.ms-card-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  color: rgba(255,255,255,.72);
+  font-size: .64rem;
+}
+
+.ms-summary-probabilities {
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ms-summary-probabilities b,
+.ms-card-summary .pending,
+.ms-selected-count {
+  overflow: hidden;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.055);
+  font-size: .6rem;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-summary-probabilities b {
+  color: #c9f6e5;
+}
+
+.ms-card-summary .pending {
+  color: rgba(255,255,255,.55);
+}
+
+.ms-selected-count {
+  color: #67e4b4;
+  background: rgba(94,230,177,.09);
+}
+
+.ms-card-summary > svg {
+  flex: 0 0 auto;
+  margin-left: auto;
+  transition: transform .15s ease;
+}
+
+.ms-match-card.open .ms-card-summary > svg {
+  transform: rotate(180deg);
+}
+
+.ms-card-body {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows .15s ease;
+}
+
+.ms-card-body > div {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ms-match-card.open .ms-card-body {
+  grid-template-rows: 1fr;
+}
+
+.ms-match-card.open .ms-card-body > div {
+  padding: 10px 14px 15px;
+  border-top: 1px solid rgba(94,230,177,.16);
+}
+
+.ms-analysis-section {
+  padding: 9px 0;
+}
+
+.ms-analysis-section + .ms-analysis-section {
+  border-top: 1px solid rgba(255,255,255,.06);
+}
+
+.ms-analysis-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 7px;
+  color: rgba(255,255,255,.72);
+  font-size: .65rem;
+  font-weight: 850;
+  letter-spacing: .065em;
+  text-transform: uppercase;
+}
+
+.ms-prob-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 5px;
+  padding: 8px 9px;
+  border: 1px solid rgba(255,255,255,.055);
+  border-radius: 10px;
+  background: rgba(255,255,255,.035);
+}
+
+.ms-prob-row > div:first-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ms-prob-row strong {
+  overflow-wrap: anywhere;
+  color: #edf7f3;
+  font-size: .73rem;
+}
+
+.ms-evidence {
+  margin-top: 3px;
+  color: rgba(255,255,255,.48);
+  font-size: .57rem;
+}
+
+.ms-evidence.missing {
+  color: #d5ab72;
+}
+
+.ms-prob-values {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.ms-prob-values b {
+  color: #67e4b4;
+  font: 850 .86rem 'JetBrains Mono', monospace;
+}
+
+.ms-prob-values span {
+  padding: 3px 6px;
+  border-radius: 7px;
+  color: #f5cd67;
+  background: rgba(251,191,36,.09);
+  font: 750 .66rem 'JetBrains Mono', monospace;
+}
+
+.ms-analysis-section.compact p {
+  margin: 0;
+  color: rgba(255,255,255,.61);
+  font-size: .67rem;
+  line-height: 1.5;
+}
+
+.ms-evidence-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.ms-evidence-summary span {
+  padding: 5px 7px;
+  border-radius: 8px;
+  color: #b8d6cb;
+  background: rgba(94,230,177,.07);
+  font-size: .57rem;
+}
+
+.ms-pick-list {
+  display: grid;
+  gap: 6px;
+}
+
+.ms-pick-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid rgba(255,255,255,.075);
+  border-radius: 11px;
+  color: inherit;
+  background: rgba(255,255,255,.035);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ms-pick-button.is-selected {
+  border-color: rgba(94,230,177,.46);
+  background: rgba(94,230,177,.12);
+}
+
+.ms-pick-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ms-pick-copy strong {
+  overflow-wrap: anywhere;
+  color: #edf7f3;
+  font-size: .72rem;
+  line-height: 1.35;
+}
+
+.ms-pick-copy small {
+  margin-top: 3px;
+  color: rgba(255,255,255,.45);
+  font-size: .55rem;
+}
+
+.ms-pick-metrics {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ms-pick-metrics > span {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 4px 7px;
+  border-radius: 8px;
+  background: rgba(255,255,255,.05);
+}
+
+.ms-pick-metrics small {
+  color: rgba(255,255,255,.44);
+  font-size: .5rem;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.ms-pick-metrics b {
+  color: #67e4b4;
+  font: 850 .68rem 'JetBrains Mono', monospace;
+}
+
+.ms-pick-metrics > span:last-child b {
+  color: #f5cd67;
+}
+
+.ms-empty-analysis {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 105px;
+  padding: 18px;
+  color: rgba(255,255,255,.58);
+  font-size: .72rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.ms-refresh-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(94,230,177,.15);
+  border-radius: 13px;
+  color: rgba(255,255,255,.62);
+  background: rgba(255,255,255,.04);
+  font-size: .65rem;
+}
+
+.ms-refresh-row button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(94,230,177,.25);
+  border-radius: 9px;
+  color: #c9f6e5;
+  background: rgba(94,230,177,.09);
+  font-family: inherit;
+  font-size: .65rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.ms-refresh-row button:disabled {
+  opacity: .58;
+  cursor: wait;
+}
+
 .spin { animation: ms-spin .8s linear infinite; }
 @keyframes ms-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 620px) {
-  .ms-dashboard { padding: 14px 10px calc(82px + env(safe-area-inset-bottom)); }
-  .ms-hero { align-items: flex-start; padding: 17px 15px; }
-  .ms-provider { display: none; }
-  .ms-toolbar { grid-template-columns: 36px minmax(0,1fr) 36px; }
-  .ms-toolbar .ms-analyze-button { grid-column: 1 / -1; min-height: 38px; justify-content: center; }
-  .ms-score-grid { grid-template-columns: minmax(0,1fr) 72px minmax(0,1fr); gap: 4px; }
-  .ms-team { flex-direction: column; text-align: center; gap: 5px; }
-  .ms-team.away { flex-direction: column; text-align: center; }
-  .ms-team-logo,.ms-team-fallback { width: 38px; height: 38px; flex-basis: 38px; }
-  .ms-team strong { font-size: .7rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
-  .ms-card-summary { gap: 4px; }
-  .ms-card-summary span { font-size: .59rem; }
+  .ms-score-grid {
+    grid-template-columns: minmax(0,1fr) 68px minmax(0,1fr);
+    gap: 5px;
+  }
+
+  .ms-team,
+  .ms-team.away {
+    flex-direction: column;
+    gap: 5px;
+    text-align: center;
+  }
+
+  .ms-team-logo,
+  .ms-team-fallback {
+    flex-basis: 38px;
+    width: 38px;
+    height: 38px;
+  }
+
+  .ms-team strong {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: .68rem;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .ms-score {
+    min-height: 58px;
+  }
+
+  .ms-summary-probabilities {
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .ms-summary-probabilities b:nth-child(2) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ms-card-body,
+  .ms-card-summary > svg {
+    transition: none;
+  }
 }
 
 .baseball-view-full {
@@ -9590,6 +10026,11 @@ input:checked + .cb-mark::after {
   color: var(--dash-text);
 }
 
+.app .container.app-baseball {
+  max-width: 960px;
+  padding-top: 0;
+}
+
 .baseball-context-row {
   display: flex;
   align-items: center;
@@ -9905,6 +10346,8 @@ input:checked + .cb-mark::after {
 }
 
 .app-baseball .bb-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 190px;
   background:
     radial-gradient(circle at 100% 0, rgba(94,230,177,.05), transparent 38%),
     linear-gradient(145deg, rgba(255,255,255,.05), rgba(255,255,255,.02)) !important;

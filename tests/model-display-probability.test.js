@@ -69,3 +69,48 @@ test('un 95% validado conserva recomendación sin imponer tamaño mínimo', () =
   assert.equal(scored.total_corners_over0_5.recommended, true);
   assert.equal(scored.total_corners_over0_5.validation.elite95Validated, true);
 });
+
+test('la apuesta diaria acepta 90% solo si esa frecuencia se sostuvo fuera de muestra', () => {
+  const markets = {
+    goals_total: {
+      kind: 'ou',
+      lines: [{ line: 1.5, prob: 0.9, n: 5, hits: 4.5, level: 'empirical' }],
+    },
+  };
+  const passed = modelToScored(markets, {
+    validationFamilies: {
+      goals_total_over_1_5: { daily90: { n: 1, avg_pred: 0.9, avg_actual: 1 } },
+      goals_total_under_1_5: { high: { n: 1, avg_pred: 0.1, avg_actual: 0 } },
+    },
+  });
+  assert.equal(passed.total_goals_over1_5.prob_final, 0.9);
+  assert.equal(passed.total_goals_over1_5.recommended, true);
+  assert.equal(passed.total_goals_over1_5.validation.daily90Validated, true);
+
+  const failed = modelToScored(markets, {
+    validationFamilies: {
+      goals_total_over_1_5: { daily90: { n: 10, avg_pred: 0.91, avg_actual: 0.8 } },
+      goals_total_under_1_5: { high: { n: 10, avg_pred: 0.09, avg_actual: 0.2 } },
+    },
+  });
+  assert.equal(failed.total_goals_over1_5.prob_final, 0.9);
+  assert.equal(failed.total_goals_over1_5.recommended, false);
+  assert.equal(failed.total_goals_over1_5.validation.daily90Validated, false);
+});
+
+test('una recomendación general debe sostener el porcentaje mostrado, no solo superar 80%', () => {
+  const scored = modelToScored({
+    goals_total: {
+      kind: 'ou',
+      lines: [{ line: 3.5, prob: 0.88, n: 20, hits: 18, level: 'empirical' }],
+    },
+  }, {
+    validationFamilies: {
+      goals_total_over_3_5: { high: { n: 10, avg_pred: 0.87, avg_actual: 0.8 } },
+      goals_total_under_3_5: { high: { n: 10, avg_pred: 0.13, avg_actual: 0.2 } },
+    },
+  });
+  assert.equal(scored.total_goals_over3_5.prob_final, 0.88);
+  assert.equal(scored.total_goals_over3_5.recommended, false);
+  assert.equal(scored.total_goals_over3_5.validation.target, 0.88);
+});
