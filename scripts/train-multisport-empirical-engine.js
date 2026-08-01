@@ -47,9 +47,9 @@ function emptyMetric() {
 function observe(metric, key, probability, actual) {
   const raw = Number(probability);
   if (!Number.isFinite(raw)) return;
-  // Se valida exactamente el porcentaje servido: solo un 100% empírico se
-  // presenta como 95%. Por ejemplo, 97% se puntúa como 97%, no como 95%.
-  const p = Math.max(0, Math.min(1, raw >= 1 ? 0.95 : raw));
+  // Se valida exactamente el porcentaje servido: toda frecuencia superior al
+  // 95% se presenta como 95% para no comunicar una garantía.
+  const p = Math.max(0, Math.min(0.95, raw));
   metric.squaredError += (p - actual) ** 2;
   metric.n++;
   if (p < 0.80) return;

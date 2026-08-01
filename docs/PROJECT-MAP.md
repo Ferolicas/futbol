@@ -193,7 +193,10 @@ sirve y cero muestras devuelve “sin dato”. Temporada actual e histórico se
 mantienen separados, la actualidad conserva más del 50% del peso y localía,
 rival, competición, pitcher/quarterback y alineación solo ponderan hechos
 observados semejantes. Cuotas, Poisson, isotónica, priors y shrinkage no alteran
-el porcentaje.
+el porcentaje. La frecuencia cruda se conserva para auditoría y la presentación
+se limita a 95%. Una opción solo entra en recomendaciones si su misma familia
+y línea sostuvo fuera de muestra, como mínimo, el porcentaje que se muestra;
+sin validación falla cerrado, sin imponer un tamaño mínimo de muestra.
 
 Las fuentes y namespaces de identificadores también están separados:
 
