@@ -1,116 +1,28 @@
 // @ts-nocheck
-/**
- * Job: baseball-finalize (MLB-only, MLB Stats API)
- *
- * Rellena los actual_* de baseball_match_predictions para los juegos MLB ya
- * terminados y marca finalized_at. La calibración (baseball-calibrate) solo usa
- * predicciones finalizadas, así que sin este job no hay datos para calibrar.
- *
- * MLB Stats API da el resultado FINAL directo en /schedule?hydrate=linescore
- * (con marcador + line score por entrada para F5), sin límite de fechas (a
- * diferencia de api-baseball free, 2022-2024). Por eso esto es 1 sola llamada
- * por fecha pendiente, sin los 2 pases que api-baseball obligaba.
- *
- * Ventana: 7 días hacia atrás por defecto (recupera pendientes con holgura).
- *
- * Payload: { days?: number, sportId?: 1|11|12 }
- */
-import { supabaseAdmin, getMlbResultsByDate } from '../../shared.js';
-import { mapPool } from '../../pool.js';
+/** Finaliza MLB e ingiere dos hechos empíricos independientes por partido. */
+import { finalizeSportDate, bogotaToday } from '../../shared.js';
 
-// MLB Stats API no tiene límite de fechas (a diferencia de api-baseball free,
-// 2022-2024), así que ampliamos la ventana a 1 año: entre más resultados
-// finalizados, mejor calibra el modelo. Cap de fechas por ejecución para que el
-// job no se eternice si hay backlog — lo pendiente se termina en corridas
-// siguientes (las predicciones finalizadas ya no reaparecen).
-const DEFAULT_WINDOW_DAYS = 365;
-const MAX_DATES_PER_RUN = 200;
-const SPORT_IDS = [1];
-
-function buildActuals(r) {
-  return {
-    actual_home_score: r.home.score,
-    actual_away_score: r.away.score,
-    actual_total_runs: r.totalRuns,
-    actual_run_diff: r.runDiff,
-    actual_result: r.result, // 'H' | 'A'
-    actual_f5_home_score: r.f5Home,
-    actual_f5_away_score: r.f5Away,
-    actual_f5_total: r.f5Total,
-    actual_btts: r.btts,
-    actual_status: 'Final',
-    finalized_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
+function addDays(date, amount) {
+  const value = new Date(`${date}T12:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + amount);
+  return value.toISOString().slice(0, 10);
 }
-
 export async function runBaseballFinalize(payload = {}) {
-  const windowDays = Number(payload.days) > 0 ? Number(payload.days) : DEFAULT_WINDOW_DAYS;
-  const since = new Date();
-  since.setDate(since.getDate() - windowDays);
-  const sinceStr = since.toISOString().split('T')[0];
-  const todayStr = new Date().toISOString().split('T')[0];
-
-  const { data: predictions, error } = await supabaseAdmin
-    .from('baseball_match_predictions')
-    .select('fixture_id, date')
-    .gte('date', sinceStr)
-    .is('finalized_at', null);
-  if (error) throw error;
-
-  const pending = (predictions || []).filter(p => p.date <= todayStr);
-  if (pending.length === 0) {
-    return { ok: true, finalized: 0, message: 'no pending predictions', windowDays };
+  const today = payload.date || bogotaToday();
+  const days = Number(payload.days) > 0 ? Math.min(Number(payload.days), 14) : 3;
+  const summaries = [];
+  for (let offset = days; offset >= 0; offset--) {
+    summaries.push(await finalizeSportDate('baseball', addDays(today, -offset), {
+      force: payload.force === true,
+      concurrency: 3,
+    }));
   }
-
-  // Agrupar por fecha → 1 llamada a MLB Stats API por día.
-  const byDate = {};
-  for (const p of pending) {
-    (byDate[p.date] = byDate[p.date] || new Set()).add(Number(p.fixture_id));
-  }
-  // Más recientes primero (relevancia para calibración fresca). Cap por corrida.
-  const allDates = Object.keys(byDate).sort().reverse();
-  const dates = allDates.slice(0, MAX_DATES_PER_RUN);
-  const capped = allDates.length > MAX_DATES_PER_RUN;
-
-  let finalized = 0, notFinal = 0, noGame = 0, apiCalls = 0;
-  const errors = [];
-
-  for (const date of dates) {
-    // Resultados finales de todos los sportIds de esa fecha.
-    const resultsById = new Map();
-    for (const sportId of SPORT_IDS) {
-      try {
-        const results = await getMlbResultsByDate(date, sportId);
-        apiCalls++;
-        for (const r of results) resultsById.set(Number(r.gamePk), r);
-      } catch (e) {
-        console.error(`[baseball-finalize] fetch ${date} sportId=${sportId}: ${e.message}`);
-        errors.push({ date, sportId, error: e.message });
-      }
-    }
-
-    const wanted = [...byDate[date]];
-    const res = await mapPool(wanted, 10, async (fid) => {
-      const r = resultsById.get(fid);
-      if (!r) return { fid, status: 'no-game' };          // aún no en resultados / no final
-      if (r.result == null) return { fid, status: 'not-final' };
-      const { error: updErr } = await supabaseAdmin
-        .from('baseball_match_predictions')
-        .update(buildActuals(r))
-        .eq('fixture_id', fid);
-      if (updErr) throw new Error(`update ${fid}: ${updErr.message || updErr}`);
-      return { fid, status: 'finalized' };
-    });
-
-    res.forEach((rr, idx) => {
-      if (!rr.ok) { errors.push({ date, fixtureId: wanted[idx], error: rr.error.message }); }
-      else if (rr.value.status === 'finalized') finalized++;
-      else if (rr.value.status === 'no-game') noGame++;
-      else notFinal++;
-    });
-  }
-
-  console.log(`[baseball-finalize] window=${windowDays}d pending=${pending.length} fechas=${dates.length}${capped ? `/${allDates.length} (capped)` : ''} finalized=${finalized} notFinal=${notFinal} noGame=${noGame} apiCalls=${apiCalls} errors=${errors.length}`);
-  return { ok: true, windowDays, examined: pending.length, datesProcessed: dates.length, capped, finalized, notFinal, noGame, apiCalls, errors: errors.length };
+  const failed = summaries.reduce((sum, item) => sum + item.failed, 0);
+  if (failed) throw new Error(`baseball finalize incompleto: ${failed} juegos`);
+  return {
+    ok: true,
+    finalized: summaries.reduce((sum, item) => sum + item.ingested, 0),
+    alreadyIngested: summaries.reduce((sum, item) => sum + item.alreadyIngested, 0),
+    dates: summaries.length,
+  };
 }

@@ -37,22 +37,19 @@ const [
   _webpush,
   _leagues,
   _combinada,
-  _baseballModel,
-  _baseballCalibration,
-  _baseballFeatures,
-  _baseballMl,
   _oddsApi,
   _db,
   _mlbStatsApi,
   _rawBackfill,
   _playerPhotos,
-  _reenrichBaseball,
-  _trainBaseballMeta,
   _modelIngest,
   _modelProfiles,
   _modelPlayerMarkets,
   _modelProbabilities,
   _trainFootballEmpirical,
+  _multisportAnalysis,
+  _multisportProviders,
+  _trainMultisport,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
@@ -66,25 +63,19 @@ const [
   import(LIB + 'webpush.js'),
   import(LIB + 'leagues.js'),
   import(LIB + 'combinada.js'),
-  import(LIB + 'baseball-model.js'),
-  import(LIB + 'baseball-calibration.js'),
-  import(LIB + 'baseball-features.js'),
-  import(LIB + 'baseball-ml.js'),
   import(LIB + 'odds-api.js'),
   import(LIB + 'db.js'),
   import(LIB + 'mlb-stats-api.js'),
   import(LIB + 'raw-backfill.js'),
   import(LIB + 'player-photos.js'),
-  // Scripts activos de entrenamiento. Las rutas antiguas de fútbol basadas en
-  // shrinkage/prior ya no se cargan en el worker: el único motor de fútbol es
-  // ahora el empírico point-in-time definido al final de esta lista.
-  import(SCRIPTS + 'reenrich-baseball.js'),
-  import(SCRIPTS + 'train-baseball-meta-models.js'),
   import(LIB + 'model-ingest.js'),
   import(LIB + 'model-profiles.js'),
   import(LIB + 'model-player-markets.js'),
   import(LIB + 'model-probabilities.js'),
   import(SCRIPTS + 'train-football-empirical-engine.js'),
+  import(LIB + 'multisport-analysis.js'),
+  import(LIB + 'multisport-providers.js'),
+  import(SCRIPTS + 'train-multisport-empirical-engine.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -112,8 +103,8 @@ const footballApiClient = _footballApiClient.default || _footballApiClient;
 export const footballApiRequest = footballApiClient.footballApiRequest;
 export const payloadQuality = footballApiClient.payloadQuality;
 
-// (api-baseball.js purgado — baseball es 100% MLB Stats API + The Odds API,
-//  ver lib/mlb-stats-api.js y lib/odds-api.js)
+// Los hechos de baseball vienen de MLB Stats. API-Baseball se consulta solo
+// mediante multisport-analysis para cuotas; The Odds API no participa en MLB.
 
 // lib/supabase.js
 export const supabaseAdmin = _supabase.supabaseAdmin;
@@ -167,39 +158,22 @@ export const buildPlayerMarkets = _modelPlayerMarkets.buildPlayerMarkets;
 export const buildModelCombinada = _modelProbabilities.buildModelCombinada;
 export const trainFootballEmpiricalEngine = _trainFootballEmpirical.trainFootballEmpiricalEngine;
 
-// scripts/reenrich-baseball.js + scripts/train-baseball-meta-models.js —
-// se invocan desde el cron baseball-retrain. Mismo guard CLI que los de fútbol.
-export const reenrichBaseball         = _reenrichBaseball.reenrichBaseball;
-export const trainBaseballMetaModels  = _trainBaseballMeta.trainBaseballMetaModels;
+// Motores deportivos independientes (MLB/NBA/NFL), todos basados únicamente
+// en frecuencias observadas. El módulo decide la fuente y su fallback.
+export const analyzeSportDate = _multisportAnalysis.analyzeSportDate;
+export const analyzeSportGame = _multisportAnalysis.analyzeSportGame;
+export const finalizeSportDate = _multisportAnalysis.finalizeSportDate;
+export const listSportFixtures = _multisportAnalysis.listSportFixtures;
+export const prepareSportDate = _multisportAnalysis.prepareSportDate;
+export const getSportGamesByDate = _multisportProviders.getSportGamesByDate;
+export const getSportGameDetails = _multisportProviders.getSportGameDetails;
+export const trainMultisportEmpiricalEngine = _trainMultisport.trainMultisportEmpiricalEngine;
 
 // lib/combinada.js
 export const buildCombinada = _combinada.buildCombinada;
 
-// lib/baseball-model.js
-export const computeBaseballProbabilities = _baseballModel.computeBaseballProbabilities;
-export const buildBaseballCombinada = _baseballModel.buildBaseballCombinada;
-export const scoreBaseballDataQuality = _baseballModel.scoreBaseballDataQuality;
-export const extractBestOdds = _baseballModel.extractBestOdds;
-
-// lib/baseball-calibration.js
-export const calibrateBaseballProbabilities = _baseballCalibration.calibrateBaseballProbabilities;
-export const flattenProbabilitiesForStorage = _baseballCalibration.flattenProbabilitiesForStorage;
-
-// lib/baseball-features.js — feature engineering point-in-time compartido
-// entre el cron retrain (reenrich + train) y el runtime de analyze.
-export const BASEBALL_FEATURE_ORDER         = _baseballFeatures.BASEBALL_FEATURE_ORDER;
-export const buildBaseballFeatureIndex      = _baseballFeatures.buildBaseballFeatureIndex;
-export const computeBaseballFeaturesForGame = _baseballFeatures.computeBaseballFeaturesForGame;
-
-// lib/baseball-ml.js — runtime de inferencia ML (carga modelos activos +
-// aplica overrides sobre los 3 mercados entrenados).
-export const loadActiveBaseballModels = _baseballMl.loadActiveBaseballModels;
-export const applyMlOverrides         = _baseballMl.applyMlOverrides;
-
 // lib/odds-api.js
 export const fetchOddsForFixtures = _oddsApi.fetchOddsForFixtures;
-export const fetchMlbOddsByDate = _oddsApi.fetchMlbOddsByDate;
-export const matchMlbOdds = _oddsApi.matchMlbOdds;
 
 // lib/mlb-stats-api.js — fuente oficial MLB/MiLB (statsapi.mlb.com)
 export const getMlbScheduleByDate = _mlbStatsApi.getMlbScheduleByDate;
@@ -207,6 +181,7 @@ export const getMlbPitcherMatchup = _mlbStatsApi.getMlbPitcherMatchup;
 export const getMlbTeamSeasonStats = _mlbStatsApi.getMlbTeamSeasonStats;
 export const toModelTeamStats = _mlbStatsApi.toModelTeamStats;
 export const getMlbLiveGame = _mlbStatsApi.getMlbLiveGame;
+export const getMlbGameBoxscore = _mlbStatsApi.getMlbGameBoxscore;
 export const getMlbResultsByDate = _mlbStatsApi.getMlbResultsByDate;
 export const MLB_SPORT_IDS = _mlbStatsApi.MLB_SPORT_IDS;
 // Player props (game logs MLB). Sustituye al extractor legacy de baseball-model

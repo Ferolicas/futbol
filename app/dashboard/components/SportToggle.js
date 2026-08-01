@@ -37,9 +37,44 @@ function BaseballGloveIcon({ size = 18, className = '' }) {
   );
 }
 
+function BasketballIcon({ size = 18, className = '' }) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M4.1 9.4c5.1.3 9.2 4.4 9.5 10.5M10.4 4.1c.3 5.1 4.4 9.2 9.5 9.5M3.2 13.8 20.8 10.2M10.2 20.8 13.8 3.2" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function AmericanFootballIcon({ size = 18, className = '' }) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4.2 16.7C1.8 13.2 4.1 7.6 8.7 4.8c4.6-2.8 9.8-2.1 11.1.1 1.4 2.3-.9 7.8-5.5 10.6-4.5 2.8-8.5 3.4-10.1 1.2Z" stroke="currentColor" strokeWidth="1.65" />
+      <path d="m8.5 13.4 6.8-4.2m-5.2 1.2 3.5 2.8m-2.1-4.1 3.4 2.7" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function TennisIcon({ size = 18, className = '' }) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M5.2 5.7c3.9 1.6 5.2 5.6 4.1 8.4-.8 2.1-2.5 3.6-4.7 4.2M18.8 18.3c-3.9-1.6-5.2-5.6-4.1-8.4.8-2.1 2.5-3.6 4.7-4.2" stroke="currentColor" strokeWidth="1.45" />
+    </svg>
+  );
+}
+
+const SPORTS = [
+  { key: 'futbol', label: 'Fútbol', detail: 'Partidos y combinadas', path: '/dashboard', icon: FootballBallIcon },
+  { key: 'baseball', label: 'Baseball', detail: 'MLB oficial', path: '/dashboard/baseball', icon: BaseballGloveIcon },
+  { key: 'basketball', label: 'Baloncesto', detail: 'NBA', path: '/dashboard/baloncesto', icon: BasketballIcon },
+  { key: 'american_football', label: 'Fútbol americano', detail: 'NFL', path: '/dashboard/futbol-americano', icon: AmericanFootballIcon },
+  { key: 'tennis', label: 'Tenis', detail: 'Fuente pendiente', path: null, icon: TennisIcon, disabled: true },
+];
+
 /**
- * Sport toggle: switches between fútbol (/dashboard) and baseball (/dashboard/baseball).
- * Renders as a sticky pill at the top of the dashboard.
+ * Selector móvil entre los productos deportivos disponibles. Tenis permanece
+ * visible pero deshabilitado hasta disponer de una fuente de datos adecuada.
  */
 export default function SportToggle() {
   const pathname = usePathname();
@@ -48,12 +83,14 @@ export default function SportToggle() {
   const [pendingSport, setPendingSport] = useState(null);
   const menuRef = useRef(null);
 
-  const isBaseball = pathname?.startsWith('/dashboard/baseball');
-  const sport = isBaseball ? 'baseball' : 'futbol';
+  const sport = pathname?.startsWith('/dashboard/baseball') ? 'baseball'
+    : pathname?.startsWith('/dashboard/baloncesto') ? 'basketball'
+    : pathname?.startsWith('/dashboard/futbol-americano') ? 'american_football'
+    : 'futbol';
+  const current = SPORTS.find((item) => item.key === sport) || SPORTS[0];
 
   useEffect(() => {
-    router.prefetch('/dashboard');
-    router.prefetch('/dashboard/baseball');
+    SPORTS.filter((item) => item.path).forEach((item) => router.prefetch(item.path));
   }, [router]);
 
   useEffect(() => {
@@ -78,14 +115,14 @@ export default function SportToggle() {
   }, [open]);
 
   const goTo = (target) => {
-    if (target === sport) return;
+    const destination = SPORTS.find((item) => item.key === target);
+    if (!destination?.path || target === sport) return;
     setPendingSport(target);
     setOpen(false);
-    if (target === 'baseball') router.push('/dashboard/baseball');
-    else router.push('/dashboard');
+    router.push(destination.path);
   };
 
-  const CurrentIcon = isBaseball ? BaseballGloveIcon : FootballBallIcon;
+  const CurrentIcon = current.icon;
 
   return (
     <div className="sport-menu" ref={menuRef}>
@@ -100,34 +137,31 @@ export default function SportToggle() {
         {pendingSport
           ? <LoaderCircle className="sport-menu-loader" size={16} aria-hidden="true" />
           : <CurrentIcon size={16} strokeWidth={2} aria-hidden="true" />}
-        <span>{pendingSport === 'baseball' ? 'Abriendo Baseball' : pendingSport === 'futbol' ? 'Abriendo Fútbol' : isBaseball ? 'Baseball' : 'Fútbol'}</span>
+        <span>{pendingSport ? `Abriendo ${SPORTS.find((item) => item.key === pendingSport)?.label || ''}` : current.label}</span>
         <ChevronDown size={15} aria-hidden="true" />
       </button>
 
       {open && (
         <div className="sport-menu-popover" role="listbox" aria-label="Seleccionar deporte">
-          <button
-            type="button"
-            className={!isBaseball ? 'is-active' : ''}
-            onClick={() => goTo('futbol')}
-            onPointerEnter={() => router.prefetch('/dashboard')}
-            role="option"
-            aria-selected={!isBaseball}
-          >
-            <span className="sport-menu-icon football"><FootballBallIcon size={18} /></span>
-            <span><strong>Fútbol</strong><small>Partidos y combinadas</small></span>
-          </button>
-          <button
-            type="button"
-            className={isBaseball ? 'is-active' : ''}
-            onClick={() => goTo('baseball')}
-            onPointerEnter={() => router.prefetch('/dashboard/baseball')}
-            role="option"
-            aria-selected={isBaseball}
-          >
-            <span className="sport-menu-icon baseball"><BaseballGloveIcon size={18} /></span>
-            <span><strong>Baseball</strong><small>MLB y apuestas del día</small></span>
-          </button>
+          {SPORTS.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                className={`${sport === item.key ? 'is-active' : ''} ${item.disabled ? 'is-disabled' : ''}`}
+                onClick={() => goTo(item.key)}
+                onPointerEnter={() => item.path && router.prefetch(item.path)}
+                role="option"
+                aria-selected={sport === item.key}
+                aria-disabled={item.disabled || undefined}
+                disabled={item.disabled}
+              >
+                <span className={`sport-menu-icon ${item.key}`}><Icon size={18} /></span>
+                <span><strong>{item.label}</strong><small>{item.detail}</small></span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

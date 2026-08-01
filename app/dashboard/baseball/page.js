@@ -1024,7 +1024,7 @@ function SubAccordion({ id, title, color, icon: Icon = BarChart3, openSub, setOp
 function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
   // Las opciones salen de las PROBABILIDADES del modelo (igual que los chips de
   // la tarjeta), NO de combinada.selections. Antes se leía la combinada, que
-  // filtra por cuota (s.odd ≥ 1.20) → si The Odds API no matcheaba ese partido,
+  // filtra por cuota (s.odd ≥ 1.20) → si API-Baseball no matcheaba ese partido,
   // el acordeón salía vacío aunque la tarjeta mostrara opciones. La cuota es
   // referencia: se muestra si existe (best_odds), pero NO es requisito.
   const probs = game.analysis?.probabilities;
@@ -1037,9 +1037,9 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
 
   const opts = [];
   // Modelo HÍBRIDO:
-  //  - Mercados principales (moneyline/totales/run line): The Odds API SÍ da
+  //  - Mercados principales (moneyline/totales/run line): API-Baseball SÍ da
   //    cuota → se muestran con cuota (apostables, cuota ≥1.10).
-  //  - Otros mercados (F5, team totals, BTTS): The Odds API solo los da por
+  //  - Otros mercados (F5, team totals, BTTS): API-Baseball los da por
   //    evento (caro) → se muestran SIN cuota como REFERENCIA (existen en la
   //    casa; el usuario ve la cuota allá). No gastan créditos extra.
   // Probabilidad ≥80% para carreras/props; el GANADOR (moneyline) ≥55% (un

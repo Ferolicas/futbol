@@ -26,7 +26,7 @@ type Sched = { queue: QueueName; id: string; pattern?: string; every?: number; t
 // futbol-live (PARTE 1: /fixtures/statistics dentro de live.js). El job dedicado
 // de 30 min queda obsoleto → al añadir su id aquí, registerSchedulers() borra el
 // scheduler Y su job delayed pendiente en el arranque (no quedan dos corriendo).
-const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-odds-15m', 'futbol-raw-backfill-half2', 'baseball-live-5m', 'futbol-live-corners-30m', 'futbol-odds-30m'];
+const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-odds-15m', 'futbol-raw-backfill-half2', 'baseball-live-5m', 'futbol-live-corners-30m', 'futbol-odds-30m', 'baseball-calibrate-daily', 'baseball-analyze-all-today-daily', 'american-football-live-10m'];
 
 const SCHEDULES: Sched[] = [
   // ── Fútbol — diarios (hora España) ──
@@ -76,22 +76,19 @@ const SCHEDULES: Sched[] = [
   // Re-análisis PRE-PARTIDO (force + today): captura el lineup confirmado de MLB
   // (props de bateadores) de los juegos que se juegan HOY Colombia. Corre en la
   // franja en que MLB publica alineaciones (tarde Colombia = 17-01 España). Odds
-  // cacheadas (3h) → no quema The Odds API; game logs cacheados (6h).
-  { queue: 'baseball-analyze',   id: 'baseball-analyze-pregame', pattern: '0 17,19,21,23,1 * * *', tz: TZ, data: { force: true, today: true } },
+  // Se filtran solo juegos a -1h/+3h del kickoff; cuotas API-Baseball cacheadas
+  // 6h y game logs MLB cacheados. Así cada juego se refresca cerca de empezar
+  // sin agotar el plan gratuito de 100 llamadas.
+  { queue: 'baseball-analyze',   id: 'baseball-analyze-pregame', pattern: '0 17,19,21,23,1 * * *', tz: TZ, data: { force: true, today: true, pregame: true } },
   // ventana 365d (default del job). MLB Stats API es gratuita y sin límite de
   // fechas, así que rellenamos resultados retroactivos sin penalización.
-  { queue: 'baseball-finalize',  id: 'baseball-finalize-daily',  pattern: '0 5 * * *',  tz: TZ }, // 5:00
-  { queue: 'baseball-calibrate', id: 'baseball-calibrate-daily', pattern: '0 6 * * *',  tz: TZ }, // 6:00 (tras finalize)
-  // Retrain ML nocturno: reenrichBaseball() + trainBaseballMetaModels(). 07:30
-  // España = 00:30 Bogotá (día siguiente). Va DESPUÉS de calibrate (06:00) y
-  // ANTES del próximo baseball-analyze (01:30 día sig.), así el análisis
-  // matutino siempre usa modelos recién entrenados.
-  { queue: 'baseball-retrain',   id: 'baseball-retrain-daily',   pattern: '30 7 * * *', tz: TZ }, // 7:30
+  // Dos pases: el de 05:00 recoge la mayoría y el de 09:00 cierra los juegos
+  // nocturnos de la costa oeste antes del entrenamiento.
+  { queue: 'baseball-finalize',  id: 'baseball-finalize-daily',  pattern: '0 5,9 * * *',  tz: TZ },
+  // La calibración isotónica quedó retirada: el porcentaje servido es la
+  // frecuencia empírica. Retrain solo escoge pesos de semejanza walk-forward.
+  { queue: 'baseball-retrain',   id: 'baseball-retrain-daily',   pattern: '30 10 * * *', tz: TZ },
   { queue: 'baseball-cleanup',   id: 'baseball-cleanup-weekly',  pattern: '0 3 * * 0',  tz: TZ }, // dom 3:00
-  // Gemelo del cron del fútbol — reanaliza HOY (Bogotá) con force=true a las
-  // 02:10 España, justo después del cron base (`baseball-analyze-daily` 01:30),
-  // para refrescar lineups confirmados y odds del bloque madrugada.
-  { queue: 'baseball-analyze-all-today', id: 'baseball-analyze-all-today-daily', pattern: '10 2 * * *', tz: TZ },
   // ── Baseball — live (cada 1 min) ──
   // MLB Stats API es gratuita y sin límite, así que polleamos al mismo ritmo
   // que la app de fútbol. El handler emite el WS update y, si hay juegos en
@@ -99,6 +96,26 @@ const SCHEDULES: Sched[] = [
   // home runs, K dorado y cambio de inning. Sin juegos en vivo: 1 schedule
   // call y exit (~unas decenas de ms).
   { queue: 'baseball-live', id: 'baseball-live-1m', every: 60_000 },
+
+  // ── Baloncesto NBA ──────────────────────────────────────────────────
+  // NBA oficial es primaria; API-NBA entra automáticamente si el CDN bloquea
+  // al VPS. API-Basketball queda para cuotas y último fallback de boxscore.
+  { queue: 'basketball-fixtures', id: 'basketball-fixtures-daily', pattern: '10 1 * * *', tz: TZ },
+  { queue: 'basketball-analyze', id: 'basketball-analyze-daily', pattern: '40 1 * * *', tz: TZ },
+  { queue: 'basketball-finalize', id: 'basketball-finalize-daily', pattern: '0 8,11 * * *', tz: TZ },
+  { queue: 'basketball-retrain', id: 'basketball-retrain-daily', pattern: '30 12 * * *', tz: TZ },
+  // El plan free permite 100 llamadas/día: 10 min + smart-window evita quemar
+  // cuota fuera de juegos y deja margen para cuotas/boxscores.
+  { queue: 'basketball-live', id: 'basketball-live-10m', every: 600_000 },
+
+  // ── Fútbol americano NFL ────────────────────────────────────────────
+  { queue: 'american-football-fixtures', id: 'american-football-fixtures-daily', pattern: '15 1 * * *', tz: TZ },
+  { queue: 'american-football-analyze', id: 'american-football-analyze-daily', pattern: '50 1 * * *', tz: TZ },
+  { queue: 'american-football-finalize', id: 'american-football-finalize-daily', pattern: '15 8,11 * * *', tz: TZ },
+  { queue: 'american-football-retrain', id: 'american-football-retrain-daily', pattern: '0 13 * * *', tz: TZ },
+  // NFL comparte cuota de datos, boxscores y odds; 30 min conserva margen
+  // incluso en una jornada de 16 partidos para finalizar todos los hechos.
+  { queue: 'american-football-live', id: 'american-football-live-30m', every: 1_800_000 },
 ];
 
 export async function registerSchedulers(): Promise<void> {

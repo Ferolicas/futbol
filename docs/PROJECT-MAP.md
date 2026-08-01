@@ -30,6 +30,8 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `/dashboard` | `app/dashboard/layout.js`, `page.js` | Plan activo | Partidos, análisis y combinadas |
 | `/dashboard/analisis/[id]` | `app/dashboard/analisis/[id]/page.js` | Plan activo | Análisis de fútbol |
 | `/dashboard/baseball` | `app/dashboard/baseball/page.js` | Plan activo | Producto de béisbol |
+| `/dashboard/baloncesto` | `app/dashboard/baloncesto/page.js` | Plan activo | Partidos y motor independiente NBA |
+| `/dashboard/futbol-americano` | `app/dashboard/futbol-americano/page.js` | Plan activo | Partidos y motor independiente NFL |
 | `/admin` | `app/admin/` | Admin/owner | Operación y clientes |
 | `/ferney` | `app/ferney/` | Privada | Auditoría del propietario |
 
@@ -56,6 +58,10 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `GET /api/fixtures` | `app/api/fixtures/route.js` | Dashboard | Partidos y análisis diarios |
 | `GET /api/match/[id]` | `app/api/match/[id]/route.js` | Análisis | Detalle estadístico |
 | `GET/POST /api/refresh-live` | `app/api/refresh-live/route.js` | Dashboard | GET lee Redis; POST fuerza proveedor |
+| `GET /api/sports/[sport]/fixtures` | `app/api/sports/[sport]/fixtures/route.js` | NBA/NFL | Jornada localizada y análisis persistido |
+| `POST /api/sports/[sport]/analyze` | `app/api/sports/[sport]/analyze/route.js` | NBA/NFL | Encola análisis sin ejecutar trabajo pesado en web |
+| `GET /api/sports/[sport]/match/[id]` | `app/api/sports/[sport]/match/[id]/route.js` | NBA/NFL | Detalle y evidencia almacenados |
+| `GET /api/sports/[sport]/quota` | `app/api/sports/[sport]/quota/route.js` | NBA/NFL | Presupuestos diarios separados por proveedor |
 | `/api/cron/*` | `app/api/cron/` | Cron/worker | Ingesta, análisis y finalización |
 
 El resto de endpoints se agrupa en `app/api/admin`, `baseball`, `chat`, `favorites`, `push`, `quota`, `tickets` y `user`.
@@ -71,7 +77,12 @@ Las migraciones viven en `scripts/`. Tablas clave:
 - `payment_webhook_events`: idempotencia persistente y reintentos de webhooks.
 - `payment_exchange_rates`: última tasa EUR→COP válida para tolerar caídas del proveedor FX.
 - `fixtures_cache`, `match_schedule`, `match_results`, `match_analysis`, `match_predictions`: núcleo de fútbol.
-- `baseball_*`: fixtures, resultados, análisis, predicciones, favoritos y ocultos.
+- `baseball_*`: producto MLB existente más hechos, jugadores, predicciones y
+  pesos empíricos propios en `baseball_engine_*`.
+- `basketball_*`: calendario, análisis y hechos NBA; no consulta tablas de
+  fútbol, MLB ni NFL.
+- `american_football_*`: calendario, análisis y hechos NFL; no consulta tablas
+  de fútbol, MLB ni NBA.
 - `combinadas`, `combinada_dia`, `tickets`, `chat_messages`, `push_subscriptions`.
 - Esquema `model`: entidades, hechos, perfiles y señales del motor estadístico.
 - `raw_api_payloads` + `api_capture_failures`: crudo válido e histórico durable
@@ -161,6 +172,45 @@ segundos después del reinicio oficial de cuota (00:00 UTC).
 crudo, ledger, hechos, dimensiones, marcadores y contadores de jugador; código
 de salida 2 significa una invariancia crítica rota.
 
+### Motores empíricos MLB, NBA y NFL
+
+`lib/multisport-empirical-engine.js` comparte únicamente la implementación de
+la fórmula de frecuencia observada; cada deporte usa su propio prefijo de
+tablas, versión entrenada, diagnósticos, caché y colas. No existe lectura
+cruzada entre `baseball`, `basketball` y `american_football`. Una muestra real
+sirve y cero muestras devuelve “sin dato”. Temporada actual e histórico se
+mantienen separados, la actualidad conserva más del 50% del peso y localía,
+rival, competición, pitcher/quarterback y alineación solo ponderan hechos
+observados semejantes. Cuotas, Poisson, isotónica, priors y shrinkage no alteran
+el porcentaje.
+
+Las fuentes también están separadas:
+
+- NBA: feed/CDN oficial primero; si el servidor recibe bloqueo o timeout,
+  `lib/nba-stats-api.js` cambia a API-NBA. API-Basketball queda para cuotas y
+  como último respaldo de boxscores. El índice oficial de `nba.com/players`
+  cruza nombres/equipos con el ID NBA y sus headshots CDN, incluso cuando el
+  boxscore llega desde API-NBA. IDs y logos canónicos evitan duplicados al
+  cambiar de fuente.
+- MLB: MLB Stats oficial aporta calendario, live, boxscores, pitchers,
+  alineaciones, game logs y fotos. API-Baseball se consulta solo para cuotas.
+- NFL: API-NFL aporta jornadas, boxscores, grupos estadísticos de jugadores,
+  fotos y cuotas.
+
+`scripts/train-multisport-empirical-engine.js` realiza selección cronológica
+70/30 por deporte y guarda validación fuera de muestra sin recalibrar el
+porcentaje. `scripts/backfill-multisport-history.js` carga una temporada MLB,
+NBA o NFL por ejecución (MLB usa rangos oficiales de 45 días), y
+`scripts/migrate-multisport-engines.sql` crea los almacenes
+independientes; la migración requiere backup y debe ejecutarse antes de activar
+las nuevas rutas en producción. Tenis permanece deshabilitado hasta aprobar una
+fuente fiable.
+
+Orden operativo de producción: aplicar la migración con backup, ejecutar por temporada
+`npm run backfill:multisport -- <baseball|basketball|american_football> <año>`,
+entrenar con `npm run train:multisport` y solo entonces desplegar/reiniciar los
+schedulers nuevos. Añadir `--dry` permite verificar cobertura sin escribir DB.
+
 ### Realtime
 
 `apps/cfanalisis-worker` ingiere y publica actualizaciones. El cliente WebSocket
@@ -198,7 +248,8 @@ snapshots live a los IDs de la jornada antes de serializar la respuesta.
 
 - `app/globals.css`: sistema visual de Home, auth, planes, checkout y dashboard.
 - `app/dashboard/components/DashboardHeader.js`: encabezado autenticado compartido.
-- `app/dashboard/components/SportToggle.js`: selector desplegable y precarga de fútbol/béisbol.
+- `app/dashboard/components/SportToggle.js`: selector y precarga de fútbol,
+  MLB, NBA y NFL; tenis figura deshabilitado como pendiente.
 - `app/dashboard/components/AnalysisFullModal.js`: carcasa compartida del análisis completo con scroll vertical nativo.
 - `app/dashboard/utils/display-betting-text.js`: traducción exclusivamente
   visual de términos de mercados heredados; no modifica IDs ni payloads.
@@ -228,7 +279,7 @@ snapshots live a los IDs de la jornada antes de serializar la respuesta.
 | Stripe | `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` |
 | Mercado Pago | `MP_ENV`, claves públicas/privadas y `MP_WEBHOOK_SECRET` |
 | App/worker | `NEXT_PUBLIC_APP_URL`, `WORKER_URL`, `CRON_SECRET`, secretos y URLs WS |
-| Datos | `FOOTBALL_API_KEY`, `THE_ODDS_API_KEY` |
+| Datos | `FOOTBALL_API_KEY`; `API_SPORTS_KEY` opcional (fallback a la anterior) y claves aislables `API_SPORTS_<PROVIDER>_KEY`/`API_NBA_KEY`/`API_BASKETBALL_KEY`/`API_BASEBALL_KEY`/`API_NFL_KEY`; presupuestos `API_SPORTS_<PROVIDER>_DAILY_BUDGET` |
 | Email/push | `RESEND_API_KEY`, `FROM_EMAIL`, VAPID |
 
 Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
@@ -240,9 +291,14 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - 2026-08-01: la migración `migrate-payment-reliability.sql` debe ejecutarse antes del build; incluye permisos explícitos para el rol `cfanalisis`.
 - 2026-08-01: Stripe escucha facturas, suscripciones y compatibilidad de PaymentIntent legado. Añadir eventos con `scripts/configure-stripe-webhook.mjs` solo después de desplegar el handler.
 - 2026-08-01: n8n ejecuta la versión publicada de cada workflow, no necesariamente el borrador visible en `workflow_entity`. Tras importar un cambio hay que publicarlo y reiniciar n8n; de lo contrario puede seguir activa una URL o conexión antigua.
-- 2026-08-01: fútbol no usa calibración isotónica, shrinkage ni mínimos de
-  muestra. El panel “Reentrenar fútbol” encola `futbol-retrain`; la calibración
-  administrativa queda exclusivamente para baseball.
+- 2026-08-01: fútbol, MLB, NBA y NFL no usan calibración isotónica, shrinkage
+  ni mínimos de muestra en serving. `baseball-calibrate` queda solo como cola
+  de compatibilidad y responde `retired-empirical-engine`.
+- 2026-08-01: no activar NBA/NFL ni el motor MLB nuevo antes de aplicar, con
+  backup, `scripts/migrate-multisport-engines.sql`; el build no ejecuta DDL.
+- 2026-08-01: los cuatro productos API-Sports mantienen cuota y cortacircuito
+  Redis separados. La configuración reserva diez llamadas del plan gratuito;
+  las cuotas deportivas nunca se usan como probabilidad del modelo.
 - 2026-08-01: `FOOTBALL_CACHE_VERSION=19` invalida análisis sin el gate exacto
   de validación. Si `prediction_models.metrics.candidate.families` no está
   disponible, se muestran frecuencias pero no se publican recomendaciones.

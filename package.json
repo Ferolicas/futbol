@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "test": "node --test tests/*.test.js",
-    "audit:football-data": "node scripts/audit-football-model-data.js"
+    "audit:football-data": "node scripts/audit-football-model-data.js",
+    "train:multisport": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/train-multisport-empirical-engine.js --all",
+    "backfill:multisport": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/backfill-multisport-history.js"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

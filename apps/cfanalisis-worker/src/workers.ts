@@ -27,7 +27,11 @@ import { runBaseballLive } from './jobs/baseball/live.js';
 import { runBaseballFinalize } from './jobs/baseball/finalize.js';
 import { runBaseballCleanup } from './jobs/baseball/cleanup.js';
 import { runBaseballRetrain } from './jobs/baseball/retrain.js';
-import { runBaseballCalibration } from './jobs/calibration/baseball.js';
+import { runBasketballFixtures, runAmericanFootballFixtures } from './jobs/multisport/fixtures.js';
+import { runBasketballAnalyze, runAmericanFootballAnalyze } from './jobs/multisport/analyze.js';
+import { runBasketballLive, runAmericanFootballLive } from './jobs/multisport/live.js';
+import { runBasketballFinalize, runAmericanFootballFinalize } from './jobs/multisport/finalize.js';
+import { runBasketballRetrain, runAmericanFootballRetrain } from './jobs/multisport/retrain.js';
 
 const handlers: Record<QueueName, Processor> = {
   'futbol-fixtures':         async (job) => runFixtures(job.data),
@@ -54,9 +58,20 @@ const handlers: Record<QueueName, Processor> = {
   'baseball-live':                async (job) => runBaseballLive(job.data),
   'baseball-finalize':            async (job) => runBaseballFinalize(job.data),
   'baseball-cleanup':             async (job) => runBaseballCleanup(job.data),
-  'baseball-calibrate':           async () => runBaseballCalibration(),
+  // Compatibilidad con jobs delayed anteriores: la isotónica quedó retirada.
+  'baseball-calibrate':           async () => ({ ok: true, skipped: 'retired-empirical-engine' }),
   // Reenrich + train ML, CPU + I/O heavy → MARATHON lock.
   'baseball-retrain':             async (job) => runBaseballRetrain(job.data),
+  'basketball-fixtures':          async (job) => runBasketballFixtures(job.data),
+  'basketball-analyze':           async (job) => runBasketballAnalyze(job.data, job),
+  'basketball-live':              async (job) => runBasketballLive(job.data),
+  'basketball-finalize':          async (job) => runBasketballFinalize(job.data),
+  'basketball-retrain':           async (job) => runBasketballRetrain(job.data),
+  'american-football-fixtures':   async (job) => runAmericanFootballFixtures(job.data),
+  'american-football-analyze':    async (job) => runAmericanFootballAnalyze(job.data, job),
+  'american-football-live':       async (job) => runAmericanFootballLive(job.data),
+  'american-football-finalize':   async (job) => runAmericanFootballFinalize(job.data),
+  'american-football-retrain':    async (job) => runAmericanFootballRetrain(job.data),
 };
 
 // Concurrency tuning per queue. Most are I/O bound (HTTP to API-Football,
@@ -85,6 +100,16 @@ const concurrency: Record<QueueName, number> = {
   'baseball-cleanup':             1,
   'baseball-calibrate':           1,
   'baseball-retrain':             1,
+  'basketball-fixtures':          1,
+  'basketball-analyze':           1,
+  'basketball-live':              1,
+  'basketball-finalize':          1,
+  'basketball-retrain':           1,
+  'american-football-fixtures':   1,
+  'american-football-analyze':    1,
+  'american-football-live':       1,
+  'american-football-finalize':   1,
+  'american-football-retrain':    1,
 };
 
 // Lock / stall tuning per queue.
@@ -134,6 +159,16 @@ const lockOpts: Record<QueueName, LockOpts> = {
   'baseball-calibrate':           HEAVY,
   // reenrich + train pueden tardar 5-15 min con dataset completo.
   'baseball-retrain':             MARATHON,
+  'basketball-fixtures':          LIGHT,
+  'basketball-analyze':           HEAVY,
+  'basketball-live':              LIGHT,
+  'basketball-finalize':          HEAVY,
+  'basketball-retrain':           MARATHON,
+  'american-football-fixtures':   LIGHT,
+  'american-football-analyze':    HEAVY,
+  'american-football-live':       LIGHT,
+  'american-football-finalize':   HEAVY,
+  'american-football-retrain':    MARATHON,
 };
 
 export type WorkerRole = 'all' | 'realtime' | 'heavy';
@@ -143,7 +178,7 @@ export type WorkerRole = 'all' | 'realtime' | 'heavy';
 // retrain) que bloquean el event loop. Todo lo que NO esté aquí = "heavy".
 // Esta es la línea divisoria de la Fase 1: un retrain de 20 min en 'heavy' ya
 // no puede congelar el tick de 20s de 'futbol-live' ni el /health en 'realtime'.
-const REALTIME_QUEUES: QueueName[] = ['futbol-live', 'baseball-live'];
+const REALTIME_QUEUES: QueueName[] = ['futbol-live', 'baseball-live', 'basketball-live', 'american-football-live'];
 
 function queuesForRole(role: WorkerRole): QueueName[] {
   const all = Object.keys(handlers) as QueueName[];

@@ -27,6 +27,18 @@ export const QUEUE_NAMES = [
   'baseball-cleanup',
   'baseball-calibrate',
   'baseball-retrain',
+  // Baloncesto (NBA; motor y almacenamiento propios)
+  'basketball-fixtures',
+  'basketball-analyze',
+  'basketball-live',
+  'basketball-finalize',
+  'basketball-retrain',
+  // Fútbol americano (NFL; motor y almacenamiento propios)
+  'american-football-fixtures',
+  'american-football-analyze',
+  'american-football-live',
+  'american-football-finalize',
+  'american-football-retrain',
 ] as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[number];
@@ -85,6 +97,16 @@ const opts: Record<QueueName, JobsOptions> = {
   'baseball-calibrate':           defaultJobOpts,
   // Retrain ML — reenrich + train, idempotente. attempts:2 acotado.
   'baseball-retrain':             { ...defaultJobOpts, attempts: 2 },
+  'basketball-fixtures':          defaultJobOpts,
+  'basketball-analyze':           analyzeJobOpts,
+  'basketball-live':              liveJobOpts,
+  'basketball-finalize':          analyzeJobOpts,
+  'basketball-retrain':           { ...defaultJobOpts, attempts: 2 },
+  'american-football-fixtures':   defaultJobOpts,
+  'american-football-analyze':    analyzeJobOpts,
+  'american-football-live':       liveJobOpts,
+  'american-football-finalize':   analyzeJobOpts,
+  'american-football-retrain':    { ...defaultJobOpts, attempts: 2 },
 };
 
 export const queues: Record<QueueName, Queue> = Object.fromEntries(
