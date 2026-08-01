@@ -155,7 +155,8 @@ sello Redis que comprueba el watchdog.
 workers y scripts activos. Reserva slots globales con Lua/Redis a un techo
 conservador de 420 peticiones por minuto, reintenta con backoff y usa un fallback
 local conservador si Redis cae. Distingue límite por minuto de cuota diaria: la
-segunda no se reintenta y abre un cortacircuito Redis compartido de 60 s.
+segunda no se reintenta y abre un cortacircuito Redis compartido hasta cinco
+segundos después del reinicio oficial de cuota (00:00 UTC).
 `scripts/audit-football-model-data.js` verifica de punta a punta
 crudo, ledger, hechos, dimensiones, marcadores y contadores de jugador; código
 de salida 2 significa una invariancia crítica rota.
