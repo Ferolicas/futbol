@@ -104,7 +104,8 @@ export const footballApiRequest = footballApiClient.footballApiRequest;
 export const payloadQuality = footballApiClient.payloadQuality;
 
 // Los hechos de baseball vienen de MLB Stats. API-Baseball se consulta solo
-// mediante multisport-analysis para cuotas; The Odds API no participa en MLB.
+// mediante multisport-analysis para cuotas y su ritmo se coordina en Redis
+// entre web/RT/heavy; The Odds API no participa en MLB.
 
 // lib/supabase.js
 export const supabaseAdmin = _supabase.supabaseAdmin;

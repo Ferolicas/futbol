@@ -7,7 +7,7 @@ const {
   buildEmpiricalPlayerProbabilities,
   multisportEngineInternals,
 } = require('../lib/multisport-empirical-engine.js');
-const { normalizeApiSportsOdds } = require('../lib/api-sports-multisport.js');
+const { apiSportsInternals, normalizeApiSportsOdds } = require('../lib/api-sports-multisport.js');
 const { normalizeTeamStatistics, multisportStoreInternals } = require('../lib/multisport-store.js');
 const { normalizeApiBasketballGame, normalizeApiNbaGame, nbaStatsInternals } = require('../lib/nba-stats-api.js');
 const { normalizeMlbGame, normalizeNflGame } = require('../lib/multisport-providers.js');
@@ -104,6 +104,18 @@ test('las cuotas API-Sports se normalizan sin entrar en la probabilidad', () => 
   ] }] }], { teams: { home: { name: 'Local' }, away: { name: 'Visitante' } } });
   assert.equal(odds.moneyline.home.odd, 1.8);
   assert.equal(odds.totals[8.5].under.odd, 1.95);
+});
+
+test('API-Sports distingue el límite por minuto de la cuota diaria', () => {
+  assert.equal(apiSportsInternals.classifyProviderLimit(200, [
+    'rateLimit: Too many requests. Your rate limit is 10 requests per minute.',
+  ]), 'minute');
+  assert.equal(apiSportsInternals.classifyProviderLimit(200, [
+    'You have reached the request limit for the day',
+  ]), 'daily');
+  assert.equal(apiSportsInternals.classifyProviderLimit(200, [
+    'Free plans do not have access to this season',
+  ]), null);
 });
 
 test('normaliza boxscores de proveedores a métricas canónicas', () => {

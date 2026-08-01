@@ -297,8 +297,10 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - 2026-08-01: no activar NBA/NFL ni el motor MLB nuevo antes de aplicar, con
   backup, `scripts/migrate-multisport-engines.sql`; el build no ejecuta DDL.
 - 2026-08-01: los cuatro productos API-Sports mantienen cuota y cortacircuito
-  Redis separados. La configuración reserva diez llamadas del plan gratuito;
-  las cuotas deportivas nunca se usan como probabilidad del modelo.
+  Redis separados. Los productos multi-deporte reservan diez llamadas del plan
+  gratuito y coordinan un máximo de diez solicitudes/minuto entre web y workers;
+  un 429 temporal pausa el host, pero nunca abre el circuito de cuota diaria.
+  Las cuotas deportivas nunca se usan como probabilidad del modelo.
 - 2026-08-01: `FOOTBALL_CACHE_VERSION=19` invalida análisis sin el gate exacto
   de validación. Si `prediction_models.metrics.candidate.families` no está
   disponible, se muestran frecuencias pero no se publican recomendaciones.
