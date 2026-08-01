@@ -1,6 +1,6 @@
 // CFanalisis Service Worker — push + renovación de suscripción.
-// v2 (2026-05-27): añadido pushsubscriptionchange para renovar suscripciones
-// que el navegador rota/caduca (lo que pasa con permisos aprobados hace meses).
+// v3 (2026-08-01): formato compacto de eventos, nueva identidad CF y acción
+// directa para abrir el partido en el dashboard.
 
 // Activación inmediata: el SW nuevo toma efecto sin esperar a cerrar pestañas.
 self.addEventListener('install', () => self.skipWaiting());
@@ -22,11 +22,17 @@ self.addEventListener('push', event => {
   event.waitUntil((async () => {
     await self.registration.showNotification(data.title || 'CFanalisis', {
       body: data.body || '',
-      icon: '/vflogo.png',
-      badge: '/vflogo.png',
+      icon: data.icon || '/cf-icon-192.png',
+      // Android exige un badge monocromo con transparencia; usar el icono
+      // cuadrado completo aquí lo convertiría en un bloque blanco.
+      badge: data.badge || '/cf-notification-badge.png',
       tag,
       renotify: true,
       vibrate: [200, 100, 200],
+      timestamp: data.timestamp ? Date.parse(data.timestamp) : Date.now(),
+      lang: 'es',
+      dir: 'ltr',
+      actions: [{ action: 'open', title: 'Ver partido' }],
       data: { url: data.url || '/dashboard' },
     });
     // NT2: telemetría detección→pantalla. El tag de eventos de fútbol en vivo es

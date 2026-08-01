@@ -2,8 +2,8 @@
 /**
  * Job: futbol-live
  * Port of /api/cron/live. Polls live fixtures from API-Football, persists
- * stats to Redis + Supabase, sends Pusher updates and push notifications
- * for goals on favorited matches.
+ * stats to Redis + Supabase, sends realtime updates and curated push
+ * notifications for favorited matches.
  *
  * Payload: {}
  */
@@ -14,6 +14,11 @@ import {
   supabaseAdmin, getMatchSchedule, pgQuery,
   footballApiRequest,
 } from '../../shared.js';
+import {
+  diffPlayerActivity,
+  extractPlayerActivity,
+  mergePlayerActivity,
+} from './live-player-activity.js';
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
@@ -203,18 +208,19 @@ function toSubArray(stored) {
 
 // ────────────────────────────────────────────────────────────────────────────
 // Bundled push delivery — 1 push por fixture/tick que agrupa TODOS los
-// deltas detectados desde el live anterior:
-//   ⚽ Goles · 🚩 córners · 🟨 amarillas · 🟥 rojas/expulsiones ·
-//   🔄 sustituciones · 🅿️ penalti · 📺 VAR (gol anulado / penalti anulado)
+// deltas relevantes detectados desde el live anterior:
+//   goles/anulados · córners · tarjetas · penaltis · faltas · remates.
+// Las sustituciones y el VAR genérico se conservan en el snapshot interno,
+// pero NO generan notificaciones.
 //
 // REGLA DE CALIDAD: solo notificamos eventos con datos REALES de API-Football
 // (array `events` con jugador/equipo concretos). NO se notifican estadísticas
-// agregadas sin contexto: los offsides (eliminados — solo vienen como contador
-// del stat, sin jugador, sin acción concreta). Tarjetas/cambios sin jugador
-// también se saltan. Mejor 1 push correcto que 5 ruidosos.
+// agregadas sin contexto: los offsides siguen fuera. Para remates y faltas se
+// comparan snapshots reales de `/fixtures?ids=...`, que incluye estadísticas
+// por jugador donde la competición tiene cobertura.
 //
-// Si un partido tiene en un mismo tick (1 minuto): 2 córners + 1 amarilla
-// + 1 cambio, se envía UN solo push compuesto en lugar de 4 separados.
+// Si un partido tiene en un mismo tick varios eventos, se envía UN solo push
+// compuesto en lugar de una ráfaga de notificaciones.
 // Esto reduce el ruido brutalmente vs el flujo anterior (1 push por evento).
 //
 // Detección por delta vs el tick anterior (`existingLive`):
@@ -230,18 +236,22 @@ function formatMinute(status) {
   return x > 0 ? `${e}+${x}` : `${e}`;
 }
 
-// Sufijo del gol según cómo fue (viene de goalScorers[].type = ev.detail de la
-// API). Así un gol de penalti se ve como "⚽ … (de penal)" en el momento exacto
-// del gol (timing por marcador, sin tocar la detección), y no hace falta un
-// push de penalti aparte. Gol normal → sin sufijo.
-function goalTypeSuffix(scorer) {
+// Etiqueta española según el detail real de API-Football.
+function goalTypeLabel(scorer) {
   const t = scorer?.type;
-  if (t === 'Penalty') return ' (de penal)';
-  if (t === 'Own Goal') return ' (en contra)';
-  return '';
+  if (t === 'Penalty') return 'GOL DE PENALTI';
+  if (t === 'Own Goal') return 'GOL EN CONTRA';
+  return 'GOL';
 }
 
-// Key estable para deduplicar eventos en listas (subst, var, penalty).
+function penaltyVarLabel(detail) {
+  const normalized = String(detail || '').toLowerCase();
+  if (normalized.includes('cancel')) return 'PENALTI ANULADO';
+  if (normalized.includes('confirm')) return 'PENALTI CONFIRMADO';
+  return 'REVISIÓN DE PENALTI';
+}
+
+// Key estable para deduplicar eventos en listas (VAR y penalti).
 //
 // BUG FIX (penaltis/cambios duplicados — confirmado 2026-05-26: el penalti de
 // S. Ndlabi llegó 2 veces, como min 26 y min 27): antes la key incluía
@@ -254,16 +264,6 @@ function goalTypeSuffix(scorer) {
 // key hace la dedup robusta ante esas correcciones.
 function evKey(ev) {
   return `${ev.player ?? ''}|${ev.teamId ?? ''}|${ev.detail ?? ev.kind ?? ev.type ?? ''}`;
-}
-
-// Identidad de una SUSTITUCIÓN. Un objeto subst es {playerIn, playerOut,
-// teamId,...} y NO tiene `player`/`detail`/`kind`/`type`, así que evKey() lo
-// colapsaba a `|{teamId}|` → la MISMA clave para todos los cambios de un equipo
-// (solo el primero notificaba; el resto quedaba deduplicado para siempre). La
-// identidad real de un cambio son sus dos jugadores (sale→entra) + equipo. Sin
-// minuto (la API lo corrige entre ticks).
-function subKey(s) {
-  return `${s.playerOut ?? ''}|${s.playerIn ?? ''}|${s.teamId ?? ''}`;
 }
 
 // Identidad de un evento VAR (no-gol). NO incluimos `player`: en eventos VAR la
@@ -301,9 +301,11 @@ function isGoalVarDetail(detail) {
 //   push:sent:{fid}:corner:{side}:{N}        — cada córner en su valor exacto
 //   push:sent:{fid}:yellow:{side}:{N}        — amarilla por lado y valor
 //   push:sent:{fid}:red:{side}:{N}
-//   push:sent:{fid}:subst:{subKey}           — cambio por (sale|entra|equipo)
 //   push:sent:{fid}:penalty:{evKey}          — penalti por (player|equipo|kind)
 //   push:sent:{fid}:var:{varKey}             — VAR no-gol por (equipo|detalle)
+//   push:sent:{fid}:shot:{playerKey}:{N}      — remate total acumulado
+//   push:sent:{fid}:sot:{playerKey}:{N}       — remate a puerta acumulado
+//   push:sent:{fid}:foul:{playerKey}:{N}      — falta cometida acumulada
 //
 // Antes de añadir la línea al bundle, comprobamos cada clave. Si existe →
 // skip. Las claves quedan en Redis con TTL y desaparecen solas; el evento
@@ -311,8 +313,8 @@ function isGoalVarDetail(detail) {
 // repetirá dentro de esa ventana.
 //
 // TTL POR TIPO DE EVENTO:
-//  - Eventos "de una vez" en el partido (gol, amarilla, roja, cambio, penalti,
-//    VAR no-gol, gol anulado) usan 7200s (2h) para disparo único: no se
+//  - Eventos "de una vez" en el partido (gol, tarjeta, penalti, remate, falta,
+//    VAR de penalti, gol anulado) usan 7200s (2h) para disparo único: no se
 //    re-notifican aunque la API reordene/reenvíe el evento mucho después.
 //  - Córner: TTL corto (90s, default). Su clave incluye el valor exacto del
 //    contador monótono; cada córner nuevo es un valor nuevo que debe poder
@@ -326,9 +328,11 @@ const DEDUP_TTL_BY_TYPE = {
   goalcancel: 7200,
   yellow: 7200,
   red: 7200,
-  subst: 7200,
   penalty: 7200,
   var: 7200,
+  shot: 7200,
+  sot: 7200,
+  foul: 7200,
 };
 
 function dedupKey(fid, ...parts) {
@@ -360,12 +364,14 @@ const EVENTLOG_CAP = 3000;
 
 function detectEventType(line) {
   if (line.startsWith('⚽')) return 'goal';
+  if (line.startsWith('⛔')) return 'goal_cancelled';
   if (line.startsWith('🚩')) return 'corner';
   if (line.startsWith('🟨')) return 'yellow';
   if (line.startsWith('🟥')) return 'red';
-  if (line.startsWith('🔄')) return 'subst';
+  if (line.startsWith('🎯')) return 'shot_on_target';
+  if (line.startsWith('◉')) return 'shot';
+  if (line.startsWith('⚠')) return 'foul';
   if (line.startsWith('🅿')) return 'penalty';
-  if (line.startsWith('📺')) return 'var';
   return 'other';
 }
 
@@ -404,7 +410,92 @@ async function markSentTTL(key, ttlSec) {
   try { await redisSet(key, 1, ttlSec); } catch {}
 }
 
-async function buildEventBundle(fid, data, prev) {
+// ─── Remates y faltas con autor ───────────────────────────────────────────
+// `/fixtures/events` no contiene esas acciones. `/fixtures?ids=...` sí incluye
+// el bloque `players` con contadores individuales, actualizado aproximadamente
+// cada minuto. Lo consultamos en lotes de hasta 20 fixtures para no multiplicar
+// llamadas. El snapshot anterior vive separado del liveStats que consume la UI,
+// evitando engordar los payloads del dashboard con decenas de jugadores.
+const PLAYER_ACTIVITY_REFRESH_SEC = 55;
+const PLAYER_ACTIVITY_TTL_SEC = 4 * 3600;
+const PLAYER_ACTIVITY_BATCH_SIZE = 20;
+
+function playerActivityRedisKey(fid) {
+  return `live:playeractivity:${fid}`;
+}
+
+async function persistPlayerActivitySnapshot(fid, snapshot) {
+  if (!snapshot?.players) return;
+  try {
+    await redisSet(playerActivityRedisKey(fid), snapshot, PLAYER_ACTIVITY_TTL_SEC);
+  } catch (e) {
+    console.error(`[live:players] no se pudo guardar baseline fid=${fid}:`, e.message);
+  }
+}
+
+async function fetchPlayerActivityUpdates(tracked) {
+  const updates = new Map();
+  if (!Array.isArray(tracked) || tracked.length === 0) return { updates, apiCalls: 0 };
+
+  // Un solo ciclo global cada ~minuto aunque el job live corra cada 20s.
+  const gateKey = 'live:playeractivity:fetch';
+  if (await alreadySent(gateKey)) return { updates, apiCalls: 0 };
+  await markSentTTL(gateKey, PLAYER_ACTIVITY_REFRESH_SEC);
+
+  const ids = [...new Set(tracked.map(m => Number(m.fixture?.id)).filter(Number.isFinite))];
+  const batches = [];
+  for (let i = 0; i < ids.length; i += PLAYER_ACTIVITY_BATCH_SIZE) {
+    batches.push(ids.slice(i, i + PLAYER_ACTIVITY_BATCH_SIZE));
+  }
+
+  let apiCalls = 0;
+  const detailed = [];
+  await Promise.all(batches.map(async batch => {
+    apiCalls++;
+    try {
+      const rows = await apiFetch(`/fixtures?ids=${batch.join('-')}`);
+      if (Array.isArray(rows)) detailed.push(...rows);
+    } catch (e) {
+      // Esta fuente enriquece el push, pero nunca puede tumbar el marcador,
+      // córners, tarjetas ni el resto del ciclo live por un fallo transitorio.
+      console.error(`[live:players] lote ${batch[0]}…${batch.at(-1)} falló:`, e.message);
+    }
+  }));
+
+  const observedAt = new Date().toISOString();
+  await Promise.all(detailed.map(async match => {
+    const fid = Number(match?.fixture?.id);
+    if (!Number.isFinite(fid)) return;
+    const extracted = extractPlayerActivity(match?.players || []);
+    // Sin cobertura individual no inventamos autor ni reemplazamos baseline.
+    if (extracted.length === 0) return;
+
+    let previousSnapshot = null;
+    try { previousSnapshot = await redisGet(playerActivityRedisKey(fid)); } catch {}
+    const previous = Array.isArray(previousSnapshot?.players) ? previousSnapshot.players : [];
+    const current = mergePlayerActivity(previous, extracted);
+    const snapshot = { observedAt, players: current };
+
+    // Primera observación = baseline silencioso: nunca enviar el acumulado del
+    // partido como si acabara de ocurrir.
+    if (previous.length === 0) {
+      await persistPlayerActivitySnapshot(fid, snapshot);
+      return;
+    }
+
+    const changes = diffPlayerActivity(previous, current);
+    if (changes.length === 0) {
+      await persistPlayerActivitySnapshot(fid, snapshot);
+      return;
+    }
+    updates.set(String(fid), { snapshot, changes });
+  }));
+
+  console.log(`[live:players] lotes=${batches.length} fixtures=${ids.length} conCambios=${updates.size}`);
+  return { updates, apiCalls };
+}
+
+async function buildEventBundle(fid, data, prev, playerActivityUpdate = null) {
   const DP = '[live:push:diag]';
   const home = data.homeTeam?.name || '?';
   const away = data.awayTeam?.name || '?';
@@ -425,18 +516,18 @@ async function buildEventBundle(fid, data, prev) {
     corners: { base: `${prev.corners?.home ?? 0}-${prev.corners?.away ?? 0}`,   now: `${data.corners?.home ?? 0}-${data.corners?.away ?? 0}`, baseReal: prev.corners?.isReal ?? null, nowReal: data.corners?.isReal ?? null },
     yellow:  { base: `${prev.yellowCards?.home ?? 0}-${prev.yellowCards?.away ?? 0}`, now: `${data.yellowCards?.home ?? 0}-${data.yellowCards?.away ?? 0}` },
     red:     { base: `${prev.redCards?.home ?? 0}-${prev.redCards?.away ?? 0}`, now: `${data.redCards?.home ?? 0}-${data.redCards?.away ?? 0}` },
-    subst:   { base: (prev.substitutions || []).length, now: (data.substitutions || []).length },
     pen:     { base: (prev.penaltyEvents || []).length, now: (data.penaltyEvents || []).length },
     var:     { base: (prev.varEvents || []).length, now: (data.varEvents || []).length },
+    playerActivity: { changes: playerActivityUpdate?.changes?.length || 0 },
   };
   console.log(`${DP} fid=${fid} ${home}-${away} min=${minute}' | ` +
     `goals base=${snap.goals.base} now=${snap.goals.now} | ` +
     `corners base=${snap.corners.base}(real=${snap.corners.baseReal}) now=${snap.corners.now}(real=${snap.corners.nowReal}) | ` +
     `yellow base=${snap.yellow.base} now=${snap.yellow.now} | ` +
     `red base=${snap.red.base} now=${snap.red.now} | ` +
-    `subst base=${snap.subst.base} now=${snap.subst.now} | ` +
     `pen base=${snap.pen.base} now=${snap.pen.now} | ` +
-    `var base=${snap.var.base} now=${snap.var.now}`);
+    `var base=${snap.var.base} now=${snap.var.now} | ` +
+    `actividadJugador cambios=${snap.playerActivity.changes}`);
 
   // REGLA GLOBAL DE CALIDAD DE NOTIFICACIONES:
   // Solo emitimos una línea si los DATOS REALES están presentes (jugador,
@@ -449,28 +540,32 @@ async function buildEventBundle(fid, data, prev) {
   // detail puede ser: 'Normal Goal', 'Penalty', 'Own Goal'. Lo expone.
   const pHG = prev.goals?.home ?? 0, pAG = prev.goals?.away ?? 0;
   const nHG = data.goals?.home ?? 0, nAG = data.goals?.away ?? 0;
+  const scoreLabel = `${nHG}–${nAG}`;
 
   // Maneja un lado del marcador autoritativo (match.goals):
   //  · SUBE (gol) → notifica "⚽" (dedup por valor goal:{side}:{N}). Antes de
   //    notificar, limpia cualquier goalcancel:{side}:{N} pendiente: si este
   //    valor se anuló antes y ahora se re-anota, una FUTURA anulación debe poder
   //    volver a avisar.
-  //  · BAJA (gol anulado por VAR/corrección) → notifica "📺 Gol anulado" UNA vez
+  //  · BAJA (gol anulado por VAR/corrección) → notifica "⛔ GOL ANULADO" UNA vez
   //    (dedup goalcancel:{side}:{valor del que se revirtió}). Una segunda
   //    anulación de un gol distinto revierte otro valor → otra clave → vuelve a
   //    notificar. Además limpia goal:{side}:{v} de los valores revertidos
   //    (Tipo A) para que re-anotarlos cuente como gol nuevo.
   // El marcador mostrado en cada línea es SIEMPRE el actual (nHG-nAG).
-  async function handleGoalSide(side, teamLabel, prevG, nowG) {
+  async function handleGoalSide(side, teamId, teamLabel, prevG, nowG) {
     if (nowG > prevG) {
       await redisDel(dedupKey(fid, 'goalcancel', side, nowG));
       const k = dedupKey(fid, 'goal', side, nowG);
       if (!(await alreadySent(k))) {
         // ÚLTIMO gol del equipo correcto (no slice(-1) ciego, que podía dar el
         // del otro equipo si la API los devuelve mezclados).
-        const last = (data.goalScorers || []).filter(g => g.teamName === teamLabel).slice(-1)[0];
-        const who = last?.player ? ` - ${last.player}` : '';
-        lines.push(`⚽ ${teamLabel}${who} (${nHG}-${nAG})${goalTypeSuffix(last)}`);
+        const last = (data.goalScorers || [])
+          .filter(g => g.teamId === teamId || g.teamName === teamLabel)
+          .slice(-1)[0];
+        const who = last?.player ? ` · ${last.player}` : '';
+        const assist = last?.assist ? ` · Asist. ${last.assist}` : '';
+        lines.push(`⚽ ${goalTypeLabel(last)}${who} · ${teamLabel}${assist} · ${scoreLabel}`);
         sentKeys.push(k);
         urgent = true;
         console.log(`${DP} fid=${fid} GOL ${side} delta ${prevG}→${nowG} ⇒ línea añadida`);
@@ -485,7 +580,11 @@ async function buildEventBundle(fid, data, prev) {
       }
       const k = dedupKey(fid, 'goalcancel', side, prevG);
       if (!(await alreadySent(k))) {
-        lines.push(`📺 Gol anulado · ${teamLabel} (${nHG}-${nAG})`);
+        const cancelled = (data.varEvents || [])
+          .filter(v => isGoalVarDetail(v.detail) && (v.teamId === teamId || v.teamName === teamLabel))
+          .slice(-1)[0];
+        const who = cancelled?.player ? ` · ${cancelled.player}` : '';
+        lines.push(`⛔ GOL ANULADO${who} · ${teamLabel} · ${scoreLabel}`);
         sentKeys.push(k);
         urgent = true;
         console.log(`${DP} fid=${fid} GOL ANULADO ${side} marcador ${prevG}→${nowG} ⇒ línea añadida (clave goalcancel:${side}:${prevG})`);
@@ -495,8 +594,8 @@ async function buildEventBundle(fid, data, prev) {
       }
     }
   }
-  await handleGoalSide('home', home, pHG, nHG);
-  await handleGoalSide('away', away, pAG, nAG);
+  await handleGoalSide('home', data.homeTeam?.id, home, pHG, nHG);
+  await handleGoalSide('away', data.awayTeam?.id, away, pAG, nAG);
 
   // ── Córners ── REAL: pasó un córner, sabemos qué equipo lo lanza.
   // API-Football NO expone córners como events con jugador (solo el contador
@@ -514,7 +613,7 @@ async function buildEventBundle(fid, data, prev) {
   if (nHC > pHC) {
     const k = dedupKey(fid, 'corner', 'home', nHC);
     if (!(await alreadySent(k))) {
-      lines.push(`🚩 ${home} (${nHC}-${nAC})`);
+      lines.push(`🚩 CÓRNER · ${home} · ${nHC}–${nAC}`);
       sentKeys.push(k);
       console.log(`${DP} fid=${fid} CORNER home delta ${pHC}→${nHC} ⇒ línea añadida`);
     } else {
@@ -527,7 +626,7 @@ async function buildEventBundle(fid, data, prev) {
   if (nAC > pAC) {
     const k = dedupKey(fid, 'corner', 'away', nAC);
     if (!(await alreadySent(k))) {
-      lines.push(`🚩 ${away} (${nHC}-${nAC})`);
+      lines.push(`🚩 CÓRNER · ${away} · ${nHC}–${nAC}`);
       sentKeys.push(k);
       console.log(`${DP} fid=${fid} CORNER away delta ${pAC}→${nAC} ⇒ línea añadida`);
     } else {
@@ -554,8 +653,8 @@ async function buildEventBundle(fid, data, prev) {
       const lastCard = (data.cardEvents || [])
         .filter(e => e.type === 'Yellow Card' && e.teamName === home && e.player)
         .slice(-1)[0];
-      const who = lastCard?.player ? `${lastCard.player} · ` : '';
-      lines.push(`🟨 ${who}${home} (${nHY}-${nAY})`);
+      const who = lastCard?.player || 'Jugador no informado';
+      lines.push(`🟨 AMARILLA · ${who} · ${home} · ${nHY}–${nAY}`);
       sentKeys.push(k);
       console.log(`${DP} fid=${fid} AMARILLA home delta ${pHY}→${nHY} jugador=${lastCard?.player || 'desconocido(solo-equipo)'} ⇒ línea añadida`);
     } else {
@@ -569,8 +668,8 @@ async function buildEventBundle(fid, data, prev) {
       const lastCard = (data.cardEvents || [])
         .filter(e => e.type === 'Yellow Card' && e.teamName === away && e.player)
         .slice(-1)[0];
-      const who = lastCard?.player ? `${lastCard.player} · ` : '';
-      lines.push(`🟨 ${who}${away} (${nHY}-${nAY})`);
+      const who = lastCard?.player || 'Jugador no informado';
+      lines.push(`🟨 AMARILLA · ${who} · ${away} · ${nHY}–${nAY}`);
       sentKeys.push(k);
       console.log(`${DP} fid=${fid} AMARILLA away delta ${pAY}→${nAY} jugador=${lastCard?.player || 'desconocido(solo-equipo)'} ⇒ línea añadida`);
     } else {
@@ -592,8 +691,8 @@ async function buildEventBundle(fid, data, prev) {
       const lastCard = (data.cardEvents || [])
         .filter(e => (e.type === 'Red Card' || e.type === 'Second Yellow card') && e.teamName === home)
         .slice(-1)[0];
-      const who = lastCard?.player ? `${lastCard.player} · ` : '';
-      lines.push(`🟥 ${who}${home} (${nHR}-${nAR})`);
+      const who = lastCard?.player || 'Jugador no informado';
+      lines.push(`🟥 EXPULSIÓN · ${who} · ${home} · ${nHR}–${nAR}`);
       sentKeys.push(k);
       urgent = true;
       console.log(`${DP} fid=${fid} ROJA home delta ${pHR}→${nHR} jugador=${lastCard?.player || 'desconocido'} ⇒ línea añadida`);
@@ -608,8 +707,8 @@ async function buildEventBundle(fid, data, prev) {
       const lastCard = (data.cardEvents || [])
         .filter(e => (e.type === 'Red Card' || e.type === 'Second Yellow card') && e.teamName === away)
         .slice(-1)[0];
-      const who = lastCard?.player ? `${lastCard.player} · ` : '';
-      lines.push(`🟥 ${who}${away} (${nHR}-${nAR})`);
+      const who = lastCard?.player || 'Jugador no informado';
+      lines.push(`🟥 EXPULSIÓN · ${who} · ${away} · ${nHR}–${nAR}`);
       sentKeys.push(k);
       urgent = true;
       console.log(`${DP} fid=${fid} ROJA away delta ${pAR}→${nAR} jugador=${lastCard?.player || 'desconocido'} ⇒ línea añadida`);
@@ -625,27 +724,41 @@ async function buildEventBundle(fid, data, prev) {
   // "🚫 Offside · Equipo" no aporta información real al usuario. Se mantiene
   // el contador en data.offsides para el dashboard, pero NO se notifica.
 
-  // ── Sustituciones (lista) ── REAL: API da player (sale) y assist (entra)
-  // como evento type='subst'. Si por algún motivo falta uno de los dos, NO
-  // notificamos — "🔄 Equipo · ? → ?" sería ruido sin información.
-  const prevSubKeys = new Set((prev.substitutions || []).map(subKey));
-  const newSubs = (data.substitutions || []).filter(s => !prevSubKeys.has(subKey(s)));
-  if (newSubs.length > 0) console.log(`${DP} fid=${fid} CAMBIO ${newSubs.length} evento(s) nuevo(s) vs baseline`);
-  for (const s of newSubs) {
-    if (!s.playerOut || !s.playerIn) {
-      skipReasons.push(`subst:incompleto(out=${s.playerOut || '?'},in=${s.playerIn || '?'})`);
-      console.log(`${DP} fid=${fid} CAMBIO incompleto (out=${s.playerOut || '?'} in=${s.playerIn || '?'}) ⇒ SKIP`);
-      continue; // saltar sustituciones incompletas
-    }
-    const k = dedupKey(fid, 'subst', subKey(s));
+  // ── Sustituciones ── NO SE NOTIFICAN.
+  // Se mantienen en el snapshot para usos internos, pero el usuario pidió
+  // eliminar completamente este ruido del canal push.
+
+  // ── Remates / remates a puerta / faltas ──
+  // Deltas por jugador entre snapshots reales de API-Football. Si la liga no
+  // tiene cobertura de `players`, playerActivityUpdate es null y no se emite
+  // nada. El baseline se confirma solo después de una entrega (o cuando nadie
+  // sigue el partido), preservando el reintento si el proveedor push falla.
+  let activityLines = 0;
+  for (const change of (playerActivityUpdate?.changes || [])) {
+    const dedupType = change.type === 'shot_on_target' ? 'sot' : change.type;
+    const k = dedupKey(fid, dedupType, change.playerKey, change.counter);
     if (await alreadySent(k)) {
-      skipReasons.push(`subst:dedup-ya-enviado`);
-      console.log(`${DP} fid=${fid} CAMBIO ${s.playerOut}→${s.playerIn} dedup ya marcada ⇒ SKIP`);
+      skipReasons.push(`${dedupType}:${change.player}:dedup-ya-enviado`);
       continue;
     }
-    lines.push(`🔄 ${s.playerOut} → ${s.playerIn} · ${s.teamName || '?'}`);
+    const times = change.count > 1 ? ` ×${change.count}` : '';
+    if (change.type === 'shot_on_target') {
+      lines.push(`🎯 REMATE A PUERTA · ${change.player} · ${change.teamName}${times}`);
+    } else if (change.type === 'shot') {
+      lines.push(`◉ REMATE · ${change.player} · ${change.teamName}${times}`);
+    } else if (change.type === 'foul') {
+      lines.push(`⚠ FALTA COMETIDA · ${change.player} · ${change.teamName}${times}`);
+    } else {
+      continue;
+    }
     sentKeys.push(k);
-    console.log(`${DP} fid=${fid} CAMBIO ${s.teamName} ${s.playerOut}→${s.playerIn} ⇒ línea añadida`);
+    activityLines++;
+  }
+
+  // Si las claves ya estaban marcadas, ese delta fue entregado antes y solo
+  // faltaba avanzar el baseline (p. ej. reinicio entre dos escrituras).
+  if (playerActivityUpdate?.snapshot && activityLines === 0) {
+    await persistPlayerActivitySnapshot(fid, playerActivityUpdate.snapshot);
   }
 
   // ── Penaltis (lista — missed / awarded) ──
@@ -671,22 +784,26 @@ async function buildEventBundle(fid, data, prev) {
       console.log(`${DP} fid=${fid} PENALTI ${p.kind} dedup ya marcada ⇒ SKIP`);
       continue;
     }
-    const verb = p.kind === 'missed' ? 'fallado' : 'señalado';
-    lines.push(`🅿️ Penalti ${verb}${p.player ? ` · ${p.player}` : ''} · ${p.teamName || '?'}`);
+    const verb = p.kind === 'missed' ? 'PENALTI FALLADO' : 'PENALTI SEÑALADO';
+    lines.push(`🅿️ ${verb}${p.player ? ` · ${p.player}` : ''} · ${p.teamName || 'Equipo no informado'}`);
     sentKeys.push(k);
     urgent = true;
     console.log(`${DP} fid=${fid} PENALTI ${verb} ${p.teamName} ⇒ línea añadida`);
   }
 
-  // ── VAR (penalti anulado/confirmado / tarjeta revisada / decisión cambiada) ──
+  // ── VAR ── Solo decisiones de PENALTI.
   // El "gol anulado" NO se emite aquí: se deriva del DESCENSO del marcador
   // autoritativo (handleGoalSide). Esto evita el bug del mismo gol anulado
   // notificado 10+ veces por la inestabilidad de `player` en el evento VAR.
-  // Aquí solo entran las decisiones VAR que NO son de gol, con identidad estable
-  // equipo+detalle (varKey, sin player ni minuto) y disparo único (TTL 2h).
-  const prevVarKeys = new Set((prev.varEvents || []).filter(v => !isGoalVarDetail(v.detail)).map(varKey));
-  const newVars = (data.varEvents || []).filter(v => !isGoalVarDetail(v.detail) && !prevVarKeys.has(varKey(v)));
-  if (newVars.length > 0) console.log(`${DP} fid=${fid} VAR ${newVars.length} evento(s) no-gol nuevo(s) vs baseline`);
+  // Revisiones de tarjetas u otras decisiones dejan de generar push. El gol
+  // anulado sigue derivándose del marcador autoritativo en handleGoalSide.
+  const isPenaltyVar = v => /penalty|penalti/i.test(String(v?.detail || ''));
+  const prevVarKeys = new Set((prev.varEvents || [])
+    .filter(v => !isGoalVarDetail(v.detail) && isPenaltyVar(v))
+    .map(varKey));
+  const newVars = (data.varEvents || [])
+    .filter(v => !isGoalVarDetail(v.detail) && isPenaltyVar(v) && !prevVarKeys.has(varKey(v)));
+  if (newVars.length > 0) console.log(`${DP} fid=${fid} VAR-PENALTI ${newVars.length} evento(s) nuevo(s) vs baseline`);
   for (const v of newVars) {
     const k = dedupKey(fid, 'var', varKey(v));
     if (await alreadySent(k)) {
@@ -694,11 +811,11 @@ async function buildEventBundle(fid, data, prev) {
       console.log(`${DP} fid=${fid} VAR ${v.detail} dedup ya marcada ⇒ SKIP`);
       continue;
     }
-    const det = v.detail || 'VAR';
-    lines.push(`📺 ${det} · ${v.teamName || '?'}${v.player ? ` · ${v.player}` : ''}`);
+    const det = penaltyVarLabel(v.detail);
+    lines.push(`🅿️ ${det}${v.player ? ` · ${v.player}` : ''} · ${v.teamName || 'Equipo no informado'}`);
     sentKeys.push(k);
     urgent = true;
-    console.log(`${DP} fid=${fid} VAR ${det} ${v.teamName} ⇒ línea añadida`);
+    console.log(`${DP} fid=${fid} VAR-PENALTI ${det} ${v.teamName} ⇒ línea añadida`);
   }
 
   if (lines.length === 0) {
@@ -713,13 +830,13 @@ async function buildEventBundle(fid, data, prev) {
   }
   console.log(`${DP} fid=${fid} ⇒ BUNDLE con ${lines.length} línea(s)${skipReasons.length ? ` (${skipReasons.length} skip: [${skipReasons.join(', ')}])` : ''}`);
 
-  // Título: "Local marcador-marcador Visitante" (ej. "IF Elfsborg 1-1 BK Häcken").
+  // Título compacto y profesional: minuto + partido + marcador.
   // El "from cfanalisis.com" que muestra Chrome debajo es el origen que el
   // navegador añade automáticamente y NO se puede quitar por código.
-  // Body: un evento por entrada, separados por línea en blanco (\n\n) para que
-  // no queden pegados cuando hay varios en el mismo bundle.
-  const title = `${home} ${nHG}-${nAG} ${away}`;
-  const body = lines.slice(0, 6).join('\n\n');
+  // Body: una línea por evento. No truncamos silenciosamente los nombres; el
+  // bundle de un minuto sigue muy por debajo del límite Web Push de 4 KB.
+  const title = `${minute}′ · ${home} ${scoreLabel} ${away}`;
+  const body = lines.join('\n');
   // Tag estable por fixture+minuto+nEventos para que múltiples ticks no
   // sobrescriban notificaciones distintas. FCM reemplaza notifs con mismo tag.
   const tag = `live-${fid}-${minute}-${lines.length}`;
@@ -734,10 +851,13 @@ async function buildEventBundle(fid, data, prev) {
   // sentKeys: el caller marca cada una en Redis DESPUÉS de enviar el push
   // (ver sendBundledPushes), no aquí. Si marcamos antes de enviar y el envío
   // falla, perdemos el evento para siempre. Marcar después es at-least-once.
-  return { fixtureId: Number(fid), title, body, tag, urgent, sentKeys, events };
+  return {
+    fixtureId: Number(fid), title, body, tag, urgent, sentKeys, events,
+    activitySnapshot: activityLines > 0 ? playerActivityUpdate?.snapshot || null : null,
+  };
 }
 
-async function sendBundledPushes(liveDetailsMap, existingLive, today) {
+async function sendBundledPushes(liveDetailsMap, existingLive, today, playerActivityUpdates = new Map()) {
   const LP = '[live:push]';
   // Eventos a persistir en el event-log (con tPush + resultado por bundle).
   const eventLogItems = [];
@@ -749,7 +869,7 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today) {
   for (const [fid, data] of Object.entries(liveDetailsMap)) {
     const prev = existingLive[fid];
     if (!prev) continue; // sin baseline → no notificamos el estado inicial
-    const bundle = await buildEventBundle(fid, data, prev);
+    const bundle = await buildEventBundle(fid, data, prev, playerActivityUpdates.get(String(fid)) || null);
     if (bundle) bundles.push(bundle);
   }
   console.log(`${LP} tick: fixtures=${fids.length} conBaseline=${withBaseline} bundles=${bundles.length}`);
@@ -771,6 +891,9 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today) {
     for (const b of bundles) {
       if (Array.isArray(b.sentKeys)) {
         await Promise.all(b.sentKeys.map(k => markSent(k)));
+      }
+      if (b.activitySnapshot) {
+        await persistPlayerActivitySnapshot(b.fixtureId, b.activitySnapshot);
       }
       for (const ev of (b.events || [])) {
         eventLogItems.push({ ...ev, tPush: null, pushResult: 'no-subscribers', subsTargeted: 0 });
@@ -826,7 +949,13 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today) {
         // entregaba tarde o en lote ("en fila de golpe").
         const result = await sendPushNotification(
           sub,
-          { title: bundle.title, body: bundle.body, tag: bundle.tag },
+          {
+            title: bundle.title,
+            body: bundle.body,
+            tag: bundle.tag,
+            url: '/dashboard',
+            timestamp: new Date().toISOString(),
+          },
           { urgency: 'high' },
         );
         if (result === true) { delivered++; bundleHadDelivery = true; }
@@ -851,6 +980,9 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today) {
       console.log(`${LP} dedup marcadas ${bundle.sentKeys.length} keys fid=${bundle.fixtureId} → ${ttlDetalle}`);
     } else if (!shouldMark) {
       console.log(`${LP} dedup NO marcadas fid=${bundle.fixtureId} — todos los envíos fallaron, reintentará en próximo tick`);
+    }
+    if (shouldMark && bundle.activitySnapshot) {
+      await persistPlayerActivitySnapshot(bundle.fixtureId, bundle.activitySnapshot);
     }
 
     // Event-log: registrar cada evento de este bundle con su resultado de push.
@@ -1267,6 +1399,11 @@ export async function runLive(_payload = {}) {
 
   const existingLive = (await redisGet(KEYS.liveStats(today))) || {};
 
+  // Arranca en paralelo la consulta batched de actividad individual. No toca
+  // liveDetailsMap hasta que terminen los rescates de eventos/stats de abajo,
+  // así evitamos carreras y mantenemos rápido el marcador temprano.
+  const playerActivityPromise = fetchPlayerActivityUpdates(tracked);
+
   const needsEventsFetchCandidates = tracked.filter(m => {
     const fid = m.fixture.id;
     const totalGoals = (m.goals?.home || 0) + (m.goals?.away || 0);
@@ -1315,8 +1452,9 @@ export async function runLive(_payload = {}) {
   // PARTE 1: una sola pasada por tick (20s) trae goles + córners + stats juntos.
   // /fixtures/statistics?fixture=X es LA fuente fiable de córners, así que lo
   // pedimos para TODOS los partidos en vivo cada tick — sin gatear por elapsed
-  // ni por "el feed principal ya trajo córners reales". El plan de cuota
-  // (150k/día) lo permite de sobra (~16 partidos × 3/min × 24h ≈ 69k/día).
+  // ni por "el feed principal ya trajo córners reales". Todas las llamadas
+  // pasan por el limitador distribuido; la actividad individual añade solo
+  // ceil(partidos/20) llamadas por minuto gracias al endpoint batched.
   // Única exclusión: los fixtures que ESTE tick ya pidieron /fixtures?id=X para
   // el goleador — esa respuesta ya trae statistics, y volver a extraer aquí
   // (con un array sin events) pisaría el goleador recién obtenido.
@@ -1374,6 +1512,19 @@ export async function runLive(_payload = {}) {
     }));
   }
 
+  let playerActivityUpdates = new Map();
+  let playerActivityApiCalls = 0;
+  try {
+    const activityResult = await playerActivityPromise;
+    playerActivityUpdates = activityResult.updates;
+    playerActivityApiCalls = activityResult.apiCalls;
+  } catch (e) {
+    // Defensa adicional: la telemetría individual es opcional para el core
+    // del partido. Un error inesperado se registra y el tick continúa.
+    console.error('[live:players] enriquecimiento omitido en este tick:', e.message);
+  }
+  apiCalls += playerActivityApiCalls;
+
   // ── BUG FIX (córners monótonos por-lado) ──
   // Los córners SOLO suben dentro de un partido. La API-Football provoca dos
   // problemas que hacían "bajar" un lado y perder/pisar valores:
@@ -1409,11 +1560,11 @@ export async function runLive(_payload = {}) {
     if (match) void persistHalfStatsSnapshot(match, data);
   }
 
-  // Fire-and-forget pushes — 1 bundle por fixture/tick con TODOS los deltas
-  // (goles, córners, amarillas, rojas/expulsiones, offside, sustituciones,
-  // penalti, VAR). Anti-spam por agrupación en el propio bundle.
+  // Fire-and-forget pushes — 1 bundle por fixture/tick con los eventos pedidos:
+  // goles/anulados, córners, tarjetas, penaltis, remates y faltas. Sustituciones
+  // y VAR genérico quedan fuera. Anti-spam por agrupación en el propio bundle.
   console.log(`${LL} → sendBundledPushes: liveDetailsMap=${Object.keys(liveDetailsMap).length} existingLive=${Object.keys(existingLive).length}`);
-  sendBundledPushes(liveDetailsMap, existingLive, today)
+  sendBundledPushes(liveDetailsMap, existingLive, today, playerActivityUpdates)
     .catch(err => console.error('[live:bundled-pushes]', err.message, err.stack));
 
   const mergedLive = { ...existingLive };

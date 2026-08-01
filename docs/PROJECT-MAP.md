@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-01 · Commit base: `cf929d4`
+Actualizado: 2026-08-01 · Base auditada: `a2bf799` + notificaciones/identidad PWA actuales
 
 ## Identidad y stack
 
@@ -167,6 +167,15 @@ solo el snapshot Redis mediante `GET /api/refresh-live`, con una única petició
 en vuelo y separación mínima de 20 s. La revalidación completa de fixtures queda
 como respaldo cada 5 min únicamente para hoy y con el WebSocket caído.
 
+Las notificaciones Web Push de fútbol se agrupan por partido y tick. Solo
+publican goles, goles anulados, córners, tarjetas, penaltis, remates, remates a
+puerta y faltas; sustituciones, offsides y VAR genérico no generan avisos. Los
+goles/tarjetas usan el evento oficial con jugador y asistencia. Remates y faltas
+comparan snapshots por jugador obtenidos con `/fixtures?ids=...` en lotes de 20,
+como máximo una vez cada 55 s; si una competición no ofrece cobertura individual
+no se inventa autor ni se emite el evento. Sus snapshots viven en claves Redis
+`live:playeractivity:{fixture}` separadas del payload del dashboard.
+
 ### Rendimiento del dashboard
 
 La lista de partidos y la lista interna de “Apuesta del día” están virtualizadas:
@@ -249,6 +258,11 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   VP9 con plano alfa real) y `/logo-metalizado-alpha-fast.webp` como primer
   frame/fallback estático en WebKit/iOS. Un coordinador permite reproducir un
   solo logo a la vez.
+- 2026-08-01: favicon e instalación PWA usan la identidad cuadrada CF en rutas
+  versionadas (`/cf-favicon.ico`, `/cf-icon-{192,512}.png` y
+  `/cf-apple-icon.png`) para evitar que Android/iOS conserven el icono anterior.
+  El Service Worker usa `/cf-notification-badge.png`, monocromo y transparente,
+  porque Android enmascara el badge de cada notificación.
 - 2026-07-29: `analysis:{date}` es caché canónica global escrita únicamente
   por el worker; una respuesta de `/api/fixtures` jamás debe sobrescribirla con
   el subconjunto visible de una zona horaria. La ruta contrasta siempre

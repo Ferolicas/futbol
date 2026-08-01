@@ -1,6 +1,6 @@
 # CF Análisis — sistema visual
 
-Actualizado: 2026-07-29
+Actualizado: 2026-08-01
 
 ## Dirección
 
@@ -27,6 +27,10 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 
 - Home y planes: escenas fijas controladas por scroll, teclado o swipe. La pantalla no acumula secciones verticales.
 - Header autenticado: video-logo, selector desplegable de deporte y menú de avatar. Se adapta desde 320 px y permanece visible.
+- Identidad instalada: favicon, acceso de Android y acceso de iPhone usan el
+  monograma cuadrado CF verde/ámbar sobre negro. Sus rutas PWA son versionadas
+  para invalidar la caché del icono anterior; el logo horizontal animado se
+  conserva dentro de la interfaz.
 - Controles: jornada y competición comparten siempre una sola fila. Las opciones mantienen texto claro sobre fondo oscuro.
 - Navegación del dashboard: orden fijo `Partidos → Combinada → Estado`.
 - Tabs y chips: estado activo con color, borde y fondo; nunca dependen solo del color.
@@ -48,6 +52,11 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - Cargas: skeleton de superficie. `BrandLogoMedia` utiliza un VP9 optimizado
   con alfa real en Chromium y una imagen WebP estática transparente en
   WebKit/iOS o movimiento reducido.
+- Notificaciones en vivo: título `minuto · local marcador visitante` y una línea
+  compacta por evento, con etiqueta española, jugador y equipo. El badge móvil
+  es un CF monocromo; goles, anulaciones, penaltis, tarjetas, córners, remates y
+  faltas tienen símbolos distintos. Sustituciones y VAR no relacionado con
+  penalti no se notifican.
 
 ## Motion y rendimiento
 

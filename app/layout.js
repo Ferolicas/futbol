@@ -34,9 +34,14 @@ export const metadata = {
   // Chrome avisa que el meta apple-* está deprecado y pide este también.
   other: { 'mobile-web-app-capable': 'yes' },
   icons: {
-    icon: '/icon-192.png',
+    icon: [
+      { url: '/cf-favicon.ico', sizes: 'any' },
+      { url: '/cf-icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/cf-icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    shortcut: '/cf-favicon.ico',
     apple: [
-      { url: '/apple-icon.png', sizes: '180x180', type: 'image/png' },
+      { url: '/cf-apple-icon.png', sizes: '180x180', type: 'image/png' },
     ],
   },
 };
