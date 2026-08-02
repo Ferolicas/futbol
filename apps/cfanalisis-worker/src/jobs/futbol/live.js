@@ -1118,7 +1118,7 @@ async function persistHalfStatsSnapshot(match, data) {
 // El escaneo de fixtures:{d} (blob grande) va gateado a ~3min para no leerlo cada tick.
 const FORCE_FINISH_GRACE_MS  = 10 * 60 * 1000;  // overdue vs expectedEnd del schedule
 const FORCE_FINISH_STALE_MS  = 40 * 60 * 1000;  // sin schedule: tiempo sin actualizarse
-const RECONCILE_MAX_AGE_MS   = 24 * 3600 * 1000; // solo re-confirmar FT con kickoff <24h
+const RECONCILE_MAX_AGE_MS   = 48 * 3600 * 1000; // hoy+ayer: cubre caídas largas y cruces de zona
 const MAX_RECONCILE_PER_TICK = 500;              // 25 lotes; cubre jornadas de 300-400 en un ciclo
 const FT_RECONCILE_EVERY_MS  = 3 * 60 * 1000;    // escaneo de fixtures:{d} cada ~3min
 const TERMINAL_STATUSES = new Set(['PST', 'CANC', 'ABD', 'AWD', 'WO', 'SUSP']);
