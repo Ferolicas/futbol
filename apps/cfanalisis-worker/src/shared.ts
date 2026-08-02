@@ -31,6 +31,7 @@ const [
   _redis,
   _apiFootball,
   _footballApiClient,
+  _footballResultSnapshot,
   _supabase,
   _supabaseCache,
   _sanityCache,
@@ -55,8 +56,9 @@ const [
   import(LIB + 'api-football.js'),
   // Cliente compartido del proveedor. Hasta que el token CI permita ampliar
   // WORKER_RE para `.cjs`, actualizar este marcador junto a cambios del cliente
-  // fuerza la recarga correcta del runtime (marker: quota-circuit-v3-live-reserve).
+  // fuerza la recarga correcta del runtime (marker: result-snapshot-v1-durable-ui).
   import(LIB + 'football-api-client.cjs'),
+  import(LIB + 'football-result-snapshot.cjs'),
   import(LIB + 'supabase.js'),
   import(LIB + 'supabase-cache.js'),
   import(LIB + 'sanity-cache.js'),
@@ -102,6 +104,11 @@ export const recomputeAnalysisWithConfirmedLineups = _apiFootball.recomputeAnaly
 const footballApiClient = _footballApiClient.default || _footballApiClient;
 export const footballApiRequest = footballApiClient.footballApiRequest;
 export const payloadQuality = footballApiClient.payloadQuality;
+
+// Resultado final durable con cobertura parcial explícita (null != cero).
+const footballResultSnapshot = _footballResultSnapshot.default || _footballResultSnapshot;
+export const buildMatchResultRow = footballResultSnapshot.buildMatchResultRow;
+export const extractResultCoverage = footballResultSnapshot.extractResultCoverage;
 
 // Los hechos de baseball vienen de MLB Stats. API-Baseball se consulta solo
 // mediante multisport-analysis para cuotas y su ritmo se coordina en Redis

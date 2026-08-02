@@ -35,10 +35,16 @@ import {
   captureFinalizedFixturesRaw,
   bogotaToday,
   footballApiRequest,
+  buildMatchResultRow,
+  extractResultCoverage,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 
 const FINALIZE_CONCURRENCY = 10;
+// Solo se consulta un partido cuando su final estimado ya pasó. Esto permite
+// ejecutar finalize de forma incremental durante todo el día sin quemar cuota
+// preguntando una y otra vez por los cientos de encuentros futuros.
+const FINALIZE_AFTER_EXPECTED_END_MS = 10 * 60 * 1000;
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 async function apiGet(path, apiKey) {
@@ -115,17 +121,11 @@ function extractResult(match) {
   const ftHome = match.score?.fulltime?.home ?? hGoals;
   const ftAway = match.score?.fulltime?.away ?? aGoals;
 
-  const hCorners = getStat(homeStats, 'Corner Kicks', 'Corners', 'Corner') ?? 0;
-  const aCorners = getStat(awayStats, 'Corner Kicks', 'Corners', 'Corner') ?? 0;
+  const coverage = extractResultCoverage(match);
+  const hCorners = coverage.corners.home;
+  const aCorners = coverage.corners.away;
 
-  const yh = getStat(homeStats, 'Yellow Cards', 'Yellowcards');
-  const ya = getStat(awayStats, 'Yellow Cards', 'Yellowcards');
-  const rh = getStat(homeStats, 'Red Cards', 'Redcards');
-  const ra = getStat(awayStats, 'Red Cards', 'Redcards');
-  const fromStats = [yh, ya, rh, ra].some(v => v != null);
-  const totalCards = fromStats
-    ? (yh || 0) + (ya || 0) + (rh || 0) + (ra || 0)
-    : cardEvents.length;
+  const totalCards = coverage.cards.total;
 
   // Stats nuevos para calibracion full (Shots, SoT, Fouls, Offsides)
   const hShots   = getStat(homeStats, 'Total Shots')   ?? null;
@@ -175,15 +175,15 @@ function extractResult(match) {
     corners: {
       home:  hCorners,
       away:  aCorners,
-      total: hCorners + aCorners,
+      total: coverage.corners.total,
     },
     cards: {
-      yellowHome: yh ?? null,
-      yellowAway: ya ?? null,
-      redHome:    rh ?? null,
-      redAway:    ra ?? null,
-      home:       (yh ?? 0) + (rh ?? 0),
-      away:       (ya ?? 0) + (ra ?? 0),
+      yellowHome: coverage.yellowCards.home,
+      yellowAway: coverage.yellowCards.away,
+      redHome:    coverage.redCards.home,
+      redAway:    coverage.redCards.away,
+      home:       coverage.cards.home,
+      away:       coverage.cards.away,
       total:      totalCards,
     },
     shots: {
@@ -221,7 +221,7 @@ function extractResult(match) {
     actualResult: ftHome === null ? null : ftHome > ftAway ? 'H' : ftHome < ftAway ? 'A' : 'D',
     actualBtts:   ftHome > 0 && ftAway > 0,
     totalGoals:   ftHome !== null && ftAway !== null ? ftHome + ftAway : null,
-    totalCorners: hCorners + aCorners,
+    totalCorners: coverage.corners.total,
     hCorners, aCorners,
     totalCards,
     firstGoalMinute,
@@ -246,14 +246,14 @@ async function upsertRefereeStats(match, r, dateStr) {
   const refName = normalizeRefereeName(match?.fixture?.referee);
   if (!refName) return;
 
-  const yh = getStat(r.homeStats, 'Yellow Cards') || 0;
-  const ya = getStat(r.awayStats, 'Yellow Cards') || 0;
-  const rh = getStat(r.homeStats, 'Red Cards') || 0;
-  const ra = getStat(r.awayStats, 'Red Cards') || 0;
-
-  // Si no hay datos de tarjetas en statistics, no contabilizamos el partido
-  // para el arbitro — preferimos perder una muestra antes que sesgar con ceros.
-  if ([yh, ya, rh, ra].every(v => v === 0) && !r.totalCards) return;
+  const coverage = extractResultCoverage(match);
+  // Sin cobertura completa de ambos equipos no atribuimos un total al árbitro.
+  // Una muestra parcial sería peor que excluir el mercado desconocido.
+  if (coverage.cards.total == null) return;
+  const yh = coverage.yellowCards.home;
+  const ya = coverage.yellowCards.away;
+  const rh = coverage.redCards.home;
+  const ra = coverage.redCards.away;
 
   // pgQuery va al VPS Postgres (donde vive referee_stats). NO usar
   // supabaseAdmin.rpc — su .rpc apunta al Supabase real, no a pgAdmin.
@@ -263,30 +263,11 @@ async function upsertRefereeStats(match, r, dateStr) {
   );
 }
 
-async function upsertMatchResult(fid, date, match, r) {
-  return supabaseAdmin.from('match_results').upsert({
-    fixture_id:  fid,
-    date,
-    league_id:   match.league.id,
-    league_name: match.league.name,
-    home_team:   { id: r.homeId, name: match.teams.home.name, logo: match.teams.home.logo },
-    away_team:   { id: r.awayId, name: match.teams.away.name, logo: match.teams.away.logo },
-    goals:       match.goals,
-    score:       match.score,
-    status:      match.fixture.status,
-    corners:     { home: r.hCorners, away: r.aCorners, total: r.totalCorners },
-    yellow_cards: {
-      home: getStat(r.homeStats, 'Yellow Cards'),
-      away: getStat(r.awayStats, 'Yellow Cards'),
-    },
-    red_cards: {
-      home: getStat(r.homeStats, 'Red Cards'),
-      away: getStat(r.awayStats, 'Red Cards'),
-    },
-    goal_scorers: r.goalEvents,
-    card_events:  r.cardEvents,
-    full_data:    match,
-  }, { onConflict: 'fixture_id' });
+async function upsertMatchResult(date, match) {
+  return supabaseAdmin.from('match_results').upsert(
+    buildMatchResultRow(date, match),
+    { onConflict: 'fixture_id' },
+  );
 }
 
 // ── Snapshot de stats por mitad (durable) ────────────────────────────────────
@@ -404,8 +385,17 @@ export async function runFinalize(payload = {}) {
       return null;
     });
     const kickoffs = Array.isArray(schedule?.kickoffTimes) ? schedule.kickoffTimes : [];
+    const now = Date.now();
     const fids = [...new Set(
       kickoffs
+        .filter((k) => {
+          const kickoff = Number(k?.kickoff);
+          const expectedEnd = Number(k?.expectedEnd);
+          const eligibleAt = Number.isFinite(expectedEnd)
+            ? expectedEnd + FINALIZE_AFTER_EXPECTED_END_MS
+            : kickoff + 130 * 60 * 1000;
+          return Number.isFinite(eligibleAt) && now >= eligibleAt;
+        })
         .map((k) => Number(k?.fixtureId ?? k?.fixture_id ?? k?.id))
         .filter(Number.isFinite),
     )];
@@ -429,7 +419,7 @@ export async function runFinalize(payload = {}) {
 
       const r = extractResult(match);
       // full_data = payload entero → ningún campo/mercado se omite a mano.
-      const { error } = await upsertMatchResult(fid, date, match, r);
+      const { error } = await upsertMatchResult(date, match);
       if (error) throw new Error(`upsert: ${error.message || error}`);
       // referee_stats (se conserva) — fallo aquí NO debe romper el finalize.
       try { await upsertRefereeStats(match, r, date); } catch (e) {

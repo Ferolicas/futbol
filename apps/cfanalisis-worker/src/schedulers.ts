@@ -26,12 +26,12 @@ type Sched = { queue: QueueName; id: string; pattern?: string; every?: number; t
 // futbol-live (PARTE 1: /fixtures/statistics dentro de live.js). El job dedicado
 // de 30 min queda obsoleto → al añadir su id aquí, registerSchedulers() borra el
 // scheduler Y su job delayed pendiente en el arranque (no quedan dos corriendo).
-const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-odds-15m', 'futbol-raw-backfill-half2', 'baseball-live-5m', 'futbol-live-corners-30m', 'futbol-odds-30m', 'baseball-calibrate-daily', 'baseball-analyze-all-today-daily', 'american-football-live-10m'];
+const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-odds-15m', 'futbol-raw-backfill-half2', 'baseball-live-5m', 'futbol-live-corners-30m', 'futbol-odds-30m', 'baseball-calibrate-daily', 'baseball-analyze-all-today-daily', 'american-football-live-10m', 'futbol-finalize-daily'];
 
 const SCHEDULES: Sched[] = [
   // ── Fútbol — diarios (hora España) ──
   // ORDEN del ciclo de auto-mejora del modelo:
-  //   03:00 + 04:00  finalize  → cierra resultados de los partidos de la noche
+  //   cada 15 min     finalize  → cierra solo partidos cuyo final estimado pasó
   //   06:30          retrain   → ciclo del motor EMPÍRICO CONTEXTUAL: captura los
   //                              crudos de los partidos recién finalizados →
   //                              ingiere hechos → reconstruye perfiles → entrena
@@ -45,7 +45,7 @@ const SCHEDULES: Sched[] = [
   // Así el modelo se auto-corrige Y aprende cada noche sin intervención manual.
   { queue: 'futbol-fixtures',  id: 'futbol-fixtures-daily',  pattern: '5 2 * * *',   tz: TZ },
   { queue: 'futbol-daily',     id: 'futbol-daily-daily',     pattern: '10 2 * * *',  tz: TZ },
-  { queue: 'futbol-finalize',  id: 'futbol-finalize-daily',  pattern: '0 3,4 * * *', tz: TZ },
+  { queue: 'futbol-finalize',  id: 'futbol-finalize-15m',    pattern: '*/15 * * * *' },
   { queue: 'futbol-retrain',   id: 'futbol-retrain-daily',   pattern: '30 6 * * *',  tz: TZ },
   // Sync nocturno del schema `model` (07:00 Madrid, tras retrain 06:30 y antes
   // del watchdog 07:30). Captura players+standings e ingiere hechos nuevos.

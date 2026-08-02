@@ -1,11 +1,12 @@
 import { redisGet, redisMGet, redisSet, KEYS, TTL } from '../../../lib/redis';
 import { ALL_LEAGUE_IDS, isYouthTeam } from '../../../lib/leagues';
 import { getCurrentUser } from '../../../lib/auth-pg';
-import { statLookup, STAT_ALIASES } from '../../../lib/match-stats';
 import { jsonError } from '../../../lib/api-error';
 import footballApiClient from '../../../lib/football-api-client.cjs';
+import footballResultSnapshot from '../../../lib/football-result-snapshot.cjs';
 
 const { footballApiRequest } = footballApiClient;
+const { extractResultCoverage } = footballResultSnapshot;
 
 // Force-refresh live data — direct API call, no cron chaining.
 // Rate-limited to once every 15s via Redis lock.
@@ -51,11 +52,6 @@ export async function GET(request) {
 function extractLiveStats(match) {
   const homeId = match.teams.home.id;
   const awayId = match.teams.away.id;
-  const homeStats = (match.statistics || []).find(s => s.team?.id === homeId);
-  const awayStats = (match.statistics || []).find(s => s.team?.id === awayId);
-
-  // AF1 FIX: statLookup compartido (aliases + null-safe), igual que el worker.
-  const getVal = (teamStats, ...names) => statLookup(teamStats, ...names) ?? 0;
 
   const goalScorers = [], cardEvents = [], missedPenalties = [];
   for (const ev of (match.events || [])) {
@@ -73,12 +69,13 @@ function extractLiveStats(match) {
     }
   }
 
-  const hCorners = getVal(homeStats, ...STAT_ALIASES.corners);
-  const aCorners = getVal(awayStats, ...STAT_ALIASES.corners);
-  const hYellow = getVal(homeStats, ...STAT_ALIASES.yellow) || cardEvents.filter(e => e.teamId === homeId && e.type === 'Yellow Card').length;
-  const aYellow = getVal(awayStats, ...STAT_ALIASES.yellow) || cardEvents.filter(e => e.teamId === awayId && e.type === 'Yellow Card').length;
-  const hRed = getVal(homeStats, ...STAT_ALIASES.red) || cardEvents.filter(e => e.teamId === homeId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
-  const aRed = getVal(awayStats, ...STAT_ALIASES.red) || cardEvents.filter(e => e.teamId === awayId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
+  const coverage = extractResultCoverage(match);
+  const counter = (value) => ({
+    home: value.home,
+    away: value.away,
+    total: value.total,
+    isReal: value.total != null,
+  });
 
   return {
     fixtureId: match.fixture.id,
@@ -87,9 +84,9 @@ function extractLiveStats(match) {
     score: match.score,
     homeTeam: { id: homeId, name: match.teams.home.name },
     awayTeam: { id: awayId, name: match.teams.away.name },
-    corners: { home: hCorners, away: aCorners, total: hCorners + aCorners },
-    yellowCards: { home: hYellow, away: aYellow, total: hYellow + aYellow },
-    redCards: { home: hRed, away: aRed, total: hRed + aRed },
+    corners: counter(coverage.corners),
+    yellowCards: counter(coverage.yellowCards),
+    redCards: counter(coverage.redCards),
     goalScorers,
     cardEvents,
     missedPenalties,
@@ -206,7 +203,9 @@ export async function POST(request) {
       merged[fid] = {
         ...data,
         // Preserve better data: keep existing corners/scorers if new ones are empty
-        corners: data.corners?.total > 0 ? data.corners : (prev?.corners || data.corners),
+        corners: data.corners?.isReal ? data.corners : (prev?.corners || data.corners),
+        yellowCards: data.yellowCards?.isReal ? data.yellowCards : (prev?.yellowCards || data.yellowCards),
+        redCards: data.redCards?.isReal ? data.redCards : (prev?.redCards || data.redCards),
         goalScorers: data.goalScorers?.length > 0 ? data.goalScorers : (prev?.goalScorers || []),
         missedPenalties: data.missedPenalties?.length > 0 ? data.missedPenalties : (prev?.missedPenalties || []),
       };

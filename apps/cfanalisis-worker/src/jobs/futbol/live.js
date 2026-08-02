@@ -12,7 +12,7 @@ import {
   redisGet, redisSet, redisDel, KEYS, TTL,
   incrementApiCallCount, sendPushNotification,
   supabaseAdmin, getMatchSchedule, pgQuery,
-  footballApiRequest,
+  footballApiRequest, extractResultCoverage,
 } from '../../shared.js';
 import {
   diffPlayerActivity,
@@ -137,24 +137,25 @@ function extractLiveStats(match, events, stats) {
   // anterior puedan completarlo. NO usamos 0 como default
   // porque "0 corners en el min 80" sería un dato real, mientras que null = "no
   // sabemos". Esto distingue "API no reporta" vs "el partido realmente no tuvo".
-  const hCornersRaw = getVal(homeStats, 'Corner Kicks', 'Corners', 'Corner');
-  const aCornersRaw = getVal(awayStats, 'Corner Kicks', 'Corners', 'Corner');
-  const hCorners = hCornersRaw ?? 0;
-  const aCorners = aCornersRaw ?? 0;
-  const cornersAreReal = hCornersRaw !== null || aCornersRaw !== null;
+  const coverage = extractResultCoverage({
+    ...match,
+    events: Array.isArray(events) ? events : [],
+    statistics: Array.isArray(stats) ? stats : [],
+  });
+  const hCorners = coverage.corners.home;
+  const aCorners = coverage.corners.away;
+  const cornersAreReal = coverage.corners.total != null;
 
   // Cards: fallback a contar events SIEMPRE que stats no haya devuelto dato
   // explícito. El bug previo (`getVal(...) || count`) tiraba el 0 legítimo del
   // stat y caía al fallback, doblando el conteo. Ahora: si stat es null →
   // fallback events; si stat es 0 → 0 (real); si stat > 0 → ese valor.
-  const yhStat = getVal(homeStats, 'Yellow Cards', 'Yellowcards');
-  const yaStat = getVal(awayStats, 'Yellow Cards', 'Yellowcards');
-  const rhStat = getVal(homeStats, 'Red Cards', 'Redcards');
-  const raStat = getVal(awayStats, 'Red Cards', 'Redcards');
-  const hYellow = yhStat ?? cardEvents.filter(e => e.teamId === homeId && e.type === 'Yellow Card').length;
-  const aYellow = yaStat ?? cardEvents.filter(e => e.teamId === awayId && e.type === 'Yellow Card').length;
-  const hRed = rhStat ?? cardEvents.filter(e => e.teamId === homeId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
-  const aRed = raStat ?? cardEvents.filter(e => e.teamId === awayId && (e.type === 'Red Card' || e.type === 'Second Yellow card')).length;
+  const hYellow = coverage.yellowCards.home;
+  const aYellow = coverage.yellowCards.away;
+  const hRed = coverage.redCards.home;
+  const aRed = coverage.redCards.away;
+  const yellowCardsAreReal = coverage.yellowCards.total != null;
+  const redCardsAreReal = coverage.redCards.total != null;
 
   // Offsides: el contador de stats agrega offsides POR MINUTO sin dar jugador
   // ni jugada concreta. API-Football tampoco expone offsides como events
@@ -166,9 +167,9 @@ function extractLiveStats(match, events, stats) {
   // como events con player, se puede reactivar la notificación.
   const hOffsidesRaw = getVal(homeStats, 'Offsides', 'Offside');
   const aOffsidesRaw = getVal(awayStats, 'Offsides', 'Offside');
-  const hOffsides = hOffsidesRaw ?? 0;
-  const aOffsides = aOffsidesRaw ?? 0;
-  const offsidesAreReal = hOffsidesRaw !== null || aOffsidesRaw !== null;
+  const hOffsides = hOffsidesRaw;
+  const aOffsides = aOffsidesRaw;
+  const offsidesAreReal = hOffsidesRaw !== null && aOffsidesRaw !== null;
 
   // Tiros / tiros a puerta / faltas: contadores agregados (sin minuto). Igual
   // que los córners, en el tick de HT su valor ES el total de la 1ª parte; se
@@ -176,16 +177,23 @@ function extractLiveStats(match, events, stats) {
   // null explícito si la API no los reporta este tick (distinto de 0 real).
   const hShotsRaw = getVal(homeStats, 'Total Shots', 'Shots Total');
   const aShotsRaw = getVal(awayStats, 'Total Shots', 'Shots Total');
-  const hShots = hShotsRaw ?? 0, aShots = aShotsRaw ?? 0;
-  const shotsAreReal = hShotsRaw !== null || aShotsRaw !== null;
+  const hShots = hShotsRaw, aShots = aShotsRaw;
+  const shotsAreReal = hShotsRaw !== null && aShotsRaw !== null;
   const hSotRaw = getVal(homeStats, 'Shots on Goal', 'Shots on Target');
   const aSotRaw = getVal(awayStats, 'Shots on Goal', 'Shots on Target');
-  const hSot = hSotRaw ?? 0, aSot = aSotRaw ?? 0;
-  const sotAreReal = hSotRaw !== null || aSotRaw !== null;
+  const hSot = hSotRaw, aSot = aSotRaw;
+  const sotAreReal = hSotRaw !== null && aSotRaw !== null;
   const hFoulsRaw = getVal(homeStats, 'Fouls', 'Fouls Committed');
   const aFoulsRaw = getVal(awayStats, 'Fouls', 'Fouls Committed');
-  const hFouls = hFoulsRaw ?? 0, aFouls = aFoulsRaw ?? 0;
-  const foulsAreReal = hFoulsRaw !== null || aFoulsRaw !== null;
+  const hFouls = hFoulsRaw, aFouls = aFoulsRaw;
+  const foulsAreReal = hFoulsRaw !== null && aFoulsRaw !== null;
+
+  const counter = (home, away, isReal) => ({
+    home,
+    away,
+    total: isReal ? home + away : null,
+    isReal,
+  });
 
   return {
     fixtureId: match.fixture.id,
@@ -194,13 +202,13 @@ function extractLiveStats(match, events, stats) {
     score: match.score,
     homeTeam: { id: homeId, name: match.teams.home.name },
     awayTeam: { id: awayId, name: match.teams.away.name },
-    corners: { home: hCorners, away: aCorners, total: hCorners + aCorners, isReal: cornersAreReal },
-    yellowCards: { home: hYellow, away: aYellow, total: hYellow + aYellow },
-    redCards: { home: hRed, away: aRed, total: hRed + aRed },
-    offsides: { home: hOffsides, away: aOffsides, total: hOffsides + aOffsides, isReal: offsidesAreReal },
-    shots: { home: hShots, away: aShots, total: hShots + aShots, isReal: shotsAreReal },
-    sot:   { home: hSot,   away: aSot,   total: hSot + aSot,     isReal: sotAreReal },
-    fouls: { home: hFouls, away: aFouls, total: hFouls + aFouls, isReal: foulsAreReal },
+    corners: counter(hCorners, aCorners, cornersAreReal),
+    yellowCards: counter(hYellow, aYellow, yellowCardsAreReal),
+    redCards: counter(hRed, aRed, redCardsAreReal),
+    offsides: counter(hOffsides, aOffsides, offsidesAreReal),
+    shots: counter(hShots, aShots, shotsAreReal),
+    sot: counter(hSot, aSot, sotAreReal),
+    fouls: counter(hFouls, aFouls, foulsAreReal),
     goalScorers,
     cardEvents,
     missedPenalties,
@@ -1052,9 +1060,13 @@ async function persistHalfStatsSnapshot(match, data) {
       sot:      realOrNull(data.sot),
       fouls:    realOrNull(data.fouls),
       offsides: realOrNull(data.offsides),
-      cards: { home: (data.yellowCards?.home ?? 0) + (data.redCards?.home ?? 0),
-               away: (data.yellowCards?.away ?? 0) + (data.redCards?.away ?? 0),
-               total: (data.yellowCards?.total ?? 0) + (data.redCards?.total ?? 0) },
+      cards: data.yellowCards?.isReal && data.redCards?.isReal
+        ? {
+            home: data.yellowCards.home + data.redCards.home,
+            away: data.yellowCards.away + data.redCards.away,
+            total: data.yellowCards.total + data.redCards.total,
+          }
+        : null,
     };
     const payload = {
       fixtureId: fid,
@@ -1092,43 +1104,34 @@ async function persistHalfStatsSnapshot(match, data) {
 
 // ── Red de seguridad: datos REALES de partidos vencidos / sin confirmar ─────
 // Corre SIEMPRE (antes del window-skip), sobre HOY y AYER. Dos casos:
-//   1) LIVE vencido (en liveStats — datos frescos <2h): expectedEnd+30min pasó,
+//   1) LIVE vencido (en liveStats — datos frescos <2h): expectedEnd+10min pasó,
 //      o sin schedule >40min sin tocarse → el tick se saltó / se perdió su FT /
 //      cruzó medianoche. Hay que despegarlo a FT.
-//   2) FT SIN confirmar (en fixtures:{d} — el marcador que SE MUESTRA, TTL 26h,
-//      sobrevive al liveStats de 2h): partido ya FT cuyo marcador NO se confirmó
-//      contra la API — típicamente un force-finish API-free previo o legado que
-//      dejó el ÚLTIMO marcador congelado (ej. Colombia 2-0 cuando acabó 3-1).
+//   2) FT o NS VENCIDO sin confirmar (en fixtures:{d} — el marcador que SE
+//      MUESTRA, TTL 26h, sobrevive al liveStats de 2h): el feed pudo haberse
+//      caído y el cache conservar NS aunque el partido ya terminara.
 //
-// Pedimos /fixtures?id=X (throttle 2min/fid; cap por tick) y escribimos
+// Pedimos /fixtures?ids=... en lotes (throttle 2min/fid; cap por tick) y escribimos
 // marcador/córners/goleadores REALES en liveStats + fixtures:{d} + fixtureStats,
 // sobrescribiendo el entry AUNQUE ya esté FT (ese es el punto del caso 2). Un set
 // de confirmados por fecha (live:rf:{d}) evita re-consultar cada FT más de una vez.
 // El escaneo de fixtures:{d} (blob grande) va gateado a ~3min para no leerlo cada tick.
-const FORCE_FINISH_GRACE_MS  = 30 * 60 * 1000;  // overdue vs expectedEnd del schedule
+const FORCE_FINISH_GRACE_MS  = 10 * 60 * 1000;  // overdue vs expectedEnd del schedule
 const FORCE_FINISH_STALE_MS  = 40 * 60 * 1000;  // sin schedule: tiempo sin actualizarse
 const FORCE_FINISH_HARD_MS   = 60 * 60 * 1000;  // si la API insiste "live" tras esto → FT igual
 const RECONCILE_MAX_AGE_MS   = 24 * 3600 * 1000; // solo re-confirmar FT con kickoff <24h
-const MAX_RECONCILE_PER_TICK = 12;               // cap del burst de re-confirmación FT
+const MAX_RECONCILE_PER_TICK = 500;              // 25 lotes; cubre jornadas de 300-400 en un ciclo
 const FT_RECONCILE_EVERY_MS  = 3 * 60 * 1000;    // escaneo de fixtures:{d} cada ~3min
+const TERMINAL_STATUSES = new Set(['PST', 'CANC', 'ABD', 'AWD', 'WO', 'SUSP']);
 async function forceFinishOverdueLive(allKickoffs, now, dates) {
   const eeByFid = new Map(
     (allKickoffs || []).map(m => [Number(m.fixtureId), Number(m.expectedEnd)]));
   const finished = [];
   let apiCalls = 0;
 
-  const fetchReal = async (fid) => {
-    let real = null;
-    try { const data = await apiFetch(`/fixtures?id=${fid}`); apiCalls++; real = data?.[0] || null; } catch {}
-    if (real && (!Array.isArray(real.statistics) || real.statistics.length === 0)) {
-      try { const ded = await apiFetch(`/fixtures/statistics?fixture=${fid}`); apiCalls++; if (Array.isArray(ded) && ded.length > 0) real.statistics = ded; } catch {}
-    }
-    return real;
-  };
-
   for (const d of dates) {
     let ls; try { ls = await redisGet(KEYS.liveStats(d)); } catch { ls = null; }
-    const hasLs = ls && typeof ls === 'object';
+    let hasLs = ls && typeof ls === 'object';
 
     // (1) LIVE vencidos en liveStats.
     const liveOverdue = [];
@@ -1142,9 +1145,9 @@ async function forceFinishOverdueLive(allKickoffs, now, dates) {
       }
     }
 
-    // (2) FT sin confirmar en fixtures:{d} (gateado a ~3min; set de confirmados).
+    // (2) FT o NS vencido sin confirmar en fixtures:{d} (gateado a ~3min).
     let fx = null, rfSet = null;
-    const ftTargets = [];
+    const cachedTargets = [];
     const gateKey = `live:ftrecon:${d}`;
     if (!(await alreadySent(gateKey))) {
       await markSentTTL(gateKey, Math.round(FT_RECONCILE_EVERY_MS / 1000));
@@ -1152,37 +1155,74 @@ async function forceFinishOverdueLive(allKickoffs, now, dates) {
       if (Array.isArray(fx) && fx.length > 0) {
         rfSet = (await redisGet(`live:rf:${d}`)) || {};
         for (const f of fx) {
-          if (ftTargets.length >= MAX_RECONCILE_PER_TICK) break;
           const fid = f.fixture?.id;
-          if (!fid || !FINISHED_STATUSES.includes(f.fixture?.status?.short)) continue;
+          if (!fid) continue;
+          const short = f.fixture?.status?.short;
+          const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
+          const expectedEnd = eeByFid.get(Number(fid));
+          const nsOverdue = short === 'NS' && (
+            (Number.isFinite(expectedEnd) && now > expectedEnd + FORCE_FINISH_GRACE_MS) ||
+            (!Number.isFinite(expectedEnd) && kickoff > 0 && now > kickoff + 130 * 60 * 1000)
+          );
+          if (!FINISHED_STATUSES.includes(short) && !nsOverdue) continue;
           if (rfSet[fid]) continue; // ya confirmado contra la API
-          const ko = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
-          if (ko && now - ko > RECONCILE_MAX_AGE_MS) continue; // solo recientes
-          ftTargets.push(fid);
+          if (kickoff && now - kickoff > RECONCILE_MAX_AGE_MS) continue; // solo recientes
+          cachedTargets.push({ fid: Number(fid), kind: nsOverdue ? 'stale' : 'ft' });
         }
       }
     }
 
-    const targets = [
+    // Cursor circular: si una caída deja cientos de NS, ningún fixture sin
+    // respuesta puede monopolizar para siempre los primeros 60 puestos.
+    let selectedCachedTargets = cachedTargets;
+    if (cachedTargets.length > MAX_RECONCILE_PER_TICK) {
+      const cursorKey = `live:reconcursor:${d}`;
+      const storedCursor = Number(await redisGet(cursorKey)) || 0;
+      const start = storedCursor % cachedTargets.length;
+      selectedCachedTargets = [];
+      for (let i = 0; i < MAX_RECONCILE_PER_TICK; i++) {
+        selectedCachedTargets.push(cachedTargets[(start + i) % cachedTargets.length]);
+      }
+      await redisSet(
+        cursorKey,
+        (start + MAX_RECONCILE_PER_TICK) % cachedTargets.length,
+        48 * 3600,
+      ).catch(() => {});
+    }
+
+    const targetMap = new Map([
       ...liveOverdue.map(x => ({ ...x, kind: 'live' })),
-      ...ftTargets.map(fid => ({ fid, ee: eeByFid.get(fid), kind: 'ft' })),
-    ];
+      ...selectedCachedTargets.map(x => ({ ...x, ee: eeByFid.get(x.fid) })),
+    ].map(target => [target.fid, target]));
+    const targets = [];
+    for (const target of targetMap.values()) {
+      const tkey = `live:forcefinish:${target.fid}`;
+      if (await alreadySent(tkey)) continue;
+      await markSentTTL(tkey, 120);
+      targets.push(target);
+    }
     if (targets.length === 0) continue;
+
+    // Una consulta por lote de hasta 20, no una petición por partido. Si hubo
+    // 400 stale tras una caída son 20 llamadas, no 400.
+    const batch = await fetchDetailedLiveMatches(targets.map(t => t.fid), `reconcile-${d}`);
+    apiCalls += batch.apiCalls;
+    const realByFid = new Map(
+      batch.matches.map(match => [Number(match?.fixture?.id), match]),
+    );
 
     let lsChanged = false, fxChanged = false, rfChanged = false;
     const fxArr = Array.isArray(fx) ? fx : null;
 
     await Promise.all(targets.map(async ({ fid, ee, kind }) => {
-      const tkey = `live:forcefinish:${fid}`;
-      if (await alreadySent(tkey)) return;
-      await markSentTTL(tkey, 120);
-      const real = await fetchReal(fid);
+      const real = realByFid.get(Number(fid)) || null;
 
       if (real && FINISHED_STATUSES.includes(real.fixture?.status?.short)) {
         // ✓ DATOS REALES → liveStats + fixtureStats + fixtures:{d} + match_analysis.
         const stats = extractLiveStats(real, real.events || [], real.statistics || []);
         stats.date = d; stats.savedAt = new Date().toISOString(); stats.realFinal = true;
-        if (hasLs) { ls[fid] = stats; lsChanged = true; }
+        if (!hasLs) { ls = {}; hasLs = true; }
+        ls[fid] = stats; lsChanged = true;
         try { await redisSet(KEYS.fixtureStats(fid), stats, TTL.yesterday); } catch {}
         void (async () => {
           try { await supabaseAdmin.from('match_analysis').update({ live_stats: stats }).eq('fixture_id', fid); }
@@ -1202,6 +1242,38 @@ async function forceFinishOverdueLive(allKickoffs, now, dates) {
           goalScorers: stats.goalScorers || [], missedPenalties: stats.missedPenalties || [],
         });
         console.log(`[live:force-finish] fid=${fid} (${d}) [${kind}] → FT REAL (${real.goals?.home}-${real.goals?.away})`);
+      } else if (kind !== 'live' && real && LIVE_STATUSES.includes(real.fixture?.status?.short)) {
+        // El cache decía NS/FT, pero el proveedor confirma que está en vivo:
+        // incorporarlo al realtime inmediatamente.
+        const stats = extractLiveStats(real, real.events || [], real.statistics || []);
+        if (!hasLs) { ls = {}; hasLs = true; }
+        ls[fid] = stats; lsChanged = true;
+        if (fxArr) {
+          const idx = fxArr.findIndex(f => f.fixture?.id === fid);
+          if (idx >= 0) {
+            fxArr[idx] = { ...fxArr[idx], fixture: { ...fxArr[idx].fixture, status: real.fixture.status }, goals: real.goals || fxArr[idx].goals, score: real.score || fxArr[idx].score };
+            fxChanged = true;
+          }
+        }
+        finished.push({
+          fixtureId: fid, status: real.fixture.status, goals: real.goals, score: real.score,
+          corners: stats.corners, yellowCards: stats.yellowCards, redCards: stats.redCards,
+          goalScorers: stats.goalScorers || [], missedPenalties: stats.missedPenalties || [],
+        });
+        console.log(`[live:reconcile] fid=${fid} (${d}) ${kind} → ${real.fixture.status.short} REAL`);
+      } else if (real && TERMINAL_STATUSES.has(real.fixture?.status?.short)) {
+        // Aplazado/cancelado/abandonado: mostrar el estado real, no NS ni un
+        // marcador inventado.
+        if (fxArr) {
+          const idx = fxArr.findIndex(f => f.fixture?.id === fid);
+          if (idx >= 0) {
+            fxArr[idx] = { ...fxArr[idx], fixture: { ...fxArr[idx].fixture, status: real.fixture.status }, goals: real.goals || fxArr[idx].goals, score: real.score || fxArr[idx].score };
+            fxChanged = true;
+          }
+        }
+        if (rfSet) { rfSet[fid] = 1; rfChanged = true; }
+        finished.push({ fixtureId: fid, status: real.fixture.status, goals: real.goals, score: real.score });
+        console.log(`[live:reconcile] fid=${fid} (${d}) → ${real.fixture.status.short} REAL`);
       } else if (kind === 'live' && real && LIVE_STATUSES.includes(real.fixture?.status?.short) &&
                  !(Number.isFinite(ee) && now > ee + FORCE_FINISH_HARD_MS)) {
         // Sigue en vivo de verdad y no es absurdamente tarde → respetar.
@@ -1217,7 +1289,7 @@ async function forceFinishOverdueLive(allKickoffs, now, dates) {
         });
         console.log(`[live:force-finish] fid=${fid} (${d}) [live] → FT sin datos reales (reintentará)`);
       }
-      // kind==='ft' sin poder confirmar (API falló) → no marca rfSet; reintenta en el próximo ciclo de 3min.
+      // Sin respuesta concluyente no se inventa nada ni se marca: reintenta.
     }));
 
     if (lsChanged && hasLs) { try { await redisSet(KEYS.liveStats(d), ls, TTL.liveStats); } catch {} }
@@ -1391,7 +1463,7 @@ export async function runLive(_payload = {}) {
         status: m.fixture.status,
         goals: m.goals,
         score: m.score,
-        corners: d?.corners?.total > 0 ? d.corners : null,
+        corners: d?.corners?.isReal ? d.corners : null,
         yellowCards: d?.yellowCards || null,
         redCards: d?.redCards || null,
         goalScorers: d?.goalScorers || [],
@@ -1605,7 +1677,7 @@ export async function runLive(_payload = {}) {
       status: m.fixture.status,
       goals: m.goals,
       score: m.score,
-      corners: merged?.corners?.total > 0 ? merged.corners : (details?.corners || null),
+      corners: merged?.corners?.isReal ? merged.corners : (details?.corners?.isReal ? details.corners : null),
       yellowCards: details?.yellowCards || null,
       redCards: details?.redCards || null,
       goalScorers: details?.goalScorers || [],

@@ -59,6 +59,7 @@ const fmtTime = (d, tz) => fmtTimeInTz(d, tz || getUserTz());
 const isLive = (s) => ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(s);
 const isFinished = (s) => ['FT', 'AET', 'PEN', 'AWD', 'WO'].includes(s);
 const isPostponed = (s) => ['PST', 'CANC', 'SUSP', 'ABD'].includes(s);
+const isCoveredCounter = (counter) => counter?.isReal === true || Number(counter?.total || 0) > 0;
 const statusText = (s) => ({
   NS: 'Proximo', '1H': '1T', '2H': '2T', HT: 'Entretiempo',
   FT: 'Final', ET: 'Extra', P: 'Penales', AET: 'Extra', PEN: 'Penales',
@@ -331,9 +332,9 @@ export default function Dashboard() {
             if (existing && FT.includes(existing.status?.short)) {
               next[fid] = {
                 ...existing,
-                corners: fresh.corners?.total > 0 ? fresh.corners : existing.corners,
-                yellowCards: fresh.yellowCards?.total > 0 ? fresh.yellowCards : existing.yellowCards,
-                redCards: fresh.redCards || existing.redCards,
+                corners: isCoveredCounter(fresh.corners) ? fresh.corners : existing.corners,
+                yellowCards: isCoveredCounter(fresh.yellowCards) ? fresh.yellowCards : existing.yellowCards,
+                redCards: isCoveredCounter(fresh.redCards) ? fresh.redCards : existing.redCards,
                 goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : existing.goalScorers,
                 cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : existing.cardEvents,
                 missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : existing.missedPenalties,
@@ -347,13 +348,17 @@ export default function Dashboard() {
               // NO reemplazar en bloque: eso reseteaba los córners que el WS ya
               // avanzó (bug "frontend 0-0 / córner no actualiza"). El poll solo
               // rellena huecos y los córners NUNCA bajan (máximo por-lado).
-              const ph = existing.corners?.home ?? 0, pa = existing.corners?.away ?? 0;
-              const fh = fresh.corners?.home ?? 0, fa = fresh.corners?.away ?? 0;
+              const ph = isCoveredCounter(existing.corners) ? existing.corners.home : 0;
+              const pa = isCoveredCounter(existing.corners) ? existing.corners.away : 0;
+              const fh = isCoveredCounter(fresh.corners) ? fresh.corners.home : 0;
+              const fa = isCoveredCounter(fresh.corners) ? fresh.corners.away : 0;
               const ch = Math.max(ph, fh), ca = Math.max(pa, fa);
               next[fid] = {
                 ...fresh,
                 ...existing, // el WS (existing) gana sobre el snapshot del poll
-                corners: { home: ch, away: ca, total: ch + ca },
+                corners: isCoveredCounter(existing.corners) || isCoveredCounter(fresh.corners)
+                  ? { home: ch, away: ca, total: ch + ca, isReal: true }
+                  : (existing.corners || fresh.corners),
                 goalScorers: existing.goalScorers?.length > 0 ? existing.goalScorers : (fresh.goalScorers || []),
                 cardEvents: existing.cardEvents?.length > 0 ? existing.cardEvents : (fresh.cardEvents || []),
                 missedPenalties: existing.missedPenalties?.length > 0 ? existing.missedPenalties : (fresh.missedPenalties || []),
@@ -410,7 +415,7 @@ export default function Dashboard() {
                 candidate = {
                   ...(existing || {}),
                   ...fresh,
-                  corners: fresh.corners?.total > 0 ? fresh.corners : (existing?.corners || fresh.corners),
+                  corners: isCoveredCounter(fresh.corners) ? fresh.corners : (existing?.corners || fresh.corners),
                   goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : (existing?.goalScorers || []),
                   cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : (existing?.cardEvents || []),
                   missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : (existing?.missedPenalties || []),
@@ -419,9 +424,9 @@ export default function Dashboard() {
                 // Existing is FT — only upgrade stats, never downgrade status
                 candidate = {
                   ...existing,
-                  corners: fresh.corners?.total > 0 ? fresh.corners : existing.corners,
-                  yellowCards: fresh.yellowCards?.total > 0 ? fresh.yellowCards : existing.yellowCards,
-                  redCards: fresh.redCards || existing.redCards,
+                  corners: isCoveredCounter(fresh.corners) ? fresh.corners : existing.corners,
+                  yellowCards: isCoveredCounter(fresh.yellowCards) ? fresh.yellowCards : existing.yellowCards,
+                  redCards: isCoveredCounter(fresh.redCards) ? fresh.redCards : existing.redCards,
                   goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : existing.goalScorers,
                   cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : existing.cardEvents,
                   missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : existing.missedPenalties,
@@ -430,7 +435,7 @@ export default function Dashboard() {
                 candidate = {
                   ...(existing || {}),
                   ...fresh,
-                  corners: fresh.corners?.total > 0 ? fresh.corners : (existing?.corners || fresh.corners),
+                  corners: isCoveredCounter(fresh.corners) ? fresh.corners : (existing?.corners || fresh.corners),
                   goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : (existing?.goalScorers || []),
                   missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : (existing?.missedPenalties || []),
                 };
@@ -1836,7 +1841,7 @@ const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFav
                     <SlotScore value={match.goals.home} className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }} />
 
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
-                      {liveStats?.corners && (
+                      {isCoveredCounter(liveStats?.corners) && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 8, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700, color: '#f1f5f9' }}>
                           <span style={{ color: '#fbbf24' }}>🚩</span>
                           <span>{liveStats.corners.home}</span>
@@ -1845,7 +1850,7 @@ const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFav
                           <span style={{ color: 'rgba(255,255,255,.4)', fontWeight: 400 }}>({liveStats.corners.home + liveStats.corners.away})</span>
                         </div>
                       )}
-                      {liveStats?.yellowCards && (
+                      {isCoveredCounter(liveStats?.yellowCards) && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 8, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700 }}>
                           <span style={{ color: '#fbbf24' }}>🟨{liveStats.yellowCards.home}</span>
                           <span style={{ color: '#ef4444' }}>🟥{liveStats.redCards?.home ?? 0}</span>
@@ -2127,7 +2132,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                       <SlotScore value={match.goals.home} className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }} />
 
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
-                        {liveStats?.corners && (
+                        {isCoveredCounter(liveStats?.corners) && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 8, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700, color: '#f1f5f9' }}>
                             <span style={{ color: '#fbbf24' }}>🚩</span>
                             <span>{liveStats.corners.home}</span>
@@ -2136,7 +2141,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                             <span style={{ color: 'rgba(255,255,255,.4)', fontWeight: 400 }}>({liveStats.corners.home + liveStats.corners.away})</span>
                           </div>
                         )}
-                        {liveStats?.yellowCards && (
+                        {isCoveredCounter(liveStats?.yellowCards) && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 8, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700 }}>
                             <span style={{ color: '#fbbf24' }}>🟨{liveStats.yellowCards.home}</span>
                             <span style={{ color: '#ef4444' }}>🟥{liveStats.redCards?.home ?? 0}</span>
@@ -2467,24 +2472,24 @@ function LiveStatsBar({ stats }) {
   if (!stats) return null;
   const { corners, yellowCards, redCards } = stats;
   // Always render if at least one stat object is present (even 0-0 shows the icon)
-  if (!corners && !yellowCards && !redCards) return null;
+  if (!isCoveredCounter(corners) && !isCoveredCounter(yellowCards) && !isCoveredCounter(redCards)) return null;
 
   return (
     <div className="live-stats-bar">
-      {corners && (
+      {isCoveredCounter(corners) && (
         <span className="ls-item" title="Corners">
           <span className="ls-icon corner-icon">&#9873;</span>
           {corners.home}-{corners.away}
           <span className="ls-total">({corners.total})</span>
         </span>
       )}
-      {yellowCards && (
+      {isCoveredCounter(yellowCards) && (
         <span className="ls-item" title="Tarjetas amarillas">
           <span className="ls-icon yellow-card" />
           {yellowCards.home}-{yellowCards.away}
         </span>
       )}
-      {redCards && (redCards.home > 0 || redCards.away > 0) && (
+      {isCoveredCounter(redCards) && (redCards.home > 0 || redCards.away > 0) && (
         <span className="ls-item" title="Tarjetas rojas">
           <span className="ls-icon red-card" />
           {redCards.home}-{redCards.away}

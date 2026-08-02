@@ -9,6 +9,8 @@ const LiveStatsContext = createContext({
   isPopulated: false,
 });
 
+const isCoveredCounter = (counter) => counter?.isReal === true || Number(counter?.total || 0) > 0;
+
 export function useLiveStats() {
   return useContext(LiveStatsContext);
 }
@@ -32,9 +34,9 @@ export default function LiveStatsProvider({ children }) {
           goals: m.goals,
           score: m.score,
           elapsed: m.status?.elapsed,
-          corners: m.corners?.total > 0 ? m.corners : (existing.corners || m.corners),
-          yellowCards: m.yellowCards?.total > 0 ? m.yellowCards : (existing.yellowCards || m.yellowCards),
-          redCards: m.redCards?.total > 0 ? m.redCards : (existing.redCards || m.redCards),
+          corners: isCoveredCounter(m.corners) ? m.corners : (existing.corners || m.corners),
+          yellowCards: isCoveredCounter(m.yellowCards) ? m.yellowCards : (existing.yellowCards || m.yellowCards),
+          redCards: isCoveredCounter(m.redCards) ? m.redCards : (existing.redCards || m.redCards),
           goalScorers: m.goalScorers?.length > 0 ? m.goalScorers : (existing.goalScorers || []),
           missedPenalties: m.missedPenalties?.length > 0 ? m.missedPenalties : (existing.missedPenalties || []),
         };

@@ -6,6 +6,13 @@ import { userHasActivePlan } from '../../../lib/require-active-plan';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { filterFixturesByLocalDate } from '../../../lib/timezone';
 import { esTeam } from '../../../lib/team-names-es';
+import footballResultSnapshot from '../../../lib/football-result-snapshot.cjs';
+
+const {
+  buildDurableResultSnapshot,
+  mergeDurableResultWithLive,
+  mergeFixtureWithDurableResult,
+} = footballResultSnapshot;
 
 const FT_STATS_FIELDS = ['corners', 'yellowCards', 'redCards', 'goalScorers', 'cardEvents', 'missedPenalties'];
 
@@ -240,6 +247,7 @@ export async function GET(request) {
 
     const [
       liveDataResults,
+      durableResultsResponse,
       batchFlag,
       session,
       cachedAnalysisData,
@@ -248,6 +256,12 @@ export async function GET(request) {
       quota,
     ] = await Promise.all([
       fixtures.length > 0 ? Promise.all(liveStatsKeys.map(k => redisGet(k))) : [],
+      fixtureIds.length > 0
+        ? supabaseAdmin
+            .from('match_results')
+            .select('fixture_id,status,goals,score,corners,yellow_cards,red_cards,goal_scorers,card_events,created_at')
+            .in('fixture_id', fixtureIds)
+        : Promise.resolve({ data: [] }),
       fixtures.length > 0 ? redisGet(`dailyBatch:${date}`) : null,
       Promise.resolve(user),
       fixtureIds.length > 0 ? redisGet(analysisRedisKey) : null,
@@ -264,12 +278,26 @@ export async function GET(request) {
       }
     }
 
+    // Resultado durable: el cierre postpartido vive en match_results y debe ser
+    // la autoridad aunque fixtures:{date} siga en NS o el live Redis haya
+    // expirado. Antes esta tabla se alimentaba correctamente, pero la API web
+    // jamás la leía: 25 partidos FT de la madrugada seguían apareciendo NS.
+    const durableSnapshots = {};
+    for (const row of (durableResultsResponse?.data || [])) {
+      const snapshot = buildDurableResultSnapshot(row);
+      if (snapshot) durableSnapshots[row.fixture_id] = snapshot;
+    }
+
     // ===== PHASE 3: Process live stats =====
-    let initialLiveStats = {};
+    let initialLiveStats = { ...durableSnapshots };
 
     if (fixtures.length > 0) {
       if (liveData && typeof liveData === 'object') {
-        initialLiveStats = liveData;
+        for (const [fid, live] of Object.entries(liveData)) {
+          initialLiveStats[fid] = durableSnapshots[fid]
+            ? mergeDurableResultWithLive(durableSnapshots[fid], live)
+            : live;
+        }
 
         const liveInCache = fixtures.filter(f => {
           const live = liveData[f.fixture.id];
@@ -289,6 +317,13 @@ export async function GET(request) {
           });
         }
       }
+
+      // Status/marcador final durable gana sobre cualquier fixture cacheado.
+      fixtures = fixtures.map((fixture) =>
+        mergeFixtureWithDurableResult(
+          fixture,
+          durableSnapshots[fixture.fixture?.id],
+        ));
 
       // Fix stale live stats: if fixture is FT but live entry still shows live status,
       // correct the status so the card doesn't stay stuck as "in play"
@@ -333,8 +368,11 @@ export async function GET(request) {
         const s = initialLiveStats[f.fixture.id];
         if (!s) return true;
         const hasRealStats =
+          (s.corners?.isReal === true) ||
           (s.corners?.total > 0) ||
+          (s.yellowCards?.isReal === true) ||
           (s.yellowCards?.total > 0) ||
+          (s.redCards?.isReal === true) ||
           (s.redCards?.home > 0 || s.redCards?.away > 0) ||
           (s.cardEvents?.length > 0) ||
           (s.goalScorers?.length > 0);
@@ -391,7 +429,7 @@ export async function GET(request) {
 
             if (existingIsFT || fixtureIsFT) {
               // Keep the FT status/goals/score, only take stats data (corners, cards, scorers)
-              initialLiveStats[fid] = {
+              const legacyMerged = {
                 ...(existing || {}),
                 corners: stats.corners || existing?.corners,
                 yellowCards: stats.yellowCards || existing?.yellowCards,
@@ -406,6 +444,9 @@ export async function GET(request) {
                 goals: existing?.goals || stats.goals || f.goals,
                 score: existing?.score || stats.score || f.score,
               };
+              initialLiveStats[fid] = durableSnapshots[fid]
+                ? mergeDurableResultWithLive(durableSnapshots[fid], stats)
+                : legacyMerged;
             } else {
               // Non-finished: use stats as-is (live match getting live data)
               initialLiveStats[fid] = stats;

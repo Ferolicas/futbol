@@ -9,6 +9,12 @@ import { getCurrentUser } from '../../../../lib/auth-pg';
 import { userHasActivePlan } from '../../../../lib/require-active-plan';
 import { jsonError } from '../../../../lib/api-error';
 import { redisRateLimit } from '../../../../lib/ratelimit-redis';
+import footballResultSnapshot from '../../../../lib/football-result-snapshot.cjs';
+
+const {
+  buildDurableResultSnapshot,
+  mergeDurableResultWithLive,
+} = footballResultSnapshot;
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -64,17 +70,38 @@ export async function GET(request, { params }) {
       return Response.json({ error: 'Match not analyzed yet', notFound: true }, { status: 404 });
     }
 
-    // Merge latest live status from Redis
+    // match_results es la autoridad durable de un partido cerrado. Redis live
+    // expira y match_analysis puede no tener estadísticas en ligas de cobertura
+    // limitada; el marcador/goles disponibles nunca deben desaparecer por eso.
+    let durableResult = null;
+    try {
+      const { data: resultRow } = await supabaseAdmin
+        .from('match_results')
+        .select('fixture_id,status,goals,score,corners,yellow_cards,red_cards,goal_scorers,card_events,created_at')
+        .eq('fixture_id', Number(id))
+        .maybeSingle();
+      durableResult = buildDurableResultSnapshot(resultRow);
+    } catch (e) {
+      console.error('[match:GET] durable result lookup failed:', e.message);
+    }
+
+    // Merge latest live status from Redis. Si existe cierre durable, este gana
+    // en status/marcador y Redis solo puede aportar campos reales adicionales.
     const today = clientDate || new Date().toISOString().split('T')[0];
     let statusUpdated = false;
+    let resultStats = durableResult;
 
     try {
       const liveData = await redisGet(KEYS.liveStats(today));
       if (liveData?.[id]) {
         const live = liveData[id];
-        if (live.status?.short && live.status.short !== analysis.status?.short) {
-          analysis.status = live.status;
-          analysis.goals = live.goals || analysis.goals;
+        resultStats = durableResult
+          ? mergeDurableResultWithLive(durableResult, live)
+          : live;
+        if (resultStats.status?.short && resultStats.status.short !== analysis.status?.short) {
+          analysis.status = resultStats.status;
+          analysis.goals = resultStats.goals || analysis.goals;
+          analysis.score = resultStats.score || analysis.score;
           statusUpdated = true;
         }
       }
@@ -83,9 +110,15 @@ export async function GET(request, { params }) {
     if (!statusUpdated) {
       try {
         const stats = await redisGet(KEYS.fixtureStats(id));
-        if (stats?.status?.short && stats.status.short !== analysis.status?.short) {
-          analysis.status = stats.status;
-          analysis.goals = stats.goals || analysis.goals;
+        if (stats) {
+          resultStats = durableResult
+            ? mergeDurableResultWithLive(durableResult, stats)
+            : stats;
+        }
+        if (resultStats?.status?.short && resultStats.status.short !== analysis.status?.short) {
+          analysis.status = resultStats.status;
+          analysis.goals = resultStats.goals || analysis.goals;
+          analysis.score = resultStats.score || analysis.score;
           statusUpdated = true;
         }
       } catch {}
@@ -104,8 +137,19 @@ export async function GET(request, { params }) {
       } catch {}
     }
 
+    // Última palabra: un cache NS/live nunca puede degradar un resultado final
+    // confirmado en PostgreSQL.
+    if (durableResult) {
+      analysis.status = durableResult.status;
+      analysis.goals = durableResult.goals || analysis.goals;
+      analysis.score = durableResult.score || analysis.score;
+      resultStats = resultStats
+        ? mergeDurableResultWithLive(durableResult, resultStats)
+        : durableResult;
+    }
+
     const quota = await getQuota();
-    return Response.json({ analysis, quota });
+    return Response.json({ analysis, resultStats, quota });
   } catch (error) {
     console.error('[match:GET]', error.message);
     return jsonError(error);
@@ -183,7 +227,25 @@ export async function POST(request, { params }) {
         return Response.json({ stats: cached, fromCache: true });
       }
 
-      // L2: Check Supabase (permanent storage)
+      // L2: resultado final durable. Incluso si la liga solo entregó goles o
+      // tarjetas, lo disponible se devuelve y no se vuelve a gastar cuota
+      // intentando fabricar mercados que el proveedor no cubre.
+      try {
+        const { data: resultRow } = await supabaseAdmin
+          .from('match_results')
+          .select('fixture_id,status,goals,score,corners,yellow_cards,red_cards,goal_scorers,card_events,created_at')
+          .eq('fixture_id', Number(id))
+          .maybeSingle();
+        const resultStats = buildDurableResultSnapshot(resultRow);
+        if (resultStats) {
+          redisSet(KEYS.fixtureStats(id), resultStats, TTL.yesterday).catch(() => {});
+          return Response.json({ stats: resultStats, fromCache: true });
+        }
+      } catch (e) {
+        console.error(`[match:refresh-stats] durable result ${id}:`, e.message);
+      }
+
+      // L3: almacenamiento permanente del análisis (compatibilidad histórica)
       try {
         const { data: row } = await supabaseAdmin
           .from('match_analysis')
@@ -199,7 +261,7 @@ export async function POST(request, { params }) {
         }
       } catch {}
 
-      // L3: Fetch from API
+      // L4: Fetch from API
       const stats = await fetchMatchStats(id);
       if (!stats) return Response.json({ error: 'Match not found' }, { status: 404 });
 

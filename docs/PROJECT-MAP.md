@@ -185,6 +185,11 @@ cinco minutos porque el reinicio real depende de la cuenta. Los flujos críticos
 20.000 llamadas reservadas; análisis y enriquecidos nunca pueden consumir esa
 reserva. Si falta el calendario del día actual, el worker live ignora el
 smart-skip histórico y consulta el feed en modo fail-open cada 20 segundos.
+El cierre de resultados corre incrementalmente cada 15 minutos y solo consulta
+fixtures cuyo final estimado ya pasó; no vuelve a pedir partidos futuros. Cada
+campo postpartido conserva cobertura independiente: goles siempre que existan,
+y córners/tarjetas solo cuando el proveedor los entregó (`null` significa sin
+cobertura y jamás se convierte en cero).
 `scripts/audit-football-model-data.js` verifica de punta a punta
 crudo, ledger, hechos, dimensiones, marcadores y contadores de jugador; código
 de salida 2 significa una invariancia crítica rota.
@@ -250,6 +255,12 @@ como fuente primaria; si no recibe eventos durante 50 s, su watchdog consulta
 solo el snapshot Redis mediante `GET /api/refresh-live`, con una única petición
 en vuelo y separación mínima de 20 s. La revalidación completa de fixtures queda
 como respaldo cada 5 min únicamente para hoy y con el WebSocket caído.
+Cada tres minutos el worker reconcilia además fixtures FT y NS cuyo final
+estimado ya venció. Los consulta en lotes de hasta 20, corrige marcador/status y
+estadísticas reales en Redis, y distingue FT, en vivo, aplazado y cancelado sin
+inventar un cierre. Hasta 500 vencidos se recuperan en un solo ciclo mediante
+lotes; un cursor circular evita que, por encima de eso, un fixture sin respuesta
+bloquee a los siguientes.
 
 Las notificaciones Web Push de fútbol se agrupan por partido y tick. Solo
 publican goles, goles anulados, córners, tarjetas, penaltis, remates, remates a
@@ -278,9 +289,14 @@ pero comparte encabezado, controles, tabs, espaciado, color y comportamiento de
 tarjetas. Los datos operativos de proveedor/cuota no aparecen en la experiencia
 del cliente.
 
-`GET /api/fixtures` usa `MGET` para documentos Redis, una consulta PostgreSQL
-por lote para los `live_stats` ausentes y filtra análisis, cuotas, standings y
-snapshots live a los IDs de la jornada antes de serializar la respuesta.
+`GET /api/fixtures` usa `MGET` para documentos Redis y consultas PostgreSQL por
+lote. Cruza siempre los IDs visibles con `match_results`: el resultado durable
+FT gana sobre un `fixtures:{date}`/live Redis vencido que aún diga NS, por lo que
+marcador y mercados disponibles sobreviven a expiraciones o caídas del feed.
+Luego completa `live_stats` ausentes y filtra análisis, cuotas, standings y
+snapshots a los IDs de la jornada antes de serializar la respuesta. El detalle
+`GET/POST /api/match/[id]` aplica la misma autoridad durable y no vuelve a gastar
+cuota buscando mercados que esa competición no cubrió.
 
 ## Dependencias compartidas
 

@@ -39,6 +39,7 @@ const statusLabel = (s) => ({
 }[s] || s);
 const isLiveStatus = (s) => ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(s);
 const isClockRunning = (s) => ['1H', '2H', 'ET', 'LIVE'].includes(s);
+const isCoveredCounter = (counter) => counter?.isReal === true || Number(counter?.total || 0) > 0;
 
 function getProbColor(v) {
   if (v >= 70) return 'hi';
@@ -132,6 +133,9 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
       setAnalysis(data.analysis);
       setProbabilities(data.analysis.calculatedProbabilities || null);
       setCombinada(data.analysis.combinada || null);
+      if (data.resultStats) {
+        setLiveStats(prev => ({ ...prev, [fixtureId]: data.resultStats }));
+      }
       // Refresh the hand-off cache so a quick back-and-forth uses the fresher data
       setAnalysisCache(fixtureId, { analysis: data.analysis });
     } catch (e) {
@@ -139,7 +143,7 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [fixtureId]);
+  }, [fixtureId, setLiveStats]);
 
   // On mount: if we hydrated from the hand-off cache, fetch silently in the
   // background so the user sees instant content. Otherwise fetch with spinner.
@@ -150,6 +154,10 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
   useEffect(() => {
     if (!analysis) return;
     const existing = allLiveStats[fixtureId];
+    // Un cierre durable también es una respuesta completa cuando el proveedor
+    // solo cubre marcador/goles. No repetir peticiones buscando mercados que no
+    // existen para esa competición.
+    if (existing?.realFinal) return;
     if (existing && (existing.corners || existing.yellowCards || existing.goalScorers?.length || existing.cardEvents?.length)) return;
 
     const loadStats = async () => {
@@ -502,7 +510,7 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
 
                           {/* Stats: corners + tarjetas */}
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                            {liveStats?.corners && (
+                            {isCoveredCounter(liveStats?.corners) && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 8, background: 'rgba(255,255,255,.1)', fontSize: '.8rem', fontWeight: 700 }}>
                                 <Flag size={14} style={{ color: '#fbbf24', flexShrink: 0 }} />
                                 <span>{liveStats.corners.home}</span>
@@ -511,7 +519,7 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
                                 <span style={{  color: 'white', fontWeight: 400 }}>({liveStats.corners.home + liveStats.corners.away})</span>
                               </div>
                             )}
-                            {liveStats?.yellowCards && (
+                            {isCoveredCounter(liveStats?.yellowCards) && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 8, background: 'rgba(255,255,255,.1)', fontSize: '.8rem', fontWeight: 700 }}>
                                 <span style={{ color: '#fbbf24' }}>🟨{liveStats.yellowCards.home}</span>
                                 <span style={{ color: '#ef4444' }}>🟥{liveStats.redCards?.home ?? 0}</span>
