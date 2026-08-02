@@ -397,7 +397,10 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   un 429 temporal pausa el host, pero nunca abre el circuito de cuota diaria.
   Las cuotas deportivas nunca se usan como probabilidad del modelo.
 - 2026-08-02: `FOOTBALL_CACHE_VERSION=21` exige fiabilidad ≥90% para publicar
-  opciones sin tocar las estadísticas, y `MULTISPORT_CACHE_VERSION=14` deja
+  opciones sin tocar las estadísticas y mantiene lectura compatible de análisis
+  v20, porque sus cálculos son idénticos; la frontera pública sanea siempre las
+  opciones sin volver a llamar a la API ni ocultar estadísticas durante el
+  despliegue. `MULTISPORT_CACHE_VERSION=14` deja
   Baseball solo en MLB con baremo público 70%. Las decisiones siguen usando
   frecuencias ponderadas reales; el máximo 95% vive solo en presentación y los
   diagnósticos nunca cambian ni bloquean una frecuencia calculada.
