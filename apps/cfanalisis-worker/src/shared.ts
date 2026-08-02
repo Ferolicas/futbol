@@ -75,6 +75,8 @@ const [
   import(LIB + 'model-player-markets.js'),
   import(LIB + 'model-probabilities.js'),
   import(SCRIPTS + 'train-football-empirical-engine.js'),
+  // Deploy marker: Bet365 market catalog v13. These runtime imports live
+  // outside the TypeScript tree, so this file must trigger a worker reload.
   import(LIB + 'multisport-analysis.js'),
   import(LIB + 'multisport-providers.js'),
   import(SCRIPTS + 'train-multisport-empirical-engine.js'),

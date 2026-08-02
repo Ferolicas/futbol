@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Image from 'next/image';
@@ -12,6 +12,10 @@ const cap = (v) => {
   if (value >= 95) return 95;
   return Math.floor((value + 1e-9) * 100) / 100;
 };
+const isBet365Market = (market) => String(market?.bookmaker || '').normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '') === 'bet365'
+  && Number(market?.odd) >= 1.20
+  && Number(market?.rawProbability ?? market?.probability) >= 80;
 
 export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClose }) {
   const params = useParams();
@@ -82,16 +86,14 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
   const a = data?.analysis;
   const result = data?.result;
   const probs = a?.probabilities;
-  const ml = probs?.moneyline;
-  const totals = probs?.totals;
-  const runLine = probs?.runLine;
-  const f5 = probs?.f5;
-  const teamTotals = probs?.teamTotals;
-  const btts = probs?.btts;
   const expected = probs?.expected;
   const combinada = a?.combinada;
   const dq = a?.data_quality;
-  const bestOdds = a?.best_odds;
+  const markets = (Array.isArray(combinada?.selectable) ? combinada.selectable : [])
+    .filter(isBet365Market)
+    .sort((left, right) => Number(right.rawProbability ?? right.probability) - Number(left.rawProbability ?? left.probability)
+      || Number(right.odd) - Number(left.odd));
+  const highlighted = (Array.isArray(combinada?.selections) ? combinada.selections : []).filter(isBet365Market);
 
   return (
     <div className={`baseball-analysis-page ${embedded ? 'is-embedded' : ''}`} style={{ maxWidth: 1100, margin: '0 auto', padding: '0 16px 60px', color: '#e2e8f0' }}>
@@ -123,7 +125,7 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
         {dq && (
           <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <Badge label={`Calidad: ${dq.score}%`} color={dq.score >= 75 ? '#10b981' : dq.score >= 50 ? '#f59e0b' : '#ef4444'} />
-            {dq.hasOdds && <Badge label="Odds" color="#22d3ee" />}
+            {dq.hasOdds && <Badge label="Cuotas Bet365" color="#22d3ee" />}
             {dq.hasH2H && <Badge label="H2H" color="#8b5cf6" />}
             {dq.hasHomeStats && dq.hasAwayStats && <Badge label="Stats" color="#10b981" />}
             {dq.hasPitcherMatchup && <Badge label="Pitcher" color="#f59e0b" />}
@@ -132,22 +134,22 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
         )}
       </motion.div>
 
-      {/* Player markets — bloque F. Si players==null, sección oculta. */}
-      {probs?.players && <PlayerMarketsSection players={probs.players} />}
-
       {/* Combinada highlight */}
-      {combinada && combinada.combinedProbability >= 60 && (
-        <Section title="Combinada del partido" accent="#5ee6b1">
+      {highlighted.length > 0 && combinada.combinedProbability >= 60 && (
+        <Section title="Combinada Bet365 del partido" accent="#5ee6b1">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {combinada.selections.map((s, i) => (
+            {highlighted.map((s, i) => (
               <div key={i} style={{
-                display: 'flex', alignItems: 'center', gap: 10,
+                display: 'grid', gridTemplateColumns: '1fr auto auto', alignItems: 'center', gap: 10,
                 padding: '10px 12px', borderRadius: 8,
                 background: 'rgba(94,230,177,0.06)',
               }}>
-                <span style={{ fontWeight: 700, fontSize: '.9rem', flex: 1 }}>{displayBettingText(`${s.market}: ${s.pick}`)}</span>
+                <span style={{ minWidth: 0 }}>
+                  <small style={{ display: 'block', color: '#94a3b8', marginBottom: 2 }}>{s.marketLabel || s.market}</small>
+                  <strong style={{ fontSize: '.9rem', lineHeight: 1.35 }}>{displayBettingText(s.pick || s.name)}</strong>
+                </span>
                 <span style={{ color: '#10b981', fontWeight: 700 }}>{cap(s.rawProbability ?? s.probability)}%</span>
-                {s.odd && <span style={{ color: '#22d3ee', fontFamily: 'JetBrains Mono, monospace' }}>@{s.odd}</span>}
+                <span style={{ color: '#f5e400', fontFamily: 'JetBrains Mono, monospace' }}>@{Number(s.odd).toFixed(2)}</span>
               </div>
             ))}
             <div style={{
@@ -166,105 +168,41 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
         </Section>
       )}
 
-      {/* Moneyline */}
-      {ml && (
-        <Section title="Moneyline (Ganador)">
-          <ProbBar leftLabel={a.home_team} leftPct={cap(ml.home)} rightLabel={a.away_team} rightPct={cap(ml.away)}
-            leftOdd={bestOdds?.moneyline?.home} rightOdd={bestOdds?.moneyline?.away} />
-        </Section>
-      )}
-
-      {/* Totals */}
-      {totals?.lines && (
-        <Section title="Total de carreras (Más de / Menos de)">
+      <Section title="Opciones disponibles en Bet365">
+        {markets.length > 0 ? (
           <div style={{ display: 'grid', gap: 8 }}>
-            {Object.entries(totals.lines).map(([line, val]) => {
-              const isBest = Number(line) === totals.bestLine;
-              return (
-                <div key={line} style={{
-                  display: 'grid', gridTemplateColumns: '60px 1fr', gap: 10, alignItems: 'center',
-                  padding: '8px 10px', borderRadius: 8,
-                  background: isBest ? 'rgba(94,230,177,0.08)' : 'rgba(255,255,255,0.03)',
-                  border: isBest ? '1px solid rgba(94,230,177,0.3)' : '1px solid rgba(255,255,255,0.05)',
-                }}>
-                  <div style={{ fontWeight: 700, color: isBest ? '#5ee6b1' : '#cbd5e1' }}>Línea {line}</div>
-                  <ProbBar leftLabel={`Más de ${line}`} leftPct={val.over} rightLabel={`Menos de ${line}`} rightPct={val.under}
-                    leftOdd={bestOdds?.totals?.[line]?.over?.odd} rightOdd={bestOdds?.totals?.[line]?.under?.odd} compact />
+            {markets.map((market) => (
+              <article key={market.id} style={{
+                display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center',
+                padding: '11px 12px', borderRadius: 9, background: 'rgba(255,255,255,.03)',
+                border: '1px solid rgba(94,230,177,.12)',
+              }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3, flexWrap: 'wrap' }}>
+                    <span style={{ padding: '2px 6px', borderRadius: 999, background: '#f5e400', color: '#10241e', fontSize: '.58rem', fontWeight: 900 }}>BET365</span>
+                    <small style={{ color: '#94a3b8' }}>{market.marketLabel || market.market}</small>
+                  </div>
+                  <strong style={{ fontSize: '.88rem', lineHeight: 1.35 }}>{displayBettingText(market.name)}</strong>
                 </div>
-              );
-            })}
-          </div>
-          {expected && (
-            <div style={{ marginTop: 10, fontSize: '.78rem', color: '#94a3b8' }}>
-              Carreras esperadas: <strong style={{ color: '#5ee6b1' }}>{expected.lambdaHome} – {expected.lambdaAway}</strong> (total {expected.totalRuns})
-            </div>
-          )}
-        </Section>
-      )}
-
-      {/* Run Line */}
-      {runLine && (
-        <Section title="Run Line ±1.5">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <RunLineRow label={`${a.home_team} -1.5`} pct={runLine.home_minus_1_5} />
-            <RunLineRow label={`${a.away_team} +1.5`} pct={runLine.away_plus_1_5} />
-            <RunLineRow label={`${a.away_team} -1.5`} pct={runLine.away_minus_1_5} />
-            <RunLineRow label={`${a.home_team} +1.5`} pct={runLine.home_plus_1_5} />
-          </div>
-        </Section>
-      )}
-
-      {/* F5 */}
-      {f5 && (
-        <Section title="First 5 Innings (F5)">
-          {f5.moneyline && (
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: '.8rem', color: '#94a3b8', marginBottom: 6, fontWeight: 700 }}>Ganador F5</div>
-              <ProbBar leftLabel={a.home_team} leftPct={cap(f5.moneyline.home)} rightLabel={a.away_team} rightPct={cap(f5.moneyline.away)} compact />
-              {f5.moneyline.tie != null && (
-                <div style={{ marginTop: 4, fontSize: '.75rem', color: '#94a3b8' }}>
-                  Empate F5: <strong>{f5.moneyline.tie}%</strong>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: 'JetBrains Mono, monospace' }}>
+                  <strong style={{ color: '#5ee6b1' }}>{cap(market.rawProbability ?? market.probability)}%</strong>
+                  <strong style={{ color: '#f5e400' }}>@{Number(market.odd).toFixed(2)}</strong>
                 </div>
-              )}
-            </div>
-          )}
-          {f5.totals && (
-            <div>
-              <div style={{ fontSize: '.8rem', color: '#94a3b8', marginBottom: 6, fontWeight: 700 }}>Total F5</div>
-              <div style={{ display: 'grid', gap: 6 }}>
-                {Object.entries(f5.totals).map(([line, val]) => (
-                  <ProbBar key={line} leftLabel={`Más de ${line}`} leftPct={val.over} rightLabel={`Menos de ${line}`} rightPct={val.under} compact />
-                ))}
-              </div>
-            </div>
-          )}
-        </Section>
-      )}
-
-      {/* Team Totals */}
-      {teamTotals && (
-        <Section title="Total por equipo">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <div>
-              <div style={{ fontSize: '.85rem', fontWeight: 700, marginBottom: 6 }}>{a.home_team}</div>
-              {Object.entries(teamTotals.home).map(([line, val]) => (
-                <ProbBar key={line} leftLabel={`Más de ${line}`} leftPct={val.over} rightLabel={`Menos de ${line}`} rightPct={val.under} compact />
-              ))}
-            </div>
-            <div>
-              <div style={{ fontSize: '.85rem', fontWeight: 700, marginBottom: 6 }}>{a.away_team}</div>
-              {Object.entries(teamTotals.away).map(([line, val]) => (
-                <ProbBar key={line} leftLabel={`Más de ${line}`} leftPct={val.over} rightLabel={`Menos de ${line}`} rightPct={val.under} compact />
-              ))}
-            </div>
+              </article>
+            ))}
           </div>
-        </Section>
-      )}
+        ) : (
+          <div style={{ color: '#94a3b8', fontSize: '.84rem', lineHeight: 1.5 }}>
+            No se publica ninguna recomendación: Bet365 no ofrece ahora una línea compatible con probabilidad mínima del 80% y cuota mínima de 1,20.
+          </div>
+        )}
+      </Section>
 
-      {/* BTTS */}
-      {btts && (
-        <Section title="Ambos equipos anotan 1+ carrera">
-          <ProbBar leftLabel="Sí" leftPct={btts.yes} rightLabel="No" rightPct={btts.no} />
+      {expected && (
+        <Section title="Resumen estadístico">
+          <div style={{ color: '#94a3b8', fontSize: '.82rem', lineHeight: 1.6 }}>
+            Media ponderada en antecedentes comparables: <strong style={{ color: '#5ee6b1' }}>{expected.lambdaHome} carreras de {a.home_team} y {expected.lambdaAway} de {a.away_team}</strong>; total medio {expected.totalRuns}.
+          </div>
         </Section>
       )}
 
@@ -337,44 +275,6 @@ function Section({ title, children, accent }) {
   );
 }
 
-function ProbBar({ leftLabel, leftPct, rightLabel, rightPct, leftOdd, rightOdd, compact = false }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 3 : 6 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: compact ? '.78rem' : '.88rem' }}>
-        <span style={{ fontWeight: 600 }}>
-          {leftLabel}
-          {leftOdd && <span style={{ marginLeft: 6, color: '#22d3ee', fontFamily: 'JetBrains Mono, monospace', fontSize: '.78em' }}>@{leftOdd}</span>}
-        </span>
-        <span style={{ fontWeight: 600, textAlign: 'right' }}>
-          {rightOdd && <span style={{ marginRight: 6, color: '#22d3ee', fontFamily: 'JetBrains Mono, monospace', fontSize: '.78em' }}>@{rightOdd}</span>}
-          {rightLabel}
-        </span>
-      </div>
-      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        <span style={{ color: '#10b981', fontWeight: 800, minWidth: 40, fontSize: compact ? '.78rem' : '.88rem' }}>{leftPct}%</span>
-        <div style={{ flex: 1, height: compact ? 6 : 10, borderRadius: 4, overflow: 'hidden', display: 'flex', background: 'rgba(255,255,255,0.04)' }}>
-          <div style={{ width: `${leftPct}%`, background: 'linear-gradient(90deg,#10b981,#059669)' }} />
-          <div style={{ width: `${rightPct}%`, background: 'linear-gradient(90deg,#ef4444,#dc2626)' }} />
-        </div>
-        <span style={{ color: '#ef4444', fontWeight: 800, minWidth: 40, textAlign: 'right', fontSize: compact ? '.78rem' : '.88rem' }}>{rightPct}%</span>
-      </div>
-    </div>
-  );
-}
-
-function RunLineRow({ label, pct }) {
-  return (
-    <div style={{
-      padding: '10px 12px', borderRadius: 8,
-      background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
-      display: 'flex', alignItems: 'center', gap: 10,
-    }}>
-      <span style={{ flex: 1, fontSize: '.85rem', fontWeight: 600 }}>{label}</span>
-      <span style={{ fontWeight: 800, color: pct >= 60 ? '#10b981' : pct <= 40 ? '#ef4444' : '#cbd5e1' }}>{pct}%</span>
-    </div>
-  );
-}
-
 function TeamHeader({ name, score, side }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
@@ -398,60 +298,6 @@ function Badge({ label, color }) {
   );
 }
 
-// ── Player markets section — bloque F ──
-// Se renderiza solo si probs.players != null (cuando se conecte MLB Stats API).
-function PlayerMarketsSection({ players }) {
-  const groups = [
-    { key: 'strikeouts', title: 'Ponches por pitcher',     emoji: 'K', color: '#a78bfa', unit: 'K' },
-    { key: 'hits',       title: 'Hits por bateador',       emoji: 'H', color: '#f59e0b', unit: 'hits' },
-    { key: 'totalBases', title: 'Bases totales',            emoji: 'TB', color: '#22d3ee', unit: 'bases' },
-    { key: 'rbis',       title: 'Carreras impulsadas (RBI)', emoji: 'R', color: '#10b981', unit: 'RBI' },
-    { key: 'homeRuns',   title: 'Home runs',                emoji: 'HR', color: '#ef4444', unit: 'HR' },
-  ].filter(g => Array.isArray(players[g.key]) && players[g.key].length > 0);
-
-  if (groups.length === 0) return null;
-
-  return (
-    <Section title="Mercados de jugador" accent="#a78bfa">
-      {groups.map(g => (
-        <div key={g.key} style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: '.85rem', color: g.color, fontWeight: 700, marginBottom: 8 }}>{g.title}</div>
-          <div style={{ display: 'grid', gap: 6 }}>
-            {players[g.key].slice(0, 6).map((pl, i) => (
-              <div key={pl.id || i} style={{
-                padding: '10px 12px', borderRadius: 8,
-                background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                  <span style={{ fontWeight: 700, fontSize: '.9rem', flex: 1 }}>{pl.name}</span>
-                  <span style={{ fontSize: '.7rem', color: '#94a3b8' }}>{pl.teamName}</span>
-                  <span style={{
-                    fontSize: '.75rem', color: g.color, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700,
-                  }}>{pl.total ?? 0} {g.unit} hist.</span>
-                </div>
-                {pl.lineProbs && Object.keys(pl.lineProbs).length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {Object.entries(pl.lineProbs).map(([line, prob]) => (
-                      <span key={line} style={{
-                        padding: '3px 8px', borderRadius: 6, fontSize: '.72rem', fontWeight: 700,
-                        background: prob >= 70 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.1)',
-                        border: `1px solid ${prob >= 70 ? '#10b981' : 'rgba(245,158,11,0.25)'}`,
-                        color: prob >= 70 ? '#10b981' : '#f59e0b',
-                      }}>
-                        Más de {line}: {prob}%
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </Section>
-  );
-}
-
 const navBtnPlain = {
   padding: '6px 12px', borderRadius: 8,
   background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
@@ -459,4 +305,3 @@ const navBtnPlain = {
 };
 const backBtn = { ...navBtnPlain };
 const primaryBtn = { ...navBtnPlain, background: 'rgba(94,230,177,0.15)', border: '1px solid #5ee6b1', color: '#5ee6b1' };
-const secondaryBtn = { ...navBtnPlain, background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.3)', color: '#22d3ee' };

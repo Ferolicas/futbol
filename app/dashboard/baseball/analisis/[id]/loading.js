@@ -1,5 +1,5 @@
 // Skeleton del análisis individual de baseball — replica el layout real
-// (header + score box + secciones de Moneyline/Totals/RunLine/F5 etc).
+// (header + marcador + catálogo apostable Bet365 + resumen estadístico).
 export default function BaseballAnalysisLoading() {
   return (
     <div className="bb-analisis-skel" aria-busy="true" aria-live="polite">

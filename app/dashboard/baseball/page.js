@@ -64,6 +64,16 @@ const cap = (v) => {
   if (value >= 95) return 95;
   return Math.floor((value + 1e-9) * 100) / 100;
 };
+const normalizeBookmaker = (value) => String(value || '').normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const bet365Markets = (analysis) => (Array.isArray(analysis?.combinada?.selectable)
+  ? analysis.combinada.selectable
+  : [])
+  .filter((market) => normalizeBookmaker(market.bookmaker) === 'bet365'
+    && Number(market.odd) >= 1.20
+    && Number(market.rawProbability ?? market.probability) >= 80)
+  .sort((a, b) => Number(b.rawProbability ?? b.probability) - Number(a.rawProbability ?? a.probability)
+    || Number(b.odd) - Number(a.odd));
 const isLive = (s) => ['LIVE', 'IN', 'IN1', 'IN2', 'IN3', 'IN4', 'IN5', 'IN6', 'IN7', 'IN8', 'IN9'].includes(s);
 const isFinished = (s) => ['FT', 'AOT'].includes(s);
 const isPostponed = (s) => ['POST', 'CANC', 'INTR', 'ABD'].includes(s);
@@ -701,52 +711,6 @@ function ScoreCenter({ live, hasScore, homeScore, awayScore, statusLabel, time, 
   );
 }
 
-// Recomendaciones de JUGADOR (player props) con foto oficial MLB.
-// players = probabilities.players: { strikeouts:[{id,name,teamName,lineProbs}], hits, homeRuns, totalBases, rbis }
-function PlayerPropsBlock({ players }) {
-  if (!players || Object.keys(players).length === 0) {
-    return <div style={{ fontSize: '.74rem', color: '#94a3b8', padding: '4px 2px' }}>Sin recomendaciones de jugador todavía (el lineup de bateadores lo publica MLB unas horas antes; los ponches del pitcher aparecen tras el análisis).</div>;
-  }
-  // Solo recomendaciones con probabilidad ≥ 80% (todas las categorías).
-  const MIN_PROB = 80;
-  const cats = [
-    { key: 'strikeouts', label: 'ponches', emoji: '🔥', minProb: MIN_PROB },
-    { key: 'hits',       label: 'hits',    emoji: '🏏', minProb: MIN_PROB },
-    { key: 'totalBases', label: 'bases totales', emoji: '💥', minProb: MIN_PROB },
-    { key: 'rbis',       label: 'RBI',     emoji: '🏃', minProb: MIN_PROB },
-    { key: 'homeRuns',   label: 'home run', emoji: '⚾', minProb: MIN_PROB },
-  ];
-  // Mejor línea cuya probabilidad sea ≥ minProb. SIN fallback: si ninguna línea
-  // alcanza el umbral, no se recomienda (devuelve null) → solo se muestran ≥80%.
-  const bestLine = (lineProbs, minProb) => {
-    const entries = Object.entries(lineProbs || {}).map(([l, p]) => [parseFloat(l), p]).sort((a, b) => b[0] - a[0]);
-    for (const [l, p] of entries) if (p >= minProb) return { line: Math.ceil(l), prob: p };
-    return null;
-  };
-  const rows = [];
-  for (const cat of cats) {
-    for (const pl of (players[cat.key] || [])) {
-      const best = bestLine(pl.lineProbs, cat.minProb);
-      if (best) rows.push({ id: pl.id, name: pl.name, team: pl.teamName, cat, best });
-    }
-  }
-  rows.sort((a, b) => b.best.prob - a.best.prob);
-  if (rows.length === 0) return <div style={{ fontSize: '.74rem', color: '#94a3b8' }}>Sin recomendaciones de jugador.</div>;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {rows.map((r, i) => (
-        <div key={`${r.id}-${r.cat.key}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 9px', borderRadius: 9, background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.05)' }}>
-          <Image src={pitcherFace(r.id)} alt={r.name} width={28} height={28} style={{ borderRadius: '50%', objectFit: 'cover', background: 'rgba(255,255,255,.06)' }} unoptimized />
-          <span style={{ flex: 1, fontSize: '.78rem', color: '#f1f5f9', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {r.cat.emoji} {r.name} <span style={{ color: '#94a3b8' }}>— {r.best.line}+ {r.cat.label}</span>
-          </span>
-          <span style={{ fontSize: '.84rem', fontWeight: 800, color: r.best.prob >= 65 ? '#22c55e' : '#bff4df', fontFamily: 'JetBrains Mono, monospace' }}>{cap(r.best.prob)}%</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded,
                     onExpand, onSelect, onFavorite, onDismiss, onViewFull,
                     selectedMarkets, onToggleMarket }) {
@@ -777,9 +741,8 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
       }
     : game.status;
 
-  const ml = game.analysis?.probabilities?.moneyline;
-  const totals = game.analysis?.probabilities?.totals;
   const combinada = game.analysis?.combinada;
+  const availableMarkets = bet365Markets(game.analysis);
 
   // Pitchers abridores (foto + ERA) y cuotas reales (moneyline) para el header.
   const pp = game.probablePitchers || {};
@@ -839,7 +802,8 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
 
         {/* Cuotas reales a color (moneyline) */}
         {bestOdds?.moneyline && (bestOdds.moneyline.home != null || bestOdds.moneyline.away != null) && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ padding: '2px 6px', borderRadius: 999, background: '#f5e400', color: '#10241e', fontSize: '.58rem', fontWeight: 900 }}>BET365</span>
             {bestOdds.moneyline.home != null && (
               <span style={{ padding: '4px 14px', borderRadius: 8, background: 'linear-gradient(135deg,#22c55e,#16a34a)', fontWeight: 700, fontSize: '.8rem', color: '#fff' }}>
                 {home?.abbreviation || 'Local'} {Number(bestOdds.moneyline.home).toFixed(2)}
@@ -854,36 +818,20 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
         )}
 
         <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {ml && (() => {
-            const homePct = cap(ml.home);
-            const awayPct = cap(ml.away);
-            const favHome = homePct >= awayPct;
-            const favName = favHome ? (home?.name || 'Local') : (away?.name || 'Visitante');
-            const favPct = cap(favHome ? homePct : awayPct);
-            return (
-              <span style={miniChip()}>
-                🏆 {favName} {favPct}%
-              </span>
-            );
-          })()}
+          {availableMarkets.slice(0, 2).map((market) => (
+            <span key={market.id} style={miniChip()}>
+              Bet365 · {displayBettingText(market.name)} · {cap(market.rawProbability ?? market.probability)}% @{Number(market.odd).toFixed(2)}
+            </span>
+          ))}
 
-          {totals?.bestLine && totals.lines?.[totals.bestLine] && (() => {
-            const t = totals.lines[totals.bestLine];
-            const overWins = (t.over || 0) >= (t.under || 0);
-            const side = overWins ? 'Más de' : 'Menos de';
-            const pct = overWins ? t.over : t.under;
-            return (
-              <span style={miniChip()}>
-                {side} {totals.bestLine} carreras — {pct}%
-              </span>
-            );
-          })()}
-
-          {combinada && combinada.combinedProbability >= 60 && (
+          {combinada?.selections?.length > 0 && combinada.combinedProbability >= 60 && (
             <span style={miniChip()}>
               🎯 Combinada {combinada.selections?.length || 0} picks · {cap(combinada.combinedProbability)}%
               {combinada.combinedOdd ? ` @${combinada.combinedOdd}` : ''}
             </span>
+          )}
+          {isAnalyzed && availableMarkets.length === 0 && (
+            <span style={miniChip()}>Sin recomendación disponible en Bet365</span>
           )}
           {isAnalyzed && (
             <span style={miniChip()}>
@@ -934,22 +882,8 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
                   setOpenSub={setOpenSub}
                 >
                   <BaseballProbBlock
-                    probabilities={game.analysis.probabilities}
-                    bestOdds={game.analysis.best_odds}
-                    homeTeam={game.analysis.home_team || home?.name}
-                    awayTeam={game.analysis.away_team || away?.name}
+                    markets={availableMarkets}
                   />
-                </SubAccordion>
-
-                <SubAccordion
-                  id="players"
-                  title="Recomendaciones de jugadores"
-                  icon={Sparkles}
-                  color="#22c55e"
-                  openSub={openSub}
-                  setOpenSub={setOpenSub}
-                >
-                  <PlayerPropsBlock players={game.analysis.probabilities?.players} />
                 </SubAccordion>
 
                 <button className="baseball-view-full" onClick={onViewFull}>
@@ -1014,119 +948,71 @@ function SubAccordion({ id, title, color, icon: Icon = BarChart3, openSub, setOp
 }
 
 // =====================================================================
-// BLOQUE: SELECCIONA MERCADOS (combinada.selections como fuente única)
+// BLOQUES BET365 — la lista persistida por el servidor es la única fuente.
+// No se reconstruyen líneas desde probabilidades ni se muestran referencias.
 // =====================================================================
-function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
-  // Las opciones salen de las PROBABILIDADES del modelo (igual que los chips de
-  // la tarjeta), NO de combinada.selections. Antes se leía la combinada, que
-  // filtra por cuota (s.odd ≥ 1.20) → si API-Baseball no matcheaba ese partido,
-  // el acordeón salía vacío aunque la tarjeta mostrara opciones. La cuota es
-  // referencia: se muestra si existe (best_odds), pero NO es requisito.
-  const probs = game.analysis?.probabilities;
-  if (!probs) {
-    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Sin probabilidades calculadas.</div>;
-  }
-  const best = game.analysis?.best_odds || {};
-  const homeName = game.analysis?.home_team || game.teams?.home?.name || 'Local';
-  const awayName = game.analysis?.away_team || game.teams?.away?.name || 'Visitante';
-
-  const opts = [];
-  // Modelo HÍBRIDO:
-  //  - Mercados principales (moneyline/totales/run line): API-Baseball SÍ da
-  //    cuota → se muestran con cuota (apostables, cuota ≥1.10).
-  //  - Otros mercados (F5, team totals, BTTS): API-Baseball los da por
-  //    evento (caro) → se muestran SIN cuota como REFERENCIA (existen en la
-  //    casa; el usuario ve la cuota allá). No gastan créditos extra.
-  // Probabilidad ≥80% para carreras/props; el GANADOR (moneyline) ≥55% (un
-  // favorito al 58-65% es apostable y valioso, no necesita 80%).
-  const MIN_ODD = 1.10;
-  const add = (key, cat, label, prob, odd, extra = {}, minProb = 80) => {
-    if (prob == null || prob < minProb) return;
-    // Si tiene cuota pero es < 1.10, no vale la pena → excluir.
-    // Si no tiene cuota, se muestra igual (referencia, sin @cuota).
-    if (odd != null && odd < MIN_ODD) return;
-    opts.push({ key, cat, label, probability: cap(prob), odd: (odd != null && odd >= MIN_ODD) ? odd : null, ...extra });
-  };
-
-  if (probs.moneyline) {
-    add('ml-home', 'Moneyline', `${homeName} gana`, probs.moneyline.home, best.moneyline?.home, {}, 55);
-    add('ml-away', 'Moneyline', `${awayName} gana`, probs.moneyline.away, best.moneyline?.away, {}, 55);
-  }
-  if (probs.totals?.lines) {
-    for (const [line, v] of Object.entries(probs.totals.lines)) {
-      add(`tot-o-${line}`, 'Total Carreras', `Más de ${line} carreras`, v.over, best.totals?.[line]?.over?.odd, { _line: parseFloat(line) });
-      add(`tot-u-${line}`, 'Total Carreras', `Menos de ${line} carreras`, v.under, best.totals?.[line]?.under?.odd, { _line: parseFloat(line) });
-    }
-  }
-  if (probs.runLine) {
-    add('rl-h-15', 'Run Line', `${homeName} -1.5`, probs.runLine.home_minus_1_5, best.runLine?.home_minus_1_5);
-    add('rl-a+15', 'Run Line', `${awayName} +1.5`, probs.runLine.away_plus_1_5, best.runLine?.away_plus_1_5);
-    add('rl-a-15', 'Run Line', `${awayName} -1.5`, probs.runLine.away_minus_1_5, best.runLine?.away_minus_1_5);
-    add('rl-h+15', 'Run Line', `${homeName} +1.5`, probs.runLine.home_plus_1_5, best.runLine?.home_plus_1_5);
-  }
-  if (probs.f5?.moneyline) {
-    add('f5-h', 'F5 (primeras 5)', `${homeName} F5`, probs.f5.moneyline.home, best.f5?.moneyline?.home);
-    add('f5-a', 'F5 (primeras 5)', `${awayName} F5`, probs.f5.moneyline.away, best.f5?.moneyline?.away);
-  }
-  if (probs.f5?.totals) {
-    for (const [line, v] of Object.entries(probs.f5.totals)) {
-      add(`f5t-o-${line}`, 'F5 (primeras 5)', `F5 Más de ${line}`, v.over, best.f5?.totals?.[line]?.over?.odd, { _line: parseFloat(line) });
-      add(`f5t-u-${line}`, 'F5 (primeras 5)', `F5 Menos de ${line}`, v.under, best.f5?.totals?.[line]?.under?.odd, { _line: parseFloat(line) });
-    }
-  }
-  if (probs.teamTotals?.home) {
-    for (const [line, v] of Object.entries(probs.teamTotals.home)) add(`tth-${line}`, 'Total Local', `${homeName} +${line} carreras`, v.over, best.teamTotals?.home?.[line]?.over?.odd, { _line: parseFloat(line) });
-  }
-  if (probs.teamTotals?.away) {
-    for (const [line, v] of Object.entries(probs.teamTotals.away)) add(`tta-${line}`, 'Total Visitante', `${awayName} +${line} carreras`, v.over, best.teamTotals?.away?.[line]?.over?.odd, { _line: parseFloat(line) });
-  }
-  if (probs.btts) {
-    add('btts-y', 'Ambos anotan', 'Ambos anotan 1+', probs.btts.yes, best.btts?.yes);
-    add('btts-n', 'Ambos anotan', 'Algún equipo en blanco', probs.btts.no, best.btts?.no);
-  }
-
-  // Con cuota primero (apostables), luego por probabilidad.
-  const markets = opts.sort((a, b) => (b.odd ? 1 : 0) - (a.odd ? 1 : 0) || b.probability - a.probability);
-  if (markets.length === 0) {
-    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Ninguna opción (ganador ≥55%, resto ≥80%) en este partido.</div>;
-  }
-
-  const byCat = markets.reduce((acc, m) => {
-    (acc[m.cat] = acc[m.cat] || []).push(m);
-    return acc;
+function groupBet365Markets(markets) {
+  return (markets || []).reduce((groups, market) => {
+    const label = market.marketLabel || market.market || 'Mercado Bet365';
+    (groups[label] ||= []).push(market);
+    return groups;
   }, {});
+}
+
+function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
+  const markets = bet365Markets(game.analysis);
+  if (markets.length === 0) {
+    return (
+      <div style={{ fontSize: '.78rem', color: '#94a3b8', lineHeight: 1.5 }}>
+        Bet365 no tiene ahora una selección compatible con el modelo, probabilidad mínima del 80% y cuota mínima de 1,20 para este partido.
+      </div>
+    );
+  }
 
   return (
     <div>
-      {Object.entries(byCat).map(([cat, items]) => (
-        <div key={cat} style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: '.7rem', color: '#5ee6b1', fontWeight: 800, letterSpacing: 1, marginBottom: 4, textTransform: 'uppercase' }}>{cat}</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 6 }}>
-            {items.map(m => {
-              const sel = !!selectedMarkets[m.key];
+      {Object.entries(groupBet365Markets(markets)).map(([category, items]) => (
+        <div key={category} style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+            <span style={{ padding: '2px 6px', borderRadius: 999, background: '#f5e400', color: '#10241e', fontSize: '.58rem', fontWeight: 900 }}>BET365</span>
+            <span style={{ fontSize: '.7rem', color: '#5ee6b1', fontWeight: 800, letterSpacing: .5, textTransform: 'uppercase' }}>{category}</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 6 }}>
+            {items.map((market) => {
+              const key = market.id;
+              const selected = !!selectedMarkets[key];
+              const marketData = {
+                ...market,
+                key,
+                cat: category,
+                label: market.name,
+                probability: cap(market.probability),
+                rawProbability: Number(market.rawProbability ?? market.probability),
+                odd: Number(market.odd),
+              };
               return (
                 <button
-                  key={m.key}
-                  onClick={() => onToggleMarket(m.key, m)}
+                  key={key}
+                  onClick={() => onToggleMarket(key, marketData)}
                   style={{
-                    padding: '6px 10px', borderRadius: 8, cursor: 'pointer',
-                    background: sel ? 'rgba(94,230,177,0.16)' : 'rgba(255,255,255,0.03)',
-                    border: sel ? '1px solid #5ee6b1' : '1px solid rgba(94,230,177,0.10)',
-                    textAlign: 'left', display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                    background: selected ? 'rgba(94,230,177,0.16)' : 'rgba(255,255,255,0.03)',
+                    border: selected ? '1px solid #5ee6b1' : '1px solid rgba(94,230,177,0.10)',
+                    textAlign: 'left', display: 'grid', gridTemplateColumns: '16px 1fr auto', alignItems: 'center', gap: 7,
                   }}
                 >
                   <span style={{
                     width: 14, height: 14, borderRadius: 3,
-                    background: sel ? '#5ee6b1' : 'transparent',
-                    border: sel ? 'none' : '1px solid #475569',
+                    background: selected ? '#5ee6b1' : 'transparent',
+                    border: selected ? 'none' : '1px solid #475569',
                     color: '#1c1410', fontSize: 10, fontWeight: 800,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}>{sel ? '✓' : ''}</span>
-                  <span style={{ flex: 1, fontSize: '.78rem', color: '#cbd5e1' }}>{m.label}</span>
-                  <span style={{ fontWeight: 800, fontSize: '.78rem', color: m.probability >= 75 ? '#5ee6b1' : m.probability >= 60 ? '#bff4df' : '#94a3b8' }}>
-                    {m.probability}%
+                  }}>{selected ? '✓' : ''}</span>
+                  <span style={{ minWidth: 0, fontSize: '.78rem', color: '#e2e8f0', lineHeight: 1.3 }}>{displayBettingText(market.name)}</span>
+                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+                    <strong style={{ fontSize: '.78rem', color: '#5ee6b1' }}>{cap(market.rawProbability ?? market.probability)}%</strong>
+                    <small style={{ fontSize: '.7rem', color: '#f5e400', fontFamily: 'JetBrains Mono, monospace' }}>@{Number(market.odd).toFixed(2)}</small>
                   </span>
-                  {m.odd && <span style={{ fontSize: '.7rem', color: '#bff4df', fontFamily: 'JetBrains Mono, monospace' }}>@{m.odd}</span>}
                 </button>
               );
             })}
@@ -1137,181 +1023,30 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
   );
 }
 
-function categorizeMarket(category, scope) {
-  if (!category) return 'Otros';
-  if (category === 'moneyline') return 'Moneyline';
-  if (category.startsWith('total-')) return 'Total Carreras';
-  if (category.startsWith('runline')) return 'Run Line';
-  if (category.startsWith('f5')) return 'F5 (primeras 5 entradas)';
-  if (category === 'btts') return 'Ambos anotan';
-  if (category.startsWith('home-total')) return 'Total Local';
-  if (category.startsWith('away-total')) return 'Total Visitante';
-  if (category.startsWith('pl-k-')) return 'Ponches por pitcher';
-  if (category.startsWith('pl-h-')) return 'Hits por bateador';
-  if (category.startsWith('pl-tb-')) return 'Bases totales';
-  if (category.startsWith('pl-rbi-')) return 'RBIs';
-  if (category.startsWith('pl-hr-')) return 'Home Runs';
-  return scope === 'player' ? 'Jugador' : 'Otros';
-}
-
-// =====================================================================
-// BLOQUE: % PROBABILIDADES CALCULADAS
-// =====================================================================
-function BaseballProbBlock({ probabilities: p, bestOdds, homeTeam, awayTeam }) {
-  if (!p) return null;
-  const hasOdd = (v) => isFinite(parseFloat(v)) && parseFloat(v) > 1;
-
-  const adaptiveCat = (probObj, oddObj, makeLabel) => {
-    if (!probObj || !oddObj) return [];
-    return Object.entries(probObj).map(([line, vals]) => {
-      if (line.startsWith('_')) return null;
-      const overOdd = oddObj[line]?.over?.odd ?? oddObj?.[line]?.over;
-      const underOdd = oddObj[line]?.under?.odd ?? oddObj?.[line]?.under;
-      return [
-        hasOdd(overOdd) && vals.over != null && { label: makeLabel('Más de', line), value: vals.over },
-        hasOdd(underOdd) && vals.under != null && { label: makeLabel('Menos de', line), value: vals.under },
-      ].filter(Boolean);
-    }).flat().filter(Boolean);
-  };
-
-  const cats = [
-    { title: 'Moneyline (Ganador)', items: [
-      hasOdd(bestOdds?.moneyline?.home) && p.moneyline && { label: homeTeam, value: p.moneyline.home },
-      hasOdd(bestOdds?.moneyline?.away) && p.moneyline && { label: awayTeam, value: p.moneyline.away },
-    ].filter(Boolean) },
-
-    p.totals?.lines && {
-      title: 'Total de carreras',
-      subtitle: p.expected?.totalRuns != null ? `Esperado: ${p.expected.totalRuns}` : null,
-      items: adaptiveCat(p.totals.lines, bestOdds?.totals, (verb, line) => `${verb} ${line}`),
-    },
-
-    p.runLine && {
-      title: 'Run Line ±1.5',
-      items: [
-        p.runLine.home_minus_1_5 != null && { label: `${homeTeam} -1.5`, value: p.runLine.home_minus_1_5 },
-        p.runLine.away_plus_1_5  != null && { label: `${awayTeam} +1.5`, value: p.runLine.away_plus_1_5 },
-        p.runLine.away_minus_1_5 != null && { label: `${awayTeam} -1.5`, value: p.runLine.away_minus_1_5 },
-        p.runLine.home_plus_1_5  != null && { label: `${homeTeam} +1.5`, value: p.runLine.home_plus_1_5 },
-      ].filter(Boolean),
-    },
-
-    p.f5?.moneyline && {
-      title: 'F5 — Ganador',
-      items: [
-        { label: `${homeTeam} F5`, value: p.f5.moneyline.home },
-        { label: `${awayTeam} F5`, value: p.f5.moneyline.away },
-        p.f5.moneyline.tie != null && { label: 'Empate F5', value: p.f5.moneyline.tie },
-      ].filter(Boolean),
-    },
-
-    p.f5?.totals && {
-      title: 'F5 — Total carreras',
-      items: Object.entries(p.f5.totals).map(([line, vals]) => ([
-        vals.over != null && { label: `F5 Más de ${line}`, value: vals.over },
-        vals.under != null && { label: `F5 Menos de ${line}`, value: vals.under },
-      ].filter(Boolean))).flat().filter(Boolean),
-    },
-
-    p.teamTotals?.home && {
-      title: `Total — ${homeTeam}`,
-      items: Object.entries(p.teamTotals.home).map(([line, vals]) => ([
-        vals.over != null && { label: `Más de ${line}`, value: vals.over },
-        vals.under != null && { label: `Menos de ${line}`, value: vals.under },
-      ].filter(Boolean))).flat().filter(Boolean),
-    },
-
-    p.teamTotals?.away && {
-      title: `Total — ${awayTeam}`,
-      items: Object.entries(p.teamTotals.away).map(([line, vals]) => ([
-        vals.over != null && { label: `Más de ${line}`, value: vals.over },
-        vals.under != null && { label: `Menos de ${line}`, value: vals.under },
-      ].filter(Boolean))).flat().filter(Boolean),
-    },
-
-    p.btts && { title: 'Ambos anotan 1+ carrera', items: [
-      { label: 'Sí', value: p.btts.yes },
-      { label: 'No', value: p.btts.no },
-    ] },
-
-    p.players?.strikeouts?.length > 0 && {
-      title: 'Ponches por pitcher',
-      items: p.players.strikeouts.flatMap(pl =>
-        Object.entries(pl.lineProbs || {}).map(([line, prob]) => ({
-          label: `${pl.name} — Más de ${line} K`,
-          value: prob,
-        })),
-      ),
-    },
-    p.players?.hits?.length > 0 && {
-      title: 'Hits por bateador',
-      items: p.players.hits.flatMap(pl =>
-        Object.entries(pl.lineProbs || {}).map(([line, prob]) => ({
-          label: `${pl.name} — Más de ${line} hits`,
-          value: prob,
-        })),
-      ),
-    },
-    p.players?.totalBases?.length > 0 && {
-      title: 'Bases totales',
-      items: p.players.totalBases.flatMap(pl =>
-        Object.entries(pl.lineProbs || {}).map(([line, prob]) => ({
-          label: `${pl.name} — Bases > ${line}`,
-          value: prob,
-        })),
-      ),
-    },
-    p.players?.rbis?.length > 0 && {
-      title: 'RBIs',
-      items: p.players.rbis.flatMap(pl =>
-        Object.entries(pl.lineProbs || {}).map(([line, prob]) => ({
-          label: `${pl.name} — Más de ${line} RBI`,
-          value: prob,
-        })),
-      ),
-    },
-    p.players?.homeRuns?.length > 0 && {
-      title: 'Home Runs',
-      items: p.players.homeRuns.flatMap(pl => {
-        const hist = pl.history || [];
-        const hits = hist.filter(v => (v || 0) >= 1).length;
-        const prob = hist.length > 0 ? cap((hits / hist.length) * 100) : 0;
-        return [{ label: `${pl.name} — HR (anytime)`, value: prob }];
-      }),
-    },
-  ].filter(Boolean).filter(c => c.items && c.items.length > 0);
-
-  if (cats.length === 0) {
-    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>Sin probabilidades para mostrar.</div>;
+function BaseballProbBlock({ markets }) {
+  if (!markets?.length) {
+    return <div style={{ fontSize: '.78rem', color: '#94a3b8' }}>No hay probabilidades publicables sin una cuota Bet365 válida.</div>;
   }
-
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-      {cats.map((cat, ci) => (
-        <div key={ci} style={{
-          background: 'rgba(94,230,177,0.05)',
-          border: '1px solid rgba(94,230,177,0.22)',
-          borderRadius: 10, padding: '10px 12px', flex: '1 1 220px', minWidth: 0,
+      {Object.entries(groupBet365Markets(markets)).map(([category, items]) => (
+        <div key={category} style={{
+          background: 'rgba(94,230,177,0.05)', border: '1px solid rgba(94,230,177,0.22)',
+          borderRadius: 10, padding: '10px 12px', flex: '1 1 240px', minWidth: 0,
         }}>
-          <div style={{
-            fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px',
-            color: '#5ee6b1', marginBottom: cat.subtitle ? 2 : 8,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>{cat.title}</div>
-          {cat.subtitle && <div style={{ fontSize: '.65rem', color: '#4f7d6e', marginBottom: 8 }}>{cat.subtitle}</div>}
-          {cat.items.map((it, i) => {
-            const v = cap(it.value);
-            const color = v >= 80 ? '#fcd34d' : v >= 65 ? '#fbbf24' : v >= 50 ? '#f59e0b' : '#94a3b8';
-            return (
-              <div key={i} style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-                padding: '4px 0', borderBottom: '1px solid rgba(94,230,177,0.06)', gap: 8,
-              }}>
-                <span style={{ fontSize: '.72rem', color: '#cbd5e1', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
-                <span style={{ fontSize: '.85rem', fontWeight: 700, color, fontFamily: 'JetBrains Mono, monospace', fontVariantNumeric: 'tabular-nums' }}>{v}%</span>
-              </div>
-            );
-          })}
+          <div style={{ fontSize: '.7rem', fontWeight: 800, textTransform: 'uppercase', color: '#5ee6b1', marginBottom: 8 }}>
+            {category}
+          </div>
+          {items.map((market) => (
+            <div key={market.id} style={{
+              display: 'grid', gridTemplateColumns: '1fr auto auto', alignItems: 'center',
+              padding: '6px 0', borderBottom: '1px solid rgba(94,230,177,0.06)', gap: 9,
+            }}>
+              <span style={{ fontSize: '.72rem', color: '#cbd5e1', lineHeight: 1.3 }}>{displayBettingText(market.name)}</span>
+              <strong style={{ fontSize: '.82rem', color: '#fcd34d', fontFamily: 'JetBrains Mono, monospace' }}>{cap(market.rawProbability ?? market.probability)}%</strong>
+              <span style={{ fontSize: '.72rem', color: '#f5e400', fontFamily: 'JetBrains Mono, monospace' }}>@{Number(market.odd).toFixed(2)}</span>
+            </div>
+          ))}
         </div>
       ))}
     </div>
@@ -1354,7 +1089,7 @@ function ApuestaDelDiaBlock({ apuesta, show, onToggle }) {
                       <i className={s.priority === 1 ? 'is-live' : ''}>{s.priority === 2 ? 'Próximo' : s.priority === 1 ? 'En vivo' : 'Final'}</i>
                       {s.matchName}
                     </span>
-                    <span className="apuesta-mkt">{displayBettingText(s.name || s.market || 'Pick')}</span>
+                    <span className="apuesta-mkt">Bet365 · {displayBettingText(s.name || s.market || 'Pick')}</span>
                   </span>
                   <span className="apuesta-item-metrics">
                     <span className="apuesta-prob"><small>Prob.</small>{cap(s.rawProbability ?? s.probability)}%</span>
@@ -1394,7 +1129,7 @@ function CombinadaTab({ customCombinada, onClear, onRemove }) {
             <span className="comb-item-index">{String(i + 1).padStart(2, '0')}</span>
             <div className="comb-item-content">
               <div className="comb-item-match">{s.matchName}</div>
-              <div className="comb-item-name">{displayBettingText(s.name || s.market)}</div>
+              <div className="comb-item-name">Bet365 · {displayBettingText(s.name || s.market)}</div>
             </div>
             <div className="comb-item-metrics">
               <span className="comb-item-prob"><small>Prob.</small>{cap(s.rawProbability ?? s.probability)}%</span>

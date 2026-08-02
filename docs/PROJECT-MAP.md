@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-02 · Commit: `fb7cb83`
+Actualizado: 2026-08-02 · Commit base: `ea9c547`
 
 ## Identidad y stack
 
@@ -227,7 +227,17 @@ Las fuentes y namespaces de identificadores también están separados:
 - MLB/MiLB: MLB Stats oficial aporta calendarios de MLB, Triple-A, Double-A,
   High-A, Single-A y Rookie, además de live, boxscores y logos. El enriquecido
   de pitchers, alineaciones y props se reserva para MLB; API-Baseball se consulta
-  solo para cuotas MLB y nunca se inventan cuotas de ligas menores.
+  solo para cuotas MLB y nunca se inventan cuotas de ligas menores. En MLB la
+  casa contractual es exclusivamente Bet365: el normalizador conserva ID y
+  nombre original de mercado/selección y distingue de forma estricta
+  `Over/Under` (carreras), `Total Hits`, combinaciones resultado/total, total por
+  equipo, hándicap y primeras cinco entradas. Una probabilidad solo se publica
+  como opción si su línea exacta existe en el catálogo Bet365 y la cuota real es
+  al menos 1,20; el dashboard, la combinada manual y el detalle consumen esa
+  misma lista persistida y nunca reconstruyen mercados de referencia. Los
+  historiales de jugador pueden seguir alimentándose internamente, pero no se
+  presentan como apuesta hasta que exista una selección y cuota Bet365
+  atribuible al jugador y línea exactos.
 - NFL: API-NFL aporta la ventana reciente cuando está disponible; ESPN garantiza
   el calendario amplio, IDs y logos canónicos, boxscores, jugadores y cuotas
   publicadas sin duplicar encuentros al cambiar de fuente.
@@ -372,11 +382,12 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   gratuito y coordinan un máximo de diez solicitudes/minuto entre web y workers;
   un 429 temporal pausa el host, pero nunca abre el circuito de cuota diaria.
   Las cuotas deportivas nunca se usan como probabilidad del modelo.
-- 2026-08-02: `FOOTBALL_CACHE_VERSION=20` y `MULTISPORT_CACHE_VERSION=12`
+- 2026-08-02: `FOOTBALL_CACHE_VERSION=20` y `MULTISPORT_CACHE_VERSION=13`
   invalidan análisis con el antiguo gate de validación o sin separación entre
-  frecuencia cruda y valor visual. Las decisiones usan frecuencias ponderadas
-  reales; el máximo 95% vive solo en la presentación y los diagnósticos nunca
-  bloquean una recomendación.
+  frecuencia cruda y valor visual; la versión 13 también invalida Baseball sin
+  catálogo Bet365 exacto. Las decisiones usan frecuencias ponderadas reales; el
+  máximo 95% vive solo en la presentación y los diagnósticos nunca bloquean una
+  recomendación.
 - 2026-08-01: no liberar un intento pendiente por tiempo ni marcar terminal un cobro recurrente que MP pueda reintentar; primero cancelar el recurso remoto.
 - 2026-07-29: el checkout automático requiere deduplicación persistente ante Strict Mode/Fast Refresh.
 - 2026-07-29: solo el plan viaja por URL; el servidor vuelve a calcular precio, moneda y proveedor.
@@ -415,5 +426,10 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - 2026-08-02: `/api/sports/[sport]/fixtures` es cache/DB-only para el navegador.
   Las llamadas a NBA/ESPN/API-Sports pertenecen a los schedulers y workers; no
   reintroducir fallback de proveedor en una visita del cliente.
+- 2026-08-02: los módulos multi-deporte se importan dinámicamente desde
+  `apps/cfanalisis-worker/src/shared.ts`. Todo cambio de ese runtime debe tocar
+  también su marcador de deploy mientras esos módulos no estén en `WORKER_RE`;
+  así GitHub Actions reconstruye y recarga PM2 en vez de conservar módulos
+  antiguos en memoria.
 - 2026-06: los nombres `supabaseAdmin`/`createSupabaseServerClient` son shims PG, no Supabase activo.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.
