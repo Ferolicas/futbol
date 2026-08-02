@@ -2,12 +2,12 @@
 /**
  * Job: futbol-finalize
  *
- * Cierra los resultados de los partidos del día leyendo la lista de fixtures de
- * `match_schedule` (NO del bucket Redis efímero `live:*`, que tenía TTL 2h y
- * vivía bajo la fecha-UTC equivocada → perdía casi todos los partidos de la
- * tarde/noche; anoche finalizó 1 de 6). Patrón calcado de baseball-finalize:
- * lista pendiente desde una tabla → agrupar por fecha → 1 llamada /fixtures?id=X
- * por partido. Sin dependencia de Redis ni de `match_predictions` (tabla muerta).
+ * Cierra los resultados de los partidos del día uniendo `match_schedule` con
+ * `fixtures_cache`/Redis. La agenda es durable, pero puede no contener un
+ * partido incorporado por una actualización posterior del feed; la jornada
+ * visible sí lo contiene. Usar ambas fuentes evita que el usuario vea un FT que
+ * nunca llegue a `match_results`. No depende de `live:*` (TTL corto) ni de
+ * `match_predictions` (tabla muerta).
  *
  * Flujo:
  *   1. Resolver fecha(s) objetivo. El cron corre de madrugada España (03/04),
@@ -16,7 +16,7 @@
  *      anterior (red de seguridad para lo que no finalizó la corrida previa).
  *      payload.date fuerza una fecha concreta; payload.includeNext añade la
  *      jornada siguiente (partidos de Asia/Oceanía que ya terminaron temprano).
- *   2. Sacar los fixtureId de kickoff_times de la fila de cada fecha.
+ *   2. Unir los fixtureId de kickoff_times con los fixtures visibles de la fecha.
  *   3. Saltar los que ya están en match_results (dedup → 0 llamadas API).
  *   4. /fixtures?id=X por cada uno; solo FT/AET/PEN se finalizan. La API
  *      devuelve el resultado COMPLETO; nada se filtra a mano (match_results
@@ -37,6 +37,9 @@ import {
   footballApiRequest,
   buildMatchResultRow,
   extractResultCoverage,
+  getCachedFixturesRaw,
+  redisGet,
+  redisSet,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 
@@ -45,8 +48,15 @@ const FINALIZE_CONCURRENCY = 10;
 // ejecutar finalize de forma incremental durante todo el día sin quemar cuota
 // preguntando una y otra vez por los cientos de encuentros futuros.
 const FINALIZE_AFTER_EXPECTED_END_MS = 10 * 60 * 1000;
+// Un NS/TBD persistente no puede gastar una llamada cada 15 minutos durante
+// dos jornadas. El realtime lo reconcilia por lotes; finalize queda como red de
+// seguridad y vuelve a comprobar el mismo estado como máximo cada seis horas.
+const FINALIZE_PENDING_RECHECK_TTL = 6 * 60 * 60;
+const FINALIZE_TERMINAL_RECHECK_TTL = 24 * 60 * 60;
+const FINALIZE_NO_RESPONSE_RECHECK_TTL = 10 * 60;
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
+const TERMINAL_STATUSES = ['PST', 'CANC', 'ABD', 'AWD', 'WO', 'SUSP'];
 async function apiGet(path, apiKey) {
   try {
     const result = await footballApiRequest(path, {
@@ -374,31 +384,65 @@ export async function runFinalize(payload = {}) {
   const dates = resolveDates(payload);
 
   let candidates = 0, finalized = 0, notFinal = 0, noMatch = 0, apiCalls = 0;
+  let terminalSkipped = 0, deferred = 0, recoveredFromFixtureCache = 0;
   const errors = [];
   const finalizedFids = [];
 
   for (const date of dates) {
-    // Fuente de la lista: match_schedule (durable en Supabase; la escribe
-    // futbol-fixtures a las 02:05). NO Redis liveStats (efímero, TTL 2h).
+    // Fuente primaria: match_schedule (durable en PostgreSQL; la escribe
+    // futbol-fixtures a las 02:05). Se completa con fixtures_cache, nunca con
+    // liveStats (efímero, TTL 2h).
     const schedule = await getMatchSchedule(date).catch((e) => {
       console.error(`[futbol-finalize] getMatchSchedule ${date}:`, e.message);
       return null;
     });
-    const kickoffs = Array.isArray(schedule?.kickoffTimes) ? schedule.kickoffTimes : [];
+    const scheduledKickoffs = Array.isArray(schedule?.kickoffTimes) ? schedule.kickoffTimes : [];
+    const visibleFixtures = await getCachedFixturesRaw(date).catch((e) => {
+      console.error(`[futbol-finalize] getCachedFixturesRaw ${date}:`, e.message);
+      return null;
+    });
+
+    // La agenda y la jornada visible pueden divergir si el proveedor incorpora
+    // un partido después de crear match_schedule. Conservamos el timing durable
+    // de la agenda y lo enriquecemos/completamos con el fixture cacheado.
+    const kickoffByFixture = new Map();
+    for (const item of scheduledKickoffs) {
+      const fid = Number(item?.fixtureId ?? item?.fixture_id ?? item?.id);
+      if (Number.isFinite(fid)) kickoffByFixture.set(fid, { ...item, fixtureId: fid });
+    }
+    for (const fixture of (Array.isArray(visibleFixtures) ? visibleFixtures : [])) {
+      const fid = Number(fixture?.fixture?.id);
+      if (!Number.isFinite(fid)) continue;
+      const kickoff = fixture?.fixture?.date ? new Date(fixture.fixture.date).getTime() : NaN;
+      const previous = kickoffByFixture.get(fid);
+      const previousKickoff = previous?.kickoff != null ? Number(previous.kickoff) : NaN;
+      const previousExpectedEnd = previous?.expectedEnd != null ? Number(previous.expectedEnd) : NaN;
+      if (!previous) recoveredFromFixtureCache++;
+      kickoffByFixture.set(fid, {
+        ...(previous || {}),
+        fixtureId: fid,
+        kickoff: Number.isFinite(previousKickoff) ? previousKickoff : kickoff,
+        expectedEnd: Number.isFinite(previousExpectedEnd)
+          ? previousExpectedEnd
+          : (Number.isFinite(kickoff) ? kickoff + 120 * 60 * 1000 : NaN),
+        cachedStatus: fixture?.fixture?.status?.short || null,
+      });
+    }
+    const kickoffs = [...kickoffByFixture.values()];
     const now = Date.now();
-    const fids = [...new Set(
-      kickoffs
-        .filter((k) => {
-          const kickoff = Number(k?.kickoff);
-          const expectedEnd = Number(k?.expectedEnd);
-          const eligibleAt = Number.isFinite(expectedEnd)
-            ? expectedEnd + FINALIZE_AFTER_EXPECTED_END_MS
-            : kickoff + 130 * 60 * 1000;
-          return Number.isFinite(eligibleAt) && now >= eligibleAt;
-        })
-        .map((k) => Number(k?.fixtureId ?? k?.fixture_id ?? k?.id))
-        .filter(Number.isFinite),
-    )];
+    const eligibleEntries = kickoffs.filter((k) => {
+      if (FINISHED_STATUSES.includes(k?.cachedStatus)) return true;
+      const kickoff = Number(k?.kickoff);
+      const expectedEnd = Number(k?.expectedEnd);
+      const eligibleAt = Number.isFinite(expectedEnd)
+        ? expectedEnd + FINALIZE_AFTER_EXPECTED_END_MS
+        : kickoff + 130 * 60 * 1000;
+      return Number.isFinite(eligibleAt) && now >= eligibleAt;
+    });
+    const eligibleByFid = new Map(
+      eligibleEntries.map((entry) => [Number(entry.fixtureId), entry]),
+    );
+    const fids = [...eligibleByFid.keys()].filter(Number.isFinite);
     candidates += fids.length;
     if (fids.length === 0) continue;
 
@@ -406,7 +450,28 @@ export async function runFinalize(payload = {}) {
     const { data: existing } = await supabaseAdmin
       .from('match_results').select('fixture_id').in('fixture_id', fids);
     const existingIds = new Set((existing || []).map((row) => row.fixture_id));
-    const toCheck = fids.filter((fid) => !existingIds.has(fid));
+    const pending = fids.filter((fid) => !existingIds.has(fid));
+    const toCheck = [];
+    await Promise.all(pending.map(async (fid) => {
+      const cachedStatus = eligibleByFid.get(fid)?.cachedStatus || null;
+      // Un terminal confirmado y visible no tiene resultado deportivo que
+      // persistir. Si algún día cambia a NS/live/FT, el estado cacheado cambia
+      // y vuelve a entrar automáticamente.
+      if (TERMINAL_STATUSES.includes(cachedStatus)) {
+        terminalSkipped++;
+        return;
+      }
+      const lastObserved = await redisGet(`finalize:recheck:${fid}`).catch(() => null);
+      if (lastObserved && (
+        lastObserved === 'NO_RESPONSE' ||
+        cachedStatus == null ||
+        String(lastObserved) === String(cachedStatus)
+      )) {
+        deferred++;
+        return;
+      }
+      toCheck.push(fid);
+    }));
     if (toCheck.length === 0) continue;
 
     const res = await mapPool(toCheck, FINALIZE_CONCURRENCY, async (fid) => {
@@ -414,8 +479,25 @@ export async function runFinalize(payload = {}) {
       // exóticas). Devuelve el resultado completo; nada se pide por mercado.
       const match = await fetchFixture(fid, apiKey);
       apiCalls++;
-      if (!match) return { status: 'no-match' };
-      if (!FINISHED_STATUSES.includes(match.fixture?.status?.short)) return { status: 'not-final' };
+      if (!match) {
+        await redisSet(
+          `finalize:recheck:${fid}`,
+          'NO_RESPONSE',
+          FINALIZE_NO_RESPONSE_RECHECK_TTL,
+        ).catch(() => {});
+        return { status: 'no-match' };
+      }
+      if (!FINISHED_STATUSES.includes(match.fixture?.status?.short)) {
+        const observedStatus = match.fixture?.status?.short || 'UNKNOWN';
+        await redisSet(
+          `finalize:recheck:${fid}`,
+          observedStatus,
+          TERMINAL_STATUSES.includes(observedStatus)
+            ? FINALIZE_TERMINAL_RECHECK_TTL
+            : FINALIZE_PENDING_RECHECK_TTL,
+        ).catch(() => {});
+        return { status: 'not-final' };
+      }
 
       const r = extractResult(match);
       // full_data = payload entero → ningún campo/mercado se omite a mano.
@@ -468,7 +550,9 @@ export async function runFinalize(payload = {}) {
   console.log(
     `[futbol-finalize] fecha=${dates.join('|')} candidatos=${candidates} ` +
     `finalizados=${finalized} noFinal=${notFinal} sinPartido=${noMatch} ` +
-    `errores=${errors.length} apiCalls=${apiCalls} rawCaptured=${rawCaptured}`,
+    `terminalSkip=${terminalSkipped} diferidos=${deferred} ` +
+    `recuperadosCache=${recoveredFromFixtureCache} errores=${errors.length} ` +
+    `apiCalls=${apiCalls} rawCaptured=${rawCaptured}`,
   );
 
   return {
@@ -478,6 +562,9 @@ export async function runFinalize(payload = {}) {
     finalized,
     notFinal,
     noMatch,
+    terminalSkipped,
+    deferred,
+    recoveredFromFixtureCache,
     apiCalls,
     rawCaptured,
     errors: errors.length,
