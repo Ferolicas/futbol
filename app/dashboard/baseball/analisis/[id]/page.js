@@ -7,7 +7,11 @@ import Image from 'next/image';
 import DashboardBuffer from '../../../components/DashboardBuffer';
 import { displayBettingText } from '../../../utils/display-betting-text';
 
-const cap = (v) => Math.min(95, Math.max(0, v ?? 0));
+const cap = (v) => {
+  const value = Math.max(0, Math.min(100, Number(v) || 0));
+  if (value >= 95) return 95;
+  return Math.floor((value + 1e-9) * 100) / 100;
+};
 
 export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClose }) {
   const params = useParams();
@@ -142,7 +146,7 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
                 background: 'rgba(94,230,177,0.06)',
               }}>
                 <span style={{ fontWeight: 700, fontSize: '.9rem', flex: 1 }}>{displayBettingText(`${s.market}: ${s.pick}`)}</span>
-                <span style={{ color: '#10b981', fontWeight: 700 }}>{s.probability}%</span>
+                <span style={{ color: '#10b981', fontWeight: 700 }}>{cap(s.rawProbability ?? s.probability)}%</span>
                 {s.odd && <span style={{ color: '#22d3ee', fontFamily: 'JetBrains Mono, monospace' }}>@{s.odd}</span>}
               </div>
             ))}
@@ -154,7 +158,7 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
             }}>
               <span style={{ fontWeight: 800, color: '#5ee6b1' }}>Probabilidad combinada</span>
               <div style={{ display: 'flex', gap: 12 }}>
-                <span style={{ fontSize: '1.3rem', fontWeight: 800, color: '#5ee6b1' }}>{combinada.combinedProbability}%</span>
+                <span style={{ fontSize: '1.3rem', fontWeight: 800, color: '#5ee6b1' }}>{cap(combinada.combinedProbability)}%</span>
                 {combinada.combinedOdd && <span style={{ fontSize: '1.3rem', fontWeight: 800, color: '#22d3ee', fontFamily: 'JetBrains Mono, monospace' }}>@{combinada.combinedOdd}</span>}
               </div>
             </div>

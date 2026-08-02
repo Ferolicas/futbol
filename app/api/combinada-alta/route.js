@@ -15,8 +15,12 @@ import { getAnalyzedFixtureIds, getAnalyzedMatchesFull } from '../../../lib/sani
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const VISUAL_PROB_CAP = 95;
 const FINISHED_STATUSES = new Set(['FT', 'AET', 'PEN', 'AWD', 'WO', 'CANC', 'PST', 'ABD', 'SUSP']);
+const displayProbability = (value) => {
+  const probability = Math.max(0, Math.min(100, Number(value) || 0));
+  if (probability >= 95) return 95;
+  return Math.floor((probability + 1e-9) * 100) / 100;
+};
 
 function todayInBogota() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
@@ -63,7 +67,7 @@ async function handle(request) {
     }
     const selections = comb?.selections || [];
     for (const sel of selections) {
-      if (sel.probability < minProb) continue;
+      if (Number(sel.rawProbability ?? sel.probability) < minProb) continue;
       if (!sel.odd || sel.odd < minOdd) continue;
       all.push({
         ...sel,
@@ -79,7 +83,7 @@ async function handle(request) {
         leagueId:    data.leagueId || null,
         leagueLogo:  data.leagueLogo || null,
         kickoff:     data.kickoff  || null,
-        probability: Math.min(VISUAL_PROB_CAP, sel.probability),
+        probability: displayProbability(sel.rawProbability ?? sel.probability),
       });
     }
   }
@@ -94,19 +98,20 @@ async function handle(request) {
   }
 
   all.sort((a, b) =>
-    b.probability - a.probability ||
+    Number(b.rawProbability ?? b.probability) - Number(a.rawProbability ?? a.probability) ||
     (b.odd || 0) - (a.odd || 0)
   );
 
   const combinedOdd  = all.reduce((acc, m) => acc * (m.odd || 1), 1);
-  const combinedProb = all.reduce((acc, m) => acc * ((m.probability || 0) / 100), 1) * 100;
+  const combinedProb = all.reduce((acc, m) => acc * (Number(m.rawProbability ?? m.probability) / 100), 1) * 100;
 
   return Response.json({
     ok: true,
     date,
     selections: all,
     combinedOdd:         +combinedOdd.toFixed(2),
-    combinedProbability: +combinedProb.toFixed(1),
+    combinedProbability: displayProbability(combinedProb),
+    rawCombinedProbability: +combinedProb.toFixed(2),
     selectionsCount:     all.length,
     thresholds:          { minProb, minOdd },
   });

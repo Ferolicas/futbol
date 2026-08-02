@@ -59,7 +59,11 @@ const BaseballAnalysisExperience = dynamic(
 // =====================================================================
 // HELPERS
 // =====================================================================
-const cap = (v) => Math.min(95, Math.max(0, v ?? 0));
+const cap = (v) => {
+  const value = Math.max(0, Math.min(100, Number(v) || 0));
+  if (value >= 95) return 95;
+  return Math.floor((value + 1e-9) * 100) / 100;
+};
 const isLive = (s) => ['LIVE', 'IN', 'IN1', 'IN2', 'IN3', 'IN4', 'IN5', 'IN6', 'IN7', 'IN8', 'IN9'].includes(s);
 const isFinished = (s) => ['FT', 'AOT'].includes(s);
 const isPostponed = (s) => ['POST', 'CANC', 'INTR', 'ABD'].includes(s);
@@ -736,7 +740,7 @@ function PlayerPropsBlock({ players }) {
           <span style={{ flex: 1, fontSize: '.78rem', color: '#f1f5f9', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {r.cat.emoji} {r.name} <span style={{ color: '#94a3b8' }}>— {r.best.line}+ {r.cat.label}</span>
           </span>
-          <span style={{ fontSize: '.84rem', fontWeight: 800, color: r.best.prob >= 65 ? '#22c55e' : '#bff4df', fontFamily: 'JetBrains Mono, monospace' }}>{r.best.prob}%</span>
+          <span style={{ fontSize: '.84rem', fontWeight: 800, color: r.best.prob >= 65 ? '#22c55e' : '#bff4df', fontFamily: 'JetBrains Mono, monospace' }}>{cap(r.best.prob)}%</span>
         </div>
       ))}
     </div>
@@ -855,7 +859,7 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
             const awayPct = cap(ml.away);
             const favHome = homePct >= awayPct;
             const favName = favHome ? (home?.name || 'Local') : (away?.name || 'Visitante');
-            const favPct = Math.round(favHome ? homePct : awayPct);
+            const favPct = cap(favHome ? homePct : awayPct);
             return (
               <span style={miniChip()}>
                 🏆 {favName} {favPct}%
@@ -877,7 +881,7 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
 
           {combinada && combinada.combinedProbability >= 60 && (
             <span style={miniChip()}>
-              🎯 Combinada {combinada.selections?.length || 0} picks · {combinada.combinedProbability}%
+              🎯 Combinada {combinada.selections?.length || 0} picks · {cap(combinada.combinedProbability)}%
               {combinada.combinedOdd ? ` @${combinada.combinedOdd}` : ''}
             </span>
           )}
@@ -1041,7 +1045,7 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
     // Si tiene cuota pero es < 1.10, no vale la pena → excluir.
     // Si no tiene cuota, se muestra igual (referencia, sin @cuota).
     if (odd != null && odd < MIN_ODD) return;
-    opts.push({ key, cat, label, probability: Math.round(prob), odd: (odd != null && odd >= MIN_ODD) ? odd : null, ...extra });
+    opts.push({ key, cat, label, probability: cap(prob), odd: (odd != null && odd >= MIN_ODD) ? odd : null, ...extra });
   };
 
   if (probs.moneyline) {
@@ -1271,7 +1275,7 @@ function BaseballProbBlock({ probabilities: p, bestOdds, homeTeam, awayTeam }) {
       items: p.players.homeRuns.flatMap(pl => {
         const hist = pl.history || [];
         const hits = hist.filter(v => (v || 0) >= 1).length;
-        const prob = hist.length > 0 ? Math.round((hits / hist.length) * 100) : 0;
+        const prob = hist.length > 0 ? cap((hits / hist.length) * 100) : 0;
         return [{ label: `${pl.name} — HR (anytime)`, value: prob }];
       }),
     },
@@ -1296,7 +1300,7 @@ function BaseballProbBlock({ probabilities: p, bestOdds, homeTeam, awayTeam }) {
           }}>{cat.title}</div>
           {cat.subtitle && <div style={{ fontSize: '.65rem', color: '#4f7d6e', marginBottom: 8 }}>{cat.subtitle}</div>}
           {cat.items.map((it, i) => {
-            const v = Math.round(it.value ?? 0);
+            const v = cap(it.value);
             const color = v >= 80 ? '#fcd34d' : v >= 65 ? '#fbbf24' : v >= 50 ? '#f59e0b' : '#94a3b8';
             return (
               <div key={i} style={{
@@ -1329,7 +1333,7 @@ function ApuestaDelDiaBlock({ apuesta, show, onToggle }) {
           <span><small>Selección inteligente</small><strong>Apuesta del día</strong></span>
         </span>
         <span className="apuesta-head-metrics">
-          <span><small>Probabilidad</small><strong>{apuesta.combinedProbability}%</strong></span>
+          <span><small>Probabilidad</small><strong>{cap(apuesta.combinedProbability)}%</strong></span>
           {apuesta.combinedOdd && <span><small>Cuota</small><strong>{apuesta.combinedOdd}</strong></span>}
           <ChevronDown className={show ? 'is-open' : ''} size={17} aria-hidden="true" />
         </span>
@@ -1353,7 +1357,7 @@ function ApuestaDelDiaBlock({ apuesta, show, onToggle }) {
                     <span className="apuesta-mkt">{displayBettingText(s.name || s.market || 'Pick')}</span>
                   </span>
                   <span className="apuesta-item-metrics">
-                    <span className="apuesta-prob"><small>Prob.</small>{s.probability}%</span>
+                    <span className="apuesta-prob"><small>Prob.</small>{cap(s.rawProbability ?? s.probability)}%</span>
                     {s.odd && <span className="apuesta-odd"><small>Cuota</small>{s.odd}</span>}
                   </span>
                 </article>
@@ -1393,7 +1397,7 @@ function CombinadaTab({ customCombinada, onClear, onRemove }) {
               <div className="comb-item-name">{displayBettingText(s.name || s.market)}</div>
             </div>
             <div className="comb-item-metrics">
-              <span className="comb-item-prob"><small>Prob.</small>{s.probability}%</span>
+              <span className="comb-item-prob"><small>Prob.</small>{cap(s.rawProbability ?? s.probability)}%</span>
               <span className="comb-item-odd"><small>Cuota</small>{s.odd || '—'}</span>
             </div>
             <button
@@ -1408,7 +1412,7 @@ function CombinadaTab({ customCombinada, onClear, onRemove }) {
       <div className="comb-summary">
         <div className="comb-sum-row">
           <span>Probabilidad combinada</span>
-          <strong>{customCombinada.combinedProbability}%</strong>
+          <strong>{cap(customCombinada.combinedProbability)}%</strong>
         </div>
         <div className="comb-sum-row">
           <span>Cuota total</span>

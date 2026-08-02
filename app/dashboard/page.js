@@ -65,8 +65,13 @@ const statusText = (s) => ({
   SUSP: 'Suspendido', PST: 'Pospuesto', CANC: 'Cancelado',
 }[s] || s);
 
-// Display cap: internally probabilities can be 100%, but we show max 95% to the user
-const cap = (v) => Math.min(95, v);
+// El motor y los rankings usan el valor crudo; esta función es exclusivamente
+// visual y evita mostrar más de 95% o redondear 94.999% hacia 95%.
+const cap = (v) => {
+  const value = Math.max(0, Math.min(100, Number(v) || 0));
+  if (value >= 95) return 95;
+  return Math.floor((value + 1e-9) * 100) / 100;
+};
 
 // Splash-once-per-tab: el splash de bienvenida solo se muestra en la
 // primera carga del tab. Las subsiguientes navegaciones (back desde
@@ -1099,7 +1104,7 @@ export default function Dashboard() {
     //    se muestran las 10
     //  - Solo partidos próximos (NS) o en vivo — los finalizados desaparecen
     //  - Orden: NS > en vivo, dentro de cada grupo prob desc
-    //  - Cap visual 95% (nunca se muestra 100% para no dar falsa certeza)
+    //  - El ranking usa la probabilidad cruda; la UI muestra máximo 95%
     const MIN_PROB = 90;
     const MIN_ODD  = 1.20;
     const all = [];
@@ -1117,7 +1122,7 @@ export default function Dashboard() {
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
 
       // La combinada general contiene recomendaciones desde 80%, pero la
-      // Apuesta del Día exige siempre 90% + validación fuera de muestra + cuota real ≥1.20.
+      // Apuesta del Día exige siempre frecuencia real ≥90% + cuota real ≥1.20.
       const isEngine = data?.combinada?.source === 'context-engine';
       const liveComb = (!isEngine && data.calculatedProbabilities)
         ? buildCombinada(data.calculatedProbabilities, data.odds, data.playerHighlights, { home: homeTeam, away: awayTeam })
@@ -1126,16 +1131,15 @@ export default function Dashboard() {
       const minProb = MIN_PROB;
 
       selections.forEach(sel => {
-        if (sel.dailyValidated !== true) return;
         if (!isDailyPickMarketAllowed(sel)) return;
-        if (sel.probability < minProb) return;
+        if (Number(sel.rawProbability ?? sel.probability) < minProb) return;
         if (!sel.odd || sel.odd < MIN_ODD) return;
         all.push({
           ...sel,
           // Selecciones del motor traen el market_key como id; traducir a nombre
           // legible (cubre también combinadas cacheadas con la clave cruda).
           name: sel.scope === 'context' ? marketLabel(sel.id, { home: homeTeam, away: awayTeam }) : sel.name,
-          probability: Math.min(95, sel.probability),
+          probability: cap(sel.rawProbability ?? sel.probability),
           fixtureId: fid,
           matchName: mn,
           homeTeam,
@@ -1151,17 +1155,17 @@ export default function Dashboard() {
     // Orden: priority desc (NS primero), después prob desc, después cuota desc
     all.sort((a, b) =>
       b.priority - a.priority ||
-      b.probability - a.probability ||
+      Number(b.rawProbability ?? b.probability) - Number(a.rawProbability ?? a.probability) ||
       (b.odd || 0) - (a.odd || 0)
     );
 
     const combinedOdd         = all.reduce((acc, m) => acc * (m.odd || 1), 1);
-    const combinedProbability = all.reduce((acc, m) => acc + m.probability, 0) / all.length;
+    const combinedProbability = all.reduce((acc, m) => acc + Number(m.rawProbability ?? m.probability), 0) / all.length;
 
     return {
       selections: all,
       combinedOdd: +combinedOdd.toFixed(2),
-      combinedProbability: +combinedProbability.toFixed(1),
+      combinedProbability: +combinedProbability.toFixed(2),
     };
   }, [analyzedData, fixtureById]);
 
@@ -1172,8 +1176,8 @@ export default function Dashboard() {
     });
     if (all.length === 0) return null;
     const co = all.reduce((a, m) => m.odd ? a * m.odd : a, 1);
-    const cp = all.reduce((a, m) => a + m.probability, 0) / all.length;
-    return { selections: all, combinedOdd: +co.toFixed(2), combinedProbability: +cp.toFixed(1), highRisk: cp < 60 };
+    const cp = all.reduce((a, m) => a * (Number(m.rawProbability ?? m.probability) / 100), 1) * 100;
+    return { selections: all, combinedOdd: +co.toFixed(2), combinedProbability: +cp.toFixed(2), highRisk: cp < 60 };
   }, [selectedMarkets]);
 
   const totalSel = useMemo(
@@ -1363,7 +1367,7 @@ export default function Dashboard() {
                 </span>
               </span>
               <span className="apuesta-head-metrics">
-                <span><small>Probabilidad</small><strong>{cap(apuestaDelDia.combinedProbability)}%</strong></span>
+                <span><small>Prob. media</small><strong>{cap(apuestaDelDia.combinedProbability)}%</strong></span>
                 {apuestaDelDia.combinedOdd > 1 && <span><small>Cuota</small><strong>{apuestaDelDia.combinedOdd}</strong></span>}
                 <ChevronDown className={showApuesta ? 'is-open' : ''} size={17} aria-hidden="true" />
               </span>
@@ -1532,7 +1536,7 @@ export default function Dashboard() {
                         <span className="comb-item-name">{displayBettingText(sel.name)}</span>
                       </div>
                       <div className="comb-item-metrics">
-                        <span className={`comb-item-prob ${sel.probability >= 75 ? 'high' : sel.probability >= 50 ? 'mid' : 'low'}`}><small>Prob.</small>{cap(sel.probability)}%</span>
+                        <span className={`comb-item-prob ${Number(sel.rawProbability ?? sel.probability) >= 75 ? 'high' : Number(sel.rawProbability ?? sel.probability) >= 50 ? 'mid' : 'low'}`}><small>Prob.</small>{cap(sel.rawProbability ?? sel.probability)}%</span>
                         <span className="comb-item-odd"><small>Cuota</small>{sel.odd ? sel.odd.toFixed(2) : '—'}</span>
                       </div>
                       <button className="comb-item-rm" onClick={() => toggleMarket(sel.fixtureId, sel, sel.matchName)} aria-label={`Quitar ${displayBettingText(sel.name)}`}><X size={15} aria-hidden="true" /></button>
@@ -1550,7 +1554,7 @@ export default function Dashboard() {
                   </div>
                   <div className="comb-formula">
                     {customCombinada.selections.map((s, i) => (
-                      <span key={i}>{i > 0 && ' x '}{cap(s.probability)}%</span>
+                      <span key={i}>{i > 0 && ' x '}{cap(s.rawProbability ?? s.probability)}%</span>
                     ))}
                     <span> = {cap(customCombinada.combinedProbability)}%</span>
                   </div>
@@ -1658,7 +1662,7 @@ function ApuestaSelectionList({ selections }) {
       <div style={{ position: 'relative', height: `${virtualizer.getTotalSize()}px` }}>
         {virtualizer.getVirtualItems().map(row => {
           const sel = selections[row.index];
-          const pct = cap(sel.probability);
+          const pct = cap(sel.rawProbability ?? sel.probability);
           const probColor = pct >= 85 ? '#4ade80' : pct >= 80 ? '#fbbf24' : '#d97706';
           const suffixes = { 'Goles': 'goles', 'Córners': 'córners', 'Tarjetas': 'tarjetas' };
           const suffix = suffixes[sel.cat];
@@ -1994,7 +1998,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
           : []);
     return sels
       // P6: filtro 1.20 mínimo (alineado con MIN_DISPLAY_ODDS en lib/constants.js)
-      .filter(s => s.odd && s.odd >= 1.20 && s.probability >= 70 && s.probability <= 95)
+      .filter(s => s.odd && s.odd >= 1.20 && Number(s.rawProbability ?? s.probability) >= 70)
       .map((s, i) => ({
         id: s.id || `mkt-${i}`,
         // Re-traduce la clave con lib/market-labels.js (misma fuente que el servidor y que la
@@ -2003,6 +2007,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
         // cacheados ANTES del fix de etiquetas. scope 'player' conserva su name (id no es clave).
         name: s.scope === 'context' ? marketLabel(s.id, { home: match.teams.home.name, away: match.teams.away.name }) : s.name,
         probability: s.probability,
+        rawProbability: s.rawProbability,
         odd: s.odd,
         bookmaker: s.bookmaker || null,   // bookmaker real atribuido por el motor
         recommended: s.recommended === true,
@@ -2013,7 +2018,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
            : s.category?.includes('goals') || s.category === 'winner' || s.category === 'btts' ? 'Goles'
            : s.category || 'Otros',
       }))
-      .sort((a, b) => b.probability - a.probability);
+      .sort((a, b) => Number(b.rawProbability ?? b.probability) - Number(a.rawProbability ?? a.probability));
   }, [isExpanded, data, match]);
 
   return (
@@ -2218,11 +2223,11 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                       >
                         <span className="mkt-name">{displayBettingText(mkt.name)}</span>
                         <span className={`mkt-validation ${mkt.recommended ? 'is-validated' : 'is-reference'}`}>
-                          {mkt.recommended ? 'Recomendación validada' : 'Solo referencia estadística'}
+                          {mkt.recommended ? 'Recomendación estadística' : 'Dato estadístico'}
                         </span>
-                        <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${cap(mkt.probability)}%` }} /></div>
+                        <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${cap(mkt.rawProbability ?? mkt.probability)}%` }} /></div>
                         <div className="mkt-nums">
-                          <span className="mkt-pct">{cap(mkt.probability)}%</span>
+                          <span className="mkt-pct">{cap(mkt.rawProbability ?? mkt.probability)}%</span>
                           {mkt.odd && <span className="mkt-odd">{mkt.odd.toFixed(2)}</span>}
                           {bkLogo && <span className="mkt-bk" title={mkt.bookmaker}><img src={bkLogo} alt={mkt.bookmaker} className="bk-logo-lg" loading="lazy" decoding="async" onError={(e) => { e.target.style.display = 'none'; }} /></span>}
                           {checked && <span className="mkt-chk">&#10003;</span>}
@@ -2587,7 +2592,7 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
   const open = openSub === id;
 
   const ProbItem = ({ it }) => {
-    const v = Math.round(it.value ?? 0);
+    const v = cap(it.value);
     const color = v >= 80 ? '#4ade80' : v >= 65 ? '#fbbf24' : v >= 50 ? '#f97316' : '#94a3b8';
     return (
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', gap: 8 }}>

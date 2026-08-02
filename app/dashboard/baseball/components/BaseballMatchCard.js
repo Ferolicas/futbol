@@ -3,7 +3,11 @@
 import Link from 'next/link';
 import Image from 'next/image';
 
-const cap = (v) => Math.min(95, Math.max(0, v ?? 0));
+const cap = (v) => {
+  const value = Math.max(0, Math.min(100, Number(v) || 0));
+  if (value >= 95) return 95;
+  return Math.floor((value + 1e-9) * 100) / 100;
+};
 
 const isLive = (s) => ['LIVE', 'IN', 'IN1', 'IN2', 'IN3', 'IN4', 'IN5', 'IN6', 'IN7', 'IN8', 'IN9'].includes(s);
 const isFinished = (s) => ['FT', 'AOT'].includes(s);
@@ -70,7 +74,7 @@ function CombinadaChip({ combinada }) {
       borderRadius: 100, padding: '2px 8px', fontSize: '.72rem', fontWeight: 700,
       color: '#f59e0b',
     }}>
-      🎯 {prob.toFixed(0)}%{combinada.hasRealOdds && combinada.combinedOdd ? ` · @${combinada.combinedOdd}` : ''}
+      🎯 {cap(prob)}%{combinada.hasRealOdds && combinada.combinedOdd ? ` · @${combinada.combinedOdd}` : ''}
     </span>
   );
 }
@@ -158,12 +162,12 @@ export default function BaseballMatchCard({
       {/* Probability bar */}
       {ml && (
         <div style={{ display: 'flex', gap: 4, fontSize: '.78rem', margin: '6px 0', alignItems: 'center' }}>
-          <span style={{ color: '#10b981', fontWeight: 700 }}>{cap(ml.home).toFixed(0)}%</span>
+          <span style={{ color: '#10b981', fontWeight: 700 }}>{cap(ml.home)}%</span>
           <div style={{ flex: 1, height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden', display: 'flex' }}>
             <div style={{ width: `${cap(ml.home)}%`, background: '#10b981' }} />
             <div style={{ width: `${cap(ml.away)}%`, background: '#ef4444' }} />
           </div>
-          <span style={{ color: '#ef4444', fontWeight: 700 }}>{cap(ml.away).toFixed(0)}%</span>
+          <span style={{ color: '#ef4444', fontWeight: 700 }}>{cap(ml.away)}%</span>
         </div>
       )}
 

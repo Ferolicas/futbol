@@ -6,7 +6,6 @@ const {
   computeMultisportEmpiricalPlayerMarkets,
   buildEmpiricalPlayerProbabilities,
   multisportEngineInternals,
-  validationSupportsDisplayedProbability,
 } = require('../lib/multisport-empirical-engine.js');
 const { apiSportsInternals, normalizeApiSportsOdds } = require('../lib/api-sports-multisport.js');
 const { normalizeTeamStatistics, multisportStoreInternals } = require('../lib/multisport-store.js');
@@ -15,7 +14,7 @@ const { normalizeMlbGame, normalizeNflGame } = require('../lib/multisport-provid
 const { normalizeEspnGame, normalizeEspnOdds } = require('../lib/espn-sports-api.js');
 const { getSportCompetitions, isIsoDate } = require('../lib/multisport-config.js');
 
-test('el motor multi-deporte acepta una muestra y limita 95–100% solo en presentación', () => {
+test('el motor multi-deporte conserva 100% crudo y muestra máximo 95%', () => {
   const rate = multisportEngineInternals.empiricalRate(
     [{ _value: 3, _current: true, _weight: 1 }],
     (value) => value > 1.5 ? 1 : 0,
@@ -25,18 +24,9 @@ test('el motor multi-deporte acepta una muestra y limita 95–100% solo en prese
   assert.equal(rate.hits, 1);
   assert.equal(rate.p, 1);
   assert.equal(multisportEngineInternals.displayPercent(rate.p), 95);
-  assert.equal(multisportEngineInternals.displayPercent(0.99999), 95);
+  assert.equal(multisportEngineInternals.displayPercent(0.9999), 95);
   assert.equal(multisportEngineInternals.displayPercent(0.9), 90);
   assert.equal(multisportEngineInternals.displayPercent(0.5), 50);
-});
-
-test('una recomendación multi-deporte exige que su mercado valide el porcentaje mostrado', () => {
-  assert.equal(validationSupportsDisplayedProbability({ n: 2, hitRate: 0.8 }, 80), true);
-  assert.equal(validationSupportsDisplayedProbability({ n: 20, hitRate: 0.89 }, 90), false);
-  assert.equal(validationSupportsDisplayedProbability({ n: 20, hitRate: 0.90 }, 90), true);
-  assert.equal(validationSupportsDisplayedProbability({ n: 20, hitRate: 0.95 }, 95), true);
-  assert.equal(validationSupportsDisplayedProbability({ n: 20, hitRate: 0.94 }, 99.9), false);
-  assert.equal(validationSupportsDisplayedProbability({ n: 0, hitRate: 1 }, 95), false);
 });
 
 test('la actualidad domina al histórico sin borrar ninguna observación', () => {
@@ -106,6 +96,7 @@ test('el motor de jugadores consulta su tabla deportiva y acepta una muestra', a
   });
   assert.equal(result.points[0].lineProbs[20.5], 95);
   assert.equal(result.points[0].evidence[20.5].n, 1);
+  assert.equal(result.points[0].evidence[20.5].rawProbability, 1);
 });
 
 test('las cuotas API-Sports se normalizan sin entrar en la probabilidad', () => {

@@ -113,9 +113,9 @@ function emptyMetric() {
 
 function addObservation(metric, family, p, hit) {
   if (p == null || hit == null || !Number.isFinite(p)) return;
-  // Se puntúa el mismo porcentaje que recibe el usuario. El cálculo interno
-  // puede ser 100%, pero el contrato visual lo muestra como máximo en 95%.
-  const q = Math.max(EPS, Math.min(0.95, p));
+  // Se puntúa la frecuencia real completa. EPS solo evita log(0); no modifica
+  // el porcentaje servido ni introduce un tope comercial.
+  const q = Math.max(EPS, Math.min(1 - EPS, p));
   metric.n++;
   metric.brierSum += (q - hit) ** 2;
   metric.loglossSum += -(hit * Math.log(q) + (1 - hit) * Math.log(1 - q));
@@ -391,7 +391,7 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
         } else if (active.version > 0) {
           // El candidato queda auditado como inactivo, pero producción conserva
           // al campeón. Renovamos SU validación con la ventana más reciente;
-          // de otro modo el gate comercial terminaría sirviendo métricas viejas.
+          // de otro modo los diagnósticos del campeón quedarían desactualizados.
           const servedReport = {
             ...report,
             candidateShare: active.config.currentShare,

@@ -42,7 +42,6 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const CONTEXT_ENGINE_ENABLED = process.env.CONTEXT_ENGINE_ENABLED === 'true';
-const VISUAL_PROB_CAP = 95; // no mostrar nunca 100% para no dar falsa certeza
 const BETTABLE_STATUSES = new Set(['NS', 'TBD']);
 
 async function handle(request) {
@@ -140,10 +139,7 @@ async function handle(request) {
     });
   }
 
-  const publishedSelections = dailyPick.selections.map(selection => ({
-    ...selection,
-    probability: Math.min(VISUAL_PROB_CAP, selection.probability),
-  }));
+  const publishedSelections = dailyPick.selections;
 
   // 5. Upsert en combinada_dia (UNIQUE por fecha)
   const { data: row, error } = await supabaseAdmin

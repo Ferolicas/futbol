@@ -24,7 +24,11 @@ function detectCountry() {
   } catch { return 'default'; }
 }
 
-const cap = (v) => Math.min(95, v);
+const cap = (v) => {
+  const value = Math.max(0, Math.min(100, Number(v) || 0));
+  if (value >= 95) return 95;
+  return Math.floor((value + 1e-9) * 100) / 100;
+};
 const fmtTime = (d, tz) => fmtTimeInTz(d, tz || getUserTz());
 const fmtDate = (d, tz) => new Date(d).toLocaleDateString('es', { timeZone: tz || getUserTz(), weekday: 'long', day: 'numeric', month: 'long' });
 const fmtShortDate = (d, tz) => new Date(d).toLocaleDateString('es', { timeZone: tz || getUserTz(), day: '2-digit', month: 'short' });
@@ -1046,7 +1050,7 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
             const matchName = `${a.homeTeam} vs ${a.awayTeam}`;
             const withOdds = allSels;
             const cOdd = withOdds.length >= 1 ? withOdds.reduce((acc, s) => acc * s.odd, 1) : null;
-            const cProb = allSels.reduce((acc, s) => acc + s.probability, 0) / allSels.length;
+            const cProb = allSels.reduce((acc, s) => acc + Number(s.rawProbability ?? s.probability), 0) / allSels.length;
             const isHighRisk = cProb < 70;
             const inCombo = selectedMarkets[fixtureId] || {};
             const addedCount = Object.keys(inCombo).length;
@@ -1121,7 +1125,7 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
                               animate={{ scale: [1, 1.05, 1], boxShadow: ['0 0 20px rgba(34,197,94,.5)', '0 0 30px rgba(34,197,94,.8)', '0 0 20px rgba(34,197,94,.5)'] }}
                               transition={{ duration: 2, repeat: Infinity, delay: i * .2 }}
                             >
-                              {cap(sel.probability)}%
+                              {cap(sel.rawProbability ?? sel.probability)}%
                             </motion.div>
                           </div>
                         </motion.button>
@@ -1984,7 +1988,7 @@ const GoalTimingSection = memo(function GoalTimingSection({ goalTiming, homeTeam
     let sum = 0;
     for (let i = s; i <= e; i++) sum += data[i]?.probability || 0;
     const value = sum / (e - s + 1);
-    return value >= 95 ? 95 : Math.floor((value + 1e-9) * 10) / 10;
+    return cap(value);
   };
 
   const home1H = aggregate(goalTiming.home, 0, 2);

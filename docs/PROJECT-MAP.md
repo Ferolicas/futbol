@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-02 · Base auditada: calendarios multideporte ampliados y paneles móviles unificados
+Actualizado: 2026-08-02 · Base auditada: frecuencia cruda exacta y tope de 95% exclusivamente visual
 
 ## Identidad y stack
 
@@ -136,16 +136,17 @@ distintos para una cuota total entre 1.50 y 2.00. El workflow no usa IA:
 construye la URL de `/api/pick-image` y Telegram publica la tarjeta con escudos,
 cuota, probabilidad y un único enlace a CF Análisis.
 
-Una opción de equipo solo puede entrar si su misma clave exacta (por ejemplo,
-`goals_total_over_1_5`) sostuvo fuera de muestra al menos el porcentaje que se
-muestra. Para la Apuesta del Día, la banda `daily90` exige además un porcentaje
-calculado de 90% o más. Ese control no cambia el porcentaje: si faltan métricas
-o la validación no alcanza el valor mostrado, el sistema falla cerrado y no
-recomienda.
-Los props de jugador siguen visibles en el constructor, pero no llegan a la
-Apuesta del día ni a la combinada automática hasta disponer de backtest
-point-in-time propio. El constructor identifica expresamente las opciones que
-son recomendaciones validadas y las que son solo referencia estadística.
+Una opción entra en recomendaciones generales cuando su frecuencia ponderada
+real es de 80% o más y existe cuota real; la Apuesta del Día exige 90% o más y
+aplica además su whitelist de mercados y rango de cuota. Las métricas fuera de
+muestra son únicamente diagnósticas: nunca cambian el porcentaje ni bloquean
+una frecuencia calculada. Los props de jugador siguen la misma regla cuando
+existe historial y una cuota atribuible. El constructor distingue únicamente
+entre recomendación estadística (≥80%) y dato estadístico seleccionable.
+Todos los filtros, rankings y probabilidades conjuntas usan la frecuencia cruda;
+web, PNG y mensaje de Telegram muestran como máximo 95% para no comunicar una
+garantía. Un valor real de 99.75% se conserva como 99.75 internamente y se
+presenta como 95%.
 
 ### Motor empírico de fútbol
 
@@ -161,14 +162,15 @@ faltas y rojas; el XI confirmado pondera alineaciones históricas reales.
 Las medias descriptivas no se presentan como goles “esperados”: la interfaz
 aclara que la media anotadora combinada y la frecuencia de superar una línea
 son medidas diferentes. Los mercados de “menos de” usan el complemento exacto
-del “más de”; no reciben ajustes artificiales y solo se recomiendan cuando su
-línea/dirección exacta sostiene fuera de muestra el porcentaje mostrado.
+del “más de”; no reciben ajustes artificiales y se recomiendan cuando su
+frecuencia cruda alcanza el umbral del producto. El walk-forward de su
+línea/dirección exacta permanece como diagnóstico auditable, no como bloqueo.
 
 `scripts/train-football-empirical-engine.js` hace walk-forward nocturno sobre
 1.200 partidos: 70% para escoger pesos y 30% cronológico intocable para aceptar
-o rechazar el candidato y renovar cada familia exacta en las bandas general,
-alta, diaria-90 y élite-95. Un candidato peor
-queda inactivo; el campeón conserva producción y refresca su propia validación.
+o rechazar el candidato y renovar el diagnóstico de cada familia exacta en las
+bandas general, alta, diaria-90 y élite-95. Un candidato peor queda inactivo; el
+campeón conserva producción y refresca sus métricas, que no actúan como gate.
 `apps/cfanalisis-worker/src/jobs/futbol/retrain.js` ejecuta captura → ingesta →
 perfiles → entrenamiento, falla si cualquier etapa queda incompleta y deja un
 sello Redis que comprueba el watchdog.
@@ -193,10 +195,11 @@ sirve y cero muestras devuelve “sin dato”. Temporada actual e histórico se
 mantienen separados, la actualidad conserva más del 50% del peso y localía,
 rival, competición, pitcher/quarterback y alineación solo ponderan hechos
 observados semejantes. Cuotas, Poisson, isotónica, priors y shrinkage no alteran
-el porcentaje. La frecuencia cruda se conserva para auditoría y la presentación
-se limita a 95%. Una opción solo entra en recomendaciones si su misma familia
-y línea sostuvo fuera de muestra, como mínimo, el porcentaje que se muestra;
-sin validación falla cerrado, sin imponer un tamaño mínimo de muestra.
+el porcentaje. La frecuencia cruda se conserva para auditoría, filtros y
+cálculos; la presentación se limita a 95% sin escribir ese límite de vuelta en
+el motor. Una opción entra en recomendaciones por su propia frecuencia y cuota;
+la validación cronológica mide el motor, pero jamás oculta o transforma el
+resultado.
 
 Las fuentes y namespaces de identificadores también están separados:
 
@@ -221,8 +224,8 @@ Las fuentes y namespaces de identificadores también están separados:
   calendario, logos, marcador, boxscore, jugadores y cuotas cuando existen.
 
 `scripts/train-multisport-empirical-engine.js` realiza selección cronológica
-70/30 por deporte y guarda validación fuera de muestra sin recalibrar el
-porcentaje. `scripts/backfill-multisport-history.js` carga una temporada y una
+70/30 por deporte y guarda diagnósticos fuera de muestra sin recalibrar ni
+bloquear el porcentaje. `scripts/backfill-multisport-history.js` carga una temporada y una
 o varias competiciones por ejecución (`--competition`; MLB/MiLB usa rangos
 oficiales de 45 días y NCAA consultas diarias concurrentes), y
 `scripts/migrate-multisport-engines.sql` crea los almacenes
@@ -291,7 +294,7 @@ snapshots live a los IDs de la jornada antes de serializar la respuesta.
 - `lib/payment-store.js`, `lib/payment-reconcile.js` y `lib/entitlements.js`: estado durable, recuperación y única regla de acceso.
 - `lib/telegram-daily-pick.js`: whitelist y selector determinista de la publicación diaria de Telegram.
 - `lib/model-engine.js`, `lib/model-to-scored.js` y
-  `lib/model-probabilities.js`: frecuencia empírica, validación exacta y contrato
+  `lib/model-probabilities.js`: frecuencia empírica, diagnóstico cronológico y contrato
   de probabilidades/combinadas. No añadir calibradores o priors al serving.
 - `lib/football-api-client.cjs`: limitador distribuido y validación de respuestas
   de API-Football; toda nueva llamada al proveedor debe pasar por aquí.
@@ -332,9 +335,11 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   gratuito y coordinan un máximo de diez solicitudes/minuto entre web y workers;
   un 429 temporal pausa el host, pero nunca abre el circuito de cuota diaria.
   Las cuotas deportivas nunca se usan como probabilidad del modelo.
-- 2026-08-01: `FOOTBALL_CACHE_VERSION=19` invalida análisis sin el gate exacto
-  de validación. Si `prediction_models.metrics.candidate.families` no está
-  disponible, se muestran frecuencias pero no se publican recomendaciones.
+- 2026-08-02: `FOOTBALL_CACHE_VERSION=20` y `MULTISPORT_CACHE_VERSION=12`
+  invalidan análisis con el antiguo gate de validación o sin separación entre
+  frecuencia cruda y valor visual. Las decisiones usan frecuencias ponderadas
+  reales; el máximo 95% vive solo en la presentación y los diagnósticos nunca
+  bloquean una recomendación.
 - 2026-08-01: no liberar un intento pendiente por tiempo ni marcar terminal un cobro recurrente que MP pueda reintentar; primero cancelar el recurso remoto.
 - 2026-07-29: el checkout automático requiere deduplicación persistente ante Strict Mode/Fast Refresh.
 - 2026-07-29: solo el plan viaja por URL; el servidor vuelve a calcular precio, moneda y proveedor.

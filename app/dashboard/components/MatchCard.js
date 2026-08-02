@@ -6,6 +6,12 @@ import FavoriteStar from './FavoriteStar';
 import MatchStatusBadge from './MatchStatusBadge';
 import { fmtTimeInTz } from '../../../lib/timezone';
 
+const displayProbability = (value) => {
+  const probability = Math.max(0, Math.min(100, Number(value) || 0));
+  if (probability >= 95) return 95;
+  return Math.floor((probability + 1e-9) * 100) / 100;
+};
+
 function TeamRow({ team, score, isWinner }) {
   return (
     <div className="match-team" style={isWinner ? { color: '#f1f5f9', fontWeight: 700 } : {}}>
@@ -73,7 +79,7 @@ function CombinadaChip({ combinada }) {
       borderRadius: 100, padding: '2px 8px', fontSize: '.72rem', fontWeight: 700,
       color: 'var(--accent-green)',
     }}>
-      🎯 {prob.toFixed(0)}%{combinada.hasRealOdds && combinada.combinedOdd ? ` · @${combinada.combinedOdd}` : ''}
+      🎯 {displayProbability(prob)}%{combinada.hasRealOdds && combinada.combinedOdd ? ` · @${combinada.combinedOdd}` : ''}
     </span>
   );
 }
@@ -156,11 +162,11 @@ export default function MatchCard({
         {/* Probability chip */}
         {probability?.homeWin != null && (
           <div style={{ display: 'flex', gap: 4, fontSize: '.75rem', color: 'var(--text-muted)' }}>
-            <span style={{ color: 'var(--accent-green)', fontWeight: 700 }}>{probability.homeWin?.toFixed(0)}%</span>
+            <span style={{ color: 'var(--accent-green)', fontWeight: 700 }}>{displayProbability(probability.homeWin)}%</span>
             <span>|</span>
-            <span>{probability.draw?.toFixed(0)}%</span>
+            <span>{displayProbability(probability.draw)}%</span>
             <span>|</span>
-            <span style={{ color: 'var(--accent-red)', fontWeight: 700 }}>{probability.awayWin?.toFixed(0)}%</span>
+            <span style={{ color: 'var(--accent-red)', fontWeight: 700 }}>{displayProbability(probability.awayWin)}%</span>
           </div>
         )}
 

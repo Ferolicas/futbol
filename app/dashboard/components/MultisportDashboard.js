@@ -59,7 +59,20 @@ function cardDate(value, timeZone) {
   } catch { return ''; }
 }
 
+function displayProbability(value) {
+  const probability = Math.max(0, Math.min(100, Number(value) || 0));
+  if (probability >= 95) return 95;
+  return Math.floor((probability + 1e-9) * 100) / 100;
+}
+
 function probability(entry) {
+  const value = Number(entry?.probability ?? entry);
+  return Number.isFinite(value) ? displayProbability(value) : null;
+}
+
+function engineRawProbability(entry) {
+  const raw = Number(entry?.rawProbability);
+  if (Number.isFinite(raw)) return raw * 100;
   const value = Number(entry?.probability ?? entry);
   return Number.isFinite(value) ? value : null;
 }
@@ -82,10 +95,10 @@ function bestTotal(probabilities) {
   for (const [line, values] of Object.entries(probabilities?.totals?.lines || {})) {
     const more = probability(values?.over);
     const less = probability(values?.under);
-    if (more != null) candidates.push({ line, side: 'Más de', probability: more, evidence: values.over?.evidence });
-    if (less != null) candidates.push({ line, side: 'Menos de', probability: less, evidence: values.under?.evidence });
+    if (more != null) candidates.push({ line, side: 'Más de', probability: more, rawProbability: engineRawProbability(values?.over), evidence: values.over?.evidence });
+    if (less != null) candidates.push({ line, side: 'Menos de', probability: less, rawProbability: engineRawProbability(values?.under), evidence: values.under?.evidence });
   }
-  return candidates.sort((left, right) => right.probability - left.probability)[0] || null;
+  return candidates.sort((left, right) => right.rawProbability - left.rawProbability)[0] || null;
 }
 
 function TeamLogo({ team }) {
@@ -141,7 +154,7 @@ function PickButton({ pick, selected, onToggle }) {
     >
       <span className="ms-pick-copy">
         <strong>{displayBettingText(pick.name)}</strong>
-        <small>{pick.validated ? 'Rendimiento histórico verificado' : 'Basada en partidos registrados'}</small>
+        <small>Frecuencia calculada con partidos registrados</small>
       </span>
       <span className="ms-pick-metrics">
         <span><small>Prob.</small><b>{probability(pick)}%</b></span>
@@ -302,8 +315,8 @@ function CombinedBet({ combination, onRemove, onClear }) {
               <span className="comb-item-name">{displayBettingText(selection.name)}</span>
             </div>
             <div className="comb-item-metrics">
-              <span className={`comb-item-prob ${selection.probability >= 75 ? 'high' : selection.probability >= 50 ? 'mid' : 'low'}`}>
-                <small>Prob.</small>{selection.probability}%
+              <span className={`comb-item-prob ${Number(selection.rawProbability ?? selection.probability) >= 75 ? 'high' : Number(selection.rawProbability ?? selection.probability) >= 50 ? 'mid' : 'low'}`}>
+                <small>Prob.</small>{displayProbability(selection.rawProbability ?? selection.probability)}%
               </span>
               <span className="comb-item-odd"><small>Cuota</small>{selection.odd.toFixed(2)}</span>
             </div>
@@ -315,7 +328,7 @@ function CombinedBet({ combination, onRemove, onClear }) {
       </div>
       <div className="comb-summary">
         <div className="comb-sum-row"><span>Cuota total</span><strong className="comb-odd-total">{combination.combinedOdd.toFixed(2)}</strong></div>
-        <div className="comb-sum-row"><span>Probabilidad conjunta</span><strong className={combination.combinedProbability >= 60 ? 'safe' : 'danger'}>{combination.combinedProbability}%</strong></div>
+        <div className="comb-sum-row"><span>Probabilidad conjunta</span><strong className={combination.combinedProbability >= 60 ? 'safe' : 'danger'}>{displayProbability(combination.combinedProbability)}%</strong></div>
       </div>
       <div className="comb-actions">
         <button type="button" className="btn-clear" onClick={onClear}>Limpiar combinada</button>
@@ -416,11 +429,11 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
     ));
     if (!selections.length) return null;
     const combinedOdd = selections.reduce((total, selection) => total * selection.odd, 1);
-    const combinedProbability = selections.reduce((total, selection) => total * (selection.probability / 100), 1) * 100;
+    const combinedProbability = selections.reduce((total, selection) => total * (Number(selection.rawProbability ?? selection.probability) / 100), 1) * 100;
     return {
       selections,
       combinedOdd,
-      combinedProbability: Math.round(combinedProbability * 10) / 10,
+      combinedProbability: Math.round((combinedProbability + Number.EPSILON) * 100) / 100,
     };
   }, [selectedMarkets]);
 

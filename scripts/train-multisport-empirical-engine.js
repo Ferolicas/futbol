@@ -1,8 +1,8 @@
 /* eslint-disable */
 // Entrenamiento walk-forward independiente para baseball, basketball y NFL.
-// Selecciona pesos solo en 70% cronológico; el 30% final únicamente acepta o
-// rechaza. La salida no calibra ni altera probabilidades: guarda pesos de
-// semejanza y un gate de acierto exacto para recomendaciones.
+// Selecciona pesos solo en 70% cronológico; el 30% final compara configuraciones.
+// La salida no calibra, altera ni bloquea probabilidades: guarda pesos de
+// semejanza y métricas diagnósticas fuera de muestra.
 
 import pg from 'pg';
 import {
@@ -47,9 +47,8 @@ function emptyMetric() {
 function observe(metric, key, probability, actual) {
   const raw = Number(probability);
   if (!Number.isFinite(raw)) return;
-  // Se valida exactamente el porcentaje servido: toda frecuencia superior al
-  // 95% se presenta como 95% para no comunicar una garantía.
-  const p = Math.max(0, Math.min(0.95, raw));
+  // Se valida la frecuencia real completa; 0 y 1 son resultados válidos.
+  const p = Math.max(0, Math.min(1, raw));
   metric.squaredError += (p - actual) ** 2;
   metric.n++;
   if (p < 0.80) return;
