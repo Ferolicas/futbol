@@ -103,3 +103,22 @@ test('PostgreSQL final gana sobre Redis NS sin perder estadísticas reales', () 
   assert.equal(fixtureCard.fixture.status.short, 'FT');
   assert.deepEqual(fixtureCard.goals, { home: 2, away: 1 });
 });
+
+test('un autor sin nombre nunca conserva objetos que rompan React', () => {
+  const snapshot = buildDurableResultSnapshot({
+    fixture_id: 101,
+    status: 'FT',
+    goals: { home: 0, away: 1 },
+    goal_scorers: [{
+      player: { id: null, name: null },
+      assist: { id: null, name: null },
+      teamId: 20,
+      minute: 58,
+      type: 'Normal Goal',
+    }],
+  });
+
+  assert.equal(snapshot.goalScorers.length, 1);
+  assert.equal(snapshot.goalScorers[0].player, null);
+  assert.equal(snapshot.goalScorers[0].assist, null);
+});

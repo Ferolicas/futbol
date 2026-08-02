@@ -20,9 +20,41 @@ import {
   fixtureDetailBatches,
   mergePlayerActivity,
 } from './live-player-activity.js';
+import {
+  cachedReconciliationKind,
+  collectStaleLiveFixtureIds,
+  shouldRejectStatusRegression,
+} from './live-reconciliation.js';
+import { queues } from '../../queues.js';
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
+
+async function enqueueImmediateFinalization(date, fixtureIds) {
+  const unique = [...new Set((fixtureIds || []).map(Number).filter(Number.isFinite))];
+  if (!date || unique.length === 0) return;
+
+  const pending = [];
+  for (const fid of unique) {
+    const lockKey = `live:finalize-enqueued:${fid}`;
+    if (await redisGet(lockKey).catch(() => null)) continue;
+    await redisSet(lockKey, '1', 60 * 60).catch(() => {});
+    pending.push(fid);
+  }
+  if (pending.length === 0) return;
+
+  try {
+    await queues['futbol-finalize'].add('futbol-finalize', {
+      date,
+      fixtureIds: pending,
+      source: 'live-confirmed-final',
+    });
+    console.log(`[live:finalize] encolados fecha=${date} fixtures=${pending.join(',')}`);
+  } catch (error) {
+    await Promise.all(pending.map((fid) => redisDel(`live:finalize-enqueued:${fid}`).catch(() => {})));
+    console.error('[live:finalize] no se pudo encolar cierre inmediato:', error.message);
+  }
+}
 
 async function apiFetch(endpoint) {
   const key = process.env.FOOTBALL_API_KEY;
@@ -1160,14 +1192,17 @@ async function forceFinishOverdueLive(allKickoffs, now, dates) {
           const short = f.fixture?.status?.short;
           const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
           const expectedEnd = eeByFid.get(Number(fid));
-          const nsOverdue = PENDING_STATUSES.has(short) && (
-            (Number.isFinite(expectedEnd) && now > expectedEnd + FORCE_FINISH_GRACE_MS) ||
-            (!Number.isFinite(expectedEnd) && kickoff > 0 && now > kickoff + 130 * 60 * 1000)
-          );
-          if (!FINISHED_STATUSES.includes(short) && !nsOverdue) continue;
+          const kind = cachedReconciliationKind({
+            status: short,
+            kickoff,
+            expectedEnd,
+            now,
+            graceMs: FORCE_FINISH_GRACE_MS,
+          });
+          if (!kind) continue;
           if (rfSet[fid]) continue; // ya confirmado contra la API
           if (kickoff && now - kickoff > RECONCILE_MAX_AGE_MS) continue; // solo recientes
-          cachedTargets.push({ fid: Number(fid), kind: nsOverdue ? 'stale' : 'ft' });
+          cachedTargets.push({ fid: Number(fid), kind });
         }
       }
     }
@@ -1237,7 +1272,7 @@ async function forceFinishOverdueLive(allKickoffs, now, dates) {
         }
         if (rfSet) { rfSet[fid] = 1; rfChanged = true; }
         finished.push({
-          fixtureId: fid, status: real.fixture.status, goals: real.goals, score: real.score,
+          date: d, fixtureId: fid, status: real.fixture.status, goals: real.goals, score: real.score,
           corners: stats.corners, yellowCards: stats.yellowCards, redCards: stats.redCards,
           goalScorers: stats.goalScorers || [], missedPenalties: stats.missedPenalties || [],
         });
@@ -1257,7 +1292,7 @@ async function forceFinishOverdueLive(allKickoffs, now, dates) {
           }
         }
         finished.push({
-          fixtureId: fid, status: real.fixture.status, goals: real.goals, score: real.score,
+          date: d, fixtureId: fid, status: real.fixture.status, goals: real.goals, score: real.score,
           corners: stats.corners, yellowCards: stats.yellowCards, redCards: stats.redCards,
           goalScorers: stats.goalScorers || [], missedPenalties: stats.missedPenalties || [],
         });
@@ -1266,6 +1301,7 @@ async function forceFinishOverdueLive(allKickoffs, now, dates) {
         // Aplazado/cancelado/abandonado: mostrar el estado real, no NS ni un
         // marcador inventado.
         const observed = {
+          date: d,
           fixtureId: fid,
           status: real.fixture.status,
           goals: real.goals,
@@ -1286,9 +1322,16 @@ async function forceFinishOverdueLive(allKickoffs, now, dates) {
         finished.push(observed);
         console.log(`[live:reconcile] fid=${fid} (${d}) → ${real.fixture.status.short} REAL`);
       } else if (real && PENDING_STATUSES.has(real.fixture?.status?.short)) {
-        // Corrige también un FT legado/fabricado si el proveedor aún dice
-        // NS/TBD. No se marca confirmado: seguirá reintentándose.
+        // Un endpoint de detalle puede responder NS/TBD durante segundos aunque
+        // el feed global ya haya confirmado juego real. Nunca retroceder una
+        // evidencia live/final a "no iniciado"; se conserva y se reintenta.
+        const previousStatus = ls?.[fid]?.status?.short || fxArr?.find((f) => f.fixture?.id === fid)?.fixture?.status?.short;
+        if (kind === 'live' || shouldRejectStatusRegression(previousStatus, real.fixture.status.short)) {
+          console.warn(`[live:reconcile] fid=${fid} (${d}) ignora regresion ${previousStatus || kind} → ${real.fixture.status.short}`);
+          return;
+        }
         const observed = {
+          date: d,
           fixtureId: fid,
           status: real.fixture.status,
           goals: real.goals,
@@ -1364,6 +1407,16 @@ export async function runLive(_payload = {}) {
   const reconciledMatches = await forceFinishOverdueLive(allKickoffs, now, [today, yesterday]);
   if (reconciledMatches.length > 0) {
     console.log(`${LL} reconcile: ${reconciledMatches.length} estado(s) confirmado(s) contra proveedor`);
+    const finalsByDate = new Map();
+    for (const match of reconciledMatches) {
+      if (!FINISHED_STATUSES.includes(match?.status?.short)) continue;
+      const matchDate = match.date || today;
+      if (!finalsByDate.has(matchDate)) finalsByDate.set(matchDate, []);
+      finalsByDate.get(matchDate).push(match.fixtureId);
+    }
+    await Promise.all([...finalsByDate.entries()].map(([matchDate, fixtureIds]) => (
+      enqueueImmediateFinalization(matchDate, fixtureIds)
+    )));
     // El helper ya corrigió liveStats + fixtures:{d} + fixtureStats con datos
     // reales. Aquí solo broadcasteamos para que el front lo despegue/actualice
     // al instante (status + marcador + goleadores reales).
@@ -1606,10 +1659,8 @@ export async function runLive(_payload = {}) {
   const finishedUpdates = [];
   let staleFixedCount = 0;
   const currentLiveIds = new Set(tracked.map(m => m.fixture.id));
-
-  const staleIds = Object.entries(existingLive)
-    .filter(([fid, m]) => LIVE_STATUSES.includes(m.status?.short) && !currentLiveIds.has(Number(fid)))
-    .map(([fid]) => Number(fid));
+  const cachedFixturesForToday = await redisGet(KEYS.fixtures(today)).catch(() => null);
+  const staleIds = collectStaleLiveFixtureIds(existingLive, cachedFixturesForToday, currentLiveIds);
 
   if (staleIds.length > 0) {
     const staleDetailResult = await fetchDetailedLiveMatches(staleIds, 'stale');
@@ -1655,6 +1706,20 @@ export async function runLive(_payload = {}) {
           staleFixedCount++;
           finishedUpdates.push({ fixtureId: fid, status: fresh.fixture.status, goals: fresh.goals, score: fresh.score, corners: fullStats.corners, yellowCards: fullStats.yellowCards, redCards: fullStats.redCards, goalScorers: fullStats.goalScorers || [], missedPenalties: fullStats.missedPenalties || [] });
         } else {
+          const previous = existingLive[fid] || {};
+          const previousStatus = previous.status?.short
+            || cachedFixturesForToday?.find((fixture) => Number(fixture?.fixture?.id) === fid)?.fixture?.status?.short;
+          if (shouldRejectStatusRegression(previousStatus, freshStatus)) {
+            console.warn(`[live:stale] fid=${fid} ignora regresion ${previousStatus} → ${freshStatus}`);
+            return;
+          }
+          mergedLive[fid] = {
+            ...previous,
+            status: fresh.fixture.status || previous.status,
+            goals: fresh.goals || previous.goals,
+            score: fresh.score || previous.score,
+            updatedAt: new Date().toISOString(),
+          };
           finishedUpdates.push({ fixtureId: fid, status: fresh.fixture.status, goals: fresh.goals, score: fresh.score });
         }
       }
@@ -1668,7 +1733,7 @@ export async function runLive(_payload = {}) {
   // Update fixtures:{date} with latest status
   const allUpdatedIds = new Set([...tracked.map(m => m.fixture.id), ...staleIds]);
   if (allUpdatedIds.size > 0) {
-    const cachedFixtures = await redisGet(KEYS.fixtures(today));
+    const cachedFixtures = cachedFixturesForToday;
     if (Array.isArray(cachedFixtures) && cachedFixtures.length > 0) {
       let changed = false;
       const updated = cachedFixtures.map(f => {
@@ -1676,6 +1741,7 @@ export async function runLive(_payload = {}) {
         if (!fid || !allUpdatedIds.has(fid)) return f;
         const live = mergedLive[fid];
         if (!live?.status) return f;
+        if (shouldRejectStatusRegression(f.fixture.status.short, live.status.short)) return f;
         if (f.fixture.status.short === live.status.short &&
             (f.fixture.status.elapsed || 0) >= (live.status.elapsed || 0)) return f;
         changed = true;
@@ -1684,6 +1750,13 @@ export async function runLive(_payload = {}) {
       if (changed) redisSet(KEYS.fixtures(today), updated, TTL.fixtures).catch(() => {});
     }
   }
+
+  await enqueueImmediateFinalization(
+    today,
+    finishedUpdates
+      .filter((match) => FINISHED_STATUSES.includes(match?.status?.short))
+      .map((match) => match.fixtureId),
+  );
 
   // Pusher update
   const allPusherUpdates = [];

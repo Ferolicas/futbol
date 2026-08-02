@@ -385,6 +385,11 @@ export async function runFinalize(payload = {}) {
   if (!apiKey) throw new Error('FOOTBALL_API_KEY not configured');
 
   const dates = resolveDates(payload);
+  const forcedFixtureIds = new Set(
+    (Array.isArray(payload.fixtureIds) ? payload.fixtureIds : [])
+      .map(Number)
+      .filter(Number.isFinite),
+  );
 
   let candidates = 0, finalized = 0, notFinal = 0, noMatch = 0, apiCalls = 0;
   let terminalSkipped = 0, deferred = 0, recoveredFromFixtureCache = 0;
@@ -432,9 +437,19 @@ export async function runFinalize(payload = {}) {
         cachedStatus: fixture?.fixture?.status?.short || null,
       });
     }
+    // Un FT detectado por el realtime se cierra inmediatamente, incluso si el
+    // partido no estaba en la agenda inicial o su final estimado aun no paso.
+    // El job vuelve a consultar al proveedor: el resultado durable nunca se
+    // infiere del reloj ni del payload del cliente.
+    for (const fid of forcedFixtureIds) {
+      if (!kickoffByFixture.has(fid)) kickoffByFixture.set(fid, { fixtureId: fid });
+    }
     const kickoffs = [...kickoffByFixture.values()];
     const now = Date.now();
     const eligibleEntries = kickoffs.filter((k) => {
+      const fid = Number(k?.fixtureId);
+      if (forcedFixtureIds.size > 0 && !forcedFixtureIds.has(fid)) return false;
+      if (forcedFixtureIds.has(fid)) return true;
       if (FINISHED_STATUSES.includes(k?.cachedStatus)) return true;
       const kickoff = Number(k?.kickoff);
       const expectedEnd = Number(k?.expectedEnd);
@@ -458,6 +473,10 @@ export async function runFinalize(payload = {}) {
     const toCheck = [];
     await Promise.all(pending.map(async (fid) => {
       const cachedStatus = eligibleByFid.get(fid)?.cachedStatus || null;
+      if (forcedFixtureIds.has(fid)) {
+        toCheck.push(fid);
+        return;
+      }
       // Un terminal confirmado y visible no tiene resultado deportivo que
       // persistir. Si algún día cambia a NS/live/FT, el estado cacheado cambia
       // y vuelve a entrar automáticamente.

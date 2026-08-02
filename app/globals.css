@@ -6358,6 +6358,60 @@ input:checked + .cb-mark::after {
 }
 
 /* ---- Live Stats ---- */
+.score-stats-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 108px;
+}
+.score-stat-chip {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 9px;
+  background: rgba(255,255,255,.075);
+  color: #f1f5f9;
+  font-size: .68rem;
+  font-variant-numeric: tabular-nums;
+}
+.score-stat-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(255,255,255,.66);
+  font-size: .58rem;
+  font-weight: 650;
+  letter-spacing: .02em;
+}
+.score-stat-label svg { color: #fbbf24; }
+.score-stat-chip > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 750;
+}
+.score-stat-chip.cards > strong > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.score-stat-chip.unavailable {
+  border-style: dashed;
+  background: rgba(255,255,255,.035);
+}
+.score-stat-chip.unavailable > strong { color: rgba(255,255,255,.4); }
+.score-awaiting-result {
+  max-width: 210px;
+  color: rgba(255,255,255,.74);
+  font-size: .8rem;
+  font-weight: 650;
+  line-height: 1.35;
+  text-align: center;
+}
 .live-stats-bar {
   display: flex;
   align-items: center;
@@ -6580,6 +6634,9 @@ input:checked + .cb-mark::after {
   .perteam-cat h4 { font-size: .65rem; }
   .timing-grid { flex-direction: column; }
   .live-stats-bar { gap: 8px; font-size: .65rem; }
+  .score-stats-summary { min-width: 96px; }
+  .score-stat-chip { gap: 5px; padding: 4px 6px; font-size: .62rem; }
+  .score-stat-label { font-size: .53rem; }
   .lst-header { font-size: .6rem; }
   .lst-row { font-size: .68rem; }
   .live-scorer { font-size: .65rem; }

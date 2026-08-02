@@ -10,6 +10,15 @@ const LiveStatsContext = createContext({
 });
 
 const isCoveredCounter = (counter) => counter?.isReal === true || Number(counter?.total || 0) > 0;
+const LIVE = new Set(['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE']);
+const FINISHED = new Set(['FT', 'AET', 'PEN']);
+const PENDING = new Set(['NS', 'TBD']);
+
+function rejectsStatusRegression(current, incoming) {
+  if (!current || !incoming || current === incoming) return false;
+  if (FINISHED.has(current) && !FINISHED.has(incoming)) return true;
+  return LIVE.has(current) && PENDING.has(incoming);
+}
 
 export function useLiveStats() {
   return useContext(LiveStatsContext);
@@ -27,13 +36,14 @@ export default function LiveStatsProvider({ children }) {
       data.matches.forEach(m => {
         const fid = m.fixtureId;
         const existing = next[fid] || {};
+        const keepObservedState = rejectsStatusRegression(existing.status?.short, m.status?.short);
         next[fid] = {
           ...existing,
           fixtureId: fid,
-          status: m.status,
-          goals: m.goals,
-          score: m.score,
-          elapsed: m.status?.elapsed,
+          status: keepObservedState ? existing.status : (m.status || existing.status),
+          goals: keepObservedState ? existing.goals : (m.goals || existing.goals),
+          score: keepObservedState ? existing.score : (m.score || existing.score),
+          elapsed: keepObservedState ? existing.elapsed : (m.status?.elapsed ?? existing.elapsed),
           corners: isCoveredCounter(m.corners) ? m.corners : (existing.corners || m.corners),
           yellowCards: isCoveredCounter(m.yellowCards) ? m.yellowCards : (existing.yellowCards || m.yellowCards),
           redCards: isCoveredCounter(m.redCards) ? m.redCards : (existing.redCards || m.redCards),

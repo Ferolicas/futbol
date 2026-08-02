@@ -24,7 +24,14 @@ export async function GET(request, { params }) {
       .filter(Boolean);
     const allowed = new Set(competitions.flatMap((competition) => [competition.key, String(competition.id)]));
     const competitionKeys = requested.filter((value) => allowed.has(value));
-    const fixtures = await listSportFixtures(config.key, date, { timeZone, competitionKeys });
+    // La experiencia del cliente es cache/DB-only. Los schedulers del worker
+    // preparan calendarios y live; una visita nunca debe esperar 4-7 segundos
+    // a tres dias de proveedores porque una liga este fuera de temporada.
+    const fixtures = await listSportFixtures(config.key, date, {
+      timeZone,
+      competitionKeys,
+      allowProviderFetch: false,
+    });
     return Response.json({
       success: true,
       sport: config.key,

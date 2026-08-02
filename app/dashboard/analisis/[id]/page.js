@@ -40,6 +40,11 @@ const statusLabel = (s) => ({
 const isLiveStatus = (s) => ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(s);
 const isClockRunning = (s) => ['1H', '2H', 'ET', 'LIVE'].includes(s);
 const isCoveredCounter = (counter) => counter?.isReal === true || Number(counter?.total || 0) > 0;
+const personName = (value) => {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (value && typeof value.name === 'string' && value.name.trim()) return value.name.trim();
+  return 'Autor no informado';
+};
 
 function getProbColor(v) {
   if (v >= 70) return 'hi';
@@ -577,17 +582,17 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                           {liveStats.goalScorers?.filter(g => g.teamId === a.homeId).map((g, i) => (
                             <div key={i} style={{ fontSize: '.8rem', fontWeight: 600, color: '#6ee7b7', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {g.minute}{g.extra ? `+${g.extra}` : ''}&#39; {g.player}{g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
+                              {g.minute}{g.extra ? `+${g.extra}` : ''}&#39; {personName(g.player)}{g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
                             </div>
                           ))}
                           {liveStats.missedPenalties?.filter(p => p.teamId === a.homeId).map((p, i) => (
                             <div key={i} style={{ fontSize: '.8rem', fontWeight: 600, color: '#fb923c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {p.player} ✗ pen. {p.minute}&#39;
+                              {personName(p.player)} ✗ pen. {p.minute}&#39;
                             </div>
                           ))}
                           {liveStats.cardEvents?.filter(c => c.teamId === a.homeId && c.type === 'Red Card').map((c, i) => (
                             <div key={i} style={{ fontSize: '.8rem', fontWeight: 600, color: '#ef4444', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              🟥 {c.player} {c.minute}&#39;
+                              🟥 {personName(c.player)} {c.minute}&#39;
                             </div>
                           ))}
                         </div>
@@ -595,17 +600,17 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'right' }}>
                           {liveStats.goalScorers?.filter(g => g.teamId !== a.homeId).map((g, i) => (
                             <div key={i} style={{ fontSize: '.8rem', fontWeight: 600, color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {g.minute}{g.extra ? `+${g.extra}` : ''}&#39; {g.player}{g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
+                              {g.minute}{g.extra ? `+${g.extra}` : ''}&#39; {personName(g.player)}{g.type === 'Penalty' ? ' (P)' : g.type === 'Own Goal' ? ' (AG)' : ''}
                             </div>
                           ))}
                           {liveStats.missedPenalties?.filter(p => p.teamId !== a.homeId).map((p, i) => (
                             <div key={i} style={{ fontSize: '.8rem', fontWeight: 600, color: '#fb923c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              ✗ pen. {p.minute}&#39; {p.player}
+                              ✗ pen. {p.minute}&#39; {personName(p.player)}
                             </div>
                           ))}
                           {liveStats.cardEvents?.filter(c => c.teamId !== a.homeId && c.type === 'Red Card').map((c, i) => (
                             <div key={i} style={{ fontSize: '.8rem', fontWeight: 600, color: '#ef4444', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {c.player} {c.minute}&#39; 🟥
+                              {personName(c.player)} {c.minute}&#39; 🟥
                             </div>
                           ))}
                         </div>

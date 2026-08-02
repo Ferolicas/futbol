@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Flag,
   Layers3,
   Save,
   Scale,
@@ -60,6 +61,12 @@ const isLive = (s) => ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(s);
 const isFinished = (s) => ['FT', 'AET', 'PEN', 'AWD', 'WO'].includes(s);
 const isPostponed = (s) => ['PST', 'CANC', 'SUSP', 'ABD'].includes(s);
 const isCoveredCounter = (counter) => counter?.isReal === true || Number(counter?.total || 0) > 0;
+const isPendingStatus = (s) => ['NS', 'TBD'].includes(s);
+const isAwaitingOfficialResult = (match, now = Date.now()) => {
+  if (!isPendingStatus(match?.fixture?.status?.short)) return false;
+  const kickoff = new Date(match?.fixture?.date || 0).getTime();
+  return Number.isFinite(kickoff) && kickoff > 0 && now > kickoff + 130 * 60 * 1000;
+};
 const statusText = (s) => ({
   NS: 'Proximo', '1H': '1T', '2H': '2T', HT: 'Entretiempo',
   FT: 'Final', ET: 'Extra', P: 'Penales', AET: 'Extra', PEN: 'Penales',
@@ -193,6 +200,11 @@ export default function Dashboard() {
       const freshStatus = fresh.status || fresh.fixture?.status;
       const freshElapsed = freshStatus?.elapsed ?? fresh.elapsed;
       const currentElapsed = f.fixture.status.elapsed;
+
+      // API-Football puede responder NS/TBD durante un instante en el detalle
+      // aunque el feed global ya haya confirmado juego. La UI nunca debe borrar
+      // un EN VIVO real por esa regresion transitoria.
+      if (isLive(f.fixture.status.short) && isPendingStatus(freshStatus?.short)) return f;
 
       // Never go backwards in elapsed time
       if (currentElapsed && freshElapsed && freshElapsed < currentElapsed &&
@@ -431,6 +443,10 @@ export default function Dashboard() {
                   cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : existing.cardEvents,
                   missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : existing.missedPenalties,
                 };
+              } else if (existing && isLive(existing.status?.short) && isPendingStatus(fresh.status?.short)) {
+                // El snapshot de detalle puede parpadear NS mientras el feed
+                // global sigue live. Conservar la evidencia ya observada.
+                candidate = existing;
               } else {
                 candidate = {
                   ...(existing || {}),
@@ -1712,10 +1728,34 @@ function ApuestaSelectionList({ selections }) {
   );
 }
 
+function ScoreStatsSummary({ stats }) {
+  const cornersCovered = isCoveredCounter(stats?.corners);
+  const yellowCovered = isCoveredCounter(stats?.yellowCards);
+  const redCovered = isCoveredCounter(stats?.redCards);
+  const unavailableTitle = 'Esta competición no entregó este dato';
+
+  return (
+    <div className="score-stats-summary" aria-label="Córners y tarjetas del partido">
+      <span className={`score-stat-chip${cornersCovered ? '' : ' unavailable'}`} title={cornersCovered ? 'Córners' : unavailableTitle}>
+        <span className="score-stat-label"><Flag size={11} aria-hidden="true" /> Córners</span>
+        <strong>{cornersCovered ? `${stats.corners.home}-${stats.corners.away}` : '—'}</strong>
+      </span>
+      <span className={`score-stat-chip cards${yellowCovered || redCovered ? '' : ' unavailable'}`} title={yellowCovered || redCovered ? 'Tarjetas' : unavailableTitle}>
+        <span className="score-stat-label"><i className="yellow-card-sm" /> Tarjetas</span>
+        <strong>
+          <span><i className="yellow-card-sm" /> {yellowCovered ? `${stats.yellowCards.home}-${stats.yellowCards.away}` : '—'}</span>
+          <span><i className="red-card-sm" /> {redCovered ? `${stats.redCards.home}-${stats.redCards.away}` : '—'}</span>
+        </strong>
+      </span>
+    </div>
+  );
+}
+
 const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings, matchData, liveStats, onSelect, onHide, onFavorite, onView, userTz }) {
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
+  const awaitingOfficialResult = isAwaitingOfficialResult(match);
   const meta = match.leagueMeta || {};
   const flag = FLAGS[meta.country] || '';
   const goalBurst = useGoalBurst((match.goals?.home ?? 0) + (match.goals?.away ?? 0), live);
@@ -1724,7 +1764,9 @@ const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFav
   const homeId = match.teams.home.id;
   const tz = userTz || 'UTC';
   const cardDate = new Date(match.fixture.date).toLocaleDateString('es', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long' });
-  const sLabel = { NS: 'PRÓXIMO', '1H': 'EN VIVO — 1T', '2H': 'EN VIVO — 2T', HT: 'ENTRETIEMPO', FT: 'FINALIZADO', ET: 'EN VIVO — Extra', P: 'EN VIVO — Penales', AET: 'FINALIZADO', PEN: 'FINALIZADO', SUSP: 'SUSPENDIDO', PST: 'POSPUESTO', CANC: 'CANCELADO' }[match.fixture.status.short] || match.fixture.status.short;
+  const sLabel = awaitingOfficialResult
+    ? 'PENDIENTE DE CONFIRMACIÓN'
+    : ({ NS: 'PRÓXIMO', TBD: 'POR CONFIRMAR', '1H': 'EN VIVO — 1T', '2H': 'EN VIVO — 2T', HT: 'ENTRETIEMPO', FT: 'FINALIZADO', ET: 'EN VIVO — Extra', P: 'EN VIVO — Penales', AET: 'FINALIZADO', PEN: 'FINALIZADO', SUSP: 'SUSPENDIDO', PST: 'POSPUESTO', CANC: 'CANCELADO' }[match.fixture.status.short] || match.fixture.status.short);
 
   return (
     <div
@@ -1840,29 +1882,12 @@ const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFav
                   <>
                     <SlotScore value={match.goals.home} className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }} />
 
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
-                      {isCoveredCounter(liveStats?.corners) && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 8, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700, color: '#f1f5f9' }}>
-                          <span style={{ color: '#fbbf24' }}>🚩</span>
-                          <span>{liveStats.corners.home}</span>
-                          <span style={{ color: 'rgba(255,255,255,.4)' }}>-</span>
-                          <span>{liveStats.corners.away}</span>
-                          <span style={{ color: 'rgba(255,255,255,.4)', fontWeight: 400 }}>({liveStats.corners.home + liveStats.corners.away})</span>
-                        </div>
-                      )}
-                      {isCoveredCounter(liveStats?.yellowCards) && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 8, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700 }}>
-                          <span style={{ color: '#fbbf24' }}>🟨{liveStats.yellowCards.home}</span>
-                          <span style={{ color: '#ef4444' }}>🟥{liveStats.redCards?.home ?? 0}</span>
-                          <span style={{ color: 'rgba(255,255,255,.4)' }}>|</span>
-                          <span style={{ color: '#fbbf24' }}>🟨{liveStats.yellowCards.away}</span>
-                          <span style={{ color: '#ef4444' }}>🟥{liveStats.redCards?.away ?? 0}</span>
-                        </div>
-                      )}
-                    </div>
+                    <ScoreStatsSummary stats={liveStats} />
 
                     <SlotScore value={match.goals.away} className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }} />
                   </>
+                ) : awaitingOfficialResult ? (
+                  <div className="score-awaiting-result">Esperando marcador oficial</div>
                 ) : (
                   <div style={{ fontSize: 'clamp(1.5rem, 5vw, 2rem)', fontWeight: 700, color: '#f1f5f9' }}>
                     {fmtTime(match.fixture.date, userTz)}
@@ -1970,6 +1995,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
+  const awaitingOfficialResult = isAwaitingOfficialResult(match);
   const meta = match.leagueMeta || {};
   const flag = FLAGS[meta.country] || '';
   const selCount = Object.keys(selMarkets).length;
@@ -1981,7 +2007,9 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
   const matchName = `${match.teams.home.name} vs ${match.teams.away.name}`;
   const tz = userTz || 'UTC';
   const cardDate = new Date(match.fixture.date).toLocaleDateString('es', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long' });
-  const sLabel = { NS: 'PRÓXIMO', '1H': 'EN VIVO — 1T', '2H': 'EN VIVO — 2T', HT: 'ENTRETIEMPO', FT: 'FINALIZADO', ET: 'EN VIVO — Extra', P: 'EN VIVO — Penales', AET: 'FINALIZADO', PEN: 'FINALIZADO', SUSP: 'SUSPENDIDO', PST: 'POSPUESTO', CANC: 'CANCELADO' }[match.fixture.status.short] || match.fixture.status.short;
+  const sLabel = awaitingOfficialResult
+    ? 'PENDIENTE DE CONFIRMACIÓN'
+    : ({ NS: 'PRÓXIMO', TBD: 'POR CONFIRMAR', '1H': 'EN VIVO — 1T', '2H': 'EN VIVO — 2T', HT: 'ENTRETIEMPO', FT: 'FINALIZADO', ET: 'EN VIVO — Extra', P: 'EN VIVO — Penales', AET: 'FINALIZADO', PEN: 'FINALIZADO', SUSP: 'SUSPENDIDO', PST: 'POSPUESTO', CANC: 'CANCELADO' }[match.fixture.status.short] || match.fixture.status.short);
 
   // "Selecciona para tu combinada" → fuente unica: buildCombinada().
   // Antes habia un constructor manual paralelo (~120 lineas) que faltaba
@@ -2131,29 +2159,12 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                     <>
                       <SlotScore value={match.goals.home} className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }} />
 
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
-                        {isCoveredCounter(liveStats?.corners) && (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 8, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700, color: '#f1f5f9' }}>
-                            <span style={{ color: '#fbbf24' }}>🚩</span>
-                            <span>{liveStats.corners.home}</span>
-                            <span style={{ color: 'rgba(255,255,255,.4)' }}>-</span>
-                            <span>{liveStats.corners.away}</span>
-                            <span style={{ color: 'rgba(255,255,255,.4)', fontWeight: 400 }}>({liveStats.corners.home + liveStats.corners.away})</span>
-                          </div>
-                        )}
-                        {isCoveredCounter(liveStats?.yellowCards) && (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 8, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700 }}>
-                            <span style={{ color: '#fbbf24' }}>🟨{liveStats.yellowCards.home}</span>
-                            <span style={{ color: '#ef4444' }}>🟥{liveStats.redCards?.home ?? 0}</span>
-                            <span style={{ color: 'rgba(255,255,255,.4)' }}>|</span>
-                            <span style={{ color: '#fbbf24' }}>🟨{liveStats.yellowCards.away}</span>
-                            <span style={{ color: '#ef4444' }}>🟥{liveStats.redCards?.away ?? 0}</span>
-                          </div>
-                        )}
-                      </div>
+                      <ScoreStatsSummary stats={liveStats} />
 
                       <SlotScore value={match.goals.away} className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }} />
                     </>
+                  ) : awaitingOfficialResult ? (
+                    <div className="score-awaiting-result">Esperando marcador oficial</div>
                   ) : (
                     <div style={{ fontSize: 'clamp(1.5rem, 5vw, 2rem)', fontWeight: 700, color: '#f1f5f9' }}>
                       {fmtTime(match.fixture.date, userTz)}
@@ -2384,6 +2395,11 @@ function GoalBurst() {
 // Foto oficial del jugador (API-Football). Fallback a placeholder si no hay id
 // o la imagen 404ea. loading=lazy para no bloquear el scroll.
 const playerFace = (id) => id ? `/api/player-photo/${id}` : null;
+const eventPersonName = (value) => {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (value && typeof value.name === 'string' && value.name.trim()) return value.name.trim();
+  return 'Autor no informado';
+};
 function PlayerFace({ id, size = 18 }) {
   const [err, setErr] = useState(false);
   const src = playerFace(id);
@@ -2400,7 +2416,7 @@ function ScorerLine({ g, side }) {
     <div className={`scorer-line${side === 'away' ? ' right' : ''}`}>
       <PlayerFace id={g.playerId} />
       <span className="scorer-txt" style={{ color: side === 'home' ? '#6ee7b7' : '#f1f5f9' }}>
-        <span className="scorer-min">{min}</span> {g.player}{sfx}
+        <span className="scorer-min">{min}</span> {eventPersonName(g.player)}{sfx}
       </span>
     </div>
   );
@@ -2412,7 +2428,7 @@ function MissedLine({ p, side }) {
     <div className={`scorer-line${side === 'away' ? ' right' : ''}`}>
       <PlayerFace id={p.playerId} />
       <span className="scorer-txt" style={{ color: '#fb923c' }}>
-        <span className="scorer-min">✗ {p.minute}&#39;</span> {p.player}
+        <span className="scorer-min">✗ {p.minute}&#39;</span> {eventPersonName(p.player)}
       </span>
     </div>
   );
