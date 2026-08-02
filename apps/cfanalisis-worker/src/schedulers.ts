@@ -1,5 +1,6 @@
 import { queues, type QueueName } from './queues.js';
 import { logger } from './logger.js';
+import { MULTISPORT_CACHE_VERSION, bogotaToday } from './shared.js';
 
 // Schedulers nativos del worker (BullMQ Job Schedulers). Reemplazan a
 // cron-job.org: el worker se auto-dispara usando el Redis local del VPS.
@@ -73,6 +74,11 @@ const SCHEDULES: Sched[] = [
   // ── Baseball — diarios (hora España) ──
   { queue: 'baseball-fixtures',  id: 'baseball-fixtures-daily',  pattern: '5 1 * * *',  tz: TZ }, // 1:05
   { queue: 'baseball-analyze',   id: 'baseball-analyze-daily',   pattern: '30 1 * * *', tz: TZ }, // 1:30 — jornada Colombia que arranca
+  // Guardia de cobertura: calendario oficial de ayer/hoy/mañana contra la
+  // versión vigente. Solo procesa IDs ausentes u obsoletos, por lo que una
+  // jornada de 400 partidos ya sana cuesta únicamente tres lecturas de
+  // calendario y cero reanálisis. También recoge juegos añadidos tarde.
+  { queue: 'baseball-analyze',   id: 'baseball-analysis-coverage-15m', pattern: '*/15 * * * *', data: { coverage: true } },
   // Re-análisis PRE-PARTIDO (force + today): captura el lineup confirmado de MLB
   // (props de bateadores) de los juegos que se juegan HOY Colombia. Corre en la
   // franja en que MLB publica alineaciones (tarde Colombia = 17-01 España). Odds
@@ -143,4 +149,18 @@ export async function registerSchedulers(): Promise<void> {
     await q.upsertJobScheduler(s.id, repeat, { name: s.queue, data: s.data ?? {} });
   }
   logger.info({ count: SCHEDULES.length }, 'job schedulers registrados');
+}
+
+// Se invoca desde el proceso heavy después de crear sus Workers. El jobId por
+// contrato+día hace el arranque idempotente y garantiza que un deploy que suba
+// CACHE_VERSION regenere la jornada sin esperar al siguiente cron nocturno.
+export async function enqueueBaseballCoverageBootstrap(): Promise<void> {
+  const date = bogotaToday();
+  const jobId = `baseball-coverage-v${MULTISPORT_CACHE_VERSION}-${date}`;
+  const job = await queues['baseball-analyze'].add(
+    'baseball-analysis-coverage',
+    { coverage: true, bootstrap: true },
+    { jobId },
+  );
+  logger.info({ queue: 'baseball-analyze', jobId: job.id, date, cacheVersion: MULTISPORT_CACHE_VERSION }, 'baseball coverage bootstrap listo');
 }

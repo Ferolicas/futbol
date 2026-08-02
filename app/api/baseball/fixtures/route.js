@@ -15,6 +15,7 @@ import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { userHasActivePlan } from '../../../../lib/require-active-plan';
 import { jsonError } from '../../../../lib/api-error';
 import { MULTISPORT_CACHE_VERSION } from '../../../../lib/multisport-analysis';
+import { enqueue } from '../../../../lib/worker-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -120,13 +121,32 @@ export async function GET(request) {
     const hiddenSet = new Set((hiddenRes.data || []).map(h => toNum(h.fixture_id)));
     const favoritesSet = new Set((favoritesRes.data || []).map(f => toNum(f.fixture_id)));
 
+    // Nunca pedir al cliente que ejecute el motor. Si el proveedor añadió un
+    // juego tarde o un deploy invalidó el contrato anterior, una sola cola
+    // idempotente repara las fechas UTC que forman su jornada local. El bucket
+    // evita que cien usuarios creen cien jobs mientras la reparación corre.
+    const missingCurrentAnalysis = allFids.filter((fixtureId) => !analysisMap.has(fixtureId));
+    if (missingCurrentAnalysis.length) {
+      const bucket = Math.floor(Date.now() / (15 * 60_000));
+      const compactDates = fetchDates.map((value) => value.replaceAll('-', '')).join('-');
+      const jobId = `baseball-auto-v${MULTISPORT_CACHE_VERSION}-${compactDates}-${bucket}`;
+      const queued = await enqueue(
+        'baseball-analyze',
+        { coverage: true, dates: fetchDates },
+        { jobOpts: { jobId } },
+      );
+      if (!queued?.ok) console.warn('[api/baseball/fixtures] no se pudo encolar cobertura automática', queued?.error || 'desconocido');
+    }
+
     const enriched = fixtures.map(f => {
       const fid = toNum(f.id);
+      const isAnalyzed = analysisMap.has(fid);
       return {
         ...f,
         analysis: analysisMap.get(fid) || null,
         liveResult: resultsMap.get(fid) || null,
-        isAnalyzed: analysisMap.has(fid),
+        isAnalyzed,
+        analysisPending: !isAnalyzed,
         isHidden: hiddenSet.has(fid),
         isFavorite: favoritesSet.has(fid),
       };

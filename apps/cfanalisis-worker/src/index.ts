@@ -11,7 +11,7 @@ import { logger } from './logger.js';
 import { notifyError } from './notifier.js';
 import { buildServer } from './server.js';
 import { startWorkers } from './workers.js';
-import { registerSchedulers } from './schedulers.js';
+import { enqueueBaseballCoverageBootstrap, registerSchedulers } from './schedulers.js';
 import { bullConnection } from './redis.js';
 import { queues } from './queues.js';
 
@@ -47,6 +47,9 @@ async function main() {
   // NO registra para evitar doble registro/carrera en el arranque.
   if (HAS_SERVER) {
     await registerSchedulers();
+  }
+  if (ROLE === 'heavy' || ROLE === 'all') {
+    await enqueueBaseballCoverageBootstrap();
   }
 
   // Graceful shutdown

@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-02 · Commit base: `ea9c547`
+Actualizado: 2026-08-02 · Commit base: `5fc1612`
 
 ## Identidad y stack
 
@@ -237,7 +237,14 @@ Las fuentes y namespaces de identificadores también están separados:
   misma lista persistida y nunca reconstruyen mercados de referencia. Los
   historiales de jugador pueden seguir alimentándose internamente, pero no se
   presentan como apuesta hasta que exista una selección y cuota Bet365
-  atribuible al jugador y línea exactos.
+  atribuible al jugador y línea exactos. La cobertura de análisis es automática:
+  un reconciliador cada 15 minutos compara ayer/hoy/mañana contra
+  `MULTISPORT_CACHE_VERSION` y procesa únicamente fixtures ausentes u obsoletos.
+  El proceso heavy encola además la misma guardia al arrancar, con job idempotente
+  por versión y día, de modo que subir el contrato de caché nunca deja la jornada
+  visible esperando al cron nocturno. Una jornada local que detecte un hueco
+  encola su reparación por fechas adyacentes y refresca cada cinco segundos hasta
+  quedar completa; el cliente nunca ofrece ejecutar manualmente el motor.
 - NFL: API-NFL aporta la ventana reciente cuando está disponible; ESPN garantiza
   el calendario amplio, IDs y logos canónicos, boxscores, jugadores y cuotas
   publicadas sin duplicar encuentros al cambiar de fuente.
@@ -431,5 +438,11 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   también su marcador de deploy mientras esos módulos no estén en `WORKER_RE`;
   así GitHub Actions reconstruye y recarga PM2 en vez de conservar módulos
   antiguos en memoria.
+- 2026-08-02: nunca elevar `MULTISPORT_CACHE_VERSION` sin la guardia automática
+  de cobertura. La API solo considera analizada una fila de la versión vigente;
+  bootstrap + reconciliación de 15 minutos reparan versiones antiguas, juegos
+  añadidos tarde y días adyacentes de cualquier zona horaria. La ruta manual de
+  compatibilidad admite hasta 500 IDs y rechaza el exceso explícitamente: jamás
+  truncar lotes de forma silenciosa.
 - 2026-06: los nombres `supabaseAdmin`/`createSupabaseServerClient` son shims PG, no Supabase activo.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.

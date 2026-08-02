@@ -7,6 +7,7 @@ import { supabaseAdmin } from '../../../../lib/supabase';
 import { getCurrentUser } from '../../../../lib/auth-pg';
 import { userHasActivePlan } from '../../../../lib/require-active-plan';
 import { jsonError } from '../../../../lib/api-error';
+import { normalizeBaseballAnalysisFixtureIds } from '../../../../lib/baseball-analysis-request';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -22,9 +23,11 @@ export async function POST(request) {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (!(await userHasActivePlan(user))) return Response.json({ error: 'Subscription required' }, { status: 403 });
     const body = await request.json();
-    const requested = [...new Set((body.fixtures || [])
-      .map((fixture) => String(fixture.id || ''))
-      .filter((fixtureId) => /^\d+$/.test(fixtureId)))].slice(0, 50);
+    const normalizedRequest = normalizeBaseballAnalysisFixtureIds(body.fixtures);
+    if (normalizedRequest.tooMany) {
+      return Response.json({ error: `Máximo ${normalizedRequest.max} partidos por solicitud` }, { status: 400 });
+    }
+    const requested = normalizedRequest.fixtureIds;
     if (!requested.length) return Response.json({ error: 'No fixtures' }, { status: 400 });
     const date = body.date || new Date().toISOString().slice(0, 10);
     if (!isIsoDate(date)) return Response.json({ error: 'Invalid date' }, { status: 400 });

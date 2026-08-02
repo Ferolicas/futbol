@@ -173,9 +173,11 @@ export const trainFootballEmpiricalEngine = _trainFootballEmpirical.trainFootbal
 // basados únicamente en frecuencias observadas. El módulo decide la fuente.
 export const analyzeSportDate = _multisportAnalysis.analyzeSportDate;
 export const analyzeSportGame = _multisportAnalysis.analyzeSportGame;
+export const buildSportAnalysisCoverageDates = _multisportAnalysis.buildSportAnalysisCoverageDates;
 export const finalizeSportDate = _multisportAnalysis.finalizeSportDate;
 export const listSportFixtures = _multisportAnalysis.listSportFixtures;
 export const prepareSportDate = _multisportAnalysis.prepareSportDate;
+export const MULTISPORT_CACHE_VERSION = _multisportAnalysis.MULTISPORT_CACHE_VERSION;
 export const getSportGamesByDate = _multisportProviders.getSportGamesByDate;
 export const getSportGameDetails = _multisportProviders.getSportGameDetails;
 export const trainMultisportEmpiricalEngine = _trainMultisport.trainMultisportEmpiricalEngine;

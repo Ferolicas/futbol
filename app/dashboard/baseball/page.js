@@ -151,8 +151,6 @@ export default function BaseballDashboard() {
   const [sortBy] = useState('time');
   const [statusFilter, setStatusFilter] = useState('all');
   const [leagueFilter, setLeagueFilter] = useState('');
-  const [selected, setSelected] = useState(new Set());
-  const [analyzing, setAnalyzing] = useState(false);
   const [expandedMatch, setExpandedMatch] = useState(null);
   const [showApuesta, setShowApuesta] = useState(true);
   const [error, setError] = useState('');
@@ -172,7 +170,7 @@ export default function BaseballDashboard() {
     fixturesKey,
     fetcher,
     {
-      refreshInterval: 60_000,
+      refreshInterval: (latest) => latest?.fixtures?.some((fixture) => !fixture.isAnalyzed) ? 5_000 : 60_000,
       revalidateOnFocus: true,
       dedupingInterval: 5000,
       keepPreviousData: true,
@@ -225,49 +223,8 @@ export default function BaseballDashboard() {
     const nd = new Date(y, m - 1, d + offset);
     const dStr = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}-${String(nd.getDate()).padStart(2, '0')}`;
     setDate(dStr);
-    setSelected(new Set());
     setSelectedMarkets({});
     setExpandedMatch(null);
-  };
-
-  const toggleSelect = (id) => {
-    setSelected(prev => {
-      const n = new Set(prev);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
-  };
-
-  const analyzeSelected = async () => {
-    const toAnalyze = games.filter(g => selected.has(g.id));
-    if (toAnalyze.length === 0) return;
-    setAnalyzing(true);
-    setError('');
-    try {
-      const res = await fetch('/api/baseball/analisis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fixtures: toAnalyze, date }),
-      });
-      const data = await res.json();
-
-      if (data.error) {
-        setError(data.error);
-      } else if (data.failedCount > 0 && data.analyzedCount === 0) {
-        const firstErr = (data.analyses || []).find(a => !a.success)?.error || 'desconocido';
-        setError(`No se analizó ningún partido (${data.failedCount} fallos). Primero: ${firstErr}`);
-      } else if (data.failedCount > 0) {
-        const firstErr = (data.analyses || []).find(a => !a.success)?.error || 'desconocido';
-        setError(`Analizados ${data.analyzedCount}/${toAnalyze.length}. ${data.failedCount} fallaron: ${firstErr}`);
-      }
-
-      setSelected(new Set());
-      await fixturesMutate();
-    } catch (e) {
-      setError('Error al analizar: ' + e.message);
-    } finally {
-      setAnalyzing(false);
-    }
   };
 
   // Optimistic dismiss + favorite con rollback
@@ -425,7 +382,7 @@ export default function BaseballDashboard() {
           <input
             type="date"
             value={date}
-            onChange={(e) => { setDate(e.target.value); setSelected(new Set()); setSelectedMarkets({}); }}
+            onChange={(e) => { setDate(e.target.value); setSelectedMarkets({}); }}
           />
         </label>
         <button className="baseball-control-btn" onClick={() => changeDate(1)} aria-label="Día siguiente"><ChevronRight size={17} aria-hidden="true" /></button>
@@ -490,12 +447,10 @@ export default function BaseballDashboard() {
                     key={group.leagueId}
                     group={group}
                     userTz={userTz}
-                    selected={selected}
                     favorites={favorites}
                     analyzed={analyzed}
                     expandedMatch={expandedMatch}
                     onExpand={(id) => setExpandedMatch(expandedMatch === id ? null : id)}
-                    onSelect={toggleSelect}
                     onFavorite={toggleFavorite}
                     onDismiss={dismissMatch}
                     onViewFull={setAnalysisModalId}
@@ -524,17 +479,6 @@ export default function BaseballDashboard() {
             />
           )}
         </>
-      )}
-
-      {tab === 'partidos' && selected.size > 0 && (
-        <button
-          className="baseball-float-action"
-          onClick={analyzeSelected}
-          disabled={analyzing}
-        >
-          {analyzing ? `Analizando ${selected.size}…` : `Analizar ${selected.size} ${selected.size === 1 ? 'partido' : 'partidos'}`}
-          <ArrowRight size={18} aria-hidden="true" />
-        </button>
       )}
 
       {tab !== 'combinada' && totalSel > 0 && (
@@ -572,8 +516,8 @@ function BaseballAnalysisModal({ id, onClose }) {
 // =====================================================================
 // LEAGUE GROUP + GAME CARD (con acordeón inline cuando isAnalyzed)
 // =====================================================================
-function LeagueGroup({ group, userTz, selected, favorites, analyzed, expandedMatch,
-                      onExpand, onSelect, onFavorite, onDismiss, onViewFull, selectedMarkets, onToggleMarket }) {
+function LeagueGroup({ group, userTz, favorites, analyzed, expandedMatch,
+                      onExpand, onFavorite, onDismiss, onViewFull, selectedMarkets, onToggleMarket }) {
   return (
     <div className="baseball-league-group" style={{ marginBottom: 22 }}>
       <h3 className="baseball-league-heading" style={{
@@ -595,12 +539,10 @@ function LeagueGroup({ group, userTz, selected, favorites, analyzed, expandedMat
             key={g.id}
             game={g}
             userTz={userTz}
-            isSelected={selected.has(g.id)}
             isFavorite={favorites.includes(g.id)}
             isAnalyzed={analyzed.includes(g.id)}
             isExpanded={expandedMatch === g.id}
             onExpand={() => onExpand(g.id)}
-            onSelect={onSelect}
             onFavorite={onFavorite}
             onDismiss={onDismiss}
             onViewFull={() => onViewFull(g.id)}
@@ -711,8 +653,8 @@ function ScoreCenter({ live, hasScore, homeScore, awayScore, statusLabel, time, 
   );
 }
 
-function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded,
-                    onExpand, onSelect, onFavorite, onDismiss, onViewFull,
+function GameCard({ game, userTz, isFavorite, isAnalyzed, isExpanded,
+                    onExpand, onFavorite, onDismiss, onViewFull,
                     selectedMarkets, onToggleMarket }) {
   // Estado EXCLUSIVO de sub-acordeón (solo uno abierto: Mercados o Probabilidades).
   const [openSub, setOpenSub] = useState(null);
@@ -753,15 +695,13 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
 
   const handleCardClick = (e) => {
     if (e.target.closest('button')) return;
-    if (isAnalyzed) onExpand();
-    else onSelect(game.id);
+    onExpand();
   };
 
   const cardClass = [
     'bb-card',
     isExpanded ? 'open' : '',
     live ? 'live' : '',
-    isSelected ? 'selected' : '',
   ].filter(Boolean).join(' ');
 
   return (
@@ -838,6 +778,9 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
               {isExpanded ? 'Ocultar análisis ▲' : 'Ver análisis ▼'}
             </span>
           )}
+          {!isAnalyzed && (
+            <span style={miniChip()}>Preparando análisis automático…</span>
+          )}
           <span style={{ flex: 1 }} />
           <button
             onClick={(e) => onDismiss(e, game.id)}
@@ -853,9 +796,18 @@ function GameCard({ game, userTz, isSelected, isFavorite, isAnalyzed, isExpanded
       {/* Acordeón principal con CSS grid 0fr→1fr — sub-acordeones siempre
           MONTADOS en el DOM (toggle solo cambia data-open). Apertura
           instantánea garantizada incluso la primera vez. */}
-      <div className="bb-grid" data-open={isExpanded && isAnalyzed && combinada ? '1' : '0'}>
+      <div className="bb-grid" data-open={isExpanded ? '1' : '0'}>
         <div>
           <div style={{ padding: 12 }}>
+            {!isAnalyzed && (
+              <div role="status" style={{
+                padding: '14px 12px', borderRadius: 10, textAlign: 'center',
+                background: 'rgba(94,230,177,0.06)', border: '1px solid rgba(94,230,177,0.18)',
+                color: '#bff4df', fontSize: '.78rem', fontWeight: 700,
+              }}>
+                Actualizando el análisis automáticamente. Esta tarjeta se habilitará en cuanto termine.
+              </div>
+            )}
             {isAnalyzed && combinada && (
               <>
                 <SubAccordion
