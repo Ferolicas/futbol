@@ -43,7 +43,12 @@ const FINALIZE_CONCURRENCY = 10;
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 async function apiGet(path, apiKey) {
   try {
-    const result = await footballApiRequest(path, { apiKey, timeoutMs: 15_000, retries: 2 });
+    const result = await footballApiRequest(path, {
+      apiKey,
+      timeoutMs: 15_000,
+      retries: 2,
+      priority: 'results',
+    });
     return result.response;
   } catch (error) {
     if (!(error?.code === 'DAILY_LIMIT' && Number(error?.retryAfterMs) > 0)) {

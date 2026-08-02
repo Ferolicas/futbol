@@ -5,6 +5,8 @@ const {
   payloadQuality, responseSize, footballApiPath,
   classifyApiErrorText,
   dailyLimitCooldownMs,
+  isCriticalPriority,
+  DAILY_LIMIT_RECHECK_MS, DAILY_CRITICAL_RESERVE,
   SLOT_MS, RATE_PER_MINUTE, FALLBACK_RATE_PER_MINUTE,
 } = require('../lib/football-api-client.cjs');
 
@@ -28,8 +30,17 @@ test('la cuota diaria abre circuito sin reintentos y el límite por minuto sí r
   );
   assert.equal(
     dailyLimitCooldownMs(Date.UTC(2026, 7, 1, 12, 0, 0)),
-    (12 * 60 * 60 * 1000) + 5_000,
+    DAILY_LIMIT_RECHECK_MS,
   );
+});
+
+test('la cuota reserva capacidad exclusiva para calendario, live y resultados', () => {
+  assert.equal(isCriticalPriority('live'), true);
+  assert.equal(isCriticalPriority('fixtures'), true);
+  assert.equal(isCriticalPriority('results'), true);
+  assert.equal(isCriticalPriority('standard'), false);
+  assert.ok(DAILY_CRITICAL_RESERVE >= 10_000);
+  assert.ok(DAILY_CRITICAL_RESERVE < 75_000);
 });
 
 test('el ritmo por defecto queda por debajo de 450 solicitudes/minuto', () => {

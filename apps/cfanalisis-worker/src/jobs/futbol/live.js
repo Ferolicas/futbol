@@ -28,7 +28,12 @@ async function apiFetch(endpoint) {
   const key = process.env.FOOTBALL_API_KEY;
   if (!key) return null;
   try {
-    const result = await footballApiRequest(endpoint, { apiKey: key, timeoutMs: 20_000, retries: 2 });
+    const result = await footballApiRequest(endpoint, {
+      apiKey: key,
+      timeoutMs: 20_000,
+      retries: 2,
+      priority: 'live',
+    });
     return result.response;
   } catch (e) {
     // El primer DAILY_LIMIT real sí se registra. Durante el cooldown, el
@@ -1259,6 +1264,7 @@ export async function runLive(_payload = {}) {
     ...((schedToday?.kickoffTimes)     || []),
     ...((schedTomorrow?.kickoffTimes)  || []),
   ];
+  const currentScheduleAvailable = (schedToday?.kickoffTimes?.length || 0) > 0;
   console.log(`${LL} tick: today=${today} schedules(y/t/m)=${(schedYesterday?.kickoffTimes?.length||0)}/${(schedToday?.kickoffTimes?.length||0)}/${(schedTomorrow?.kickoffTimes?.length||0)} unión=${allKickoffs.length}`);
 
   // Red de seguridad: despegar partidos LIVE vencidos (hoy + ayer) ANTES del
@@ -1276,7 +1282,12 @@ export async function runLive(_payload = {}) {
     }).catch(() => {});
   }
 
-  if (allKickoffs.length > 0) {
+  // Si falta el calendario ACTUAL no podemos usar el de ayer para concluir
+  // que "ya acabó el día": ese fue exactamente el incidente del 02/08. En
+  // degradación el feed live es la fuente de verdad y se consulta cada tick.
+  if (!currentScheduleAvailable) {
+    console.warn(`${LL} calendario de ${today} ausente → fail-open al feed live`);
+  } else if (allKickoffs.length > 0) {
     // Ventana global: del primer kickoff (de cualquier día) al último expectedEnd.
     const firstKickoff    = Math.min(...allKickoffs.map(m => Number(m.kickoff)).filter(Number.isFinite));
     const lastExpectedEnd = Math.max(...allKickoffs.map(m => Number(m.expectedEnd)).filter(Number.isFinite));
