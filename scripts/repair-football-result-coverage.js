@@ -23,6 +23,13 @@ function same(a, b) {
   return isDeepStrictEqual(a ?? null, b ?? null);
 }
 
+function pair(value) {
+  return {
+    home: value?.home ?? null,
+    away: value?.away ?? null,
+  };
+}
+
 (async () => {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL no configurado');
   const { rows } = await pool.query(`
@@ -42,9 +49,9 @@ function same(a, b) {
     }
     const coverage = extractResultCoverage(row.full_data);
     const changed = {
-      corners: !same(row.corners, coverage.corners),
-      yellowCards: !same(row.yellow_cards, coverage.yellowCards),
-      redCards: !same(row.red_cards, coverage.redCards),
+      corners: !same(pair(row.corners), pair(coverage.corners)),
+      yellowCards: !same(pair(row.yellow_cards), pair(coverage.yellowCards)),
+      redCards: !same(pair(row.red_cards), pair(coverage.redCards)),
     };
     if (!Object.values(changed).some(Boolean)) continue;
     for (const key of Object.keys(categories)) if (changed[key]) categories[key]++;
