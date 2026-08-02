@@ -57,7 +57,7 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `GET /api/pick-image` | `app/api/pick-image/route.js` | n8n/Telegram | Renderiza la tarjeta PNG sin IA, con hasta tres selecciones y escudos |
 | `GET /api/fixtures` | `app/api/fixtures/route.js` | Dashboard | Partidos y análisis diarios |
 | `GET /api/match/[id]` | `app/api/match/[id]/route.js` | Análisis | Detalle estadístico |
-| `GET/POST /api/refresh-live` | `app/api/refresh-live/route.js` | Dashboard | GET lee Redis; POST fuerza proveedor |
+| `GET/POST /api/refresh-live` | `app/api/refresh-live/route.js` | Dashboard | Compatibilidad cache-only; ambos leen Redis |
 | `GET /api/sports/[sport]/fixtures` | `app/api/sports/[sport]/fixtures/route.js` | Baloncesto/NFL/NCAA | Jornada localizada, competiciones y análisis persistido |
 | `POST /api/sports/[sport]/analyze` | `app/api/sports/[sport]/analyze/route.js` | Baloncesto/NFL/NCAA | Encola análisis sin ejecutar trabajo pesado en web |
 | `GET /api/sports/[sport]/match/[id]` | `app/api/sports/[sport]/match/[id]/route.js` | Baloncesto/NFL/NCAA | Detalle y evidencia almacenados |
@@ -255,6 +255,9 @@ como fuente primaria; si no recibe eventos durante 50 s, su watchdog consulta
 solo el snapshot Redis mediante `GET /api/refresh-live`, con una única petición
 en vuelo y separación mínima de 20 s. La revalidación completa de fixtures queda
 como respaldo cada 5 min únicamente para hoy y con el WebSocket caído.
+Las rutas web nunca llaman a API-Football para reparar stale ni convierten un
+estado a FT por reloj: cien clientes siguen siendo cero llamadas adicionales al
+proveedor. Solo el worker centralizado decide con una respuesta real.
 Cada tres minutos el worker reconcilia además fixtures FT y NS cuyo final
 estimado ya venció. Los consulta en lotes de hasta 20, corrige marcador/status y
 estadísticas reales en Redis, y distingue FT, en vivo, aplazado y cancelado sin

@@ -1,47 +1,48 @@
-import { redisGet, redisMGet, redisSet, KEYS, TTL } from '../../../lib/redis';
-import { ALL_LEAGUE_IDS, isYouthTeam } from '../../../lib/leagues';
+import { redisMGet, KEYS } from '../../../lib/redis';
 import { getCurrentUser } from '../../../lib/auth-pg';
 import { jsonError } from '../../../lib/api-error';
-import footballApiClient from '../../../lib/football-api-client.cjs';
-import footballResultSnapshot from '../../../lib/football-result-snapshot.cjs';
 
-const { footballApiRequest } = footballApiClient;
-const { extractResultCoverage } = footballResultSnapshot;
-
-// Force-refresh live data — direct API call, no cron chaining.
-// Rate-limited to once every 15s via Redis lock.
-// MERGES with existing live data — never destroys finished match stats.
-// Accepts { date } in POST body — if viewing a past date, fixes stale entries.
-
+// El navegador nunca consulta API-Football. El worker centralizado actualiza
+// Redis cada 20 s, reconcilia vencidos por lotes y protege cuota/rate-limit de
+// forma global. Así 100 clientes no disparan 100 recuperaciones idénticas.
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
+export const maxDuration = 10;
 
-const LOCK_KEY = 'refresh-live:lock';
-const LOCK_TTL = 15;
-const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
-const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'INT'];
+async function readSnapshots(requestedDate) {
+  const utcDate = new Date().toISOString().split('T')[0];
+  const date = requestedDate || utcDate;
+  const dates = [...new Set([utcDate, date])];
+  const snapshots = await redisMGet(dates.map((item) => KEYS.liveStats(item)));
+  const liveStats = {};
+  snapshots.forEach((snapshot) => {
+    if (snapshot && typeof snapshot === 'object') Object.assign(liveStats, snapshot);
+  });
+  return {
+    utcDate,
+    date,
+    liveStats,
+    viewDateLiveStats: date !== utcDate
+      ? (snapshots[dates.indexOf(date)] || {})
+      : null,
+  };
+}
 
-const YOUTH_RE = /\bU-?1[2-9]\b|\bU-?2[0-3]\b|\bunder[ -]?(1[2-9]|2[0-3])\b|\byouth\b|\bjunior\b|\bsub-?(1[2-9]|2[0-3])\b/i;
+async function requireUser() {
+  return getCurrentUser();
+}
 
-// Fallback ligero para el navegador: solo lee el snapshot que el worker ya
-// mantiene en Redis. Nunca llama a API-Football ni consume cuota.
 export async function GET(request) {
   try {
-    if (!(await getCurrentUser())) {
+    if (!(await requireUser())) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
     const requestedDate = new URL(request.url).searchParams.get('date');
-    const utcDate = new Date().toISOString().split('T')[0];
-    const date = requestedDate || utcDate;
-    const dates = [...new Set([utcDate, date])];
-    const snapshots = await redisMGet(dates.map(item => KEYS.liveStats(item)));
-    const liveData = {};
-    snapshots.forEach(snapshot => {
-      if (snapshot && typeof snapshot === 'object') Object.assign(liveData, snapshot);
-    });
+    const data = await readSnapshots(requestedDate);
     return Response.json({
       success: true,
-      liveStats: liveData,
+      liveStats: data.liveStats,
+      viewDateLiveStats: data.viewDateLiveStats,
+      source: 'worker-cache',
       timestamp: new Date().toISOString(),
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
@@ -49,446 +50,26 @@ export async function GET(request) {
   }
 }
 
-function extractLiveStats(match) {
-  const homeId = match.teams.home.id;
-  const awayId = match.teams.away.id;
-
-  const goalScorers = [], cardEvents = [], missedPenalties = [];
-  for (const ev of (match.events || [])) {
-    if (ev.type === 'Goal') {
-      if (ev.detail === 'Missed Penalty') {
-        // playerId → foto oficial del jugador en el frontend (PlayerFace). Sin
-        // esto solo se veia el circulo placeholder hasta que el worker reescribia.
-        missedPenalties.push({ player: ev.player?.name, playerId: ev.player?.id ?? null, teamId: ev.team?.id, teamName: ev.team?.name, minute: ev.time?.elapsed, extra: ev.time?.extra });
-      } else {
-        goalScorers.push({ player: ev.player?.name, playerId: ev.player?.id ?? null, assist: ev.assist?.name ?? null, assistId: ev.assist?.id ?? null, teamId: ev.team?.id, teamName: ev.team?.name, minute: ev.time?.elapsed, extra: ev.time?.extra, type: ev.detail });
-      }
-    }
-    if (ev.type === 'Card') {
-      cardEvents.push({ player: ev.player?.name, playerId: ev.player?.id ?? null, teamId: ev.team?.id, teamName: ev.team?.name, minute: ev.time?.elapsed, type: ev.detail });
-    }
-  }
-
-  const coverage = extractResultCoverage(match);
-  const counter = (value) => ({
-    home: value.home,
-    away: value.away,
-    total: value.total,
-    isReal: value.total != null,
-  });
-
-  return {
-    fixtureId: match.fixture.id,
-    status: match.fixture.status,
-    goals: match.goals,
-    score: match.score,
-    homeTeam: { id: homeId, name: match.teams.home.name },
-    awayTeam: { id: awayId, name: match.teams.away.name },
-    corners: counter(coverage.corners),
-    yellowCards: counter(coverage.yellowCards),
-    redCards: counter(coverage.redCards),
-    goalScorers,
-    cardEvents,
-    missedPenalties,
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-async function apiFetchFixture(apiKey, fixtureId) {
-  try {
-    const result = await footballApiRequest(`/fixtures?id=${fixtureId}`, { apiKey, timeoutMs: 20_000, retries: 2 });
-    return Array.isArray(result.response) ? result.response[0] || null : null;
-  } catch { return null; }
-}
-
+// Compatibilidad con clientes antiguos que enviaban POST. Sigue siendo una
+// lectura cache-only; jamás gasta cuota ni inventa estados.
 export async function POST(request) {
   try {
-    // R9 FIX: dispara llamadas a API-Football (quema cuota) → exigir sesión.
-    if (!(await getCurrentUser())) {
+    if (!(await requireUser())) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
     let body = {};
     try { body = await request.json(); } catch {}
-    const viewDate = body.date || null;
-    const force = body.force === true; // manual user press — bypass rate limit
-    const today = new Date().toISOString().split('T')[0];
-
-    // Rate limit — return cached data immediately if locked (unless manual force)
-    const lock = await redisGet(LOCK_KEY);
-    if (lock && !force) {
-      const liveData = await redisGet(KEYS.liveStats(today));
-      // Even when rate-limited, still return view date fixes
-      let viewDateLiveStats = null;
-      if (viewDate && viewDate !== today) {
-        viewDateLiveStats = await redisGet(KEYS.liveStats(viewDate));
-      }
-      return Response.json({
-        success: true,
-        skipped: true,
-        reason: 'Rate limited — returning cached data',
-        liveStats: liveData && typeof liveData === 'object' ? liveData : {},
-        viewDateLiveStats,
-        timestamp: new Date().toISOString(),
-      }, { headers: { 'Cache-Control': 'no-store' } });
-    }
-
-    // Manual force: use a 5s lock to prevent double-tap spam; automatic: 15s
-    await redisSet(LOCK_KEY, '1', force ? 5 : LOCK_TTL);
-
-    const apiKey = process.env.FOOTBALL_API_KEY;
-    if (!apiKey) {
-      return Response.json({ success: false, error: 'No API key configured' }, { status: 500 });
-    }
-
-    let apiCalls = 1;
-    let liveResponse;
-    try {
-      liveResponse = await footballApiRequest('/fixtures?live=all', { apiKey, timeoutMs: 20_000, retries: 2 });
-    } catch (error) {
-      const cached = await redisGet(KEYS.liveStats(today));
-      return Response.json({
-        success: false,
-        error: error?.message || 'API-Football no disponible',
-        liveStats: cached && typeof cached === 'object' ? cached : {},
-        timestamp: new Date().toISOString(),
-      });
-    }
-    const tracked = (liveResponse.response || []).filter(m =>
-      ALL_LEAGUE_IDS.includes(m.league.id) && !YOUTH_RE.test(m.league.name || '') &&
-      !isYouthTeam(m.teams?.home?.name) && !isYouthTeam(m.teams?.away?.name)
-    );
-
-    // Build fresh live data in the SAME format as cron/live (corners, yellowCards, etc.)
-    const freshLive = {};
-    for (const match of tracked) {
-      const fid = match.fixture.id;
-      const stats = extractLiveStats(match);
-      stats.date = today;
-      freshLive[fid] = stats;
-
-      // Save individual fixture stats
-      await redisSet(KEYS.fixtureStats(fid), stats, TTL.fixtureStats);
-    }
-
-    // Fetch individual fixtures for live matches missing statistics (no corners)
-    // The ?live=all endpoint sometimes returns empty statistics for certain leagues
-    const needsStatsFetch = tracked.filter(m => {
-      const elapsed = m.fixture?.status?.elapsed || 0;
-      if (elapsed < 10) return false; // too early, stats not available yet
-      const hasStats = (m.statistics || []).length > 0;
-      return !hasStats;
-    });
-
-    if (needsStatsFetch.length > 0) {
-      await Promise.all(needsStatsFetch.map(async (match) => {
-        const fid = match.fixture.id;
-        const full = await apiFetchFixture(apiKey, fid);
-        apiCalls++;
-        if (full) {
-          const fullStats = extractLiveStats(full);
-          fullStats.date = today;
-          freshLive[fid] = fullStats;
-          await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.fixtureStats);
-        }
-      }));
-    }
-
-    // MERGE with existing — never destroy finished match data
-    const existing = await redisGet(KEYS.liveStats(today)) || {};
-    const merged = { ...existing };
-    const freshFids = new Set(Object.keys(freshLive));
-
-    for (const [fid, data] of Object.entries(freshLive)) {
-      const prev = merged[fid];
-      merged[fid] = {
-        ...data,
-        // Preserve better data: keep existing corners/scorers if new ones are empty
-        corners: data.corners?.isReal ? data.corners : (prev?.corners || data.corners),
-        yellowCards: data.yellowCards?.isReal ? data.yellowCards : (prev?.yellowCards || data.yellowCards),
-        redCards: data.redCards?.isReal ? data.redCards : (prev?.redCards || data.redCards),
-        goalScorers: data.goalScorers?.length > 0 ? data.goalScorers : (prev?.goalScorers || []),
-        missedPenalties: data.missedPenalties?.length > 0 ? data.missedPenalties : (prev?.missedPenalties || []),
-      };
-    }
-
-    // Detect stale live statuses: matches that WERE live but are no longer in ?live=all.
-    // Build kickoff map from fixtures:{date} cache — keep snapshot for Pass 2.
-    const now = Date.now();
-    let staleFixed = 0;
-
-    const kickoffMap = {};
-    let fixturesCacheSnapshot = null;
-    try {
-      const cf = await redisGet(KEYS.fixtures(today));
-      if (Array.isArray(cf)) {
-        fixturesCacheSnapshot = cf;
-        for (const f of cf) {
-          if (f.fixture?.id && f.fixture?.date) {
-            kickoffMap[f.fixture.id] = new Date(f.fixture.date).getTime();
-          }
-        }
-      }
-    } catch {}
-
-    // Pass 1: stale entries in merged (from liveStats cache, 2h TTL)
-    // Any match that was live but is no longer in ?live=all needs its real status fetched.
-    // No time gate — the time gate was causing matches with elapsed<85 to be missed.
-    // M8 FIX: fetches en PARALELO (antes secuenciales → N×RTT). Pre-filtramos los
-    // elegibles y los resolvemos con Promise.all. Cada item escribe su propio
-    // merged[fid] (sin colisión; JS es mono-hilo).
-    const pass1Eligible = Object.entries(merged).filter(([fid, entry]) => {
-      if (!LIVE_STATUSES.includes(entry.status?.short)) return false;
-      if (freshFids.has(fid)) return false;
-      // Skip if kicked off in the last 5 min — may not have appeared in live feed yet
-      const kickoff = kickoffMap[fid] || 0;
-      if (kickoff && (now - kickoff) < 5 * 60 * 1000) return false;
-      return true;
-    });
-    await Promise.all(pass1Eligible.map(async ([fid, entry]) => {
-      const full = await apiFetchFixture(apiKey, Number(fid));
-      apiCalls++;
-      if (full && FINISHED_STATUSES.includes(full.fixture.status.short)) {
-        const fullStats = extractLiveStats(full);
-        fullStats.date = entry.date || today;
-        fullStats.savedAt = new Date().toISOString();
-        merged[fid] = fullStats;
-        await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
-      } else if (!full) {
-        // API returned nothing — force FT to stop showing as live
-        merged[fid] = { ...entry, status: { short: 'FT', long: 'Match Finished', elapsed: 90 } };
-      }
-      // else: API confirms still live — keep current status
-      staleFixed++;
-    }));
-
-    // Pass 2: stale entries visible in fixtures cache but NOT in liveStats.
-    // Root cause: liveStats TTL is 2h, fixtures cache TTL is 26h — after liveStats expires,
-    // Pass 1 finds nothing but fixtures still show the old live status.
-    // Also catches NS fixtures whose kickoff was >110min ago (match played but cron never
-    // tracked it, e.g. lower-league night games not in ALL_LEAGUE_IDS live feed).
-    if (fixturesCacheSnapshot) {
-      const staleInFixtures = fixturesCacheSnapshot.filter(f => {
-        const fid = String(f.fixture?.id);
-        const status = f.fixture?.status?.short;
-        const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
-        const isStaleNs = status === 'NS' && kickoff > 0 && (now - kickoff) > 110 * 60 * 1000;
-        return (LIVE_STATUSES.includes(status) || isStaleNs)
-          && !freshFids.has(fid)
-          && !FINISHED_STATUSES.includes(merged[fid]?.status?.short);
-      });
-      // M8 FIX: Pass 2 también en paralelo (Promise.all). El skip de "kickoff <5min"
-      // se aplica en el filtro previo.
-      const pass2Eligible = staleInFixtures.filter(f => {
-        const kickoff = f.fixture.date ? new Date(f.fixture.date).getTime() : 0;
-        return !(kickoff && (now - kickoff) < 5 * 60 * 1000);
-      });
-      await Promise.all(pass2Eligible.map(async (f) => {
-        const fid = f.fixture.id;
-        const kickoff = f.fixture.date ? new Date(f.fixture.date).getTime() : 0;
-        const full = await apiFetchFixture(apiKey, fid);
-        apiCalls++;
-        if (full) {
-          const fullStats = extractLiveStats(full);
-          fullStats.date = today;
-          if (FINISHED_STATUSES.includes(full.fixture.status.short)) {
-            fullStats.savedAt = new Date().toISOString();
-            merged[String(fid)] = fullStats;
-            await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
-            staleFixed++;
-          } else if (f.fixture?.status?.short === 'NS' && kickoff > 0 && (now - kickoff) > 130 * 60 * 1000) {
-            // API lag: lower leagues (e.g. B Metropolitana Argentina) can return NS for hours
-            // after kickoff — the feed simply hasn't updated. Force-finish heuristically.
-            // Spread fullStats to capture any events/stats the API does have (e.g. goals),
-            // then override status to FT regardless.
-            const forceEntry = {
-              ...fullStats,
-              status: { short: 'FT', long: 'Match Finished', elapsed: 90 },
-              goals: fullStats.goals?.home != null ? fullStats.goals : (f.goals || fullStats.goals),
-              score: fullStats.score || f.score,
-              savedAt: new Date().toISOString(),
-            };
-            merged[String(fid)] = forceEntry;
-            // Save to stats:{fid} so /api/fixtures needStats processing can find it
-            // and won't make redundant API calls on subsequent page loads
-            await redisSet(KEYS.fixtureStats(fid), forceEntry, TTL.yesterday);
-            staleFixed++;
-          } else {
-            // API confirms still live or another non-finished state — update with fresh data
-            merged[String(fid)] = fullStats;
-          }
-        } else {
-          merged[String(fid)] = { fixtureId: fid, status: { short: 'FT', long: 'Match Finished', elapsed: 90 }, goals: f.goals, date: today };
-          staleFixed++;
-        }
-      }));
-    }
-
-    // Also update fixtures:{date} cache so fixture cards show correct status
-    if (staleFixed > 0) {
-      try {
-        const cachedFixtures = await redisGet(KEYS.fixtures(today));
-        if (Array.isArray(cachedFixtures)) {
-          let changed = false;
-          const updated = cachedFixtures.map(f => {
-            const fid = f.fixture?.id;
-            const liveEntry = merged[fid];
-            if (liveEntry && FINISHED_STATUSES.includes(liveEntry.status?.short) &&
-                !FINISHED_STATUSES.includes(f.fixture?.status?.short)) {
-              changed = true;
-              return {
-                ...f,
-                fixture: { ...f.fixture, status: liveEntry.status },
-                goals: liveEntry.goals || f.goals,
-                score: liveEntry.score || f.score,
-              };
-            }
-            return f;
-          });
-          if (changed) await redisSet(KEYS.fixtures(today), updated, 48 * 3600);
-        }
-      } catch {}
-    }
-
-    await redisSet(KEYS.liveStats(today), merged, TTL.liveStats);
-
-    // ===== Handle viewed date (past dates — e.g., yesterday) =====
-    // Fix stale entries: matches that show as live but are actually finished
-    let viewDateLiveStats = null;
-    let viewDateStaleFixed = 0;
-
-    if (viewDate && viewDate !== today) {
-      const viewExisting = await redisGet(KEYS.liveStats(viewDate)) || {};
-      let viewChanged = false;
-
-      const staleEntries = Object.entries(viewExisting).filter(
-        ([, entry]) => LIVE_STATUSES.includes(entry.status?.short)
-      );
-
-      if (staleEntries.length > 0) {
-        await Promise.all(staleEntries.map(async ([fid, entry]) => {
-          const full = await apiFetchFixture(apiKey, Number(fid));
-          apiCalls++;
-          if (full) {
-            const fullStats = extractLiveStats(full);
-            fullStats.date = viewDate;
-            if (FINISHED_STATUSES.includes(full.fixture.status.short)) {
-              fullStats.savedAt = new Date().toISOString();
-            }
-            viewExisting[fid] = fullStats;
-            viewChanged = true;
-            viewDateStaleFixed++;
-            await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
-          }
-        }));
-      }
-
-      // Pass 2 for viewDate: scan fixtures cache — liveStats TTL (2h) may have expired
-      // but fixtures cache (26h) still shows stale live or NS status
-      try {
-        const viewFixtures = await redisGet(KEYS.fixtures(viewDate));
-        if (Array.isArray(viewFixtures)) {
-          const viewNow = Date.now();
-          const staleInViewFixtures = viewFixtures.filter(f => {
-            const fid = String(f.fixture?.id);
-            const status = f.fixture?.status?.short;
-            const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
-            const isStaleNs = status === 'NS' && kickoff > 0 && (viewNow - kickoff) > 110 * 60 * 1000;
-            return (LIVE_STATUSES.includes(status) || isStaleNs)
-              && !FINISHED_STATUSES.includes(viewExisting[fid]?.status?.short);
-          });
-          for (const f of staleInViewFixtures) {
-            const fid = f.fixture.id;
-            const vKickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
-            const full = await apiFetchFixture(apiKey, fid);
-            apiCalls++;
-            if (full) {
-              const fullStats = extractLiveStats(full);
-              fullStats.date = viewDate;
-              if (FINISHED_STATUSES.includes(full.fixture.status.short)) {
-                fullStats.savedAt = new Date().toISOString();
-                viewExisting[String(fid)] = fullStats;
-                viewChanged = true;
-                viewDateStaleFixed++;
-                await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
-              } else if (f.fixture?.status?.short === 'NS' && vKickoff > 0 && (viewNow - vKickoff) > 130 * 60 * 1000) {
-                // API lag for lower leagues — force-finish heuristically
-                const forceEntry = {
-                  ...fullStats,
-                  status: { short: 'FT', long: 'Match Finished', elapsed: 90 },
-                  goals: fullStats.goals?.home != null ? fullStats.goals : (f.goals || fullStats.goals),
-                  score: fullStats.score || f.score,
-                  savedAt: new Date().toISOString(),
-                };
-                viewExisting[String(fid)] = forceEntry;
-                await redisSet(KEYS.fixtureStats(fid), forceEntry, TTL.yesterday);
-                viewChanged = true;
-                viewDateStaleFixed++;
-              } else {
-                viewExisting[String(fid)] = fullStats;
-                viewChanged = true;
-                viewDateStaleFixed++;
-                await redisSet(KEYS.fixtureStats(fid), fullStats, TTL.yesterday);
-              }
-            } else {
-              // API returned nothing — force-finish to stop showing as live
-              viewExisting[String(fid)] = {
-                fixtureId: fid,
-                status: { short: 'FT', long: 'Match Finished', elapsed: 90 },
-                goals: f.goals,
-                date: viewDate,
-              };
-              viewChanged = true;
-              viewDateStaleFixed++;
-            }
-          }
-        }
-      } catch (e) {
-        console.error('[REFRESH-LIVE] Pass2 viewDate error:', e.message);
-      }
-
-      if (viewChanged) {
-        await redisSet(KEYS.liveStats(viewDate), viewExisting, 48 * 3600);
-        // Also update fixtures cache for the viewed date
-        try {
-          const cachedFixtures = await redisGet(KEYS.fixtures(viewDate));
-          if (Array.isArray(cachedFixtures)) {
-            let fxChanged = false;
-            const updated = cachedFixtures.map(f => {
-              const fid = f.fixture?.id;
-              const liveEntry = viewExisting[fid];
-              if (liveEntry && FINISHED_STATUSES.includes(liveEntry.status?.short) &&
-                  !FINISHED_STATUSES.includes(f.fixture?.status?.short)) {
-                fxChanged = true;
-                return {
-                  ...f,
-                  fixture: { ...f.fixture, status: liveEntry.status },
-                  goals: liveEntry.goals || f.goals,
-                  score: liveEntry.score || f.score,
-                };
-              }
-              return f;
-            });
-            if (fxChanged) await redisSet(KEYS.fixtures(viewDate), updated, 48 * 3600);
-          }
-        } catch {}
-      }
-
-      viewDateLiveStats = viewExisting;
-    }
-
+    const data = await readSnapshots(body.date || null);
     return Response.json({
       success: true,
-      liveCount: tracked.length,
-      liveStats: merged,
-      viewDateLiveStats,
-      viewDateStaleFixed,
-      apiCalls,
-      staleFixed,
+      skipped: true,
+      reason: 'worker-cache',
+      liveStats: data.liveStats,
+      viewDateLiveStats: data.viewDateLiveStats,
+      source: 'worker-cache',
       timestamp: new Date().toISOString(),
     }, { headers: { 'Cache-Control': 'no-store' } });
-
   } catch (error) {
-    console.error('[REFRESH-LIVE] Error:', error.message);
     return jsonError(error);
   }
 }

@@ -56,55 +56,11 @@ export async function GET(request) {
     // 1. Try Redis first (instant)
     const redisFixtures = await redisGet(KEYS.fixtures(date));
     if (redisFixtures && Array.isArray(redisFixtures) && redisFixtures.length > 0) {
-      // Detect stale statuses in the Redis cache:
-      // - Live-type (1H, 2H, etc.) that kicked off >110min ago — match must be done
-      // - NS (not started) that kicked off >110min ago — match was never tracked by live cron
-      //   (e.g. lower-league Argentine night games at 1 AM, cache still shows NS at 3 AM)
-      // 110min = 90min regular + 20min buffer. In both cases a fresh API fetch is needed.
-      const LIVE_CACHE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
-      const nowMs = Date.now();
-      const redisHasStale = redisFixtures.some(f => {
-        const status = f.fixture?.status?.short;
-        const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
-        if (!kickoff || (nowMs - kickoff) <= 110 * 60 * 1000) return false;
-        // Live-type status past expected end time, or NS past kickoff+110min
-        return LIVE_CACHE_STATUSES.includes(status) || status === 'NS';
-      });
-      if (redisHasStale) {
-        try {
-          const result = await getFixtures(date, { forceApi: true });
-          fixtures = result.fixtures || redisFixtures;
-          // Post-process: if the fresh API response still returns NS for a match whose kickoff
-          // was >130 min ago, force-finish it. Lower leagues (e.g. B Metropolitana Argentina)
-          // can have multi-hour lag before the API updates the status from NS.
-          fixtures = fixtures.map(f => {
-            if (f.fixture?.status?.short !== 'NS') return f;
-            const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
-            if (kickoff > 0 && (nowMs - kickoff) > 130 * 60 * 1000) {
-              return { ...f, fixture: { ...f.fixture, status: { short: 'FT', long: 'Match Finished', elapsed: 90 } } };
-            }
-            return f;
-          });
-          fromCache = false;
-          redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(() => {});
-        } catch (err) {
-          console.error('[fixtures] API fetch failed for stale date:', err.message);
-          // Fallback: force-finish stale live or NS matches client-side
-          fixtures = redisFixtures.map(f => {
-            const status = f.fixture?.status?.short;
-            const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
-            if (kickoff > 0 && (nowMs - kickoff) > 110 * 60 * 1000 &&
-                (LIVE_CACHE_STATUSES.includes(status) || status === 'NS')) {
-              return { ...f, fixture: { ...f.fixture, status: { short: 'FT', long: 'Match Finished', elapsed: 90 } } };
-            }
-            return f;
-          });
-          fromCache = true;
-        }
-      } else {
-        fixtures = redisFixtures;
-        fromCache = true;
-      }
+      // La ruta de cliente es siempre cache-only cuando ya existe jornada. El
+      // worker reconcilia stale/NS en lotes; jamás multiplicamos proveedor por
+      // cantidad de usuarios ni inferimos FT por tiempo transcurrido.
+      fixtures = redisFixtures;
+      fromCache = true;
     } else if (isPastDate) {
       // 2. Past dates: load from Supabase fixtures_cache
       let cached = null;
@@ -118,25 +74,8 @@ export async function GET(request) {
       } catch {}
       const rawFixtures = cached?.fixtures || null;
       if (rawFixtures && rawFixtures.length > 0) {
-        const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE', 'NS'];
-        const hasStale = rawFixtures.some(f => LIVE_STATUSES.includes(f.fixture?.status?.short));
-        if (hasStale) {
-          try {
-            const result = await getFixtures(date, { forceApi: true });
-            fixtures = result.fixtures || rawFixtures;
-            fromCache = false;
-            if (fixtures !== rawFixtures) {
-              redisSet(KEYS.fixtures(date), fixtures, 48 * 3600).catch(() => {});
-            }
-          } catch (err) {
-            console.error('[fixtures] past date API fetch failed:', err.message);
-            fixtures = rawFixtures;
-            fromCache = true;
-          }
-        } else {
-          fixtures = rawFixtures;
-          fromCache = true;
-        }
+        fixtures = rawFixtures;
+        fromCache = true;
       }
     } else {
       // 3. Current/future dates: fetch from API-Football
@@ -201,7 +140,7 @@ export async function GET(request) {
     if (!isPastDate) {
       const LIVE_NOW = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
       const nowMsCM = Date.now();
-      const STALE_LIVE_MS = 110 * 60 * 1000; // 90min + 20min buffer
+      const CROSS_MIDNIGHT_MAX_MS = 4 * 60 * 60 * 1000;
       const d = new Date(date + 'T12:00:00Z');
       const prevDay = new Date(d.getTime() - 86400000).toISOString().split('T')[0];
       const idsNow = new Set(fixtures.map(f => f.fixture?.id));
@@ -211,17 +150,14 @@ export async function GET(request) {
           for (const f of prevFixtures) {
             if (LIVE_NOW.includes(f.fixture?.status?.short) &&
                 f.fixture?.id && !idsNow.has(f.fixture.id)) {
-              // Guard anti-"pegado en vivo": un partido de ayer marcado LIVE cuyo
-              // kickoff fue hace >110min NO está realmente en juego (el live cron
-              // lo dejó congelado). Lo reincorporamos como FT, nunca como live —
-              // mismo criterio que la red de seguridad del camino principal arriba.
+              // Un estado live demasiado antiguo no se arrastra a la jornada
+              // siguiente. Tampoco se convierte en FT: solo el proveedor o
+              // match_results pueden confirmar un final.
               const kickoff = f.fixture?.date ? new Date(f.fixture.date).getTime() : 0;
-              if (kickoff > 0 && nowMsCM - kickoff > STALE_LIVE_MS) {
-                fixtures.push({ ...f, fixture: { ...f.fixture, status: { short: 'FT', long: 'Match Finished', elapsed: 90 } } });
-              } else {
+              if (!kickoff || nowMsCM - kickoff <= CROSS_MIDNIGHT_MAX_MS) {
                 fixtures.push(f);
+                idsNow.add(f.fixture.id);
               }
-              idsNow.add(f.fixture.id);
             }
           }
         }

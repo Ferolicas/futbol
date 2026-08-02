@@ -164,7 +164,7 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
       try {
         const isFinished = ['FT', 'AET', 'PEN'].includes(analysis?.status?.short);
         if (!isFinished) {
-          const refreshRes = await fetch('/api/refresh-live', { method: 'POST' });
+          const refreshRes = await fetch('/api/refresh-live');
           const refreshData = await refreshRes.json();
           if (refreshData.liveStats && Object.keys(refreshData.liveStats).length > 0) {
             setLiveStats(prev => ({ ...prev, ...refreshData.liveStats }));
