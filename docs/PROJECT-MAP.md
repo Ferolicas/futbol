@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-02 · Commit base: `119724b`
+Actualizado: 2026-08-03 · Commit base: `bb086d7`
 
 ## Identidad y stack
 
@@ -234,17 +234,19 @@ Las fuentes y namespaces de identificadores también están separados:
   no dispone del catálogo Bet365 contractual: no se pide su calendario, live,
   análisis ni cuotas. API-Baseball se consulta solo para cuotas MLB. En MLB la
   casa contractual es exclusivamente Bet365: el normalizador conserva ID y
-  nombre original de mercado/selección y distingue de forma estricta
-  `Over/Under` (carreras), `Total Hits`, combinaciones resultado/total, total por
-  equipo, hándicap y primeras cinco entradas. Una probabilidad solo se publica
+  nombre original de mercado/selección y distingue de forma estricta carreras
+  del partido/equipo, hándicaps, hits, 1.ª entrada, primeras 3/4,5/5/7 entradas
+  y props nominales de bateador o lanzador (hits, bases totales, carreras,
+  jonrones, impulsadas, bases por bolas, robos y ponches). Una probabilidad solo se publica
   como opción si su línea exacta existe en el catálogo Bet365 y la cuota real es
   al menos 1,20; el dashboard, la combinada manual y el detalle consumen esa
   misma lista persistida y nunca reconstruyen mercados de referencia. El baremo
-  público de partido es 70% y la Apuesta del Día conserva 90%; ambos exigen la
+  público de partido es 65% y la Apuesta del Día conserva 90%; ambos exigen la
   línea Bet365 exacta y cuota ≥1,20. Los
-  historiales de jugador pueden seguir alimentándose internamente, pero no se
-  presentan como apuesta hasta que exista una selección y cuota Bet365
-  atribuible al jugador y línea exactos. La cobertura de análisis es automática:
+  historiales completos sí se muestran aunque no exista cuota; solo entran en
+  las opciones apostables cuando hay selección, jugador, línea y cuota Bet365
+  exactos. El detalle presenta las nueve entradas, tramos acumulados, hits,
+  pitchers y todos los game logs del lineup. La cobertura de análisis es automática:
   un reconciliador cada 15 minutos compara ayer/hoy/mañana contra
   `MULTISPORT_CACHE_VERSION` y procesa únicamente fixtures ausentes u obsoletos.
   El proceso heavy encola además la misma guardia al arrancar, con job idempotente
@@ -323,6 +325,9 @@ tarjetas. Sus endpoints de jornada para clientes leen únicamente cache/DB: los
 workers son dueños de poblar proveedores, de modo que abrir una pestaña vacía o
 fuera de temporada nunca paga esperas externas de varios segundos. Los datos
 operativos de proveedor/cuota no aparecen en la experiencia del cliente.
+La jornada de Baseball transporta solo combinada, moneyline, calidad y pitchers;
+el documento pesado con nueve entradas e historiales de jugadores se solicita
+únicamente al abrir “Ver análisis completo”, evitando inflar cada tarjeta.
 
 `GET /api/fixtures` usa `MGET` para documentos Redis y consultas PostgreSQL por
 lote. Cruza siempre los IDs visibles con `match_results`: el resultado durable
@@ -402,8 +407,9 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   opciones sin volver a llamar a la API ni ocultar estadísticas durante el
   despliegue. Si el `selectable` v20 no trae fiabilidad, recupera por ID la
   evidencia exacta de `_scored`; si tampoco existe, solo reutiliza las
-  `selections` que sí acrediten ≥90. `MULTISPORT_CACHE_VERSION=14` deja
-  Baseball solo en MLB con baremo público 70%. Las decisiones siguen usando
+  `selections` que sí acrediten ≥90. `MULTISPORT_CACHE_VERSION=15` deja
+  Baseball solo en MLB con baremo público 65%, catálogo Bet365 ampliado y
+  análisis estadístico completo separado de las cuotas. Las decisiones siguen usando
   frecuencias ponderadas reales; el máximo 95% vive solo en presentación y los
   diagnósticos nunca cambian ni bloquean una frecuencia calculada.
 - 2026-08-01: no liberar un intento pendiente por tiempo ni marcar terminal un cobro recurrente que MP pueda reintentar; primero cancelar el recurso remoto.

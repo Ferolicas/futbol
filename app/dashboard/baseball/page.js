@@ -917,7 +917,7 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
   if (markets.length === 0) {
     return (
       <div style={{ fontSize: '.78rem', color: '#94a3b8', lineHeight: 1.5 }}>
-        Bet365 no tiene ahora una selección compatible con el modelo, probabilidad mínima del 70% y cuota mínima de 1,20 para este partido.
+        Bet365 no tiene ahora una selección compatible con el modelo, probabilidad mínima del {BASEBALL_RECOMMENDATION_MIN_PROBABILITY}% y cuota mínima de 1,20 para este partido.
       </div>
     );
   }

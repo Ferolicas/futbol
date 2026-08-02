@@ -107,16 +107,24 @@ export async function GET(request) {
     const allFids = fixtures.map(f => Number(f.id));
 
     const [analysesRes, resultsRes, hiddenRes, favoritesRes] = await Promise.all([
-      allFids.length ? supabaseAdmin.from('baseball_match_analysis').select('fixture_id, probabilities, combinada, data_quality, best_odds, analysis, cache_version').in('fixture_id', allFids) : Promise.resolve({ data: [] }),
+      allFids.length ? supabaseAdmin.from('baseball_match_analysis').select('fixture_id, combinada, data_quality, best_odds, analysis, cache_version').in('fixture_id', allFids) : Promise.resolve({ data: [] }),
       allFids.length ? supabaseAdmin.from('baseball_match_results').select('fixture_id, status, inning, inning_half, home_score, away_score, home_hits, away_hits, home_errors, away_errors').in('fixture_id', allFids) : Promise.resolve({ data: [] }),
       user ? supabaseAdmin.from('baseball_user_hidden').select('fixture_id').eq('user_id', user.id) : Promise.resolve({ data: [] }),
       user ? supabaseAdmin.from('baseball_user_favorites').select('fixture_id').eq('user_id', user.id) : Promise.resolve({ data: [] }),
     ]);
 
     const toNum = (v) => Number(v);
+    const compactAnalysis = (analysis) => ({
+      fixture_id: analysis.fixture_id,
+      combinada: analysis.combinada,
+      data_quality: analysis.data_quality,
+      cache_version: analysis.cache_version,
+      best_odds: { moneyline: analysis.best_odds?.moneyline || {} },
+      analysis: { pitcherMatchup: analysis.analysis?.pitcherMatchup || null },
+    });
     const analysisMap = new Map((analysesRes.data || [])
       .filter(a => Number(a.cache_version || 0) >= MULTISPORT_CACHE_VERSION)
-      .map(a => [toNum(a.fixture_id), a]));
+      .map(a => [toNum(a.fixture_id), compactAnalysis(a)]));
     const resultsMap = new Map((resultsRes.data || []).map(r => [toNum(r.fixture_id), r]));
     const hiddenSet = new Set((hiddenRes.data || []).map(h => toNum(h.fixture_id)));
     const favoritesSet = new Set((favoritesRes.data || []).map(f => toNum(f.fixture_id)));

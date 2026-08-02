@@ -5,6 +5,7 @@ const {
   computeMultisportEmpiricalPrediction,
   computeMultisportEmpiricalPlayerMarkets,
   buildEmpiricalPlayerProbabilities,
+  toBaseballProbabilityShape,
   multisportEngineInternals,
 } = require('../lib/multisport-empirical-engine.js');
 const { apiSportsInternals, normalizeApiSportsOdds } = require('../lib/api-sports-multisport.js');
@@ -74,6 +75,44 @@ test('baseball, NBA y NFL comparten fórmula pero consultan tabla aislada', asyn
   assert.equal(prediction.moneyline.home.probability, 50);
   assert.equal(prediction.moneyline.home.evidence.n, 4);
   assert.ok(sqlSeen.every((sql) => sql.includes('baseball_engine_team_stats')));
+});
+
+test('baseball calcula las nueve entradas, tramos e hits sin depender de cuotas', async () => {
+  const row = {
+    kickoff: '2026-01-01T12:00:00Z', season: '2026', competition_id: '1',
+    is_home: true, score_for: 4, score_against: 2,
+    period_scores: [1, 0, 1, 0, 0, 1, 0, 1, 0],
+    period_scores_against: [0, 1, 0, 0, 0, 0, 1, 0, 0],
+    stats: { hits: 9, opponentHits: 7 },
+  };
+  const fixture = {
+    id: 'future', date: '2026-02-01T12:00:00Z', season: '2026', league: { id: '1' },
+    teams: { home: { id: '1', name: 'A' }, away: { id: '2', name: 'B' } }, context: { home: {}, away: {} },
+  };
+  const prediction = await computeMultisportEmpiricalPrediction({ query: async () => ({ rows: [] }) }, {
+    sport: 'baseball', fixture,
+    teamRows: {
+      home: [{ ...row, fixture_id: 'a', team_id: '1', opponent_id: '8' }],
+      away: [{ ...row, fixture_id: 'b', team_id: '2', opponent_id: '9', is_home: false }],
+    },
+    odds: {
+      periods: { first3: { label: 'primeras 3 entradas', totals: { 2.5: {} }, spreads: { home: {}, away: {} } } },
+      statistics: { hits: { home: { 8.5: {} }, away: {}, total: { 15.5: {} } } },
+      spreads: { home: { '-2.5': {} }, away: {} },
+    },
+    config: { currentShare: .72, venueBoost: 1, opponentBoost: 1, competitionBoost: 1, starterBoost: 1, lineupBoost: 1 },
+  });
+  assert.equal(Object.keys(prediction.innings).length, 9);
+  assert.equal(prediction.innings[1].run.yes.rawProbability, 1);
+  assert.equal(prediction.periods.first3.totals[2.5].over.rawProbability, 1);
+  assert.equal(prediction.statistics.hits.home[8.5].over.rawProbability, .5);
+  assert.ok(prediction.statistics.hits.total[15.5]);
+  assert.ok(prediction.spreads.home[-2.5]);
+
+  const visual = toBaseballProbabilityShape(prediction);
+  assert.equal(visual.innings[1].run.yes, 95);
+  assert.equal(visual.periods.first3.totals[2.5].over, 95);
+  assert.equal(visual.statistics.hits.home[8.5].over, 50);
 });
 
 test('props de jugador son frecuencias directas y conservan evidencia', () => {

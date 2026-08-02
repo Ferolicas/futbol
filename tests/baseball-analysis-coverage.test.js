@@ -68,3 +68,10 @@ test('todos los consumidores operativos de Baseball solicitan exclusivamente MLB
   const leaguesRoute = fs.readFileSync(path.join(__dirname, '../app/api/baseball/leagues/route.js'), 'utf8');
   assert.doesNotMatch(leaguesRoute, /id:\s*(11|12|13|14|16)\b/);
 });
+
+test('la lista de partidos no transporta el análisis pesado de jugadores y entradas', () => {
+  const route = fs.readFileSync(path.join(__dirname, '../app/api/baseball/fixtures/route.js'), 'utf8');
+  assert.doesNotMatch(route, /select\('fixture_id, probabilities,/);
+  assert.match(route, /best_odds: \{ moneyline:/);
+  assert.match(route, /analysis: \{ pitcherMatchup:/);
+});
