@@ -1,7 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { buildPlayerCoverage, coveredPlayerCounter, nonNegativeInt } = require('../lib/model-ingest.js');
+const {
+  buildPlayerCoverage,
+  coveredPlayerCounter,
+  nonNegativeInt,
+  preferRelatedPayload,
+} = require('../lib/model-ingest.js');
 
 const entry = (minutes, overrides = {}) => ({
   st: {
@@ -60,4 +65,15 @@ test('un contador imposible negativo del proveedor queda desconocido', () => {
   assert.equal(nonNegativeInt('-40'), null);
   assert.equal(nonNegativeInt(0), 0);
   assert.equal(nonNegativeInt('90'), 90);
+});
+
+test('la ingesta postpartido usa statistics embebidas si el crudo relacionado está vacío', () => {
+  const embedded = [{ team: { id: 1 }, statistics: [{ type: 'Corner Kicks', value: 4 }] }];
+  assert.equal(preferRelatedPayload({ response: [] }, embedded), embedded);
+});
+
+test('la ingesta postpartido conserva el crudo relacionado cuando ya tiene datos', () => {
+  const raw = { response: [{ team: { id: 1 }, statistics: [] }] };
+  const embedded = [{ team: { id: 2 }, statistics: [] }];
+  assert.equal(preferRelatedPayload(raw, embedded), raw);
 });

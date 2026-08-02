@@ -38,6 +38,9 @@ import {
   buildMatchResultRow,
   extractResultCoverage,
   getCachedFixturesRaw,
+  ingestFixtureObjects,
+  ingestFixtures,
+  pgPool,
   redisGet,
   redisSet,
 } from '../../shared.js';
@@ -385,6 +388,7 @@ export async function runFinalize(payload = {}) {
 
   let candidates = 0, finalized = 0, notFinal = 0, noMatch = 0, apiCalls = 0;
   let terminalSkipped = 0, deferred = 0, recoveredFromFixtureCache = 0;
+  let modelBacklog = 0, modelIngested = 0;
   const errors = [];
   const finalizedFids = [];
 
@@ -547,13 +551,78 @@ export async function runFinalize(payload = {}) {
     }
   }
 
+  // Alimentación postpartido inmediata y autocurable. Antes finalize dejaba el
+  // resultado en match_results/raw, pero model.* esperaba hasta el retrain de
+  // las 06:30. Si terminaba un partido durante una auditoría aparecía una fila
+  // durable nueva y, durante horas, cero hechos del modelo. Ahora cada corrida
+  // recoge cualquier gap de SUS fechas (incluidos gaps de un intento anterior),
+  // ingiere el full_data y verifica que existan exactamente los dos equipos.
+  // Si falla, BullMQ reintenta: el backlog no depende de finalizedFids, así que
+  // el dedup de match_results no impide la autorreparación.
+  let modelIngestError = null;
+  try {
+    const { rows: backlogRows } = await pgQuery(
+      `SELECT r.fixture_id, r.full_data
+       FROM match_results r
+       LEFT JOIN model.matches m USING (fixture_id)
+       WHERE r.date = ANY($1::date[])
+         AND (
+           m.fixture_id IS NULL OR
+           (SELECT COUNT(*) FROM model.team_match_stats t WHERE t.fixture_id=r.fixture_id) <> 2
+         )
+       ORDER BY r.fixture_id`,
+      [dates],
+    );
+    modelBacklog = backlogRows.length;
+    if (modelBacklog > 0) {
+      const withObject = backlogRows.filter((row) => row.full_data?.fixture?.id);
+      const withoutObject = backlogRows
+        .filter((row) => !row.full_data?.fixture?.id)
+        .map((row) => Number(row.fixture_id));
+      const objectResult = withObject.length
+        ? await ingestFixtureObjects(pgPool, withObject.map((row) => row.full_data))
+        : { done: 0, failed: 0 };
+      const rawResult = withoutObject.length
+        ? await ingestFixtures(pgPool, withoutObject)
+        : { done: 0, failed: 0, missingFixtureRaw: 0 };
+      modelIngested = Number(objectResult.done || 0) + Number(rawResult.done || 0);
+
+      const { rows: verifyRows } = await pgQuery(
+        `SELECT COUNT(*)::int AS gaps
+         FROM match_results r
+         LEFT JOIN model.matches m USING (fixture_id)
+         WHERE r.date = ANY($1::date[])
+           AND (
+             m.fixture_id IS NULL OR
+             (SELECT COUNT(*) FROM model.team_match_stats t WHERE t.fixture_id=r.fixture_id) <> 2
+           )`,
+        [dates],
+      );
+      const gaps = Number(verifyRows[0]?.gaps || 0);
+      if (Number(objectResult.failed || 0) > 0 || Number(rawResult.failed || 0) > 0 || gaps > 0) {
+        throw new Error(
+          `ingesta modelo incompleta: backlog=${modelBacklog} done=${modelIngested} ` +
+          `failed=${Number(objectResult.failed || 0) + Number(rawResult.failed || 0)} ` +
+          `missingRaw=${rawResult.missingFixtureRaw || 0} gaps=${gaps}`,
+        );
+      }
+    }
+  } catch (e) {
+    modelIngestError = e;
+    errors.push({ stage: 'model-ingest', error: e.message });
+    console.error('[futbol-finalize] ingesta inmediata del modelo falló:', e.message);
+  }
+
   console.log(
     `[futbol-finalize] fecha=${dates.join('|')} candidatos=${candidates} ` +
     `finalizados=${finalized} noFinal=${notFinal} sinPartido=${noMatch} ` +
     `terminalSkip=${terminalSkipped} diferidos=${deferred} ` +
     `recuperadosCache=${recoveredFromFixtureCache} errores=${errors.length} ` +
-    `apiCalls=${apiCalls} rawCaptured=${rawCaptured}`,
+    `apiCalls=${apiCalls} rawCaptured=${rawCaptured} ` +
+    `modelBacklog=${modelBacklog} modelIngested=${modelIngested}`,
   );
+
+  if (modelIngestError) throw modelIngestError;
 
   return {
     ok: true,
@@ -567,6 +636,8 @@ export async function runFinalize(payload = {}) {
     recoveredFromFixtureCache,
     apiCalls,
     rawCaptured,
+    modelBacklog,
+    modelIngested,
     errors: errors.length,
   };
 }
