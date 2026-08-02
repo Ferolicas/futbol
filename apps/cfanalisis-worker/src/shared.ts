@@ -120,6 +120,7 @@ export const cacheAnalysis = _sanityCache.cacheAnalysis;
 export const getCachedAnalysis = _sanityCache.getCachedAnalysis;
 export const getCachedFixturesRaw = _sanityCache.getCachedFixturesRaw;
 export const getAnalyzedFixtureIds = _sanityCache.getAnalyzedFixtureIds;
+export const analysisDateKey = _sanityCache.analysisDateKey;
 export const incrementApiCallCount = _sanityCache.incrementApiCallCount;
 
 // triggerEvent — antes Pusher, ahora WebSocket nativo (mismo contrato).

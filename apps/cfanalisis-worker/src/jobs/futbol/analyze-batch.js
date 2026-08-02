@@ -19,7 +19,7 @@
  * Payload: { date: 'YYYY-MM-DD' }
  */
 import { UnrecoverableError } from 'bullmq';
-import { analyzeMatch, getCachedFixturesRaw, redisGet, redisSet, triggerEvent } from '../../shared.js';
+import { analysisDateKey, analyzeMatch, getCachedFixturesRaw, redisGet, redisSet, triggerEvent } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
 
@@ -94,7 +94,8 @@ export async function runAnalyzeBatch(payload = {}, job = null) {
     return { ok: true, message: 'no fixtures in cache', date };
   }
 
-  const existing     = (await redisGet(`analysis:${date}`)) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
+  const aggregateKey = analysisDateKey(date);
+  const existing     = (await redisGet(aggregateKey)) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
   const analyzedIds  = new Set((existing.globallyAnalyzed || []).map(Number));
   const analyzedOdds = { ...(existing.analyzedOdds || {}) };
   const analyzedData = { ...(existing.analyzedData || {}) };
@@ -113,7 +114,7 @@ export async function runAnalyzeBatch(payload = {}, job = null) {
   // single-threaded; the worst case is a slightly-stale snapshot.
   const schedulePersist = () => {
     if (persistInFlight) return;
-    persistInFlight = redisSet(`analysis:${date}`, {
+    persistInFlight = redisSet(aggregateKey, {
       globallyAnalyzed: [...analyzedIds],
       analyzedOdds,
       analyzedData,
@@ -192,7 +193,7 @@ export async function runAnalyzeBatch(payload = {}, job = null) {
   // Final persistence (await any in-flight write first, then one more snapshot)
   if (persistInFlight) await persistInFlight.catch(() => {});
   try {
-    await redisSet(`analysis:${date}`, {
+    await redisSet(aggregateKey, {
       globallyAnalyzed: [...analyzedIds],
       analyzedOdds,
       analyzedData,

@@ -1,5 +1,5 @@
 import { getFixtures, getQuota, getCachedStandingsPositions } from '../../../lib/api-football';
-import { getAnalyzedMatchesFull, getAnalyzedFixtureIds } from '../../../lib/sanity-cache';
+import { analysisDateKey, getAnalyzedMatchesFull, getAnalyzedFixtureIds } from '../../../lib/sanity-cache';
 import { redisGet, redisMGet, redisSet, KEYS, TTL } from '../../../lib/redis';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { userHasActivePlan } from '../../../lib/require-active-plan';
@@ -229,7 +229,7 @@ export async function GET(request) {
       ? [...new Set(fixtures.map(f => f.league?.id).filter(Boolean))]
       : [];
 
-    const analysisRedisKey = `analysis:${date}`;
+    const analysisRedisKey = analysisDateKey(date);
     const oddsRedisKey = `odds:${date}`;
     const standingsRedisKey = `standings:positions`;
 

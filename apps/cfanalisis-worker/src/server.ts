@@ -4,7 +4,7 @@ import os from 'os';
 import { execSync } from 'child_process';
 import { isValidQueue, queues, QUEUE_NAMES, type QueueName } from './queues.js';
 import { getErrors } from './errors-log.js';
-import { redisGet, pgQuery, bogotaToday } from './shared.js';
+import { analysisDateKey, redisGet, pgQuery, bogotaToday } from './shared.js';
 import { bullConnection } from './redis.js';
 import { logger } from './logger.js';
 import { notifyError } from './notifier.js';
@@ -116,7 +116,7 @@ async function collectAnalysisStatus(date: string) {
   // errors:{date}:list   → recent errors (newest first, capped 500)
   const [fixtures, analysis, dailyBatch, errors] = await Promise.all([
     redisGet(`fixtures:${date}`),
-    redisGet(`analysis:${date}`),
+    redisGet(analysisDateKey(date)),
     redisGet(`dailyBatch:${date}`),
     getErrors(date),
   ]);

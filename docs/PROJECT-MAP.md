@@ -363,10 +363,12 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   `/cf-apple-icon.png`) para evitar que Android/iOS conserven el icono anterior.
   El Service Worker usa `/cf-notification-badge.png`, monocromo y transparente,
   porque Android enmascara el badge de cada notificación.
-- 2026-07-29: `analysis:{date}` es caché canónica global escrita únicamente
+- 2026-08-02: `analysis:v{FOOTBALL_CACHE_VERSION}:{date}` es la caché canónica global escrita únicamente
   por el worker; una respuesta de `/api/fixtures` jamás debe sobrescribirla con
   el subconjunto visible de una zona horaria. La ruta contrasta siempre
-  `analyzed-ids:{date}` y días adyacentes para autorreparar caches parciales y
-  cubrir partidos nocturnos que cambian de jornada entre Bogotá y Madrid.
+  `analyzed-ids:v{FOOTBALL_CACHE_VERSION}:{date}` y días adyacentes para
+  autorreparar caches parciales y cubrir partidos nocturnos que cambian de
+  jornada entre Bogotá y Madrid. Ambos índices cambian con el contrato para que
+  un análisis obsoleto nunca reaparezca desde Redis o PostgreSQL.
 - 2026-06: los nombres `supabaseAdmin`/`createSupabaseServerClient` son shims PG, no Supabase activo.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.

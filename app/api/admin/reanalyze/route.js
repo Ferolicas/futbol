@@ -7,7 +7,7 @@
  * GET  (session auth)   → returns current progress from Redis for frontend polling.
  */
 import { analyzeMatch, getFixtures, fetchMatchStats, resetRateLimiter } from '../../../../lib/api-football';
-import { getCachedAnalysis } from '../../../../lib/sanity-cache';
+import { analysisDateKey, getCachedAnalysis } from '../../../../lib/sanity-cache';
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
@@ -169,7 +169,7 @@ export async function POST(request) {
   };
 
   // Load accumulated analysis summary
-  const existing     = await redisGet(`analysis:${date}`) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
+  const existing     = await redisGet(analysisDateKey(date)) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
   const analyzedIds  = existing.globallyAnalyzed || [];
   const analyzedOdds = existing.analyzedOdds || {};
   const analyzedData = existing.analyzedData || {};
@@ -221,7 +221,7 @@ export async function POST(request) {
   }
 
   // Persist accumulated analysis summary
-  await redisSet(`analysis:${date}`, { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData }, 12 * 3600).catch(() => {});
+  await redisSet(analysisDateKey(date), { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData }, 12 * 3600).catch(() => {});
 
   // Update progress counters
   const nextOffset   = offset + BATCH_SIZE;

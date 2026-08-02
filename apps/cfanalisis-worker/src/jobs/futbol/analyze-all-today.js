@@ -13,7 +13,7 @@
  */
 import {
   getFixtures, analyzeMatch, getQuota,
-  getAnalyzedFixtureIds, redisGet, redisSet, bogotaToday,
+  analysisDateKey, getAnalyzedFixtureIds, redisGet, redisSet, bogotaToday,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
@@ -111,7 +111,8 @@ export async function runAnalyzeAllToday(payload = {}, job = null) {
   // 99 análisis válidos en el primer instante; si algo falla, queda peor que
   // antes. Con UNION, el peor caso es "algunos quedan con análisis viejo",
   // mucho mejor que "algunos desaparecen".
-  const existing = (await redisGet(`analysis:${date}`)) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
+  const aggregateKey = analysisDateKey(date);
+  const existing = (await redisGet(aggregateKey)) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
   const analyzedIdsSet = new Set((existing.globallyAnalyzed || []).map(Number));
   const analyzedOdds = { ...(existing.analyzedOdds || {}) };
   const analyzedData = { ...(existing.analyzedData || {}) };
@@ -124,7 +125,7 @@ export async function runAnalyzeAllToday(payload = {}, job = null) {
   let persistInFlight = null;
   const schedulePersist = () => {
     if (persistInFlight) return;
-    persistInFlight = redisSet(`analysis:${date}`, {
+    persistInFlight = redisSet(aggregateKey, {
       globallyAnalyzed: [...analyzedIdsSet],
       analyzedOdds,
       analyzedData,
@@ -204,7 +205,7 @@ export async function runAnalyzeAllToday(payload = {}, job = null) {
   if (persistInFlight) await persistInFlight.catch(() => {});
   if (analyzedIdsSet.size > 0) {
     try {
-      await redisSet(`analysis:${date}`, {
+      await redisSet(aggregateKey, {
         globallyAnalyzed: [...analyzedIdsSet],
         analyzedOdds,
         analyzedData,

@@ -1,5 +1,6 @@
 import { analyzeMatch, getQuota } from '../../../lib/api-football';
 import { redisGet, redisSet } from '../../../lib/redis';
+import { analysisDateKey } from '../../../lib/sanity-cache';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { userHasActivePlan } from '../../../lib/require-active-plan';
 import { jsonError } from '../../../lib/api-error';
@@ -63,7 +64,8 @@ export async function POST(request) {
     const successful = analyses.filter(a => a.success);
     if (successful.length > 0) {
       try {
-        const existing = await redisGet(`analysis:${date}`) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
+        const aggregateKey = analysisDateKey(date);
+        const existing = await redisGet(aggregateKey) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
         const analyzedIds  = existing.globallyAnalyzed || [];
         const analyzedOdds = existing.analyzedOdds     || {};
         const analyzedData = existing.analyzedData     || {};
@@ -104,7 +106,7 @@ export async function POST(request) {
           }
         }
 
-        await redisSet(`analysis:${date}`, { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData }, 12 * 3600);
+        await redisSet(aggregateKey, { globallyAnalyzed: analyzedIds, analyzedOdds, analyzedData }, 12 * 3600);
       } catch (e) {
         console.error('[analisis] summary update failed:', e.message);
       }
