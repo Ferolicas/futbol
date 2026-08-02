@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-02 · Base auditada: frecuencia cruda exacta y tope de 95% exclusivamente visual
+Actualizado: 2026-08-02 · Commit: `fb7cb83`
 
 ## Identidad y stack
 
@@ -186,9 +186,11 @@ cinco minutos porque el reinicio real depende de la cuenta. Los flujos críticos
 reserva. Si falta el calendario del día actual, el worker live ignora el
 smart-skip histórico y consulta el feed en modo fail-open cada 20 segundos.
 El cierre de resultados corre incrementalmente cada 15 minutos y solo consulta
-fixtures cuyo final estimado ya pasó; no vuelve a pedir partidos futuros. Cada
-campo postpartido conserva cobertura independiente: goles siempre que existan,
-y córners/tarjetas solo cuando el proveedor los entregó (`null` significa sin
+fixtures cuyo final estimado ya pasó; no vuelve a pedir partidos futuros. Si el
+realtime confirma un FT/AET/PEN, encola además un cierre durable dirigido e
+inmediato, que vuelve a consultar el proveedor antes de escribir. Cada campo
+postpartido conserva cobertura independiente: goles siempre que existan, y
+córners/tarjetas solo cuando el proveedor los entregó (`null` significa sin
 cobertura y jamás se convierte en cero).
 `scripts/audit-football-model-data.js` verifica de punta a punta
 crudo, ledger, hechos, dimensiones, marcadores y contadores de jugador; código
@@ -258,12 +260,16 @@ como respaldo cada 5 min únicamente para hoy y con el WebSocket caído.
 Las rutas web nunca llaman a API-Football para reparar stale ni convierten un
 estado a FT por reloj: cien clientes siguen siendo cero llamadas adicionales al
 proveedor. Solo el worker centralizado decide con una respuesta real.
-Cada tres minutos el worker reconcilia además fixtures FT y NS cuyo final
-estimado ya venció. Los consulta en lotes de hasta 20, corrige marcador/status y
-estadísticas reales en Redis, y distingue FT, en vivo, aplazado y cancelado sin
-inventar un cierre. Hasta 500 vencidos se recuperan en un solo ciclo mediante
-lotes; un cursor circular evita que, por encima de eso, un fixture sin respuesta
-bloquee a los siguientes.
+Cada tres minutos el worker reconcilia además fixtures FT, NS y estados live
+cuyo final estimado ya venció. El escaneo une `liveStats` con la jornada visible,
+por lo que recupera un partido aunque un detalle transitorio ya haya contaminado
+Redis. Los consulta en lotes de hasta 20, corrige marcador/status y estadísticas
+reales, y distingue FT, en vivo, aplazado y cancelado sin inventar un cierre.
+Una vez observado live o final, NS/TBD se rechaza como regresión tanto en el
+worker como en el cliente. Un final confirmado encola de inmediato su
+persistencia en `match_results` y el modelo. Hasta 500 vencidos se recuperan en
+un solo ciclo; un cursor circular evita que, por encima de eso, un fixture sin
+respuesta bloquee a los siguientes.
 
 Las notificaciones Web Push de fútbol se agrupan por partido y tick. Solo
 publican goles, goles anulados, córners, tarjetas, penaltis, remates, remates a
@@ -289,8 +295,10 @@ Baloncesto y fútbol americano usan el mismo armazón visual móvil de fútbol:
 selector de fecha, competición/estado, pestañas Partidos/Combinada, tarjetas
 expandibles y combinada flotante. Béisbol conserva sus mercados especializados,
 pero comparte encabezado, controles, tabs, espaciado, color y comportamiento de
-tarjetas. Los datos operativos de proveedor/cuota no aparecen en la experiencia
-del cliente.
+tarjetas. Sus endpoints de jornada para clientes leen únicamente cache/DB: los
+workers son dueños de poblar proveedores, de modo que abrir una pestaña vacía o
+fuera de temporada nunca paga esperas externas de varios segundos. Los datos
+operativos de proveedor/cuota no aparecen en la experiencia del cliente.
 
 `GET /api/fixtures` usa `MGET` para documentos Redis y consultas PostgreSQL por
 lote. Cruza siempre los IDs visibles con `match_results`: el resultado durable
@@ -300,6 +308,12 @@ Luego completa `live_stats` ausentes y filtra análisis, cuotas, standings y
 snapshots a los IDs de la jornada antes de serializar la respuesta. El detalle
 `GET/POST /api/match/[id]` aplica la misma autoridad durable y no vuelve a gastar
 cuota buscando mercados que esa competición no cubrió.
+
+Las tarjetas live/final siempre reservan los recuadros de Córners y Tarjetas.
+Cuando el proveedor no cubre ese mercado muestran `—`; nunca ocultan el bloque
+ni convierten ausencia en 0. Los eventos normalizan nombres de jugador y un
+autor no informado se presenta como tal, sin permitir que objetos irregulares
+del proveedor rompan React.
 
 ## Dependencias compartidas
 
@@ -393,5 +407,13 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   autorreparar caches parciales y cubrir partidos nocturnos que cambian de
   jornada entre Bogotá y Madrid. Ambos índices cambian con el contrato para que
   un análisis obsoleto nunca reaparezca desde Redis o PostgreSQL.
+- 2026-08-02: un estado de fútbol ya observado como live o final nunca puede
+  retroceder a NS/TBD por una respuesta transitoria del detalle. El reconciliador
+  debe escanear también `fixtures:{date}` y todo FT confirmado debe activar el
+  cierre durable dirigido; el reloj solo decide cuándo volver a consultar, no
+  cuál fue el resultado.
+- 2026-08-02: `/api/sports/[sport]/fixtures` es cache/DB-only para el navegador.
+  Las llamadas a NBA/ESPN/API-Sports pertenecen a los schedulers y workers; no
+  reintroducir fallback de proveedor en una visita del cliente.
 - 2026-06: los nombres `supabaseAdmin`/`createSupabaseServerClient` son shims PG, no Supabase activo.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.
