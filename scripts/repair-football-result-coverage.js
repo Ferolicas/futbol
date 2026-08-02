@@ -7,6 +7,7 @@ try { require('dotenv').config({ path: '.env.local' }); } catch {}
 try { require('dotenv').config({ path: '.env' }); } catch {}
 
 const { Pool } = require('pg');
+const { isDeepStrictEqual } = require('node:util');
 const { extractResultCoverage } = require('../lib/football-result-snapshot.cjs');
 
 const RUN = process.argv.includes('--run');
@@ -17,7 +18,9 @@ const pool = new Pool({
 });
 
 function same(a, b) {
-  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  // JSONB no conserva el orden de las claves; comparar JSON.stringify daría
+  // falsos positivos aunque el contenido fuera idéntico.
+  return isDeepStrictEqual(a ?? null, b ?? null);
 }
 
 (async () => {
