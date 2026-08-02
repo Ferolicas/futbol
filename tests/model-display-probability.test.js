@@ -263,6 +263,19 @@ test('la frontera pública rechaza caches sin fiabilidad y nunca redondea 89.999
   assert.deepEqual(sanitized.selectable.map((selection) => selection.id), ['ok']);
   assert.equal(sanitized.combinedProbability, 80);
   assert.equal(sanitized.combinedOdd, 1.5);
+
+  const compatibleV20 = sanitizeFootballCombinada({
+    source: 'context-engine',
+    selections: [
+      { id: 'reliable-v20', confidence: 91, odd: 1.4, rawProbability: 82 },
+      { id: 'low-v20', confidence: 89, odd: 1.5, rawProbability: 90 },
+    ],
+    selectable: [
+      { id: 'legacy-without-confidence', odd: 1.3, rawProbability: 95 },
+    ],
+  });
+  assert.deepEqual(compatibleV20.selections.map((selection) => selection.id), ['reliable-v20']);
+  assert.deepEqual(compatibleV20.selectable.map((selection) => selection.id), ['reliable-v20']);
 });
 
 test('los tramos de gol cuentan partidos con ocurrencia y no cantidad de goles', () => {

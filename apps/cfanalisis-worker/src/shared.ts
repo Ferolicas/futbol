@@ -75,8 +75,9 @@ const [
   import(LIB + 'model-player-markets.js'),
   import(LIB + 'model-probabilities.js'),
   import(SCRIPTS + 'train-football-empirical-engine.js'),
-  // Deploy marker: MLB-only + Baseball recommendation catalog v14. These runtime imports live
-  // outside the TypeScript tree, so this file must trigger a worker reload.
+  // Deploy marker: MLB-only/Baseball v14 + football reliability boundary v21-v20.
+  // These runtime imports live outside the TypeScript tree, so this file must
+  // trigger a worker reload when their contract changes.
   import(LIB + 'multisport-analysis.js'),
   import(LIB + 'multisport-providers.js'),
   import(SCRIPTS + 'train-multisport-empirical-engine.js'),

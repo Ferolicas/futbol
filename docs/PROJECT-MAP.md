@@ -400,7 +400,8 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   opciones sin tocar las estadísticas y mantiene lectura compatible de análisis
   v20, porque sus cálculos son idénticos; la frontera pública sanea siempre las
   opciones sin volver a llamar a la API ni ocultar estadísticas durante el
-  despliegue. `MULTISPORT_CACHE_VERSION=14` deja
+  despliegue. Si el `selectable` v20 no trae fiabilidad, solo reutiliza las
+  `selections` que sí acrediten ≥90. `MULTISPORT_CACHE_VERSION=14` deja
   Baseball solo en MLB con baremo público 70%. Las decisiones siguen usando
   frecuencias ponderadas reales; el máximo 95% vive solo en presentación y los
   diagnósticos nunca cambian ni bloquean una frecuencia calculada.
