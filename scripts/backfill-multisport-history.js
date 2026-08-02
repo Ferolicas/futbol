@@ -58,7 +58,9 @@ function selectedCompetitions(sport, requested) {
   const available = getSportCompetitions(sport);
   const values = String(requested || 'all').split(',').map((value) => value.trim()).filter(Boolean);
   if (values.includes('all')) return available;
-  if (sport === 'baseball' && values.includes('minor')) return available.filter((competition) => competition.key !== 'mlb');
+  if (sport === 'baseball' && values.includes('minor')) {
+    throw new Error('MiLB está desactivado: el producto solo consulta MLB porque exige mercados Bet365 apostables');
+  }
   const wanted = new Set(values);
   const selected = available.filter((competition) => wanted.has(competition.key) || wanted.has(String(competition.id)));
   if (!selected.length) throw new Error(`Competición inválida para ${sport}: ${requested}`);

@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * Job: baseball-live (MLB + MiLB, MLB Stats API)
+ * Job: baseball-live (MLB, MLB Stats API)
  *
  * Polling del estado EN VIVO de los juegos MLB del día desde la MLB Stats API
  * (gratis, sin límite de requests → sin el budget/throttle que api-baseball
@@ -261,7 +261,7 @@ export async function runBaseballLive(payload = {}) {
   // 1) Schedule del día (ligero) — ver qué juegos hay y cuáles en vivo.
   let games = [];
   try { games = await getMlbScheduleByDate(today, SPORT_IDS); }
-  catch (e) { console.warn(`[baseball-live] schedule MLB/MiLB: ${e.message}`); }
+  catch (e) { console.warn(`[baseball-live] schedule MLB: ${e.message}`); }
   if (games.length === 0) return { ok: true, skipped: true, reason: 'no games today' };
 
   const liveGames = games.filter(g => g.isLive);

@@ -75,7 +75,7 @@ const [
   import(LIB + 'model-player-markets.js'),
   import(LIB + 'model-probabilities.js'),
   import(SCRIPTS + 'train-football-empirical-engine.js'),
-  // Deploy marker: Bet365 market catalog v13. These runtime imports live
+  // Deploy marker: MLB-only + Baseball recommendation catalog v14. These runtime imports live
   // outside the TypeScript tree, so this file must trigger a worker reload.
   import(LIB + 'multisport-analysis.js'),
   import(LIB + 'multisport-providers.js'),
@@ -169,7 +169,7 @@ export const buildPlayerMarkets = _modelPlayerMarkets.buildPlayerMarkets;
 export const buildModelCombinada = _modelProbabilities.buildModelCombinada;
 export const trainFootballEmpiricalEngine = _trainFootballEmpirical.trainFootballEmpiricalEngine;
 
-// Motores deportivos independientes (MLB/MiLB, NBA/NCAA y NFL/NCAA), todos
+// Motores deportivos independientes (MLB, NBA/NCAA y NFL/NCAA), todos
 // basados únicamente en frecuencias observadas. El módulo decide la fuente.
 export const analyzeSportDate = _multisportAnalysis.analyzeSportDate;
 export const analyzeSportGame = _multisportAnalysis.analyzeSportGame;
@@ -188,7 +188,7 @@ export const buildCombinada = _combinada.buildCombinada;
 // lib/odds-api.js
 export const fetchOddsForFixtures = _oddsApi.fetchOddsForFixtures;
 
-// lib/mlb-stats-api.js — fuente oficial MLB/MiLB (statsapi.mlb.com)
+// lib/mlb-stats-api.js — fuente oficial MLB (statsapi.mlb.com)
 export const getMlbScheduleByDate = _mlbStatsApi.getMlbScheduleByDate;
 export const getMlbPitcherMatchup = _mlbStatsApi.getMlbPitcherMatchup;
 export const getMlbTeamSeasonStats = _mlbStatsApi.getMlbTeamSeasonStats;

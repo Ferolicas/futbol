@@ -3,10 +3,15 @@ const assert = require('node:assert/strict');
 
 const { displayPct, modelToScored, playerMarketsToSelections } = require('../lib/model-to-scored.js');
 const { calculateGoalTimingProbabilities } = require('../lib/descriptive-stats.js');
+const {
+  meetsFootballReliability,
+  sanitizeFootballCombinada,
+} = require('../lib/recommendation-policy.js');
 
 let buildModelCombinada;
+let buildCalculatedProbabilities;
 test.before(async () => {
-  ({ buildModelCombinada } = await import('../lib/model-probabilities.js'));
+  ({ buildModelCombinada, buildCalculatedProbabilities } = await import('../lib/model-probabilities.js'));
 });
 
 test('la presentación limita a 95% sin alterar la frecuencia del motor', () => {
@@ -87,7 +92,7 @@ test('la combinada calcula con el valor crudo aunque visualmente muestre 95%', (
   const scored = modelToScored({
     goals_total: {
       kind: 'ou',
-      lines: [{ line: 0.5, prob: 0.9975, n: 4, hits: 4, level: 'empirical' }],
+      lines: [{ line: 0.5, prob: 0.9975, n: 120, hits: 120, conf: 0.95, level: 'empirical' }],
     },
   });
   const result = buildModelCombinada(
@@ -121,7 +126,7 @@ test('la combinada y la Apuesta del Día usan la frecuencia, no el diagnóstico'
   const scored = modelToScored({
     goals_total: {
       kind: 'ou',
-      lines: [{ line: 1.5, prob: 0.9, n: 5, hits: 4, level: 'empirical' }],
+      lines: [{ line: 1.5, prob: 0.9, n: 108, hits: 97, conf: 0.9, level: 'empirical' }],
     },
   }, {
     validationFamilies: {
@@ -142,7 +147,7 @@ test('la combinada y la Apuesta del Día usan la frecuencia, no el diagnóstico'
   assert.equal(result.selections[0].dailyEligible, true);
 });
 
-test('un prop de jugador con frecuencia real y cuota entra sin gate adicional', () => {
+test('un prop de jugador entra cuando su fiabilidad real llega al 90%', () => {
   const result = buildModelCombinada(
     {},
     {
@@ -156,7 +161,7 @@ test('un prop de jugador con frecuencia real y cuota entra sin gate adicional', 
       10: {
         player_id: 10,
         name: 'Jugador',
-        markets: { anytime_scorer: { prob: 0.9 } },
+        markets: { anytime_scorer: { prob: 0.9, n: 72, conf: 0.9 } },
       },
     },
     {},
@@ -166,6 +171,98 @@ test('un prop de jugador con frecuencia real y cuota entra sin gate adicional', 
   assert.equal(result.selections[0].scope, 'player');
   assert.equal(result.selections[0].probability, 90);
   assert.equal(result.selections[0].dailyEligible, true);
+  assert.equal(result.selections[0].confidence, 90);
+});
+
+test('fiabilidad 90 filtra solo opciones de apuesta y conserva todas las frecuencias calculadas', () => {
+  const scored = modelToScored({
+    goals_total: {
+      kind: 'ou',
+      lines: [
+        { line: 0.5, prob: 0.7, n: 108, hits: 76, conf: 0.9, level: 'empirical' },
+        { line: 1.5, prob: 0.8, n: 108, hits: 86, conf: 0.9, level: 'empirical' },
+        { line: 2.5, prob: 0.95, n: 107, hits: 102, conf: 0.899999, level: 'empirical' },
+      ],
+    },
+  });
+  const descriptives = {
+    homeAvg: { n: 8, goalsFor: 1.2, goalsAgainst: 1.1, coverage: {} },
+    awayAvg: { n: 9, goalsFor: 1.3, goalsAgainst: 1.0, coverage: {} },
+    meetings: 0,
+    dataAvailability: {},
+  };
+  const probabilities = buildCalculatedProbabilities(scored, descriptives, {});
+  const result = buildModelCombinada(
+    scored,
+    { overUnder: { Over_0_5: 1.3, Over_1_5: 1.5, Over_2_5: 1.9 } },
+    { home: 'Local', away: 'Visitante' },
+    {},
+    probabilities,
+    null,
+  );
+
+  assert.equal(probabilities.overUnder.over15, 80);
+  assert.equal(probabilities.overUnder.over25, 95);
+  assert.deepEqual(result.selectable.map((selection) => selection.id).sort(), [
+    'total_goals_over0_5',
+    'total_goals_over1_5',
+  ]);
+  assert.deepEqual(result.selections.map((selection) => selection.id), ['total_goals_over1_5']);
+  assert.equal(result.selectable.some((selection) => selection.id === 'total_goals_over2_5'), false);
+  assert.equal(result.minimumReliability, 90);
+  assert.equal(result._funnel.bajoFiabilidad90, 1);
+});
+
+test('un prop de jugador bajo 90% de fiabilidad no se publica aunque tenga probabilidad y cuota', () => {
+  const result = buildModelCombinada(
+    {},
+    {
+      allBookmakerOdds: [{
+        name: 'bet365',
+        players: { scorer: { fiable: 1.65, insuficiente: 1.70 } },
+      }],
+    },
+    { home: 'Local', away: 'Visitante' },
+    {
+      10: {
+        player_id: 10,
+        name: 'Fiable',
+        markets: { anytime_scorer: { prob: 0.9, n: 72, conf: 0.9 } },
+      },
+      11: {
+        player_id: 11,
+        name: 'Insuficiente',
+        markets: { anytime_scorer: { prob: 0.95, n: 71, conf: 0.899999 } },
+      },
+    },
+    {},
+    null,
+  );
+
+  assert.deepEqual(result.selectable.map((selection) => selection.playerId), [10]);
+  assert.equal(result._funnel.playerBelowReliability, 1);
+});
+
+test('la frontera pública rechaza caches sin fiabilidad y nunca redondea 89.999 a 90', () => {
+  assert.equal(meetsFootballReliability(0.9), true);
+  assert.equal(meetsFootballReliability(89.999), false);
+  const sanitized = sanitizeFootballCombinada({
+    source: 'context-engine',
+    selections: [
+      { id: 'ok', confidence: 90, odd: 1.5, rawProbability: 80 },
+      { id: 'low', confidence: 89.999, odd: 1.8, rawProbability: 95 },
+      { id: 'legacy', odd: 1.9, rawProbability: 95 },
+    ],
+    selectable: [
+      { id: 'ok', confidence: 90, odd: 1.5, rawProbability: 80 },
+      { id: 'legacy', odd: 1.9, rawProbability: 95 },
+    ],
+  });
+
+  assert.deepEqual(sanitized.selections.map((selection) => selection.id), ['ok']);
+  assert.deepEqual(sanitized.selectable.map((selection) => selection.id), ['ok']);
+  assert.equal(sanitized.combinedProbability, 80);
+  assert.equal(sanitized.combinedOdd, 1.5);
 });
 
 test('los tramos de gol cuentan partidos con ocurrencia y no cantidad de goles', () => {

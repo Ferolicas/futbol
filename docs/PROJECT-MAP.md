@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-02 · Commit base: `5fc1612`
+Actualizado: 2026-08-02 · Commit base: `119724b`
 
 ## Identidad y stack
 
@@ -29,7 +29,7 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `/pago/estado` | `app/pago/estado/` | Sí | Confirmación durable y recuperación del pago |
 | `/dashboard` | `app/dashboard/layout.js`, `page.js` | Plan activo | Partidos, análisis y combinadas |
 | `/dashboard/analisis/[id]` | `app/dashboard/analisis/[id]/page.js` | Plan activo | Análisis de fútbol |
-| `/dashboard/baseball` | `app/dashboard/baseball/page.js` | Plan activo | MLB, Triple-A, Double-A, High-A, Single-A y Rookie |
+| `/dashboard/baseball` | `app/dashboard/baseball/page.js` | Plan activo | MLB con mercados Bet365 exactos |
 | `/dashboard/baloncesto` | `app/dashboard/baloncesto/page.js` | Plan activo | Partidos NBA y NCAA |
 | `/dashboard/futbol-americano` | `app/dashboard/futbol-americano/page.js` | Plan activo | NFL, NCAA FBS y NCAA FCS |
 | `/admin` | `app/admin/` | Admin/owner | Operación y clientes |
@@ -77,8 +77,9 @@ Las migraciones viven en `scripts/`. Tablas clave:
 - `payment_webhook_events`: idempotencia persistente y reintentos de webhooks.
 - `payment_exchange_rates`: última tasa EUR→COP válida para tolerar caídas del proveedor FX.
 - `fixtures_cache`, `match_schedule`, `match_results`, `match_analysis`, `match_predictions`: núcleo de fútbol.
-- `baseball_*`: MLB/MiLB más hechos, jugadores, predicciones y pesos empíricos
-  propios en `baseball_engine_*`.
+- `baseball_*`: MLB más hechos, jugadores, predicciones y pesos empíricos
+  propios en `baseball_engine_*`. Filas históricas de MiLB pueden permanecer
+  inertes, pero ninguna ruta, scheduler ni worker activo las solicita o publica.
 - `basketball_*`: calendario, análisis y hechos NBA/NCAA; no consulta tablas de
   fútbol, béisbol ni fútbol americano.
 - `american_football_*`: calendario, análisis y hechos NFL/FBS/FCS; no consulta
@@ -136,13 +137,17 @@ distintos para una cuota total entre 1.50 y 2.00. El workflow no usa IA:
 construye la URL de `/api/pick-image` y Telegram publica la tarjeta con escudos,
 cuota, probabilidad y un único enlace a CF Análisis.
 
-Una opción entra en recomendaciones generales cuando su frecuencia ponderada
-real es de 80% o más y existe cuota real; la Apuesta del Día exige 90% o más y
-aplica además su whitelist de mercados y rango de cuota. Las métricas fuera de
+Una opción de fútbol entra en recomendaciones generales cuando su frecuencia
+ponderada real es de 80% o más, existe cuota real y la fiabilidad propia del
+mercado es de 90% o más; el constructor puede listar frecuencias desde 70%,
+siempre con la misma fiabilidad mínima. La Apuesta del Día exige además 90% de
+frecuencia, su whitelist de mercados y rango de cuota. Las métricas fuera de
 muestra son únicamente diagnósticas: nunca cambian el porcentaje ni bloquean
 una frecuencia calculada. Los props de jugador siguen la misma regla cuando
 existe historial y una cuota atribuible. El constructor distingue únicamente
-entre recomendación estadística (≥80%) y dato estadístico seleccionable.
+entre recomendación estadística (≥80%) y dato estadístico seleccionable
+(≥70%), pero ambos requieren fiabilidad ≥90%. `lib/recommendation-policy.js`
+centraliza estos gates sin participar en ningún cálculo del motor.
 Todos los filtros, rankings y probabilidades conjuntas usan la frecuencia cruda;
 web, PNG y mensaje de Telegram muestran como máximo 95% para no comunicar una
 garantía. Un valor real de 99.75% se conserva como 99.75 internamente y se
@@ -224,17 +229,19 @@ Las fuentes y namespaces de identificadores también están separados:
 - NCAA baloncesto: calendario, logos, marcadores, boxscores, jugadores y cuotas
   publicadas mediante el feed deportivo de ESPN (grupo 50), con IDs aislados de
   NBA. No depende de la ventana de fechas de API-Sports.
-- MLB/MiLB: MLB Stats oficial aporta calendarios de MLB, Triple-A, Double-A,
-  High-A, Single-A y Rookie, además de live, boxscores y logos. El enriquecido
-  de pitchers, alineaciones y props se reserva para MLB; API-Baseball se consulta
-  solo para cuotas MLB y nunca se inventan cuotas de ligas menores. En MLB la
+- MLB: MLB Stats oficial aporta calendario, live, boxscores, pitchers,
+  alineaciones, props y logos. MiLB está fuera de la configuración activa porque
+  no dispone del catálogo Bet365 contractual: no se pide su calendario, live,
+  análisis ni cuotas. API-Baseball se consulta solo para cuotas MLB. En MLB la
   casa contractual es exclusivamente Bet365: el normalizador conserva ID y
   nombre original de mercado/selección y distingue de forma estricta
   `Over/Under` (carreras), `Total Hits`, combinaciones resultado/total, total por
   equipo, hándicap y primeras cinco entradas. Una probabilidad solo se publica
   como opción si su línea exacta existe en el catálogo Bet365 y la cuota real es
   al menos 1,20; el dashboard, la combinada manual y el detalle consumen esa
-  misma lista persistida y nunca reconstruyen mercados de referencia. Los
+  misma lista persistida y nunca reconstruyen mercados de referencia. El baremo
+  público de partido es 70% y la Apuesta del Día conserva 90%; ambos exigen la
+  línea Bet365 exacta y cuota ≥1,20. Los
   historiales de jugador pueden seguir alimentándose internamente, pero no se
   presentan como apuesta hasta que exista una selección y cuota Bet365
   atribuible al jugador y línea exactos. La cobertura de análisis es automática:
@@ -254,8 +261,8 @@ Las fuentes y namespaces de identificadores también están separados:
 `scripts/train-multisport-empirical-engine.js` realiza selección cronológica
 70/30 por deporte y guarda diagnósticos fuera de muestra sin recalibrar ni
 bloquear el porcentaje. `scripts/backfill-multisport-history.js` carga una temporada y una
-o varias competiciones por ejecución (`--competition`; MLB/MiLB usa rangos
-oficiales de 45 días y NCAA consultas diarias concurrentes), y
+o varias competiciones por ejecución (`--competition`; MLB usa rangos oficiales
+de 45 días y NCAA consultas diarias concurrentes; `minor` se rechaza), y
 `scripts/migrate-multisport-engines.sql` crea los almacenes
 independientes; la migración requiere backup y debe ejecutarse antes de activar
 las nuevas rutas en producción. Tenis permanece deshabilitado hasta aprobar una
@@ -389,12 +396,11 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   gratuito y coordinan un máximo de diez solicitudes/minuto entre web y workers;
   un 429 temporal pausa el host, pero nunca abre el circuito de cuota diaria.
   Las cuotas deportivas nunca se usan como probabilidad del modelo.
-- 2026-08-02: `FOOTBALL_CACHE_VERSION=20` y `MULTISPORT_CACHE_VERSION=13`
-  invalidan análisis con el antiguo gate de validación o sin separación entre
-  frecuencia cruda y valor visual; la versión 13 también invalida Baseball sin
-  catálogo Bet365 exacto. Las decisiones usan frecuencias ponderadas reales; el
-  máximo 95% vive solo en la presentación y los diagnósticos nunca bloquean una
-  recomendación.
+- 2026-08-02: `FOOTBALL_CACHE_VERSION=21` exige fiabilidad ≥90% para publicar
+  opciones sin tocar las estadísticas, y `MULTISPORT_CACHE_VERSION=14` deja
+  Baseball solo en MLB con baremo público 70%. Las decisiones siguen usando
+  frecuencias ponderadas reales; el máximo 95% vive solo en presentación y los
+  diagnósticos nunca cambian ni bloquean una frecuencia calculada.
 - 2026-08-01: no liberar un intento pendiente por tiempo ni marcar terminal un cobro recurrente que MP pueda reintentar; primero cancelar el recurso remoto.
 - 2026-07-29: el checkout automático requiere deduplicación persistente ante Strict Mode/Fast Refresh.
 - 2026-07-29: solo el plan viaja por URL; el servidor vuelve a calcular precio, moneda y proveedor.

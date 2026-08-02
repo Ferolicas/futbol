@@ -1,7 +1,7 @@
 /**
  * GET /api/baseball/fixtures?date=YYYY-MM-DD&tz=<IANA>
  *
- * Lista MLB y las categorías oficiales de MiLB del día (zona horaria del cliente) desde MLB Stats
+ * Lista los partidos MLB del día (zona horaria del cliente) desde MLB Stats
  * API oficial (statsapi.mlb.com) — api-baseball no sirve para MLB (plan free
  * 2022-2024, sin pitchers). Enriquece con el análisis (probabilidades,
  * combinada) y el estado en vivo (baseball_match_results), ambos por gamePk.

@@ -47,6 +47,7 @@ import { DateCaption, LeaguePicker, StatusPicker } from '../components/Dashboard
 import DashboardBuffer from '../components/DashboardBuffer';
 import AnalysisFullModal from '../components/AnalysisFullModal';
 import { displayBettingText } from '../utils/display-betting-text';
+import { BASEBALL_RECOMMENDATION_MIN_PROBABILITY } from '../../../lib/recommendation-policy';
 
 const BaseballAnalysisExperience = dynamic(
   () => import('./analisis/[id]/page').then((module) => module.BaseballAnalysisExperience),
@@ -71,7 +72,7 @@ const bet365Markets = (analysis) => (Array.isArray(analysis?.combinada?.selectab
   : [])
   .filter((market) => normalizeBookmaker(market.bookmaker) === 'bet365'
     && Number(market.odd) >= 1.20
-    && Number(market.rawProbability ?? market.probability) >= 80)
+    && Number(market.rawProbability ?? market.probability) >= BASEBALL_RECOMMENDATION_MIN_PROBABILITY)
   .sort((a, b) => Number(b.rawProbability ?? b.probability) - Number(a.rawProbability ?? a.probability)
     || Number(b.odd) - Number(a.odd));
 const isLive = (s) => ['LIVE', 'IN', 'IN1', 'IN2', 'IN3', 'IN4', 'IN5', 'IN6', 'IN7', 'IN8', 'IN9'].includes(s);
@@ -916,7 +917,7 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
   if (markets.length === 0) {
     return (
       <div style={{ fontSize: '.78rem', color: '#94a3b8', lineHeight: 1.5 }}>
-        Bet365 no tiene ahora una selección compatible con el modelo, probabilidad mínima del 80% y cuota mínima de 1,20 para este partido.
+        Bet365 no tiene ahora una selección compatible con el modelo, probabilidad mínima del 70% y cuota mínima de 1,20 para este partido.
       </div>
     );
   }

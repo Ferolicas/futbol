@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * Job: baseball-fixtures (MLB + MiLB, MLB Stats API)
+ * Job: baseball-fixtures (MLB, MLB Stats API)
  *
  * Cachea el schedule del día MLB en baseball_match_schedule (cartelera + ventana
  * de juego). El analyze y el live obtienen el schedule directo de MLB Stats API,
@@ -17,11 +17,11 @@ const GAME_DURATION_MIN = 210; // ~3.5h cubre extra innings
 export async function runBaseballFixtures(payload = {}) {
   // Misma jornada Colombia objetivo que baseball-analyze (alineado con fútbol).
   const targetDate = payload.date || cronTargetDate();
-  console.log(`[job:baseball-fixtures] MLB/MiLB targetDate=${targetDate}`);
+  console.log(`[job:baseball-fixtures] MLB targetDate=${targetDate}`);
 
   let games = [];
   try { games = await getMlbScheduleByDate(targetDate, SPORT_IDS); }
-  catch (e) { console.warn(`[baseball-fixtures] schedule MLB/MiLB: ${e.message}`); }
+  catch (e) { console.warn(`[baseball-fixtures] schedule MLB: ${e.message}`); }
 
   const kickoffTimes = games.map(g => {
     const kickoff = new Date(g.dateUTC).getTime();

@@ -6,6 +6,7 @@ import { supabaseAdmin } from '../../../../../lib/supabase';
 import { getCurrentUser } from '../../../../../lib/auth-pg';
 import { userHasActivePlan } from '../../../../../lib/require-active-plan';
 import { jsonError } from '../../../../../lib/api-error';
+import { MULTISPORT_CACHE_VERSION } from '../../../../../lib/multisport-analysis';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,10 @@ export async function GET(_request, { params }) {
     if (!fixtureId) return Response.json({ error: 'Invalid id' }, { status: 400 });
 
     const [analysisRes, resultRes] = await Promise.all([
-      supabaseAdmin.from('baseball_match_analysis').select('*').eq('fixture_id', fixtureId).maybeSingle(),
+      supabaseAdmin.from('baseball_match_analysis').select('*')
+        .eq('fixture_id', fixtureId)
+        .gte('cache_version', MULTISPORT_CACHE_VERSION)
+        .maybeSingle(),
       supabaseAdmin.from('baseball_match_results').select('*').eq('fixture_id', fixtureId).maybeSingle(),
     ]);
 

@@ -15,6 +15,8 @@ const {
   MAX_BASEBALL_ANALYSIS_FIXTURES,
   normalizeBaseballAnalysisFixtureIds,
 } = require('../lib/baseball-analysis-request.js');
+const { getMultisportConfig } = require('../lib/multisport-config.js');
+const { MLB_SPORT_IDS } = require('../lib/mlb-stats-api.js');
 
 test('la cobertura incluye las fechas adyacentes incluso al cambiar de año', () => {
   assert.deepEqual(buildSportAnalysisCoverageDates('2026-01-01'), [
@@ -57,4 +59,12 @@ test('la tarjeta pendiente abre estado automático y no ofrece analizar manualme
   assert.match(source, /Actualizando el análisis automáticamente/);
   assert.doesNotMatch(source, /Analizar \$\{selected\.size\}/);
   assert.doesNotMatch(source, /else onSelect\(game\.id\)/);
+});
+
+test('todos los consumidores operativos de Baseball solicitan exclusivamente MLB', () => {
+  assert.deepEqual(getMultisportConfig('baseball').competitions.map((competition) => competition.id), ['1']);
+  assert.deepEqual(Object.keys(MLB_SPORT_IDS), ['1']);
+
+  const leaguesRoute = fs.readFileSync(path.join(__dirname, '../app/api/baseball/leagues/route.js'), 'utf8');
+  assert.doesNotMatch(leaguesRoute, /id:\s*(11|12|13|14|16)\b/);
 });

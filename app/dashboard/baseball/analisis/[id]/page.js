@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import Image from 'next/image';
 import DashboardBuffer from '../../../components/DashboardBuffer';
 import { displayBettingText } from '../../../utils/display-betting-text';
+import { BASEBALL_RECOMMENDATION_MIN_PROBABILITY } from '../../../../../lib/recommendation-policy';
 
 const cap = (v) => {
   const value = Math.max(0, Math.min(100, Number(v) || 0));
@@ -15,7 +16,7 @@ const cap = (v) => {
 const isBet365Market = (market) => String(market?.bookmaker || '').normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '') === 'bet365'
   && Number(market?.odd) >= 1.20
-  && Number(market?.rawProbability ?? market?.probability) >= 80;
+  && Number(market?.rawProbability ?? market?.probability) >= BASEBALL_RECOMMENDATION_MIN_PROBABILITY;
 
 export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClose }) {
   const params = useParams();
@@ -193,7 +194,7 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
           </div>
         ) : (
           <div style={{ color: '#94a3b8', fontSize: '.84rem', lineHeight: 1.5 }}>
-            No se publica ninguna recomendación: Bet365 no ofrece ahora una línea compatible con probabilidad mínima del 80% y cuota mínima de 1,20.
+            No se publica ninguna recomendación: Bet365 no ofrece ahora una línea compatible con probabilidad mínima del 70% y cuota mínima de 1,20.
           </div>
         )}
       </Section>

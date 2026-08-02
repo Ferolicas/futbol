@@ -73,7 +73,7 @@ test('Baseball publica solo selecciones cruzadas con Bet365 y cuota mínima 1.20
   const odds = normalizeApiSportsOdds(payload, fixture, { sport: 'baseball', bookmakers: ['Bet365'] });
   const prediction = {
     sport: 'baseball',
-    moneyline: { home: probability(.82), away: probability(.18) },
+    moneyline: { home: probability(.74), away: probability(.26) },
     totals: { lines: {
       8.5: { over: probability(.10), under: probability(.90) },
       12.5: { over: probability(.01), under: probability(.99) },
@@ -89,7 +89,7 @@ test('Baseball publica solo selecciones cruzadas con Bet365 y cuota mínima 1.20
     },
     teamTotals: {
       home: { 3.5: { over: probability(.85), under: probability(.15) } },
-      away: { 4.5: { over: probability(.18), under: probability(.82) } },
+      away: { 4.5: { over: probability(.31), under: probability(.69) } },
     },
   };
 
@@ -98,15 +98,21 @@ test('Baseball publica solo selecciones cruzadas con Bet365 y cuota mínima 1.20
   assert.ok(result.selectable.length > 0);
   assert.ok(result.selectable.every((selection) => selection.bookmaker === 'Bet365'));
   assert.ok(result.selectable.every((selection) => selection.odd >= 1.20));
-  assert.ok(result.selectable.every((selection) => selection.rawProbability >= 80));
+  assert.ok(result.selectable.every((selection) => selection.rawProbability >= 70));
   assert.ok(result.selectable.every((selection) => selection.bookmakerMarket));
   assert.ok(result.selectable.every((selection) => selection.bookmakerSelection));
   assert.ok(result.selectable.some((selection) => selection.id === 'total-8.5-under'));
   assert.ok(result.selectable.some((selection) => selection.id === 'first5-total-4.5-under'));
   assert.ok(result.selectable.some((selection) => selection.id === 'team-total-home-3.5-over'));
+  assert.ok(result.selectable.some((selection) => selection.id === 'ml-home'));
+  assert.ok(result.selectable.every((selection) => selection.id !== 'team-total-away-4.5-under'));
   assert.ok(result.selectable.every((selection) => !selection.id.includes('18.5')));
   assert.ok(result.selectable.every((selection) => !selection.id.includes('12.5')));
   assert.ok(result.selectable.every((selection) => !/\bF5\b/i.test(selection.name)));
+  assert.ok(result.selections.every((selection) => selection.rawProbability >= 70));
+  assert.equal(result.selectableThreshold, 70);
+  assert.equal(result.highlightThreshold, 70);
+  assert.equal(result.dailyThreshold, 90);
 });
 
 test('las combinadas descartan selecciones viejas o ajenas al catálogo Bet365 actual', () => {

@@ -26,9 +26,9 @@ import { usePusherEvent } from '../../lib/use-pusher';
 import { useWorkerSocketState } from '../../hooks/useWorkerSocket';
 import { BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
 import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/timezone';
-import { buildCombinada } from '../../lib/combinada';
 import { marketLabel } from '../../lib/market-labels';
 import { isTelegramMarketAllowed as isDailyPickMarketAllowed } from '../../lib/telegram-daily-pick';
+import { meetsFootballReliability } from '../../lib/recommendation-policy';
 import { setAnalysisCache } from '../../lib/analysis-cache';
 import { fetcher } from '../../lib/fetcher';
 import BrandLogoMedia from '../../components/BrandLogoMedia';
@@ -1142,16 +1142,14 @@ export default function Dashboard() {
       const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
 
-      // La combinada general contiene recomendaciones desde 80%, pero la
-      // Apuesta del Día exige siempre frecuencia real ≥90% + cuota real ≥1.20.
+      // El catálogo canónico ya exige fiabilidad real >=90%. La Apuesta del
+      // Día añade su requisito independiente de frecuencia >=90% y cuota.
       const isEngine = data?.combinada?.source === 'context-engine';
-      const liveComb = (!isEngine && data.calculatedProbabilities)
-        ? buildCombinada(data.calculatedProbabilities, data.odds, data.playerHighlights, { home: homeTeam, away: awayTeam })
-        : null;
-      const selections = liveComb?.selections || data?.combinada?.selections || [];
+      const selections = isEngine ? (data.combinada.selections || []) : [];
       const minProb = MIN_PROB;
 
       selections.forEach(sel => {
+        if (!meetsFootballReliability(sel.confidence)) return;
         if (!isDailyPickMarketAllowed(sel)) return;
         if (Number(sel.rawProbability ?? sel.probability) < minProb) return;
         if (!sel.odd || sel.odd < MIN_ODD) return;
@@ -2011,27 +2009,23 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
     ? 'PENDIENTE DE CONFIRMACIÓN'
     : ({ NS: 'PRÓXIMO', TBD: 'POR CONFIRMAR', '1H': 'EN VIVO — 1T', '2H': 'EN VIVO — 2T', HT: 'ENTRETIEMPO', FT: 'FINALIZADO', ET: 'EN VIVO — Extra', P: 'EN VIVO — Penales', AET: 'FINALIZADO', PEN: 'FINALIZADO', SUSP: 'SUSPENDIDO', PST: 'POSPUESTO', CANC: 'CANCELADO' }[match.fixture.status.short] || match.fixture.status.short);
 
-  // "Selecciona para tu combinada" → fuente unica: buildCombinada().
-  // Antes habia un constructor manual paralelo (~120 lineas) que faltaba
-  // los mercados nuevos (faltas, mitades, AH, asistencias, tiros por linea
-  // optima, etc.) y mostraba cuotas planas para player markets. Ahora reusa
-  // exactamente la misma selecciones que la "Combinada Auto" — un unico
-  // sitio donde mantener el catalogo de mercados.
+  // "Selecciona para tu combinada" → fuente única: el catálogo canónico
+  // creado por el motor. No se reconstruyen opciones desde porcentajes porque
+  // esa ruta perdería el dato de fiabilidad exigido por la política pública.
   const markets = useMemo(() => {
     if (!isExpanded) return [];
     // "Selecciona para tu combinada": usa data.combinada.SELECTABLE — TODA línea con
     // prob≥70% y cuota real ≥1.20 (bet365/bwin, con equivalencia de línea entera). NO
-    // el gate ≥80% de recomendaciones generales (eso es `selections`). Fallback a
-    // selections (combinadas viejas sin selectable) o buildCombinada (no-engine).
+    // el gate ≥80% de recomendaciones generales (eso es `selections`).
     const isEngine = data?.combinada?.source === 'context-engine';
     const sels = isEngine
       ? (data.combinada.selectable || data.combinada.selections || [])
-      : (data?.calculatedProbabilities
-          ? (buildCombinada(data.calculatedProbabilities, data.odds, data.playerHighlights, { home: match.teams.home.name, away: match.teams.away.name })?.selections || [])
-          : []);
+      : [];
     return sels
       // P6: filtro 1.20 mínimo (alineado con MIN_DISPLAY_ODDS en lib/constants.js)
-      .filter(s => s.odd && s.odd >= 1.20 && Number(s.rawProbability ?? s.probability) >= 70)
+      .filter(s => meetsFootballReliability(s.confidence)
+        && s.odd && s.odd >= 1.20
+        && Number(s.rawProbability ?? s.probability) >= 70)
       .map((s, i) => ({
         id: s.id || `mkt-${i}`,
         // Re-traduce la clave con lib/market-labels.js (misma fuente que el servidor y que la

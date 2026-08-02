@@ -9,8 +9,8 @@
  * (que es exclusiva del workflow "apuesta del dia" con 90%+).
  */
 
-import { buildCombinada } from '../../../lib/combinada';
 import { getAnalyzedFixtureIds, getAnalyzedMatchesFull } from '../../../lib/sanity-cache';
+import { meetsFootballReliability } from '../../../lib/recommendation-policy';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -54,19 +54,10 @@ async function handle(request) {
     const kickoffMs = data.kickoff ? new Date(data.kickoff).getTime() : 0;
     if (kickoffMs > 0 && (nowMs - kickoffMs) > 110 * 60 * 1000) continue;
 
-    let comb;
-    try {
-      comb = buildCombinada(
-        data.calculatedProbabilities,
-        data.odds,
-        data.playerHighlights,
-        { home: data.homeTeam, away: data.awayTeam }
-      );
-    } catch {
-      continue;
-    }
-    const selections = comb?.selections || [];
+    if (data.combinada?.source !== 'context-engine') continue;
+    const selections = data.combinada.selectable || data.combinada.selections || [];
     for (const sel of selections) {
+      if (!meetsFootballReliability(sel.confidence)) continue;
       if (Number(sel.rawProbability ?? sel.probability) < minProb) continue;
       if (!sel.odd || sel.odd < minOdd) continue;
       all.push({

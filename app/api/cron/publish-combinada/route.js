@@ -30,9 +30,9 @@
  */
 
 import { supabaseAdmin } from '../../../../lib/supabase';
-import { buildCombinada } from '../../../../lib/combinada';
 import { getAnalyzedFixtureIds, getAnalyzedMatchesFull } from '../../../../lib/sanity-cache';
 import { jsonError } from '../../../../lib/api-error';
+import { meetsFootballReliability } from '../../../../lib/recommendation-policy';
 import {
   selectTelegramDailyPick,
   TELEGRAM_DAILY_PICK_RULES,
@@ -41,7 +41,6 @@ import {
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const CONTEXT_ENGINE_ENABLED = process.env.CONTEXT_ENGINE_ENABLED === 'true';
 const BETTABLE_STATUSES = new Set(['NS', 'TBD']);
 
 async function handle(request) {
@@ -76,25 +75,12 @@ async function handle(request) {
     if (statusShort && !BETTABLE_STATUSES.has(statusShort)) continue;
     const kickoffMs = data.kickoff ? new Date(data.kickoff).getTime() : 0;
     if (kickoffMs > 0 && kickoffMs <= nowMs + 5 * 60 * 1000) continue;
-    // La combinada del motor trae candidatos desde 80% y cuota ≥1.20. La
-    // selección final de Telegram aplica aquí el requisito estricto de 90%.
-    let selections;
-    if (CONTEXT_ENGINE_ENABLED && data.combinada?.source === 'context-engine') {
-      selections = data.combinada.selections || [];
-    } else {
-      let comb;
-      try {
-        comb = buildCombinada(
-          data.calculatedProbabilities,
-          data.odds,
-          data.playerHighlights,
-          { home: data.homeTeam, away: data.awayTeam }
-        );
-      } catch {
-        continue;
-      }
-      selections = comb?.selections || [];
-    }
+    // La combinada canónica trae candidatos desde 80%, cuota ≥1.20 y
+    // fiabilidad >=90%. Nunca reconstruir desde porcentajes: se perdería el
+    // metadato de fiabilidad. Telegram agrega aquí frecuencia >=90%.
+    if (data.combinada?.source !== 'context-engine') continue;
+    const selections = (data.combinada.selections || [])
+      .filter((selection) => meetsFootballReliability(selection.confidence));
     for (const sel of selections) {
       all.push({
         ...sel,
