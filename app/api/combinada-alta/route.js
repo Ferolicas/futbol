@@ -6,7 +6,7 @@
  *
  * Usado por n8n para enviar a Telegram personal una combinada de
  * probabilidad alta (default 80%) sin pisar la tabla combinada_dia
- * (que es exclusiva del workflow "apuesta del dia" con 90%+).
+ * (que es exclusiva del workflow "apuesta del dia" con sus reglas propias).
  */
 
 import { getAnalyzedFixtureIds, getAnalyzedMatchesFull } from '../../../lib/sanity-cache';

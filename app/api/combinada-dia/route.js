@@ -20,7 +20,7 @@
 
 import { supabaseAdmin } from '../../../lib/supabase';
 import { jsonError } from '../../../lib/api-error';
-import { meetsFootballReliability } from '../../../lib/recommendation-policy';
+import { meetsTelegramDailyPickReliability } from '../../../lib/telegram-daily-pick';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,7 +71,7 @@ export async function GET(request) {
   if (Array.isArray(data.selections)) {
     const nowMs = Date.now();
     data.selections = data.selections.filter(sel => {
-      if (!meetsFootballReliability(sel?.confidence)) return false;
+      if (!meetsTelegramDailyPickReliability(sel?.confidence)) return false;
       if (!sel?.kickoff) return true;
       const kMs = new Date(sel.kickoff).getTime();
       if (!Number.isFinite(kMs)) return true;

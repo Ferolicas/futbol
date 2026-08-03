@@ -82,6 +82,9 @@ if (source.length < 1 || source.length > 3) {
 if (!Number.isFinite(totalOdd) || totalOdd < 1.5 || totalOdd > 2) {
   throw new Error('Cuota total fuera del rango 1.50–2.00');
 }
+if (!Number.isFinite(totalProbability) || totalProbability < 80) {
+  throw new Error('Probabilidad conjunta inferior al 80%');
+}
 
 const normalize = value => String(value || '')
   .normalize('NFD')
@@ -107,8 +110,17 @@ const formatTime = kickoff => {
 };
 
 const selections = source.map(selection => {
+  const rawProbability = Number(selection.rawProbability ?? selection.probability);
   const probability = Number(selection.probability);
-  if (!allowedMarket(selection) || !Number.isFinite(probability) || probability < 90) {
+  const rawReliability = Number(selection.confidence);
+  const reliability = rawReliability >= 0 && rawReliability <= 1
+    ? rawReliability * 100
+    : rawReliability;
+  const odd = Number(selection.odd);
+  if (!allowedMarket(selection)
+      || !Number.isFinite(rawProbability) || rawProbability < 80
+      || !Number.isFinite(reliability) || reliability < 80
+      || !Number.isFinite(odd) || odd < 1.2 || odd > 1.6) {
     throw new Error('El backend devolvió un mercado fuera de las reglas de Telegram');
   }
   return {
@@ -121,7 +133,7 @@ const selections = source.map(selection => {
       .replace(/\bOver\b/gi, 'Más de')
       .replace(/\bUnder\b/gi, 'Menos de'),
     probability: Math.min(95, probability),
-    odd: Number(selection.odd),
+    odd,
     time: formatTime(selection.kickoff),
   };
 });

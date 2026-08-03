@@ -28,7 +28,11 @@ import { BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
 import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/timezone';
 import { marketLabel } from '../../lib/market-labels';
 import { isTelegramMarketAllowed as isDailyPickMarketAllowed } from '../../lib/telegram-daily-pick';
-import { meetsFootballReliability } from '../../lib/recommendation-policy';
+import {
+  FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY,
+  isFootballFrontendDailyPickEligible,
+  meetsFootballReliability,
+} from '../../lib/recommendation-policy';
 import { setAnalysisCache } from '../../lib/analysis-cache';
 import { fetcher } from '../../lib/fetcher';
 import BrandLogoMedia from '../../components/BrandLogoMedia';
@@ -1120,14 +1124,12 @@ export default function Dashboard() {
 
   const apuestaDelDia = useMemo(() => {
     // Reglas:
-    //  - Solo selecciones con probabilidad ≥ 90% Y cuota real ≥ 1.20
+    //  - Solo selecciones con probabilidad ≥75%, fiabilidad ≥90% y cuota real ≥1.20
     //  - SIN límite por partido: si un partido tiene 10 opciones que cumplen,
     //    se muestran las 10
     //  - Solo partidos próximos (NS) o en vivo — los finalizados desaparecen
     //  - Orden: NS > en vivo, dentro de cada grupo prob desc
     //  - El ranking usa la probabilidad cruda; la UI muestra máximo 95%
-    const MIN_PROB = 90;
-    const MIN_ODD  = 1.20;
     const all = [];
 
     Object.entries(analyzedData).forEach(([fid, data]) => {
@@ -1142,17 +1144,18 @@ export default function Dashboard() {
       const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
 
-      // El catálogo canónico ya exige fiabilidad real >=90%. La Apuesta del
-      // Día añade su requisito independiente de frecuencia >=90% y cuota.
+      // selectable contiene todas las líneas calculadas desde 70%; leer solo
+      // selections impediría que el baremo visual de 75% tuviera efecto,
+      // porque ese subconjunto nace en 80%. La frontera pública ya recupera y
+      // exige la fiabilidad real >=90% también para caches v20.
       const isEngine = data?.combinada?.source === 'context-engine';
-      const selections = isEngine ? (data.combinada.selections || []) : [];
-      const minProb = MIN_PROB;
+      const selections = isEngine
+        ? (data.combinada.selectable || data.combinada.selections || [])
+        : [];
 
       selections.forEach(sel => {
-        if (!meetsFootballReliability(sel.confidence)) return;
         if (!isDailyPickMarketAllowed(sel)) return;
-        if (Number(sel.rawProbability ?? sel.probability) < minProb) return;
-        if (!sel.odd || sel.odd < MIN_ODD) return;
+        if (!isFootballFrontendDailyPickEligible(sel)) return;
         all.push({
           ...sel,
           // Selecciones del motor traen el market_key como id; traducir a nombre
@@ -1395,7 +1398,7 @@ export default function Dashboard() {
               <div className="apuesta-body">
                 <div className="apuesta-summary">
                   <Sparkles size={15} aria-hidden="true" />
-                  {apuestaDelDia.selections.length} selecciones ordenadas por oportunidad
+                  {apuestaDelDia.selections.length} selecciones desde {FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY}% ordenadas por oportunidad
                 </div>
                 <ApuestaSelectionList selections={apuestaDelDia.selections} />
               </div>

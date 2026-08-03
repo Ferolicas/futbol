@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-03 · Commit base: `bb086d7`
+Actualizado: 2026-08-03 · Commit base: `1548a70`
 
 ## Identidad y stack
 
@@ -130,18 +130,23 @@ Tras login o registro, las pantallas cliente llaman `refreshSession()` antes de 
 
 El workflow n8n `COMBINADA DEL DIA` se ejecuta diariamente a las 13:00 de
 Madrid. Una sola llamada autenticada a `/api/cron/publish-combinada` reúne los
-análisis y devuelve la selección final. `lib/telegram-daily-pick.js` exige 90%
-por opción, admite únicamente goles, córners, tarjetas o remates a puerta,
-prioriza una sola apuesta y, si hace falta, combina hasta tres partidos
-distintos para una cuota total entre 1.50 y 2.00. El workflow no usa IA:
-construye la URL de `/api/pick-image` y Telegram publica la tarjeta con escudos,
-cuota, probabilidad y un único enlace a CF Análisis.
+análisis y devuelve la selección final. `lib/telegram-daily-pick.js` exige al
+menos 80% de frecuencia y 80% de fiabilidad por opción, admite únicamente
+goles, córners, tarjetas o remates a puerta y limita cada cuota individual al
+rango 1.20–1.60. Prioriza una sola apuesta y, si hace falta, combina hasta tres
+partidos distintos para una cuota total entre 1.50 y 2.00, manteniendo también
+una probabilidad conjunta mínima de 80%. El ranking prioriza probabilidad,
+fiabilidad y después cuota. El workflow no usa IA: construye la URL de
+`/api/pick-image` y Telegram publica la tarjeta con escudos, cuota, probabilidad
+y un único enlace a CF Análisis. `scripts/build-n8n-telegram-workflow.mjs`
+mantiene en n8n las mismas validaciones defensivas que el publicador.
 
 Una opción de fútbol entra en recomendaciones generales cuando su frecuencia
 ponderada real es de 80% o más, existe cuota real y la fiabilidad propia del
 mercado es de 90% o más; el constructor puede listar frecuencias desde 70%,
-siempre con la misma fiabilidad mínima. La Apuesta del Día exige además 90% de
-frecuencia, su whitelist de mercados y rango de cuota. Las métricas fuera de
+siempre con la misma fiabilidad mínima. La Apuesta del Día visible en la app
+empieza en 75% de frecuencia, conserva la fiabilidad mínima de 90%, exige cuota
+real desde 1.20 y aplica su whitelist de mercados. Las métricas fuera de
 muestra son únicamente diagnósticas: nunca cambian el porcentaje ni bloquean
 una frecuencia calculada. Los props de jugador siguen la misma regla cuando
 existe historial y una cuota atribuible. El constructor distingue únicamente
@@ -412,6 +417,12 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   análisis estadístico completo separado de las cuotas. Las decisiones siguen usando
   frecuencias ponderadas reales; el máximo 95% vive solo en presentación y los
   diagnósticos nunca cambian ni bloquean una frecuencia calculada.
+- 2026-08-03: la Apuesta del Día del frontend y la publicación de Telegram son
+  productos independientes. El frontend admite frecuencia ≥75%, fiabilidad
+  ≥90% y cuota real ≥1.20. Telegram exige frecuencia y fiabilidad ≥80% por
+  selección, cuota individual 1.20–1.60 y una cuota final 1.50–2.00 con
+  probabilidad conjunta ≥80%; lee la evidencia durable `_scored` para no perder
+  opciones válidas de fiabilidad 80–89% por el saneamiento público de 90%.
 - 2026-08-01: no liberar un intento pendiente por tiempo ni marcar terminal un cobro recurrente que MP pueda reintentar; primero cancelar el recurso remoto.
 - 2026-07-29: el checkout automático requiere deduplicación persistente ante Strict Mode/Fast Refresh.
 - 2026-07-29: solo el plan viaja por URL; el servidor vuelve a calcular precio, moneda y proveedor.

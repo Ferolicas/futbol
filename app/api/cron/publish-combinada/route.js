@@ -2,9 +2,10 @@
  * GET/POST /api/cron/publish-combinada?secret=CRON_SECRET[&date=YYYY-MM-DD][&status=draft|published]
  *
  * Recorre todos los partidos analizados del día y elige una apuesta publicable:
- * probabilidad individual >=90%, únicamente goles/córners/tarjetas/remates a
- * puerta y cuota total entre 1.50 y 2.00. Prefiere una sola selección; si no
- * alcanza el mínimo, combina hasta tres partidos distintos.
+ * probabilidad y fiabilidad individual >=80%, únicamente goles/córners/
+ * tarjetas/remates a puerta, cuota individual 1.20–1.60 y cuota total entre
+ * 1.50 y 2.00. Prefiere una sola selección; si no alcanza el mínimo, combina
+ * hasta tres partidos distintos sin bajar de 80% conjunto.
  *
  * Status semantics:
  *   - 'draft'     = creada/calculada pero NO lista para publicar
@@ -32,7 +33,7 @@
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { getAnalyzedFixtureIds, getAnalyzedMatchesFull } from '../../../../lib/sanity-cache';
 import { jsonError } from '../../../../lib/api-error';
-import { meetsFootballReliability } from '../../../../lib/recommendation-policy';
+import { reliabilityPercent } from '../../../../lib/recommendation-policy';
 import {
   selectTelegramDailyPick,
   TELEGRAM_DAILY_PICK_RULES,
@@ -42,6 +43,15 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const BETTABLE_STATUSES = new Set(['NS', 'TBD']);
+
+function unwrapAnalysis(value) {
+  if (!value || typeof value !== 'object') return {};
+  if (value.analysis && typeof value.analysis === 'object'
+      && (value.analysis.homeTeam || value.analysis.kickoff || value.analysis._scored)) {
+    return value.analysis;
+  }
+  return value;
+}
 
 async function handle(request) {
   const url = new URL(request.url);
@@ -64,9 +74,29 @@ async function handle(request) {
   // 2. Cargar analisis completos (Redis L1 + Supabase L2)
   const { analyzedData } = await getAnalyzedMatchesFull(fixtureIds).catch(() => ({ analyzedData: {} }));
 
-  // 3. Reunir candidatos de partidos que todavía no hayan empezado. La selección
-  // final (mercados permitidos y cuota 1.50–2.00) se hace de forma determinista
-  // al terminar de recorrer la jornada.
+  // Telegram tiene una fiabilidad mínima propia de 80%, mientras el catálogo
+  // público del frontend se sanea a 90%. Leemos aquí el documento durable
+  // original para no perder opciones válidas 80–89%; la evidencia _scored
+  // recupera la fiabilidad exacta en caches v20 que aún no la incluían dentro
+  // de cada selección. Si la lectura durable falla, el fallback saneado sigue
+  // siendo seguro porque es más estricto (>=90%).
+  const rawResult = await supabaseAdmin
+    .from('match_analysis')
+    .select('fixture_id, analysis, combinada, cache_version')
+    .eq('date', date)
+    .gte('cache_version', 20)
+    .in('fixture_id', fixtureIds);
+  const rawRows = rawResult?.error ? [] : (rawResult?.data || []);
+  const rawByFixture = new Map(rawRows.map((row) => {
+    const inner = unwrapAnalysis(row.analysis);
+    return [String(row.fixture_id), {
+      combinada: row.combinada || inner.combinada || null,
+      scored: inner._scored || row.analysis?._scored || {},
+    }];
+  }));
+
+  // 3. Reunir candidatos de partidos que todavía no hayan empezado. La
+  // selección final se hace de forma determinista al terminar la jornada.
   const nowMs = Date.now();
   const all = [];
   for (const [fid, data] of Object.entries(analyzedData || {})) {
@@ -75,13 +105,13 @@ async function handle(request) {
     if (statusShort && !BETTABLE_STATUSES.has(statusShort)) continue;
     const kickoffMs = data.kickoff ? new Date(data.kickoff).getTime() : 0;
     if (kickoffMs > 0 && kickoffMs <= nowMs + 5 * 60 * 1000) continue;
-    // La combinada canónica trae candidatos desde 80%, cuota ≥1.20 y
-    // fiabilidad >=90%. Nunca reconstruir desde porcentajes: se perdería el
-    // metadato de fiabilidad. Telegram agrega aquí frecuencia >=90%.
-    if (data.combinada?.source !== 'context-engine') continue;
-    const selections = (data.combinada.selections || [])
-      .filter((selection) => meetsFootballReliability(selection.confidence));
+    const raw = rawByFixture.get(String(fid));
+    const combinada = raw?.combinada || data.combinada;
+    if (combinada?.source !== 'context-engine') continue;
+    const selections = combinada.selectable || combinada.selections || [];
     for (const sel of selections) {
+      const evidence = raw?.scored?.[sel.id];
+      const confidence = reliabilityPercent(sel.confidence ?? evidence?.confidence ?? evidence?.conf);
       all.push({
         ...sel,
         fixtureId:    Number(fid),
@@ -97,6 +127,7 @@ async function handle(request) {
         leagueLogo:   data.leagueLogo || null,
         kickoff:      data.kickoff  || null,
         probability:  Number(sel.probability),
+        confidence,
       });
     }
   }
@@ -111,8 +142,8 @@ async function handle(request) {
     });
   }
 
-  // 4. Una sola selección si ya queda entre 1.50 y 2.00. Si no, buscar la
-  // combinación mínima (máximo tres partidos distintos) que entre en el rango.
+  // 4. Una sola selección si ya queda entre 1.50 y 1.60. Si no, buscar la
+  // combinación mínima (máximo tres partidos distintos) entre 1.50 y 2.00.
   const dailyPick = selectTelegramDailyPick(all);
   if (dailyPick.selections.length === 0) {
     return Response.json({

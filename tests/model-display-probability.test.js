@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const { displayPct, modelToScored, playerMarketsToSelections } = require('../lib/model-to-scored.js');
 const { calculateGoalTimingProbabilities } = require('../lib/descriptive-stats.js');
 const {
+  FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY,
+  isFootballFrontendDailyPickEligible,
   meetsFootballReliability,
   sanitizeFootballCombinada,
 } = require('../lib/recommendation-policy.js');
@@ -22,6 +24,22 @@ test('la presentación limita a 95% sin alterar la frecuencia del motor', () => 
   assert.equal(displayPct(95), 95);
   assert.equal(displayPct(99.9), 95);
   assert.equal(displayPct(100), 95);
+});
+
+test('la Apuesta del Día del frontend empieza en 75% y conserva fiabilidad 90%', () => {
+  assert.equal(FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY, 75);
+  assert.equal(isFootballFrontendDailyPickEligible({
+    rawProbability: 75, confidence: 90, odd: 1.20,
+  }), true);
+  assert.equal(isFootballFrontendDailyPickEligible({
+    rawProbability: 74.999, confidence: 99, odd: 2,
+  }), false);
+  assert.equal(isFootballFrontendDailyPickEligible({
+    rawProbability: 95, confidence: 89.999, odd: 2,
+  }), false);
+  assert.equal(isFootballFrontendDailyPickEligible({
+    rawProbability: 95, confidence: 99, odd: 1.19,
+  }), false);
 });
 
 test('los mercados de jugador respetan el mismo contrato exacto', () => {
