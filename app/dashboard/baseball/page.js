@@ -604,10 +604,21 @@ const pitcherFace = (id) => id
   : null;
 
 // Columna de equipo: logo grande + abreviatura + pitcher abridor (foto + ERA).
-function TeamColumn({ team, pitcherName, pitcherId, era }) {
+function TeamColumn({ team, pitcherName, pitcherId, era, role, winProbability }) {
   const short = pitcherName ? pitcherName.split(' ').slice(-1)[0] : null;
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+      <span style={{
+        padding: '3px 7px', borderRadius: 8,
+        background: role === 'LOCAL' ? 'rgba(34,211,238,.10)' : 'rgba(245,158,11,.10)',
+        border: `1px solid ${role === 'LOCAL' ? 'rgba(34,211,238,.25)' : 'rgba(245,158,11,.25)'}`,
+        color: role === 'LOCAL' ? '#67e8f9' : '#fcd34d',
+        fontSize: '.56rem', fontWeight: 900, letterSpacing: '.06em',
+        display: 'inline-flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.25,
+      }}>
+        <span>{role}</span>
+        {winProbability != null && <span style={{ letterSpacing: 0 }}>Gana {cap(winProbability)}%</span>}
+      </span>
       {team?.logo
         ? <Image src={team.logo} alt={team.name} width={46} height={46} style={{ objectFit: 'contain' }} unoptimized />
         : <div style={{ width: 46, height: 46, borderRadius: 10, background: 'rgba(255,255,255,.06)' }} />}
@@ -685,6 +696,7 @@ function GameCard({ game, userTz, isFavorite, isAnalyzed, isExpanded,
     : game.status;
 
   const combinada = game.analysis?.combinada;
+  const winProbabilities = combinada?.winProbabilities;
   const availableMarkets = bet365Markets(game.analysis);
 
   // Pitchers abridores (foto + ERA) y cuotas reales (moneyline) para el header.
@@ -726,14 +738,20 @@ function GameCard({ game, userTz, isFavorite, isAnalyzed, isExpanded,
 
         {/* Equipos + marcador central (estilo fútbol) con pitchers MLB (foto+ERA) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <TeamColumn team={home} pitcherName={pp.home} pitcherId={pp.homeId} era={homeEra} />
+          <TeamColumn
+            team={home} pitcherName={pp.home} pitcherId={pp.homeId} era={homeEra}
+            role="LOCAL" winProbability={winProbabilities?.home}
+          />
           <ScoreCenter
             live={live} hasScore={hasScore} homeScore={homeScore} awayScore={awayScore}
             statusLabel={statusText({ status: effStatusObj })}
             time={fmtTimeInTz(game.date, userTz)}
             inningTxt={live ? statusText({ status: effStatusObj }) : null}
           />
-          <TeamColumn team={away} pitcherName={pp.away} pitcherId={pp.awayId} era={awayEra} />
+          <TeamColumn
+            team={away} pitcherName={pp.away} pitcherId={pp.awayId} era={awayEra}
+            role="VISITANTE" winProbability={winProbabilities?.away}
+          />
         </div>
 
         {/* Estado EN VIVO: diamante de bases + conteo (solo en curso) */}

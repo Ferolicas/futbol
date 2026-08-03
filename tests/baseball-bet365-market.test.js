@@ -50,9 +50,14 @@ const payload = [{
         { id: 66, name: 'Away Odd/Even (OT)', values: [{ value: 'Odd', odd: '1.91' }, { value: 'Even', odd: '1.93' }] },
         { id: 83, name: 'Team With Highest Scoring', values: [{ value: 'Home', odd: '1.75' }, { value: 'Draw', odd: '9.00' }, { value: 'Away', odd: '2.05' }] },
         { id: 69, name: 'Result/Total Goals', values: [{ value: 'Home/Over 8.5', odd: '4.10' }] },
-        { id: 2, name: 'Asian Handicap', values: [{ value: 'Home -1.5', odd: '3.20' }, { value: 'Away +1.5', odd: '2.05' }] },
+        { id: 2, name: 'Asian Handicap', values: [
+          { value: 'Home -1.5', odd: '3.20' }, { value: 'Away -1.5', odd: '2.05' },
+          { value: 'Home -4.5', odd: '5.75' }, { value: 'Away -4.5', odd: '1.17' },
+          { value: 'Home +4.5', odd: '1.08' }, { value: 'Away +4.5', odd: '7.25' },
+        ] },
         { id: 6, name: 'Over/Under (1st 5 Innings)', values: [{ value: 'Over 4.5', odd: '1.80' }, { value: 'Under 4.5', odd: '1.95' }] },
         { id: 3, name: 'Asian Handicap (1st 5 Innings)', values: [{ value: 'Home +0', odd: '2.15' }, { value: 'Away +0', odd: '1.68' }] },
+        { id: 63, name: 'Asian Handicap (4.5 Innings)', values: [{ value: 'Home -0.5', odd: '2.30' }, { value: 'Away -0.5', odd: '1.66' }] },
         { id: 43, name: 'Home Team Total Goals (Including OT)', values: [{ value: 'Over 3.5', odd: '1.83' }, { value: 'Under 3.5', odd: '1.90' }] },
         { id: 44, name: 'Away Team Total Goals (Including OT)', values: [{ value: 'Over 4.5', odd: '1.76' }, { value: 'Under 4.5', odd: '2.00' }] },
       ],
@@ -76,6 +81,15 @@ test('Baseball separa carreras, hits y mercados combinados del catálogo Bet365'
   assert.equal(odds.totals[18.5], undefined);
   assert.equal(odds.periods.first5.totals[4.5].under.odd, 1.95);
   assert.equal(odds.periods.first5.spreads.home[0].odd, 2.15);
+  assert.equal(odds.periods.first4_5.spreads.home[-0.5].odd, 2.3);
+  assert.equal(odds.periods.first4_5.spreads.away[0.5].odd, 1.66);
+  assert.equal(odds.periods.first4_5.spreads.away[0.5].selectionName, 'Away +0.5');
+  assert.equal(odds.spreads.home[-4.5].odd, 5.75);
+  assert.equal(odds.spreads.away[4.5].odd, 1.17);
+  assert.equal(odds.spreads.away[4.5].selectionName, 'Away +4.5');
+  assert.equal(odds.spreads.away[4.5].providerSelectionName, 'Away -4.5');
+  assert.equal(odds.spreads.away[-4.5].odd, 7.25);
+  assert.equal(odds.spreads.away[-4.5].selectionName, 'Away -4.5');
   assert.equal(odds.periods.inning1.totals[0.5].over.odd, 1.66);
   assert.equal(odds.periods.first3.totals[2.5].under.odd, 1.85);
   assert.equal(odds.teamTotals.home[3.5].over.odd, 1.83);
@@ -144,6 +158,10 @@ test('Baseball publica solo selecciones cruzadas con Bet365 y cuota mínima 1.20
   assert.equal(result.selectableThreshold, 65);
   assert.equal(result.highlightThreshold, 65);
   assert.equal(result.dailyThreshold, 90);
+  assert.deepEqual(result.winProbabilities, { home: 74, away: 26 });
+  assert.ok(result.selectable.every((selection) => (
+    selection.id !== 'handicap-away-4_5' || selection.odd !== 7.25
+  )));
 });
 
 test('Baseball conserva todas las líneas exactas y cruza props por nombre de jugador', () => {

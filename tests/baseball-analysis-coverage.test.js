@@ -140,6 +140,8 @@ test('la tarjeta pendiente abre estado automático y no ofrece analizar manualme
   assert.match(source, /Actualizando el análisis automáticamente/);
   assert.doesNotMatch(source, /Analizar \$\{selected\.size\}/);
   assert.doesNotMatch(source, /else onSelect\(game\.id\)/);
+  assert.match(source, /role="LOCAL" winProbability=\{winProbabilities\?\.home\}/);
+  assert.match(source, /role="VISITANTE" winProbability=\{winProbabilities\?\.away\}/);
 });
 
 test('todos los consumidores operativos de Baseball solicitan exclusivamente MLB', () => {

@@ -424,9 +424,14 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   opciones sin volver a llamar a la API ni ocultar estadísticas durante el
   despliegue. Si el `selectable` v20 no trae fiabilidad, recupera por ID la
   evidencia exacta de `_scored`; si tampoco existe, solo reutiliza las
-  `selections` que sí acrediten ≥90. `MULTISPORT_CACHE_VERSION=15` deja
+  `selections` que sí acrediten ≥90. `MULTISPORT_CACHE_VERSION=16` deja
   Baseball solo en MLB con baremo público 65%, catálogo Bet365 ampliado y
-  análisis estadístico completo separado de las cuotas. Las decisiones siguen usando
+  análisis estadístico completo separado de las cuotas. En el Asian Handicap
+  de API-Baseball, el signo de las selecciones `Away` se invierte para mostrar
+  la línea canónica que ve el cliente en Bet365; se conserva el valor original
+  del proveedor solo como trazabilidad. La lista identifica Local/Visitante y
+  transporta en `combinada.winProbabilities` exclusivamente el resumen liviano
+  de victoria, sin cargar el JSON completo de probabilidades. Las decisiones siguen usando
   frecuencias ponderadas reales; el máximo 95% vive solo en presentación y los
   diagnósticos nunca cambian ni bloquean una frecuencia calculada.
 - 2026-08-03: la Apuesta del Día del frontend y la publicación de Telegram son

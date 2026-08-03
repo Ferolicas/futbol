@@ -113,9 +113,9 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
           Baseball · {a?.country} · {a?.league_name}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-          <TeamHeader name={a?.home_team} score={result?.home_score} side="HOME" />
+          <TeamHeader name={a?.home_team} score={result?.home_score} side="LOCAL" probability={probs?.moneyline?.home} />
           <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#64748b' }}>VS</div>
-          <TeamHeader name={a?.away_team} score={result?.away_score} side="AWAY" />
+          <TeamHeader name={a?.away_team} score={result?.away_score} side="VISITANTE" probability={probs?.moneyline?.away} />
         </div>
         {a?.start_time && (
           <div style={{ marginTop: 10, fontSize: '.85rem', color: '#64748b', fontFamily: 'JetBrains Mono, monospace' }}>
@@ -575,12 +575,17 @@ function CompleteBaseballAnalysis({ probabilities, homeName, awayName }) {
   );
 }
 
-function TeamHeader({ name, score, side }) {
+function TeamHeader({ name, score, side, probability }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: '.7rem', color: '#64748b', fontWeight: 700, letterSpacing: 1 }}>{side}</div>
         <div style={{ fontSize: '1.15rem', fontWeight: 800 }}>{name}</div>
+        {probability != null && (
+          <div style={{ marginTop: 3, color: '#5ee6b1', fontSize: '.72rem', fontWeight: 800 }}>
+            Probabilidad de ganar: {cap(probability)}%
+          </div>
+        )}
       </div>
       {score != null && (
         <div style={{ fontSize: '2rem', fontWeight: 800, color: '#5ee6b1', fontFamily: 'JetBrains Mono, monospace' }}>{score}</div>
