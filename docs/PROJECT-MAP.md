@@ -139,7 +139,9 @@ una probabilidad conjunta mínima de 80%. El ranking prioriza probabilidad,
 fiabilidad y después cuota. El workflow no usa IA: construye la URL de
 `/api/pick-image` y Telegram publica la tarjeta con escudos, cuota, probabilidad
 y un único enlace a CF Análisis. `scripts/build-n8n-telegram-workflow.mjs`
-mantiene en n8n las mismas validaciones defensivas que el publicador.
+mantiene en n8n las mismas validaciones defensivas que el publicador y un
+disparador interno, no público, para poder ejecutar el mismo flujo en QA sin
+alterar su programación diaria.
 
 Una opción de fútbol entra en recomendaciones generales cuando su frecuencia
 ponderada real es de 80% o más, existe cuota real y la fiabilidad propia del

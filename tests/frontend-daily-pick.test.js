@@ -23,4 +23,5 @@ test('n8n conserva la defensa de probabilidad, fiabilidad y cuotas de Telegram',
   assert.match(source, /rawProbability < 80/);
   assert.match(source, /reliability < 80/);
   assert.match(source, /odd < 1\.2 \|\| odd > 1\.6/);
+  assert.match(source, /n8n-nodes-base\.executeWorkflowTrigger/);
 });

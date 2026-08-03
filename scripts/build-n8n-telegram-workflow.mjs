@@ -15,6 +15,13 @@ if (!workflow || workflow.id !== 'yrqca9FJFPClDu8H') {
 
 const byName = new Map(workflow.nodes.map(node => [node.name, structuredClone(node)]));
 const schedule = byName.get('Schedule Trigger');
+const executeTrigger = byName.get('Execute Workflow Trigger') || {
+  parameters: {},
+  type: 'n8n-nodes-base.executeWorkflowTrigger',
+  typeVersion: 1,
+  id: 'a5cbf768-ced6-4bdd-b935-66fa74089e5b',
+  name: 'Execute Workflow Trigger',
+};
 const publish = byName.get('HTTP Request');
 const code = byName.get('Code1');
 const telegram = byName.get('Send a photo message');
@@ -27,6 +34,7 @@ if (!String(publish.parameters?.url || '').includes('/api/cron/publish-combinada
 }
 
 schedule.position = [-720, 0];
+executeTrigger.position = [-720, 180];
 publish.position = [-480, 0];
 code.position = [-220, 0];
 telegram.position = [80, 0];
@@ -171,9 +179,12 @@ state.lastTelegramDate = prepared.date;
 state.lastTelegramMessageId = $input.first()?.json?.message_id || null;
 return $input.all();`;
 
-workflow.nodes = [schedule, publish, code, telegram, finalize];
+workflow.nodes = [schedule, executeTrigger, publish, code, telegram, finalize];
 workflow.connections = {
   'Schedule Trigger': {
+    main: [[{ node: 'HTTP Request', type: 'main', index: 0 }]],
+  },
+  'Execute Workflow Trigger': {
     main: [[{ node: 'HTTP Request', type: 'main', index: 0 }]],
   },
   'HTTP Request': {
