@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import BrandLogoMedia from '../../../components/BrandLogoMedia';
 
@@ -39,7 +40,7 @@ export default function AnalysisFullModal({
 
   const baseball = variant === 'baseball';
 
-  return (
+  const modal = (
     <div
       className={`analysis-native-modal ${baseball ? 'is-baseball' : ''}`}
       role="dialog"
@@ -72,4 +73,12 @@ export default function AnalysisFullModal({
       </section>
     </div>
   );
+
+  // El dashboard anima su contenedor al entrar y eso crea un contexto de
+  // apilado propio. Si el modal vive dentro de ese árbol, el header sticky de
+  // la app puede quedar por encima aunque el modal tenga un z-index mayor.
+  // El portal lo monta en <body>, donde la carcasa y su botón de cierre
+  // compiten en el contexto raíz y permanecen siempre sobre la navegación.
+  if (typeof document === 'undefined') return null;
+  return createPortal(modal, document.body);
 }
