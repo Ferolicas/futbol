@@ -174,9 +174,10 @@ telegram.parameters = {
 
 finalize.name = 'Registrar envio';
 finalize.parameters.jsCode = String.raw`const prepared = $('Code1').first().json;
+const telegramResponse = $input.first()?.json || {};
 const state = $getWorkflowStaticData('global');
 state.lastTelegramDate = prepared.date;
-state.lastTelegramMessageId = $input.first()?.json?.message_id || null;
+state.lastTelegramMessageId = telegramResponse.message_id || telegramResponse.result?.message_id || null;
 return $input.all();`;
 
 workflow.nodes = [schedule, executeTrigger, publish, code, telegram, finalize];
