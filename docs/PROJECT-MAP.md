@@ -262,7 +262,10 @@ Las fuentes y namespaces de identificadores también están separados:
   día cuyo análisis siga con `hasOdds=false`; reintenta solo esos IDs y se
   detiene inmediatamente cuando ya existe una cuota real. El mapeo de jornada y
   los snapshots vacíos de cuotas duran como máximo diez minutos, para no
-  congelar durante seis horas una publicación tardía de Bet365.
+  congelar durante seis horas una publicación tardía de Bet365. El mapeo
+  `/games` de API-Baseball pide explícitamente `America/Bogota`: así los juegos
+  nocturnos que cruzan medianoche UTC siguen perteneciendo al día del cliente y
+  el plan gratuito no los rechaza erróneamente como una fecha futura.
   El proceso heavy encola además la misma guardia al arrancar, con job idempotente
   por versión y día, de modo que subir el contrato de caché nunca deja la jornada
   visible esperando al cron nocturno. Una jornada local que detecte un hueco
@@ -436,7 +439,9 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   la jornada actual si `data_quality.hasOdds=false`. El pase principal se hace a
   las 10:30 Colombia y la guardia de 15 minutos vuelve a consultar únicamente
   partidos futuros sin cuotas; no bajar el umbral, inventar líneas ni volver a
-  cachear durante seis horas una respuesta vacía de API-Baseball.
+  cachear durante seis horas una respuesta vacía de API-Baseball. Toda consulta
+  de mapeo de MLB debe llevar `timezone=America/Bogota`; usar la fecha UTC deja
+  sin cuotas a los juegos nocturnos hasta que ya están por comenzar.
 - 2026-08-01: no liberar un intento pendiente por tiempo ni marcar terminal un cobro recurrente que MP pueda reintentar; primero cancelar el recurso remoto.
 - 2026-07-29: el checkout automático requiere deduplicación persistente ante Strict Mode/Fast Refresh.
 - 2026-07-29: solo el plan viaja por URL; el servidor vuelve a calcular precio, moneda y proveedor.

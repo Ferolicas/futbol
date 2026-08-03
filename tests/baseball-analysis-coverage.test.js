@@ -17,6 +17,7 @@ const {
   normalizeBaseballAnalysisFixtureIds,
 } = require('../lib/baseball-analysis-request.js');
 const { getMultisportConfig } = require('../lib/multisport-config.js');
+const { multisportProviderInternals } = require('../lib/multisport-providers.js');
 const { MLB_SPORT_IDS } = require('../lib/mlb-stats-api.js');
 
 test('la cobertura incluye las fechas adyacentes incluso al cambiar de año', () => {
@@ -104,6 +105,17 @@ test('los schedulers de MLB usan el pase tardío y el prepartido en hora Colombi
   assert.match(source, /const BOGOTA_TZ = 'America\/Bogota'/);
   assert.match(source, /id: 'baseball-analyze-daily', pattern: '30 10 \* \* \*', tz: BOGOTA_TZ/);
   assert.match(source, /id: 'baseball-analyze-pregame', pattern: '0 12,14,16,18,20,22 \* \* \*', tz: BOGOTA_TZ/);
+});
+
+test('el mapeo de cuotas conserva en Colombia los juegos que cruzan medianoche UTC', () => {
+  assert.equal(
+    multisportProviderInternals.providerDateForGame('baseball', '2026-08-04T00:05:00Z'),
+    '2026-08-03',
+  );
+  assert.equal(
+    multisportProviderInternals.providerDateForGame('basketball', '2026-08-04T00:05:00Z'),
+    '2026-08-04',
+  );
 });
 
 test('el endpoint admite jornadas grandes y nunca trunca silenciosamente a 50', () => {

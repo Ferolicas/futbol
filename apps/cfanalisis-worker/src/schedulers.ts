@@ -160,7 +160,7 @@ export async function registerSchedulers(): Promise<void> {
 // CACHE_VERSION regenere la jornada sin esperar al siguiente cron nocturno.
 export async function enqueueBaseballCoverageBootstrap(): Promise<void> {
   const date = bogotaToday();
-  const jobId = `baseball-coverage-v${MULTISPORT_CACHE_VERSION}-odds-refresh-v1-${date}`;
+  const jobId = `baseball-coverage-v${MULTISPORT_CACHE_VERSION}-odds-refresh-v2-bogota-${date}`;
   const job = await queues['baseball-analyze'].add(
     'baseball-analysis-coverage',
     { coverage: true, bootstrap: true },
