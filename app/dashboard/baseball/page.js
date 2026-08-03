@@ -46,6 +46,7 @@ import { usePusherEvent } from '../../../lib/use-pusher';
 import { DateCaption, LeaguePicker, StatusPicker } from '../components/DashboardFilters';
 import DashboardBuffer from '../components/DashboardBuffer';
 import AnalysisFullModal from '../components/AnalysisFullModal';
+import BaseballResultStats from './components/BaseballResultStats';
 import { displayBettingText } from '../utils/display-betting-text';
 import { BASEBALL_RECOMMENDATION_MIN_PROBABILITY } from '../../../lib/recommendation-policy';
 
@@ -78,6 +79,12 @@ const bet365Markets = (analysis) => (Array.isArray(analysis?.combinada?.selectab
 const isLive = (s) => ['LIVE', 'IN', 'IN1', 'IN2', 'IN3', 'IN4', 'IN5', 'IN6', 'IN7', 'IN8', 'IN9'].includes(s);
 const isFinished = (s) => ['FT', 'AOT'].includes(s);
 const isPostponed = (s) => ['POST', 'CANC', 'INTR', 'ABD'].includes(s);
+// Si el calendario oficial ya dice Final, nunca permitir que un snapshot IN
+// de segundos antes lo haga retroceder visualmente. Para el resto, el snapshot
+// de un minuto es más fresco que el schedule cacheado.
+const effectiveGameStatus = (game) => isFinished(game?.status?.short)
+  ? game.status.short
+  : (game?.liveResult?.status || game?.status?.short);
 
 const detectTz = () => {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return 'UTC'; }
@@ -189,17 +196,27 @@ export default function BaseballDashboard() {
       const next = { ...prev };
       for (const s of data.games) {
         if (!s?.gamePk) continue;
-        next[s.gamePk] = {
+        const override = {
           status: s.isFinal ? 'FT' : (s.isLive ? 'IN' : 'NS'),
           inning: s.inning ?? null,
           inning_half: s.inningHalf ? String(s.inningHalf).toLowerCase() : null,
           home_score: s.home?.runs ?? s.home?.score ?? null,
           away_score: s.away?.runs ?? s.away?.score ?? null,
+          home_hits: s.home?.hits ?? null,
+          away_hits: s.away?.hits ?? null,
+          home_errors: s.home?.errors ?? null,
+          away_errors: s.away?.errors ?? null,
           // Estado rico para la UI en vivo (conteo, bases, pitcher/bateador).
           outs: s.outs, balls: s.balls, strikes: s.strikes, bases: s.bases,
           currentPitcher: s.currentPitcher, currentBatter: s.currentBatter,
           lastPlay: s.lastPlay,
         };
+        // El estado detallado de un juego en curso no trae el boxscore final.
+        // No sobrescribir con null las estadísticas durables ya leídas de PG.
+        if (s.home?.stats != null) override.home_stats = s.home.stats;
+        if (s.away?.stats != null) override.away_stats = s.away.stats;
+        if (s.innings != null) override.innings = s.innings;
+        next[s.gamePk] = override;
       }
       return next;
     });
@@ -294,7 +311,7 @@ export default function BaseballDashboard() {
   // ─── DERIVED ────────────────────────────────────────────────────────
   const visible = useMemo(() => games.filter(g => {
     if (hidden.includes(g.id)) return false;
-    const s = g.status?.short;
+    const s = effectiveGameStatus(g);
     if (isPostponed(s)) return false;
     if (statusFilter === 'live' && !isLive(s)) return false;
     if (statusFilter === 'upcoming' && s !== 'NS') return false;
@@ -328,13 +345,13 @@ export default function BaseballDashboard() {
 
   const apuestaDelDia = useMemo(() => buildBaseballApuestaDelDia(analyzedGames), [analyzedGames]);
 
-  const liveCount = games.filter(g => !hidden.includes(g.id) && isLive(g.status?.short)).length;
-  const upcomingCount = games.filter(g => !hidden.includes(g.id) && g.status?.short === 'NS').length;
-  const finishedCount = games.filter(g => !hidden.includes(g.id) && isFinished(g.status?.short)).length;
+  const liveCount = games.filter(g => !hidden.includes(g.id) && isLive(effectiveGameStatus(g))).length;
+  const upcomingCount = games.filter(g => !hidden.includes(g.id) && effectiveGameStatus(g) === 'NS').length;
+  const finishedCount = games.filter(g => !hidden.includes(g.id) && isFinished(effectiveGameStatus(g))).length;
   const favoriteCount = games.filter(g => favorites.includes(g.id) && !hidden.includes(g.id)).length;
   const allVisibleCount = games.filter((game) => {
     if (hidden.includes(game.id)) return false;
-    if (isPostponed(game.status?.short)) return false;
+    if (isPostponed(effectiveGameStatus(game))) return false;
     if (leagueFilter && String(game.league?.id) !== leagueFilter) return false;
     return true;
   }).length;
@@ -674,19 +691,22 @@ function GameCard({ game, userTz, isFavorite, isAnalyzed, isExpanded,
   const home = game.teams?.home;
   const away = game.teams?.away;
   const liveResult = game.liveResult;
-  // El estado y el marcador FRESCOS viven en baseball_match_results (liveResult):
-  // el job live los actualiza incluso al terminar el partido (FT). game.status
-  // viene del snapshot matutino de fixtures (NS, 0-0), así que SIEMPRE preferimos
-  // liveResult cuando existe — si no, un partido terminado se vería como "próximo"
-  // o con 0-0 hasta que el finalize nocturno refresque el cache.
-  const effStatus = liveResult?.status || game.status?.short;
+  // El estado y el marcador frescos viven en baseball_match_results. La única
+  // precedencia superior es un Final del calendario oficial, para que un
+  // snapshot IN tomado segundos antes nunca oculte un partido ya terminado.
+  const scheduleFinished = isFinished(game.status?.short);
+  const effStatus = effectiveGameStatus(game);
   const live = isLive(effStatus);
   const finished = isFinished(effStatus);
-  const homeScore = liveResult?.home_score ?? game.scores?.home?.total;
-  const awayScore = liveResult?.away_score ?? game.scores?.away?.total;
+  const homeScore = scheduleFinished
+    ? (game.scores?.home?.total ?? liveResult?.home_score)
+    : (liveResult?.home_score ?? game.scores?.home?.total);
+  const awayScore = scheduleFinished
+    ? (game.scores?.away?.total ?? liveResult?.away_score)
+    : (liveResult?.away_score ?? game.scores?.away?.total);
   const hasScore = (live || finished) && homeScore != null && awayScore != null;
   // Status efectivo para statusText (incluye inning/half del liveResult).
-  const effStatusObj = liveResult
+  const effStatusObj = liveResult && !scheduleFinished
     ? {
         short: liveResult.status,
         inning: liveResult.inning,
@@ -757,6 +777,15 @@ function GameCard({ game, userTz, isFavorite, isAnalyzed, isExpanded,
         {/* Estado EN VIVO: diamante de bases + conteo (solo en curso) */}
         {live && liveResult && (liveResult.inning != null || liveResult.bases) && (
           <LiveDiamond live={liveResult} />
+        )}
+
+        {(live || finished) && liveResult && (
+          <BaseballResultStats
+            result={liveResult}
+            homeName={home?.abbreviation || home?.name || 'Local'}
+            awayName={away?.abbreviation || away?.name || 'Visitante'}
+            compact
+          />
         )}
 
         {/* Cuotas reales a color (moneyline) */}

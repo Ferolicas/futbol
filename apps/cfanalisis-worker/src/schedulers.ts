@@ -100,11 +100,12 @@ const SCHEDULES: Sched[] = [
   { queue: 'baseball-retrain',   id: 'baseball-retrain-daily',   pattern: '30 10 * * *', tz: TZ },
   { queue: 'baseball-cleanup',   id: 'baseball-cleanup-weekly',  pattern: '0 3 * * 0',  tz: TZ }, // dom 3:00
   // ── Baseball — live (cada 1 min) ──
-  // MLB Stats API es gratuita y sin límite, así que polleamos al mismo ritmo
-  // que la app de fútbol. El handler emite el WS update y, si hay juegos en
+  // MLB Stats API es gratuita y sin límite, así que polleamos cada minuto.
+  // El handler emite el WS update y, si hay juegos en
   // vivo, pide el feed pitch-by-pitch (concurrency 6) para detectar carreras,
-  // home runs, K dorado y cambio de inning. Sin juegos en vivo: 1 schedule
-  // call y exit (~unas decenas de ms).
+  // home runs, K dorado y cambio de inning. Sin juegos en vivo: dos llamadas
+  // de schedule (hoy + ayer Colombia) y persiste cualquier FT pendiente. El día
+  // anterior evita perder juegos de costa oeste al cruzar medianoche local.
   { queue: 'baseball-live', id: 'baseball-live-1m', every: 60_000 },
 
   // ── Baloncesto NBA + NCAA ───────────────────────────────────────────

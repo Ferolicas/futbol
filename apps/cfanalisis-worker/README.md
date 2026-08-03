@@ -66,10 +66,10 @@ populated keys regardless of which side wrote them.
 | `futbol-live`               | `*/1 * * * *`                   | Smart: only acts inside game window     |
 | `futbol-live-corners`       | `*/30 * * * *`                  | Refresh corners for live matches        |
 | `futbol-odds`               | `*/15 * * * *`                  | Pull odds from The Odds API             |
-| `baseball-fixtures`         | `0 1 * * *`                     | Fetch baseball fixtures                 |
-| `baseball-analyze`          | `30 1 * * *`                    | Compute probs + persist analysis        |
-| `baseball-live`             | `*/5 * * * *`                   | Smart: budgeted + dynamically spaced    |
-| `baseball-finalize`         | `0 5 * * *`                     | Fill actual_* cols of predictions       |
+| `baseball-fixtures`         | `20 10 * * *` Colombia          | Fetch MLB fixtures                      |
+| `baseball-analyze`          | `30 10 * * *` Colombia          | Compute probs + persist analysis/odds   |
+| `baseball-live`             | every 1 min                     | Live + durable final scores/boxscores   |
+| `baseball-finalize`         | `0 5,9 * * *` Madrid            | Fill actual_* cols of predictions       |
 | `baseball-cleanup`          | `0 3 * * *`                     | Delete stale baseball rows              |
 
 All cron-job.org hits go to `https://cfanalisis.com/api/cron/<name>?secret=$CRON_SECRET`

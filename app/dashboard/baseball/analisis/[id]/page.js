@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import DashboardBuffer from '../../../components/DashboardBuffer';
+import BaseballResultStats from '../../components/BaseballResultStats';
 import { displayBettingText } from '../../../utils/display-betting-text';
 import { BASEBALL_RECOMMENDATION_MIN_PROBABILITY } from '../../../../../lib/recommendation-policy';
 
@@ -133,6 +134,16 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
           </div>
         )}
       </motion.div>
+
+      {result?.home_score != null && result?.away_score != null && (
+        <Section title={result.status === 'FT' ? 'Resultado oficial MLB' : 'Estadísticas en vivo MLB'} accent="#22d3ee">
+          <BaseballResultStats
+            result={result}
+            homeName={a?.home_team || 'Local'}
+            awayName={a?.away_team || 'Visitante'}
+          />
+        </Section>
+      )}
 
       {/* Combinada highlight */}
       {highlighted.length > 0 && combinada.combinedProbability >= 60 && (

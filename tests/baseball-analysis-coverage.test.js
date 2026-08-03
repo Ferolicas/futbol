@@ -157,4 +157,24 @@ test('la lista de partidos no transporta el análisis pesado de jugadores y entr
   assert.doesNotMatch(route, /select\('fixture_id, probabilities,/);
   assert.match(route, /best_odds: \{ moneyline:/);
   assert.match(route, /analysis: \{ pitcherMatchup:/);
+  assert.match(route, /innings, home_stats, away_stats, finished_at/);
+});
+
+test('el live de MLB cierra resultados y cubre la jornada anterior', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../apps/cfanalisis-worker/src/jobs/baseball/live.js'), 'utf8');
+  assert.match(source, /\[addDays\(today, -1\), today\]/);
+  assert.match(source, /buildBaseballResultRow/);
+  assert.match(source, /home_stats,away_stats,finished_at/);
+  assert.doesNotMatch(source, /reason: 'no live games'/);
+});
+
+test('la interfaz prioriza Final oficial y muestra el boxscore MLB', () => {
+  const dashboard = fs.readFileSync(path.join(__dirname, '../app/dashboard/baseball/page.js'), 'utf8');
+  const resultStats = fs.readFileSync(path.join(__dirname, '../app/dashboard/baseball/components/BaseballResultStats.js'), 'utf8');
+  assert.match(dashboard, /const effectiveGameStatus/);
+  assert.match(dashboard, /isFinished\(game\?\.status\?\.short\)/);
+  assert.match(dashboard, /<BaseballResultStats/);
+  assert.match(resultStats, /short: 'HR'/);
+  assert.match(resultStats, /short: 'RBI'/);
+  assert.match(resultStats, /CARRERAS POR ENTRADA/);
 });

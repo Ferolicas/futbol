@@ -12,7 +12,9 @@
  * Payload: { date?: 'YYYY-MM-DD' }
  */
 import {
-  getMlbScheduleByDate, getMlbLiveGame, triggerEvent, bogotaToday,
+  getMlbScheduleByDate, getMlbLiveGame, getMlbGameBoxscore,
+  buildBaseballResultRow, baseballResultRowChanged,
+  triggerEvent, bogotaToday,
   supabaseAdmin, redisGet, redisSet, sendPushNotification, MLB_SPORT_IDS,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
@@ -58,6 +60,38 @@ function toSubArray(stored) {
 
 function inningArrow(half) {
   return half === 'Top' ? '↑' : half === 'Bottom' ? '↓' : '';
+}
+
+function addDays(date, amount) {
+  const value = new Date(`${date}T12:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + amount);
+  return value.toISOString().slice(0, 10);
+}
+
+function realtimeScheduleState(game, row) {
+  return {
+    gamePk: game.gamePk,
+    status: game.status,
+    isFinal: row?.status === 'FT' || game.isFinal,
+    isLive: row?.status !== 'FT' && game.isLive,
+    inning: row?.inning ?? game.inning,
+    inningHalf: row?.inning_half || game.inningHalf,
+    innings: row?.innings || game.innings || null,
+    home: {
+      name: game.home?.name,
+      runs: row?.home_score ?? game.home?.score,
+      hits: row?.home_hits ?? game.home?.hits,
+      errors: row?.home_errors ?? game.home?.errors,
+      stats: row?.home_stats || null,
+    },
+    away: {
+      name: game.away?.name,
+      runs: row?.away_score ?? game.away?.score,
+      hits: row?.away_hits ?? game.away?.hits,
+      errors: row?.away_errors ?? game.away?.errors,
+      stats: row?.away_stats || null,
+    },
+  };
 }
 
 // Construye TODOS los bundles de un juego para este tick:
@@ -258,28 +292,74 @@ async function sendBaseballPushes(states, prevMap) {
 export async function runBaseballLive(payload = {}) {
   const today = payload.date || bogotaToday();
 
-  // 1) Schedule del día (ligero) — ver qué juegos hay y cuáles en vivo.
-  let games = [];
-  try { games = await getMlbScheduleByDate(today, SPORT_IDS); }
-  catch (e) { console.warn(`[baseball-live] schedule MLB: ${e.message}`); }
+  // 1) Cubrir hoy + ayer Colombia. Los juegos nocturnos del oeste pueden
+  // terminar después de medianoche; consultar solo `bogotaToday()` los dejaba
+  // eternamente en IN en cuanto cambiaba el día local.
+  const scheduleDates = payload.date ? [today] : [addDays(today, -1), today];
+  const scheduleAttempts = await Promise.allSettled(scheduleDates.map(async (date) => (
+    (await getMlbScheduleByDate(date, SPORT_IDS)).map((game) => ({ ...game, resultDate: date }))
+  )));
+  const games = [...new Map(scheduleAttempts
+    .filter((attempt) => attempt.status === 'fulfilled')
+    .flatMap((attempt) => attempt.value)
+    .map((game) => [Number(game.gamePk), game])).values()];
+  for (const attempt of scheduleAttempts) {
+    if (attempt.status === 'rejected') console.warn(`[baseball-live] schedule MLB: ${attempt.reason?.message || attempt.reason}`);
+  }
   if (games.length === 0) return { ok: true, skipped: true, reason: 'no games today' };
 
-  const liveGames = games.filter(g => g.isLive);
-  if (liveGames.length === 0) {
-    // No hay nada en vivo → emitimos los marcadores del schedule (para cerrar
-    // finales en la UI) y salimos sin pedir el feed detallado.
-    try {
-      await triggerEvent('baseball-live', 'update', {
-        date: today,
-        games: games.map(g => ({ gamePk: g.gamePk, status: g.status, isFinal: g.isFinal, inning: g.inning,
-          home: { name: g.home.name, runs: g.home.score }, away: { name: g.away.name, runs: g.away.score } })),
-        timestamp: new Date().toISOString(),
-      });
-    } catch {}
-    return { ok: true, skipped: true, reason: 'no live games', total: games.length };
+  // 2) Snapshot previo de todos los juegos iniciados/finales. Se lee ANTES de
+  // escribir para conservar la detección de carreras de las notificaciones.
+  const resultGames = games.filter((game) => game.isLive || game.isFinal);
+  const resultFids = resultGames.map((game) => Number(game.gamePk));
+  let prevMap = {};
+  if (resultFids.length) {
+    const { data: prevRows, error: prevError } = await supabaseAdmin
+      .from('baseball_match_results')
+      .select('fixture_id,league_id,date,status,inning,inning_half,home_score,away_score,home_hits,away_hits,home_errors,away_errors,innings,home_stats,away_stats,finished_at')
+      .in('fixture_id', resultFids);
+    if (prevError) throw new Error(`resultados previos: ${prevError.message || prevError}`);
+    prevMap = Object.fromEntries((prevRows || []).map((row) => [Number(row.fixture_id), row]));
   }
 
-  // 2) Estado detallado en vivo de cada juego (MLB Stats API gratis → sin throttle).
+  // El boxscore completo se pide una sola vez cuando un juego llega a Final.
+  // Si falló temporalmente, home_stats/away_stats siguen null y el siguiente
+  // tick lo reintenta sin inventar ceros.
+  const finalsMissingBoxscore = resultGames.filter((game) => {
+    const previous = prevMap[Number(game.gamePk)];
+    return game.isFinal && (!previous?.home_stats || !previous?.away_stats);
+  });
+  const boxscoreAttempts = await mapPool(finalsMissingBoxscore, 4, async (game) => ({
+    fixtureId: Number(game.gamePk),
+    boxscore: await getMlbGameBoxscore(game.gamePk),
+  }));
+  const boxscoreMap = Object.fromEntries(boxscoreAttempts
+    .filter((attempt) => attempt.ok && attempt.value?.boxscore)
+    .map((attempt) => [attempt.value.fixtureId, attempt.value.boxscore]));
+
+  const now = new Date();
+  const scheduleRows = resultGames.map((game) => buildBaseballResultRow(
+    game,
+    prevMap[Number(game.gamePk)] || {},
+    boxscoreMap[Number(game.gamePk)] || null,
+    game.resultDate,
+    now,
+  )).filter(Boolean);
+  const changedRows = scheduleRows.filter((row) => baseballResultRowChanged(prevMap[Number(row.fixture_id)], row));
+  const persistAttempts = await mapPool(changedRows, 8, async (row) => {
+    const { error } = await supabaseAdmin.from('baseball_match_results').upsert(row, { onConflict: 'fixture_id' });
+    if (error) throw new Error(`snapshot ${row.fixture_id}: ${error.message || error}`);
+    return row.fixture_id;
+  });
+  const persistFailures = persistAttempts.filter((attempt) => !attempt.ok);
+  if (persistFailures.length) {
+    throw new Error(`persistencia de resultados MLB incompleta: ${persistFailures.map((attempt) => attempt.error?.message || attempt.error).slice(0, 3).join('; ')}`);
+  }
+  const persistedMap = { ...prevMap };
+  for (const row of scheduleRows) persistedMap[Number(row.fixture_id)] = row;
+
+  const liveGames = games.filter(g => g.isLive);
+  // 3) Estado detallado de los que siguen en vivo.
   const detailed = await mapPool(liveGames, 6, async (g) => {
     try {
       const state = await getMlbLiveGame(g.gamePk);
@@ -287,19 +367,8 @@ export async function runBaseballLive(payload = {}) {
     } catch (e) { console.warn(`[baseball-live] liveGame ${g.gamePk}: ${e.message}`); return null; }
   });
   const states = detailed.filter(r => r.ok && r.value).map(r => r.value);
-  if (states.length === 0) return { ok: true, skipped: true, reason: 'no live state' };
 
-  // 3) Baseline previo (para detectar carreras nuevas) ANTES de sobreescribir.
-  const fids = states.map(s => Number(s.gamePk));
-  let prevMap = {};
-  // inning + inning_half necesarios para detectar cambio de inning (push notif).
-  const { data: prevRows } = await supabaseAdmin
-    .from('baseball_match_results')
-    .select('fixture_id, home_score, away_score, status, inning, inning_half')
-    .in('fixture_id', fids);
-  prevMap = Object.fromEntries((prevRows || []).map(r => [Number(r.fixture_id), r]));
-
-  // 4) Persistir resultados (marcador + estado rico).
+  // 4) El feed vivo enriquece el snapshot de schedule con conteo y bases.
   await mapPool(states, 8, async (s) => {
     const { error } = await supabaseAdmin.from('baseball_match_results').upsert({
       fixture_id: s.gamePk,
@@ -322,15 +391,39 @@ export async function runBaseballLive(payload = {}) {
     return s.gamePk;
   });
 
-  // 5) WS para la UI en vivo (estado pitch-by-pitch completo).
+  // 5) WS unificado: finalizados y en vivo comparten el mismo contrato. El
+  // estado detallado reemplaza al básico del schedule para los juegos activos.
+  const emittedMap = new Map(resultGames.map((game) => [
+    Number(game.gamePk),
+    realtimeScheduleState(game, persistedMap[Number(game.gamePk)]),
+  ]));
+  for (const state of states) {
+    const basic = emittedMap.get(Number(state.gamePk));
+    emittedMap.set(Number(state.gamePk), {
+      ...basic,
+      ...state,
+      home: { ...(basic?.home || {}), ...(state.home || {}) },
+      away: { ...(basic?.away || {}), ...(state.away || {}) },
+    });
+  }
   try {
-    await triggerEvent('baseball-live', 'update', { date: today, games: states, timestamp: new Date().toISOString() });
+    await triggerEvent('baseball-live', 'update', {
+      date: today,
+      games: [...emittedMap.values()],
+      timestamp: new Date().toISOString(),
+    });
   } catch (e) { console.error('[baseball-live] WS:', e.message); }
 
   // 6) Push de carreras a favoritos (best-effort).
-  try { await sendBaseballPushes(states, prevMap); }
+  try { if (states.length) await sendBaseballPushes(states, prevMap); }
   catch (e) { console.error('[baseball-live:push] no fatal:', e.message); }
 
-  console.log(`[baseball-live] live=${states.length}/${games.length} emitido WS + resultados`);
-  return { ok: true, liveCount: states.length, total: games.length };
+  console.log(`[baseball-live] live=${states.length} final=${resultGames.filter((game) => game.isFinal).length} persistidos=${changedRows.length}/${games.length}`);
+  return {
+    ok: true,
+    liveCount: states.length,
+    finalCount: resultGames.filter((game) => game.isFinal).length,
+    persisted: changedRows.length,
+    total: games.length,
+  };
 }

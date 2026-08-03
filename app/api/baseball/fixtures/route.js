@@ -108,7 +108,7 @@ export async function GET(request) {
 
     const [analysesRes, resultsRes, hiddenRes, favoritesRes] = await Promise.all([
       allFids.length ? supabaseAdmin.from('baseball_match_analysis').select('fixture_id, combinada, data_quality, best_odds, analysis, cache_version').in('fixture_id', allFids) : Promise.resolve({ data: [] }),
-      allFids.length ? supabaseAdmin.from('baseball_match_results').select('fixture_id, status, inning, inning_half, home_score, away_score, home_hits, away_hits, home_errors, away_errors').in('fixture_id', allFids) : Promise.resolve({ data: [] }),
+      allFids.length ? supabaseAdmin.from('baseball_match_results').select('fixture_id, status, inning, inning_half, home_score, away_score, home_hits, away_hits, home_errors, away_errors, innings, home_stats, away_stats, finished_at').in('fixture_id', allFids) : Promise.resolve({ data: [] }),
       user ? supabaseAdmin.from('baseball_user_hidden').select('fixture_id').eq('user_id', user.id) : Promise.resolve({ data: [] }),
       user ? supabaseAdmin.from('baseball_user_favorites').select('fixture_id').eq('user_id', user.id) : Promise.resolve({ data: [] }),
     ]);

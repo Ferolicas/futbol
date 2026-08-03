@@ -271,6 +271,14 @@ Las fuentes y namespaces de identificadores también están separados:
   visible esperando al cron nocturno. Una jornada local que detecte un hueco
   encola su reparación por fechas adyacentes y refresca cada cinco segundos hasta
   quedar completa; el cliente nunca ofrece ejecutar manualmente el motor.
+  `baseball-live` consulta siempre hoy y ayer en `America/Bogota`, porque un
+  juego de costa oeste puede terminar después de medianoche. Cada transición a
+  Final se guarda de forma monótona en `baseball_match_results`: un FT nunca
+  retrocede a IN/NS. El primer cierre descarga una sola vez el boxscore oficial
+  y conserva por equipo hits, errores, jonrones, dobles, triples, bases por
+  bolas, ponches, dejados en base, bases totales, robos y carreras por entrada;
+  un campo ausente sigue null y un cero oficial sigue siendo cero. La lista y el
+  análisis completo muestran ese mismo snapshot durable.
 - NFL: API-NFL aporta la ventana reciente cuando está disponible; ESPN garantiza
   el calendario amplio, IDs y logos canónicos, boxscores, jugadores y cuotas
   publicadas sin duplicar encuentros al cambiar de fuente.
@@ -447,6 +455,11 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   cachear durante seis horas una respuesta vacía de API-Baseball. Toda consulta
   de mapeo de MLB debe llevar `timezone=America/Bogota`; usar la fecha UTC deja
   sin cuotas a los juegos nocturnos hasta que ya están por comenzar.
+- 2026-08-03: `baseball_match_results` es la autoridad visual de un juego ya
+  iniciado. El poll de un minuto debe persistir también cuando no quede ningún
+  live y debe cubrir ayer Colombia; emitir solo por WebSocket deja estados IN
+  congelados y oculta Finalizados. `home_stats`/`away_stats` proceden siempre
+  del boxscore oficial MLB y nunca completan ausencias con ceros artificiales.
 - 2026-08-01: no liberar un intento pendiente por tiempo ni marcar terminal un cobro recurrente que MP pueda reintentar; primero cancelar el recurso remoto.
 - 2026-07-29: el checkout automático requiere deduplicación persistente ante Strict Mode/Fast Refresh.
 - 2026-07-29: solo el plan viaja por URL; el servidor vuelve a calcular precio, moneda y proveedor.

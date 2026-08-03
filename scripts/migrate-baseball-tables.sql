@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS public.baseball_match_results (
   home_errors INT,
   away_errors INT,
   innings JSONB,              -- per-inning breakdown
+  home_stats JSONB,           -- boxscore oficial MLB del local
+  away_stats JSONB,           -- boxscore oficial MLB del visitante
   finished_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
