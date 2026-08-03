@@ -31,8 +31,13 @@ async function runCoverage(payload, job) {
     try {
       reports.push(await analyzeSportDate('baseball', date, {
         onlyMissingCurrent: true,
+        retryMissingOdds: true,
         concurrency: 2,
-        oddsTtl: 6 * 3600,
+        // Bet365 publica líneas durante la mañana de Colombia. Un snapshot
+        // vacío no puede vivir seis horas: la guardia vuelve a comprobarlo en
+        // su siguiente tick y deja de hacerlo en cuanto aparecen cuotas.
+        oddsTtl: 10 * 60,
+        oddsMappingTtl: 10 * 60,
       }));
     } catch (error) {
       reports.push({
@@ -69,7 +74,8 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
     force: payload.force === true,
     pregame: payload.pregame === true,
     concurrency: 2,
-    oddsTtl: 6 * 3600,
+    oddsTtl: 10 * 60,
+    oddsMappingTtl: 10 * 60,
   });
   await job?.updateProgress?.({ phase: result.ok ? 'complete' : 'failed', ...result, startedAt });
   if (!result.ok) throw new Error(`baseball empirical analyze incompleto: ${result.failed}/${result.total}`);

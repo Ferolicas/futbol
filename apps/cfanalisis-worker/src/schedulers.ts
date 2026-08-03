@@ -6,13 +6,14 @@ import { MULTISPORT_CACHE_VERSION, bogotaToday } from './shared.js';
 // cron-job.org: el worker se auto-dispara usando el Redis local del VPS.
 //
 // Dos zonas horarias en juego — NO confundir:
-//  1. Cuándo DISPARA el cron → hora de España (Europe/Madrid). DST-aware.
-//  2. Qué DÍA analiza cada job → hora Colombia (America/Bogota), calculado
-//     dentro del propio handler (futbol-daily, baseball-analyze). Es
-//     independiente de cuándo dispara.
+//  1. Los crons generales disparan en España (Europe/Madrid), DST-aware.
+//  2. Baseball fixtures/analyze/pregame dispara directamente en Colombia para
+//     que la publicación de cuotas no cambie una hora con el DST europeo.
+//  3. El DÍA objetivo se calcula en America/Bogota dentro de cada handler.
 //
 // Los crons "cada N minutos" son TZ-agnósticos (el tz no aplica).
 const TZ = 'Europe/Madrid';
+const BOGOTA_TZ = 'America/Bogota';
 
 // `pattern` = cron (granularidad mínima 1 min). `every` = intervalo en ms
 // (para sub-minuto, ej. live cada 20s). Usar uno u otro, no ambos.
@@ -71,21 +72,24 @@ const SCHEDULES: Sched[] = [
   // trae bet365/bwin (superset). Su id 'futbol-odds-30m' está en STALE_SCHEDULER_IDS
   // para que BullMQ borre el scheduler + su job delayed en el arranque. La cola/
   // worker quedan inertes (sin job que los dispare). Baseball sigue usando odds.
-  // ── Baseball — diarios (hora España) ──
-  { queue: 'baseball-fixtures',  id: 'baseball-fixtures-daily',  pattern: '5 1 * * *',  tz: TZ }, // 1:05
-  { queue: 'baseball-analyze',   id: 'baseball-analyze-daily',   pattern: '30 1 * * *', tz: TZ }, // 1:30 — jornada Colombia que arranca
+  // ── Baseball — diarios (hora Colombia) ──
+  // La madrugada española era demasiado pronto: API-Baseball aún no había
+  // publicado la cartelera/cuotas de Bet365 y el análisis quedaba completo
+  // estadísticamente, pero sin opciones apostables. El pase principal corre a
+  // las 10:30 de Colombia; la cartelera oficial se prepara diez minutos antes.
+  { queue: 'baseball-fixtures',  id: 'baseball-fixtures-daily', pattern: '20 10 * * *', tz: BOGOTA_TZ },
+  { queue: 'baseball-analyze',   id: 'baseball-analyze-daily', pattern: '30 10 * * *', tz: BOGOTA_TZ, data: { force: true, today: true } },
   // Guardia de cobertura: calendario oficial de ayer/hoy/mañana contra la
-  // versión vigente. Solo procesa IDs ausentes u obsoletos, por lo que una
-  // jornada de 400 partidos ya sana cuesta únicamente tres lecturas de
-  // calendario y cero reanálisis. También recoge juegos añadidos tarde.
+  // versión vigente. También considera pendiente un juego MLB futuro del día
+  // actual que siga sin cuotas después de las 10:30 de Colombia. Así reintenta
+  // cada 15 min solo esos IDs y se detiene en cuanto Bet365 aparece.
   { queue: 'baseball-analyze',   id: 'baseball-analysis-coverage-15m', pattern: '*/15 * * * *', data: { coverage: true } },
   // Re-análisis PRE-PARTIDO (force + today): captura el lineup confirmado de MLB
   // (props de bateadores) de los juegos que se juegan HOY Colombia. Corre en la
-  // franja en que MLB publica alineaciones (tarde Colombia = 17-01 España). Odds
-  // Se filtran solo juegos a -1h/+3h del kickoff; cuotas API-Baseball cacheadas
-  // 6h y game logs MLB cacheados. Así cada juego se refresca cerca de empezar
-  // sin agotar el plan gratuito de 100 llamadas.
-  { queue: 'baseball-analyze',   id: 'baseball-analyze-pregame', pattern: '0 17,19,21,23,1 * * *', tz: TZ, data: { force: true, today: true, pregame: true } },
+  // franja en que MLB publica alineaciones. Se expresa directamente en hora
+  // Colombia para que el horario no cambie cuando España entra/sale de DST.
+  // Solo incluye juegos a -1h/+3h del kickoff y conserva el refresco de props.
+  { queue: 'baseball-analyze', id: 'baseball-analyze-pregame', pattern: '0 12,14,16,18,20,22 * * *', tz: BOGOTA_TZ, data: { force: true, today: true, pregame: true } },
   // ventana 365d (default del job). MLB Stats API es gratuita y sin límite de
   // fechas, así que rellenamos resultados retroactivos sin penalización.
   // Dos pases: el de 05:00 recoge la mayoría y el de 09:00 cierra los juegos
@@ -156,7 +160,7 @@ export async function registerSchedulers(): Promise<void> {
 // CACHE_VERSION regenere la jornada sin esperar al siguiente cron nocturno.
 export async function enqueueBaseballCoverageBootstrap(): Promise<void> {
   const date = bogotaToday();
-  const jobId = `baseball-coverage-v${MULTISPORT_CACHE_VERSION}-${date}`;
+  const jobId = `baseball-coverage-v${MULTISPORT_CACHE_VERSION}-odds-refresh-v1-${date}`;
   const job = await queues['baseball-analyze'].add(
     'baseball-analysis-coverage',
     { coverage: true, bootstrap: true },

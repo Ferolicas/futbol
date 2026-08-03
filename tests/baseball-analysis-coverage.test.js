@@ -10,6 +10,7 @@ const {
   MULTISPORT_CACHE_VERSION,
   buildSportAnalysisCoverageDates,
   selectGamesNeedingCurrentAnalysis,
+  shouldRetryMissingBaseballOdds,
 } = require('../lib/multisport-analysis.js');
 const {
   MAX_BASEBALL_ANALYSIS_FIXTURES,
@@ -35,6 +36,74 @@ test('solo reanaliza partidos inexistentes u obsoletos para el contrato vigente'
     selectGamesNeedingCurrentAnalysis(games, analyses).map((game) => String(game.id)),
     ['2', '3'],
   );
+});
+
+test('después de las 10:30 Colombia reintenta solo juegos futuros sin cuotas', () => {
+  const now = new Date('2026-08-03T15:45:00Z'); // 10:45 en Colombia
+  const games = [
+    { id: 1, date: '2026-08-03T22:40:00Z', status: { short: 'NS', isFinal: false, isLive: false } },
+    { id: 2, date: '2026-08-03T23:05:00Z', status: { short: 'NS', isFinal: false, isLive: false } },
+    { id: 3, date: '2026-08-03T23:40:00Z', status: { short: 'NS', isFinal: false, isLive: false } },
+  ];
+  const analyses = [
+    {
+      fixture_id: 1,
+      cache_version: MULTISPORT_CACHE_VERSION,
+      updated_at: '2026-08-03T15:25:00Z',
+      data_quality: { hasOdds: false },
+    },
+    {
+      fixture_id: 2,
+      cache_version: MULTISPORT_CACHE_VERSION,
+      updated_at: '2026-08-03T15:25:00Z',
+      data_quality: { hasOdds: true },
+    },
+    {
+      fixture_id: 3,
+      cache_version: MULTISPORT_CACHE_VERSION,
+      updated_at: '2026-08-03T15:40:00Z',
+      data_quality: { hasOdds: false },
+    },
+  ];
+
+  assert.deepEqual(
+    selectGamesNeedingCurrentAnalysis(
+      games,
+      analyses,
+      MULTISPORT_CACHE_VERSION,
+      { retryMissingOdds: true, now },
+    ).map((game) => String(game.id)),
+    ['1'],
+  );
+});
+
+test('no gasta cuota en reintentos antes de la hora tardía, otro día o un juego iniciado', () => {
+  const analysis = {
+    fixture_id: 1,
+    cache_version: MULTISPORT_CACHE_VERSION,
+    updated_at: '2026-08-03T13:00:00Z',
+    data_quality: { hasOdds: false },
+  };
+  const futureToday = { id: 1, date: '2026-08-03T22:40:00Z', status: { short: 'NS' } };
+  const tomorrow = { id: 1, date: '2026-08-04T22:40:00Z', status: { short: 'NS' } };
+  const live = { id: 1, date: '2026-08-03T14:00:00Z', status: { short: 'LIVE', isLive: true } };
+
+  assert.equal(shouldRetryMissingBaseballOdds(futureToday, analysis, {
+    now: new Date('2026-08-03T14:59:00Z'), // 09:59 Colombia
+  }), false);
+  assert.equal(shouldRetryMissingBaseballOdds(tomorrow, analysis, {
+    now: new Date('2026-08-03T15:45:00Z'),
+  }), false);
+  assert.equal(shouldRetryMissingBaseballOdds(live, analysis, {
+    now: new Date('2026-08-03T15:45:00Z'),
+  }), false);
+});
+
+test('los schedulers de MLB usan el pase tardío y el prepartido en hora Colombia', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../apps/cfanalisis-worker/src/schedulers.ts'), 'utf8');
+  assert.match(source, /const BOGOTA_TZ = 'America\/Bogota'/);
+  assert.match(source, /id: 'baseball-analyze-daily', pattern: '30 10 \* \* \*', tz: BOGOTA_TZ/);
+  assert.match(source, /id: 'baseball-analyze-pregame', pattern: '0 12,14,16,18,20,22 \* \* \*', tz: BOGOTA_TZ/);
 });
 
 test('el endpoint admite jornadas grandes y nunca trunca silenciosamente a 50', () => {

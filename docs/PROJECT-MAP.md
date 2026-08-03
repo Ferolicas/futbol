@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-03 · Commit base: `1548a70`
+Actualizado: 2026-08-03 · Commit base: `d98d275`
 
 ## Identidad y stack
 
@@ -252,10 +252,17 @@ Las fuentes y namespaces de identificadores también están separados:
   línea Bet365 exacta y cuota ≥1,20. Los
   historiales completos sí se muestran aunque no exista cuota; solo entran en
   las opciones apostables cuando hay selección, jugador, línea y cuota Bet365
-  exactos. El detalle presenta las nueve entradas, tramos acumulados, hits,
+  exactos. El pase principal de la jornada MLB corre a las 10:30 de
+  `America/Bogota`, cuando el proveedor ya suele haber publicado Bet365; diez
+  minutos antes se actualiza la cartelera oficial. El detalle presenta las nueve entradas, tramos acumulados, hits,
   pitchers y todos los game logs del lineup. La cobertura de análisis es automática:
   un reconciliador cada 15 minutos compara ayer/hoy/mañana contra
-  `MULTISPORT_CACHE_VERSION` y procesa únicamente fixtures ausentes u obsoletos.
+  `MULTISPORT_CACHE_VERSION` y procesa fixtures ausentes u obsoletos. Después
+  de las 10:30 Colombia también trata como pendiente cualquier juego futuro del
+  día cuyo análisis siga con `hasOdds=false`; reintenta solo esos IDs y se
+  detiene inmediatamente cuando ya existe una cuota real. El mapeo de jornada y
+  los snapshots vacíos de cuotas duran como máximo diez minutos, para no
+  congelar durante seis horas una publicación tardía de Bet365.
   El proceso heavy encola además la misma guardia al arrancar, con job idempotente
   por versión y día, de modo que subir el contrato de caché nunca deja la jornada
   visible esperando al cron nocturno. Una jornada local que detecte un hueco
@@ -425,6 +432,11 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   selección, cuota individual 1.20–1.60 y una cuota final 1.50–2.00 con
   probabilidad conjunta ≥80%; lee la evidencia durable `_scored` para no perder
   opciones válidas de fiabilidad 80–89% por el saneamiento público de 90%.
+- 2026-08-03: un análisis MLB de versión vigente no se considera terminado para
+  la jornada actual si `data_quality.hasOdds=false`. El pase principal se hace a
+  las 10:30 Colombia y la guardia de 15 minutos vuelve a consultar únicamente
+  partidos futuros sin cuotas; no bajar el umbral, inventar líneas ni volver a
+  cachear durante seis horas una respuesta vacía de API-Baseball.
 - 2026-08-01: no liberar un intento pendiente por tiempo ni marcar terminal un cobro recurrente que MP pueda reintentar; primero cancelar el recurso remoto.
 - 2026-07-29: el checkout automático requiere deduplicación persistente ante Strict Mode/Fast Refresh.
 - 2026-07-29: solo el plan viaja por URL; el servidor vuelve a calcular precio, moneda y proveedor.
