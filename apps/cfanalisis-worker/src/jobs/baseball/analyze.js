@@ -9,7 +9,17 @@ import {
   bogotaToday,
   buildSportAnalysisCoverageDates,
   cronTargetDate,
+  redisSet,
 } from '../../shared.js';
+
+// Rastro para baseball-watchdog. Sin esto un cuelgue de la cola pasa inadvertido
+// — fue lo que dejó el béisbol 31 h sin analizar el 5 de agosto de 2026.
+async function markLastRun(kind, payload) {
+  await redisSet(`lastRun:baseball-${kind}`, {
+    completedAt: new Date().toISOString(),
+    ...payload,
+  }, 172800).catch(() => {});
+}
 
 function validDates(values) {
   return [...new Set((values || [])
@@ -60,6 +70,7 @@ async function runCoverage(payload, job) {
     durationSec: Math.round((Date.now() - startedAt) / 100) / 10,
   };
   await job?.updateProgress?.({ phase: result.ok ? 'complete' : 'failed', ...result, startedAt });
+  await markLastRun('coverage', { dates: targetDates, analyzed: result.analyzed, failed: result.failed });
   if (!result.ok) throw new Error(`baseball coverage incompleta: ${result.failed} fallos en ${targetDates.join(',')}`);
   return result;
 }
@@ -78,6 +89,9 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
     oddsMappingTtl: 10 * 60,
   });
   await job?.updateProgress?.({ phase: result.ok ? 'complete' : 'failed', ...result, startedAt });
+  await markLastRun(payload.pregame === true ? 'pregame' : 'daily', {
+    date, analyzed: result.analyzed, total: result.total, failed: result.failed,
+  });
   if (!result.ok) throw new Error(`baseball empirical analyze incompleto: ${result.failed}/${result.total}`);
   return { ...result, durationSec: Math.round((Date.now() - startedAt) / 100) / 10 };
 }

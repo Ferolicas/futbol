@@ -48,7 +48,11 @@ import DashboardBuffer from '../components/DashboardBuffer';
 import AnalysisFullModal from '../components/AnalysisFullModal';
 import BaseballResultStats from './components/BaseballResultStats';
 import { displayBettingText } from '../utils/display-betting-text';
-import { BASEBALL_RECOMMENDATION_MIN_PROBABILITY } from '../../../lib/recommendation-policy';
+import {
+  BASEBALL_RECOMMENDATION_MIN_PROBABILITY,
+  BASEBALL_DAILY_MIN_PROBABILITY,
+  BASEBALL_DAILY_MIN_RELIABILITY,
+} from '../../../lib/recommendation-policy';
 
 const BaseballAnalysisExperience = dynamic(
   () => import('./analisis/[id]/page').then((module) => module.BaseballAnalysisExperience),
@@ -1079,7 +1083,9 @@ function ApuestaDelDiaBlock({ apuesta, show, onToggle }) {
             <div className="baseball-apuesta-body">
               <div className="apuesta-summary">
                 <Sparkles size={15} aria-hidden="true" />
-                {apuesta.selections.length} selecciones ordenadas por oportunidad
+                {apuesta.selections.length} selecciones desde el {apuesta.minProbability ?? BASEBALL_DAILY_MIN_PROBABILITY}% de probabilidad
+                {' '}con fiabilidad mínima del {apuesta.minReliability ?? BASEBALL_DAILY_MIN_RELIABILITY}%
+                {' '}— carreras, hits, entradas, bateadores y lanzadores
               </div>
               {apuesta.selections.map((s, i) => (
                 <article className="baseball-apuesta-item" key={i}>
@@ -1093,6 +1099,11 @@ function ApuestaDelDiaBlock({ apuesta, show, onToggle }) {
                   </span>
                   <span className="apuesta-item-metrics">
                     <span className="apuesta-prob"><small>Prob.</small>{cap(s.rawProbability ?? s.probability)}%</span>
+                    {Number.isFinite(Number(s.reliability)) && (
+                      <span className="apuesta-prob" title={s.sampleN ? `${s.sampleHits} de ${s.sampleN} partidos comparables` : undefined}>
+                        <small>Fiab.</small>{Math.floor(Number(s.reliability))}%
+                      </span>
+                    )}
                     {s.odd && <span className="apuesta-odd"><small>Cuota</small>{s.odd}</span>}
                   </span>
                 </article>

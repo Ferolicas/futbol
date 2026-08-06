@@ -28,7 +28,11 @@ type Sched = { queue: QueueName; id: string; pattern?: string; every?: number; t
 // futbol-live (PARTE 1: /fixtures/statistics dentro de live.js). El job dedicado
 // de 30 min queda obsoleto → al añadir su id aquí, registerSchedulers() borra el
 // scheduler Y su job delayed pendiente en el arranque (no quedan dos corriendo).
-const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-odds-15m', 'futbol-raw-backfill-half2', 'baseball-live-5m', 'futbol-live-corners-30m', 'futbol-odds-30m', 'baseball-calibrate-daily', 'baseball-analyze-all-today-daily', 'american-football-live-10m', 'futbol-finalize-daily'];
+// 'baseball-analysis-coverage-15m': la guardia se mudó a la cola
+// 'baseball-coverage'. Su id viejo entra aquí para que BullMQ borre el
+// scheduler Y el job delayed pendiente en la cola 'baseball-analyze' y no
+// queden las dos versiones disparando en paralelo.
+const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-odds-15m', 'futbol-raw-backfill-half2', 'baseball-live-5m', 'futbol-live-corners-30m', 'futbol-odds-30m', 'baseball-calibrate-daily', 'baseball-analyze-all-today-daily', 'american-football-live-10m', 'futbol-finalize-daily', 'baseball-analysis-coverage-15m'];
 
 const SCHEDULES: Sched[] = [
   // ── Fútbol — diarios (hora España) ──
@@ -83,7 +87,10 @@ const SCHEDULES: Sched[] = [
   // versión vigente. También considera pendiente un juego MLB futuro del día
   // actual que siga sin cuotas después de las 10:30 de Colombia. Así reintenta
   // cada 15 min solo esos IDs y se detiene en cuanto Bet365 aparece.
-  { queue: 'baseball-analyze',   id: 'baseball-analysis-coverage-15m', pattern: '*/15 * * * *', data: { coverage: true } },
+  // La guardia vive en SU PROPIA cola desde el incidente del 5 de agosto de
+  // 2026: compartiendo cola con el pase diario, un coverage colgado dejó el
+  // análisis principal esperando detrás 31 horas.
+  { queue: 'baseball-coverage',  id: 'baseball-coverage-15m', pattern: '*/15 * * * *', data: { coverage: true } },
   // Re-análisis PRE-PARTIDO (force + today): captura el lineup confirmado de MLB
   // (props de bateadores) de los juegos que se juegan HOY Colombia. Corre en la
   // franja en que MLB publica alineaciones. Se expresa directamente en hora
@@ -94,6 +101,9 @@ const SCHEDULES: Sched[] = [
   // fechas, así que rellenamos resultados retroactivos sin penalización.
   // Dos pases: el de 05:00 recoge la mayoría y el de 09:00 cierra los juegos
   // nocturnos de la costa oeste antes del entrenamiento.
+  // Hombre muerto del béisbol (equivalente al de fútbol). 12:00 Colombia: hora y
+  // media después del pase diario de las 10:30. Silencio = todo bien.
+  { queue: 'baseball-watchdog',  id: 'baseball-watchdog-daily', pattern: '0 12 * * *', tz: BOGOTA_TZ },
   { queue: 'baseball-finalize',  id: 'baseball-finalize-daily',  pattern: '0 5,9 * * *',  tz: TZ },
   // La calibración isotónica quedó retirada: el porcentaje servido es la
   // frecuencia empírica. Retrain solo escoge pesos de semejanza walk-forward.
@@ -162,10 +172,10 @@ export async function registerSchedulers(): Promise<void> {
 export async function enqueueBaseballCoverageBootstrap(): Promise<void> {
   const date = bogotaToday();
   const jobId = `baseball-coverage-v${MULTISPORT_CACHE_VERSION}-odds-refresh-v2-bogota-${date}`;
-  const job = await queues['baseball-analyze'].add(
-    'baseball-analysis-coverage',
+  const job = await queues['baseball-coverage'].add(
+    'baseball-coverage',
     { coverage: true, bootstrap: true },
     { jobId },
   );
-  logger.info({ queue: 'baseball-analyze', jobId: job.id, date, cacheVersion: MULTISPORT_CACHE_VERSION }, 'baseball coverage bootstrap listo');
+  logger.info({ queue: 'baseball-coverage', jobId: job.id, date, cacheVersion: MULTISPORT_CACHE_VERSION }, 'baseball coverage bootstrap listo');
 }

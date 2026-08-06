@@ -21,6 +21,12 @@ export const QUEUE_NAMES = [
   // Baseball
   'baseball-fixtures',
   'baseball-analyze',
+  // Cola propia para la guardia de cobertura. Compartía cola con el pase
+  // diario y, al ser concurrency=1, un coverage colgado dejaba al análisis
+  // principal esperando detrás durante 31 h (5 de agosto de 2026). Separadas,
+  // un atasco en la guardia ya no puede impedir el análisis de la jornada.
+  'baseball-coverage',
+  'baseball-watchdog',
   'baseball-analyze-all-today',
   'baseball-live',
   'baseball-finalize',
@@ -90,6 +96,10 @@ const opts: Record<QueueName, JobsOptions> = {
   'futbol-model-sync':       { ...defaultJobOpts, attempts: 2 },
   'baseball-fixtures':            defaultJobOpts,
   'baseball-analyze':             analyzeJobOpts,
+  // La guardia se repite cada 15 min: no tiene sentido reintentar cinco veces
+  // un tick que va a volver a dispararse solo dentro de un cuarto de hora.
+  'baseball-coverage':            { ...defaultJobOpts, attempts: 1 },
+  'baseball-watchdog':            defaultJobOpts,
   'baseball-analyze-all-today':   analyzeJobOpts,
   'baseball-live':                liveJobOpts,
   'baseball-finalize':            analyzeJobOpts,

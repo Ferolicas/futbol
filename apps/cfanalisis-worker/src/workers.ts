@@ -23,6 +23,7 @@ import { runModelSync } from './jobs/futbol/model-sync.js';
 // Baseball jobs
 import { runBaseballFixtures } from './jobs/baseball/fixtures.js';
 import { runBaseballAnalyze } from './jobs/baseball/analyze.js';
+import { runBaseballWatchdog } from './jobs/baseball/watchdog.js';
 import { runBaseballLive } from './jobs/baseball/live.js';
 import { runBaseballFinalize } from './jobs/baseball/finalize.js';
 import { runBaseballCleanup } from './jobs/baseball/cleanup.js';
@@ -51,6 +52,8 @@ const handlers: Record<QueueName, Processor> = {
   'futbol-model-sync':       async (job) => runModelSync(job.data),
   'baseball-fixtures':            async (job) => runBaseballFixtures(job.data),
   'baseball-analyze':             async (job) => runBaseballAnalyze(job.data, job),
+  'baseball-coverage':            async (job) => runBaseballAnalyze({ ...(job.data || {}), coverage: true }, job),
+  'baseball-watchdog':            async () => runBaseballWatchdog(),
   // analyze-all-today: mismo handler que analyze pero forzando force=true.
   // Gemelo de futbol-analyze-all-today. Lo invoca el botón "Re-analizar
   // baseball" del panel /ferney (POST a /admin/retry con payload {force:true}).
@@ -94,6 +97,8 @@ const concurrency: Record<QueueName, number> = {
   'futbol-model-sync':       1,
   'baseball-fixtures':            1,
   'baseball-analyze':             1,
+  'baseball-coverage':            1,
+  'baseball-watchdog':            1,
   'baseball-analyze-all-today':   1,
   'baseball-live':                1,
   'baseball-finalize':            1,
@@ -152,6 +157,10 @@ const lockOpts: Record<QueueName, LockOpts> = {
   'futbol-model-sync':       HEAVY,
   'baseball-fixtures':            LIGHT,
   'baseball-analyze':             HEAVY,
+  // La guardia recorre tres fechas con techo de 20 min cada una; un lock ligero
+  // basta y hace que cualquier atasco se detecte antes.
+  'baseball-coverage':            HEAVY,
+  'baseball-watchdog':            LIGHT,
   'baseball-analyze-all-today':   HEAVY,
   'baseball-live':                LIGHT,
   'baseball-finalize':            HEAVY,

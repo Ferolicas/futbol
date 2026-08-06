@@ -157,7 +157,7 @@ test('Baseball publica solo selecciones cruzadas con Bet365 y cuota mínima 1.20
   assert.ok(result.selections.every((selection) => selection.rawProbability >= 65));
   assert.equal(result.selectableThreshold, 65);
   assert.equal(result.highlightThreshold, 65);
-  assert.equal(result.dailyThreshold, 90);
+  assert.equal(result.dailyThreshold, 70);
   assert.deepEqual(result.winProbabilities, { home: 74, away: 26 });
   assert.ok(result.selectable.every((selection) => (
     selection.id !== 'handicap-away-4_5' || selection.odd !== 7.25
@@ -249,7 +249,48 @@ test('las combinadas descartan selecciones viejas o ajenas al catálogo Bet365 a
   assert.equal(custom.selections[0].odd, 1.95);
   assert.equal(custom.selections[0].bookmaker, 'Bet365');
 
-  const daily = buildBaseballApuestaDelDia([game], { minProb: 90 });
+  // La Apuesta del Día exige fiabilidad demostrada: una selección sin muestra
+  // detrás no se publica por muy alto que sea su porcentaje.
+  assert.equal(buildBaseballApuestaDelDia([game], { minProb: 90 }), null);
+
+  const respaldada = { ...canonical, reliability: 96.4, sampleN: 220, sampleHits: 201 };
+  const gameConMuestra = {
+    ...game,
+    analysis: { combinada: { selectable: [respaldada, { ...respaldada, id: 'bwin', bookmaker: 'Bwin' }] } },
+  };
+  const daily = buildBaseballApuestaDelDia([gameConMuestra], { minProb: 90 });
   assert.equal(daily.selections.length, 1);
   assert.equal(daily.selections[0].bookmaker, 'Bet365');
+  assert.equal(daily.selections[0].reliability, 96.4);
+});
+
+test('la Apuesta del Día publica todo mercado desde 70% con fiabilidad 90%', () => {
+  const base = {
+    marketLabel: 'Mercado', odd: 1.85, bookmaker: 'Bet365',
+    bookmakerMarket: 'Over/Under', bookmakerSelection: 'Over 0.5',
+  };
+  const selectable = [
+    // Carreras del partido: entra.
+    { ...base, id: 'total-7.5-under', category: 'total-7.5', name: 'Menos de 7.5 carreras', probability: 74, rawProbability: 74, reliability: 93, sampleN: 180, sampleHits: 133 },
+    // Prop de bateador: entra — antes se perdía al leer solo `selections`.
+    { ...base, id: 'player-hits-10-0.5-over', category: 'player-hits-10-0.5', name: 'Rafael Devers: más de 0.5 hits', probability: 72, rawProbability: 72, reliability: 91, sampleN: 150, sampleHits: 108, scope: 'player' },
+    // Ponches del lanzador: entra.
+    { ...base, id: 'player-strikeouts-20-4.5-over', category: 'player-strikeouts-20-4.5', name: 'Chris Sale: más de 4.5 ponches', probability: 78, rawProbability: 78, reliability: 97, sampleN: 90, sampleHits: 72, scope: 'player' },
+    // Por debajo del 70%: fuera.
+    { ...base, id: 'ml-home', category: 'moneyline', name: 'Local gana', probability: 68, rawProbability: 68, reliability: 99, sampleN: 400, sampleHits: 272 },
+    // Alta probabilidad pero muestra insuficiente: fuera.
+    { ...base, id: 'team-total-home-2.5-over', category: 'team-total-home-2.5', name: 'Local: más de 2.5 carreras', probability: 80, rawProbability: 80, reliability: 61, sampleN: 5, sampleHits: 4 },
+  ];
+  const game = { id: 7, status: { short: 'NS' }, teams: fixture.teams, analysis: { combinada: { selectable } } };
+
+  const daily = buildBaseballApuestaDelDia([game]);
+  const ids = daily.selections.map((selection) => selection.name);
+  assert.equal(daily.selections.length, 3);
+  assert.ok(ids.includes('Menos de 7.5 carreras'));
+  assert.ok(ids.includes('Rafael Devers: más de 0.5 hits'));
+  assert.ok(ids.includes('Chris Sale: más de 4.5 ponches'));
+  assert.equal(daily.minProbability, 70);
+  assert.equal(daily.minReliability, 90);
+  // Tres selecciones del mismo partido se publican, pero la parlay no las cruza.
+  assert.equal(daily.parlay.length, 1);
 });
