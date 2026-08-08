@@ -21,6 +21,11 @@ import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
+// PSE exige contacto y direccion, aunque el Payment Brick de Mercado Pago solo
+// recoja email, documento, tipo de persona y banco. Verificado contra produccion:
+// el mismo pago SIN phone/address devuelve 424 "BankTransfers Api fail" y CON
+// ellos crea el pago (pending_waiting_transfer). Por eso los pedimos aparte.
+// Longitudes exactas de la spec de PSE.
 const billingSchema = z.object({
   firstName: z.string().trim().min(1).max(32),
   lastName: z.string().trim().min(1).max(32),
@@ -30,7 +35,8 @@ const billingSchema = z.object({
   neighborhood: z.string().trim().min(1).max(18),
   city: z.string().trim().min(1).max(18),
   phoneAreaCode: z.string().regex(/^\d{3}$/),
-  phoneNumber: z.string().regex(/^\d{1,5}$/),
+  phoneNumber: z.string().regex(/^\d{1,7}$/),
+  federalUnit: z.string().trim().max(18).optional().default(''),
 });
 
 const subscribeSchema = z.object({
@@ -114,25 +120,31 @@ export async function POST(request) {
 
     const token = formData?.token;
     const methodId = paymentMethodId(formData, selectedPaymentMethod);
-    const isPse = methodId === 'pse' || selectedPaymentMethod === 'bank_transfer';
+    // Nequi y PSE viajan los dos como `bank_transfer` en el Payment Brick, pero
+    // Nequi no tiene banco que elegir: mezclarlos le exigia datos que ese metodo
+    // nunca entrega.
+    const isNequi = methodId === 'nequi';
+    const isPse = !isNequi && (methodId === 'pse' || selectedPaymentMethod === 'bank_transfer');
     if (!token && !methodId) {
       return Response.json({ error: 'Selecciona un metodo de pago.' }, { status: 400 });
     }
+    let billingData = {};
     if (isPse) {
-      const billing = billingSchema.safeParse(billingDetails);
-      if (!billing.success) {
-        return Response.json({
-          error: 'Completa los datos reales de contacto y direccion requeridos por PSE.',
-          code: 'PSE_BILLING_REQUIRED',
-          fields: billing.error.flatten().fieldErrors,
-        }, { status: 400 });
-      }
       if (!validPseBrickData(formData)) {
         return Response.json({
           error: 'Vuelve a seleccionar el banco y completa el documento solicitado por PSE.',
           code: 'PSE_PROVIDER_FIELDS_MISSING',
         }, { status: 400 });
       }
+      const billing = billingSchema.safeParse(billingDetails);
+      if (!billing.success) {
+        return Response.json({
+          error: 'PSE necesita tus datos de contacto y direccion (Nequi y DaviPlata tambien van por PSE). Los tienes justo arriba del formulario de pago.',
+          code: 'PSE_BILLING_REQUIRED',
+          fields: billing.error.flatten().fieldErrors,
+        }, { status: 400 });
+      }
+      billingData = billing.data;
     }
 
     const kind = token ? 'subscription' : 'one_time';
@@ -184,7 +196,8 @@ export async function POST(request) {
         email: profile.email,
         backUrl,
         ipAddress: ip,
-        billingDetails: isPse ? billingSchema.parse(billingDetails) : {},
+        billingDetails: billingData,
+        payerName: profile.name,
         attemptId: attempt.id,
       });
     }
