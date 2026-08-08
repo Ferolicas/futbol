@@ -29,15 +29,38 @@ function needsAlphaFallback() {
   return isIOS || isDesktopSafari;
 }
 
+// Safari no compone el canal alfa del WebM (VP9), por eso allí se sirve un AVIF
+// animado: mismo lienzo, misma animación y 228 KB, menos que el propio WebM. Su
+// primer fotograma ya es el logo asentado, así que un navegador que soporte AVIF
+// fijo pero no secuencias muestra exactamente lo mismo que el WebP de siempre.
+const ANIMATED_FALLBACK = '/logo-metalizado-alpha.avif';
+const STATIC_FALLBACK = '/logo-metalizado-alpha-fast.webp';
+
 export default function BrandLogoMedia({ className = '', ariaLabel = 'CF Análisis' }) {
-  const [useFallback, setUseFallback] = useState(null);
+  // null = aún sin decidir (SSR/hidratación) · 'video' · 'animated' · 'static'
+  const [mode, setMode] = useState(null);
+  const [animatedReady, setAnimatedReady] = useState(false);
   const videoRef = useRef(null);
+  const useFallback = mode === null ? null : mode !== 'video';
 
   useEffect(() => {
-    setUseFallback(
-      needsAlphaFallback() ||
-      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
-    );
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      setMode('static');
+      return undefined;
+    }
+    if (!needsAlphaFallback()) {
+      setMode('video');
+      return undefined;
+    }
+    setMode('animated');
+    // Se precarga aparte: hasta que el AVIF no está decodificado se sigue viendo
+    // el WebP de 14 KB, y si el navegador no sabe decodificarlo se queda en él.
+    const probe = new Image();
+    probe.onload = () => setAnimatedReady(true);
+    probe.src = ANIMATED_FALLBACK;
+    return () => {
+      probe.onload = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -59,7 +82,14 @@ export default function BrandLogoMedia({ className = '', ariaLabel = 'CF Anális
     return (
       <img
         className={`${className} brand-logo-alpha-fallback`.trim()}
-        src="/logo-metalizado-alpha-fast.webp"
+        src={animatedReady ? ANIMATED_FALLBACK : STATIC_FALLBACK}
+        // El AVIF trae el lienzo completo del vídeo (512×288) y el WebP solo la
+        // banda del logo (512×123). En la rama animada se reserva desde el
+        // principio la proporción del vídeo y se encaja por `contain`: el logo
+        // sale del mismo tamaño y en el mismo sitio en ambos, así que el relevo
+        // WebP → AVIF no mueve nada de la página. Con movimiento reducido no se
+        // toca nada y se sigue viendo el WebP tal cual.
+        style={mode === 'animated' ? { aspectRatio: '512 / 288', objectFit: 'contain' } : undefined}
         alt={ariaLabel}
         decoding="async"
         draggable="false"
@@ -75,9 +105,9 @@ export default function BrandLogoMedia({ className = '', ariaLabel = 'CF Anális
       loop
       playsInline
       preload="auto"
-      poster="/logo-metalizado-alpha-fast.webp"
+      poster={STATIC_FALLBACK}
       aria-label={ariaLabel}
-      onError={() => setUseFallback(true)}
+      onError={() => setMode('static')}
     >
       <source src="/logo-metalizado-fast.webm" type="video/webm" />
     </video>

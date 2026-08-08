@@ -3168,10 +3168,10 @@ body {
   top: 0;
   width: 100%;
   max-width: none;
-  min-height: calc(58px + env(safe-area-inset-top));
+  min-height: calc(58px + var(--dash-safe-top));
   margin: 0 0 8px;
   padding:
-    max(4px, env(safe-area-inset-top))
+    max(4px, var(--dash-safe-top))
     max(7px, calc((100vw - 1120px) / 2 + 8px))
     4px;
   border-top: 0;
@@ -4675,8 +4675,8 @@ body {
 
 @media (min-width: 700px) {
   .dashboard-topbar {
-    min-height: calc(64px + env(safe-area-inset-top));
-    padding-top: max(5px, env(safe-area-inset-top));
+    min-height: calc(64px + var(--dash-safe-top));
+    padding-top: max(5px, var(--dash-safe-top));
     padding-bottom: 5px;
   }
 
@@ -9374,6 +9374,31 @@ input:checked + .cb-mark::after {
   .planes-page .planes-trust span:last-child { display: none; }
 }
 
+/* ---------------------------------------------------------------------
+   Inset superior estable para el cromo del dashboard.
+
+   En Safari de iPhone `env(safe-area-inset-top)` NO es constante: pasa de 0 a
+   ~50px cuando la barra de direcciones se pliega al bajar, y vuelve a 0 al
+   subir. Como la topbar es `sticky` (va en flujo) y usaba ese valor en su
+   `min-height` y su `padding`, cada cambio movía verticalmente todo lo que hay
+   debajo — incluida la lista de partidos — a mitad de scroll: la lista se
+   "devolvía" un poco y el gesto se trababa. Fijándolo a 0 en navegador, el alto
+   de la topbar deja de depender del scroll. Solo se usa el inset real en app
+   instalada, donde es constante y sí hace falta esquivar el notch.
+
+   En Android y escritorio el inset ya vale 0 siempre, así que esto no cambia
+   absolutamente nada fuera de iOS.
+   --------------------------------------------------------------------- */
+.dashboard-layout {
+  --dash-safe-top: 0px;
+}
+
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  .dashboard-layout {
+    --dash-safe-top: env(safe-area-inset-top);
+  }
+}
+
 /* =====================================================================
    DASHBOARD MOBILE-FIRST — encabezado común, controles y superficies.
    El fondo se pinta una sola vez; las tarjetas evitan blur/loops repetidos
@@ -9390,7 +9415,7 @@ input:checked + .cb-mark::after {
   --dash-green: #5ee6b1;
   min-height: 100vh;
   min-height: 100dvh;
-  padding-top: max(8px, env(safe-area-inset-top));
+  padding-top: max(8px, var(--dash-safe-top));
   color: var(--dash-text);
   background:
     radial-gradient(circle at 48% -12%, rgba(16,185,129,.14), transparent 35%),
@@ -10243,10 +10268,10 @@ input:checked + .cb-mark::after {
   top: 0 !important;
   width: 100% !important;
   max-width: none !important;
-  min-height: calc(58px + env(safe-area-inset-top)) !important;
+  min-height: calc(58px + var(--dash-safe-top)) !important;
   margin: 0 0 8px !important;
   padding:
-    max(4px, env(safe-area-inset-top))
+    max(4px, var(--dash-safe-top))
     max(8px, calc((100vw - 1120px) / 2 + 8px))
     4px !important;
   border-top: 0 !important;
@@ -10503,7 +10528,7 @@ input:checked + .cb-mark::after {
 
 @media (min-width: 700px) {
   .dashboard-topbar {
-    min-height: calc(64px + env(safe-area-inset-top)) !important;
+    min-height: calc(64px + var(--dash-safe-top)) !important;
   }
 
   .dashboard-brand {
