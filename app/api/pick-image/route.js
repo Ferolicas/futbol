@@ -164,14 +164,58 @@ function logoBadge(logo, team, accent) {
   };
 }
 
-function optionMetric(label, value, color) {
+// ---------------------------------------------------------------------------
+// Identidad visual: la misma que el dashboard (verde --dash-green sobre fondo
+// casi negro), no la cian/morada antigua.
+// ---------------------------------------------------------------------------
+const C = {
+  bg0: '#03090f',
+  bg1: '#061019',
+  surface: 'rgba(10,22,29,0.86)',
+  surfaceSoft: 'rgba(255,255,255,0.035)',
+  border: 'rgba(255,255,255,0.085)',
+  borderAccent: 'rgba(94,230,177,0.26)',
+  green: '#5ee6b1',
+  cyan: '#22d3ee',
+  amber: '#f8c95d',
+  text: '#edf6f4',
+  muted: '#8fa1aa',
+  faint: '#64798a',
+};
+
+// Los nombres reales son largos ("Total partido — Córners — Menos de 13.5"), así
+// que la métrica va DEBAJO del nombre y no a su lado: el nombre dispone de todo
+// el ancho y casi siempre cabe en una línea.
+const NAME_FONT = 23;
+const NAME_LINE_HEIGHT = 31;
+const NAME_CHARS_PER_LINE = 44;   // ~616px útiles / ~14px por carácter a 23px
+// Alto real de una fila con el nombre en una línea, medido sobre el render.
+// Se redondea al alza porque satori recorta lo que sobresale del lienzo.
+const ROW_BASE_HEIGHT = 140;
+const ROW_GAP = 14;
+
+function nameLines(option) {
+  const length = String(option.name || '').length;
+  return Math.max(1, Math.ceil(length / NAME_CHARS_PER_LINE));
+}
+
+function optionRowHeight(option) {
+  return ROW_BASE_HEIGHT + (nameLines(option) - 1) * NAME_LINE_HEIGHT;
+}
+
+function optionMetric(label, value, color, strong) {
   return {
     type: 'div',
     props: {
-      style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', width: '108px' },
+      style: {
+        display: 'flex', alignItems: 'baseline', gap: '8px',
+        padding: '7px 13px', borderRadius: '10px',
+        background: strong ? 'rgba(94,230,177,0.10)' : C.surfaceSoft,
+        border: `1px solid ${strong ? C.borderAccent : C.border}`,
+      },
       children: [
-        { type: 'span', props: { style: { color: '#93a4bd', fontSize: '13px', letterSpacing: '2px' }, children: label } },
-        { type: 'span', props: { style: { color, fontSize: '30px', fontWeight: 700 }, children: value } },
+        { type: 'span', props: { style: { color: C.faint, fontSize: '12px', fontWeight: 600, letterSpacing: '1.6px' }, children: label } },
+        { type: 'span', props: { style: { color, fontSize: '23px', fontWeight: 700 }, children: value } },
       ],
     },
   };
@@ -182,35 +226,42 @@ function optionRow(option, index) {
     type: 'div',
     props: {
       style: {
-        width: '100%', display: 'flex', alignItems: 'center', gap: '18px',
-        padding: '20px 24px', borderRadius: '20px',
-        border: '1px solid rgba(0,212,255,0.24)',
-        background: 'linear-gradient(135deg, rgba(0,212,255,0.08), rgba(124,58,237,0.08))',
+        width: '100%', display: 'flex', flexDirection: 'column', gap: '12px',
+        padding: '18px 22px', borderRadius: '18px',
+        border: `1px solid ${C.border}`,
+        background: C.surfaceSoft,
       },
       children: [
         {
           type: 'div', props: {
-            style: {
-              width: '44px', height: '44px', borderRadius: '14px', flexShrink: 0,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'rgba(0,212,255,0.14)', border: '1px solid rgba(0,212,255,0.42)',
-            },
-            children: [{ type: 'span', props: { style: { color: '#00d4ff', fontSize: '20px', fontWeight: 700 }, children: String(index + 1) } }],
-          },
-        },
-        {
-          type: 'span', props: {
-            style: { color: '#ffffff', fontSize: '24px', fontWeight: 700, lineHeight: 1.25, flex: 1 },
-            children: option.name || 'Opción disponible',
+            style: { display: 'flex', alignItems: 'flex-start', gap: '16px', width: '100%' },
+            children: [
+              {
+                type: 'div', props: {
+                  style: {
+                    width: '42px', height: '42px', borderRadius: '12px', flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(94,230,177,0.11)', border: `1px solid ${C.borderAccent}`,
+                  },
+                  children: [{ type: 'span', props: { style: { color: C.green, fontSize: '19px', fontWeight: 700 }, children: String(index + 1) } }],
+                },
+              },
+              {
+                type: 'span', props: {
+                  style: { color: C.text, fontSize: `${NAME_FONT}px`, fontWeight: 600, lineHeight: 1.3, flex: 1, paddingTop: '6px' },
+                  children: option.name || 'Opción disponible',
+                },
+              },
+            ],
           },
         },
         {
           type: 'div', props: {
-            style: { display: 'flex', alignItems: 'center', flexShrink: 0 },
+            style: { display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '58px' },
             children: [
-              optionMetric('PROB', `${option.probability}%`, '#00d4ff'),
-              optionMetric('FIAB', `${option.confidence}%`, '#4ade80'),
-              optionMetric('CUOTA', `${option.odd}x`, '#f59e0b'),
+              optionMetric('PROB', `${option.probability}%`, C.green, true),
+              optionMetric('FIAB', `${option.confidence}%`, C.cyan, false),
+              optionMetric('CUOTA', `${option.odd}`, C.amber, false),
             ],
           },
         },
@@ -224,17 +275,26 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const match = readMatch(searchParams);
     const date = cleanText(searchParams.get('fecha'), 40);
-    // Cabecera + bloque del partido + una fila por opción + pie.
-    const height = 570 + match.options.length * 118;
+    // Cabecera + bloque del partido + pie, más cada fila con el alto que pida su
+    // nombre. Sin esto, un nombre de dos o tres líneas se salía por debajo y se
+    // solapaba con el pie.
+    const rowsHeight = match.options.reduce((total, option) => total + optionRowHeight(option), 0)
+      + Math.max(0, match.options.length - 1) * ROW_GAP;
+    const height = 492 + rowsHeight;
 
-    const fontPath = join(process.cwd(), 'public/fonts/Inter-Bold.ttf');
-    if (!existsSync(fontPath)) {
-      return Response.json({ error: `Font missing at ${fontPath}` }, { status: 500 });
+    // Tres pesos: sin ellos todo sale en negrita y el conjunto se ve plano.
+    const fonts = [];
+    for (const [file, weight] of [['Inter-Regular.ttf', 400], ['Inter-SemiBold.ttf', 600], ['Inter-Bold.ttf', 700]]) {
+      const fontPath = join(process.cwd(), 'public/fonts', file);
+      if (!existsSync(fontPath)) {
+        return Response.json({ error: `Font missing at ${fontPath}` }, { status: 500 });
+      }
+      fonts.push({ name: 'Inter', data: readFileSync(fontPath), weight, style: 'normal' });
     }
-    const fontData = readFileSync(fontPath);
 
+    // Logo metalizado (el de la app), no el escudo antiguo.
     let cfLogo = null;
-    for (const path of [join(process.cwd(), 'public/vflogo.png'), join(process.cwd(), '../public/vflogo.png')]) {
+    for (const path of [join(process.cwd(), 'public/logo-cf.png'), join(process.cwd(), '../public/logo-cf.png')]) {
       if (!existsSync(path)) continue;
       cfLogo = `data:image/png;base64,${readFileSync(path).toString('base64')}`;
       break;
@@ -249,64 +309,92 @@ export async function GET(request) {
       type: 'div',
       props: {
         style: {
-          width: `${WIDTH}px`, height: `${height}px`, padding: '42px 40px 34px',
+          width: `${WIDTH}px`, height: `${height}px`, padding: '38px 38px 30px',
           display: 'flex', flexDirection: 'column', alignItems: 'center',
-          background: 'linear-gradient(180deg, #030712 0%, #081126 52%, #030712 100%)',
-          color: '#ffffff', fontFamily: 'Inter',
+          background: `linear-gradient(180deg, ${C.bg0} 0%, ${C.bg1} 46%, ${C.bg0} 100%)`,
+          color: C.text, fontFamily: 'Inter',
         },
         children: [
+          // ---- Cabecera: logo + antetítulo + fecha -------------------------
           cfLogo
-            ? { type: 'img', props: { src: cfLogo, width: 260, height: 126, style: { objectFit: 'contain' } } }
-            : { type: 'span', props: { style: { color: '#00d4ff', fontSize: '42px', fontWeight: 700, letterSpacing: '5px' }, children: 'CF ANÁLISIS' } },
-          { type: 'div', props: { style: { width: '100%', height: '1px', margin: '18px 0 26px', background: 'linear-gradient(90deg, transparent, #00d4ff70, transparent)' } } },
-          { type: 'span', props: { style: { color: '#ffffff', fontSize: '34px', fontWeight: 700, letterSpacing: '3px' }, children: 'APUESTA DEL DÍA' } },
-          date ? { type: 'span', props: { style: { color: '#93a4bd', fontSize: '18px', marginTop: '8px' }, children: date } } : null,
+            ? { type: 'img', props: { src: cfLogo, width: 300, height: 72, style: { objectFit: 'contain' } } }
+            : { type: 'span', props: { style: { color: C.green, fontSize: '40px', fontWeight: 700, letterSpacing: '5px' }, children: 'CF ANÁLISIS' } },
+          {
+            type: 'div', props: {
+              style: {
+                display: 'flex', alignItems: 'center', gap: '14px', marginTop: '22px',
+                padding: '9px 20px', borderRadius: '999px',
+                background: 'rgba(94,230,177,0.08)', border: `1px solid ${C.borderAccent}`,
+              },
+              children: [
+                { type: 'div', props: { style: { width: '7px', height: '7px', borderRadius: '999px', background: C.green } } },
+                { type: 'span', props: { style: { color: C.green, fontSize: '17px', fontWeight: 700, letterSpacing: '3.4px' }, children: 'APUESTA DEL DÍA' } },
+                ...(date ? [
+                  { type: 'div', props: { style: { width: '1px', height: '15px', background: 'rgba(255,255,255,0.16)' } } },
+                  { type: 'span', props: { style: { color: C.muted, fontSize: '16px', fontWeight: 400 }, children: date } },
+                ] : []),
+              ],
+            },
+          },
+
+          // ---- Partido ----------------------------------------------------
           {
             type: 'div', props: {
               style: {
                 width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center',
-                margin: '26px 0', padding: '24px 28px', borderRadius: '20px', gap: '16px',
-                background: 'rgba(15,23,42,0.92)', border: '1px solid rgba(255,255,255,0.10)',
+                margin: '24px 0 22px', padding: '24px 26px 20px', borderRadius: '22px', gap: '14px',
+                background: C.surface, border: `1px solid ${C.border}`,
               },
               children: [
                 {
                   type: 'div', props: {
-                    style: { display: 'flex', alignItems: 'center', width: '100%', gap: '20px' },
+                    style: { display: 'flex', alignItems: 'center', width: '100%', gap: '18px' },
                     children: [
-                      logoBadge(homeLogo, match.homeTeam, '#00d4ff'),
+                      logoBadge(homeLogo, match.homeTeam, C.green),
                       {
                         type: 'div', props: {
-                          style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: '6px' },
+                          style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: '7px' },
                           children: [
-                            { type: 'span', props: { style: { color: '#ffffff', fontSize: '24px', fontWeight: 700, textAlign: 'center' }, children: match.homeTeam || 'Local' } },
-                            { type: 'span', props: { style: { color: '#64748b', fontSize: '14px', letterSpacing: '3px' }, children: 'VS' } },
-                            { type: 'span', props: { style: { color: '#ffffff', fontSize: '24px', fontWeight: 700, textAlign: 'center' }, children: match.awayTeam || 'Visitante' } },
+                            { type: 'span', props: { style: { color: C.text, fontSize: '25px', fontWeight: 700, textAlign: 'center', lineHeight: 1.2 }, children: match.homeTeam || 'Local' } },
+                            { type: 'span', props: { style: { color: C.faint, fontSize: '13px', fontWeight: 600, letterSpacing: '3px' }, children: 'VS' } },
+                            { type: 'span', props: { style: { color: C.text, fontSize: '25px', fontWeight: 700, textAlign: 'center', lineHeight: 1.2 }, children: match.awayTeam || 'Visitante' } },
                           ],
                         },
                       },
-                      logoBadge(awayLogo, match.awayTeam, '#a78bfa'),
+                      logoBadge(awayLogo, match.awayTeam, C.cyan),
                     ],
                   },
                 },
                 {
                   type: 'span', props: {
-                    style: { color: '#93a4bd', fontSize: '17px' },
-                    children: [match.league, match.time].filter(Boolean).join(' · ') || ' ',
+                    style: { color: C.muted, fontSize: '16px', fontWeight: 400 },
+                    children: [match.league, match.time].filter(Boolean).join('  ·  ') || ' ',
                   },
                 },
               ],
             },
           },
+
+          // ---- Opciones ---------------------------------------------------
           {
             type: 'div', props: {
-              style: { width: '100%', display: 'flex', flexDirection: 'column', gap: '14px', flex: 1 },
+              style: { width: '100%', display: 'flex', flexDirection: 'column', gap: `${ROW_GAP}px` },
               children: match.options.map((option, index) => optionRow(option, index)),
             },
           },
+
+          // ---- Pie --------------------------------------------------------
           {
             type: 'div', props: {
-              style: { width: '100%', display: 'flex', justifyContent: 'center', paddingTop: '24px', marginTop: 'auto', borderTop: '1px solid rgba(255,255,255,0.08)' },
-              children: [{ type: 'span', props: { style: { color: '#00d4ff', fontSize: '19px', fontWeight: 700, letterSpacing: '2px' }, children: 'CFANALISIS.COM' } }],
+              style: {
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px',
+                paddingTop: '22px', marginTop: 'auto', borderTop: `1px solid ${C.border}`,
+              },
+              children: [
+                { type: 'span', props: { style: { color: C.green, fontSize: '18px', fontWeight: 700, letterSpacing: '2.4px' }, children: 'CFANALISIS.COM' } },
+                { type: 'div', props: { style: { width: '4px', height: '4px', borderRadius: '999px', background: C.faint } } },
+                { type: 'span', props: { style: { color: C.faint, fontSize: '15px', fontWeight: 400 }, children: 'Análisis estadístico, no consejo financiero' } },
+              ],
             },
           },
         ].filter(Boolean),
@@ -314,7 +402,7 @@ export async function GET(request) {
     }, {
       width: WIDTH,
       height,
-      fonts: [{ name: 'Inter', data: fontData, weight: 700, style: 'normal' }],
+      fonts,
     });
 
     const png = await sharp(Buffer.from(svg)).png({ quality: 100, compressionLevel: 3 }).toBuffer();
