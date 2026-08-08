@@ -27,6 +27,7 @@ import { useWorkerSocketState } from '../../hooks/useWorkerSocket';
 import { BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
 import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/timezone';
 import { marketLabel } from '../../lib/market-labels';
+import { useIsIOS } from '../../lib/is-ios';
 import { isTelegramMarketAllowed as isDailyPickMarketAllowed } from '../../lib/telegram-daily-pick';
 import {
   FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY,
@@ -1210,10 +1211,15 @@ export default function Dashboard() {
   // Solo se montan las filas próximas al viewport. Incluso con 400 partidos o
   // más, el DOM conserva aproximadamente 8–12 tarjetas; la altura total sigue
   // siendo desplazable y cada fila dinámica se mide al abrirse.
+  // En iOS no: allí la lista va en flujo normal y virtualiza el navegador con
+  // `content-visibility: auto` (ver el render de .match-list).
+  const isIOS = useIsIOS();
   const matchListRef = useRef(null);
   const [matchListOffset, setMatchListOffset] = useState(0);
   const matchVirtualizer = useWindowVirtualizer({
-    count: !loading && tab === 'partidos' ? sorted.length : 0,
+    // En iOS la lista va sin ventana JS (ver el render), así que el
+    // virtualizador se queda a cero y no mide ni posiciona nada.
+    count: !loading && tab === 'partidos' && !isIOS ? sorted.length : 0,
     estimateSize: () => 310,
     overscan: 5,
     scrollMargin: matchListOffset,
@@ -1221,6 +1227,13 @@ export default function Dashboard() {
     // Al abrir una tarjeta su altura crece. Mantener fijo el scroll actual
     // evita que el virtualizador "compense" el cambio y saque la fila pulsada
     // del viewport antes de que React termine de pintarla.
+    //
+    // OJO: hoy esto no hace nada. virtual-core 3.17.7 lee la propiedad en la
+    // instancia (`this.shouldAdjustScrollPositionOnItemSizeChange`) y nunca la
+    // copia desde las opciones, así que el callback jamás se consulta y manda
+    // el comportamiento por defecto de la librería. Se deja puesto porque
+    // declara la intención y volverá a aplicarse cuando la librería lo lea
+    // desde `options`; si se necesita ya, hay que asignarlo sobre la instancia.
     shouldAdjustScrollPositionOnItemSizeChange: () => false,
   });
 
@@ -1249,6 +1262,42 @@ export default function Dashboard() {
     pushError,
     sorted.length,
   ]);
+
+  // La tarjeta es la misma con y sin ventana JS; solo cambia quién la envuelve.
+  const renderMatchCard = (m) => (analyzedSet.has(m.fixture.id) ? (
+    <AccordionCard
+      match={m}
+      data={analyzedData[m.fixture.id]}
+      odds={analyzedOdds[m.fixture.id]}
+      standings={standings}
+      liveStats={liveStats[m.fixture.id]}
+      isExpanded={expandedMatch === m.fixture.id}
+      onToggle={toggleExpandedMatch}
+      selMarkets={selectedMarkets[m.fixture.id] || EMPTY_MARKETS}
+      onToggleMarket={toggleAccordionMarket}
+      onViewFull={openAnalysisModal}
+      onRemove={dismissMatch}
+      isFavorite={favoritesSet.has(m.fixture.id)}
+      onFavorite={toggleFavorite}
+      userTz={userTz}
+    />
+  ) : (
+    <MatchCard
+      match={m}
+      isAnalyzed={false}
+      isSelected={selected.has(m.fixture.id)}
+      isFavorite={favoritesSet.has(m.fixture.id)}
+      odds={analyzedOdds[m.fixture.id]}
+      standings={standings}
+      matchData={analyzedData[m.fixture.id]}
+      liveStats={liveStats[m.fixture.id]}
+      onSelect={toggleSelect}
+      onHide={doHide}
+      onFavorite={toggleFavorite}
+      onView={goToAnalysis}
+      userTz={userTz}
+    />
+  ));
 
   if (splash) {
     return (
@@ -1444,7 +1493,23 @@ export default function Dashboard() {
                 <p>No hay partidos para esta fecha</p>
               </div>
             )}
-            {sorted.length > 0 && (
+            {sorted.length > 0 && (isIOS ? (
+              // iOS: sin ventana JS. El virtualizador monta y mide cada fila al
+              // entrar en rango, y los impulsos largos de Safari saltan filas
+              // enteras sin llegar a montarlas; al volver hacia arriba esas
+              // filas se miden por primera vez, pasan de los 310px estimados a
+              // su alto real y empujan todo lo de abajo. Medido en WebKit: 13
+              // de 34 pasos con tirones de hasta 115px subiendo, 0 bajando.
+              // Aquí basta `content-visibility: auto` de .mcard/.acc-card, que
+              // ya se salta el render fuera de pantalla y recuerda el alto real.
+              <div className="match-list">
+                {sorted.map(m => (
+                  <div key={m.fixture.id} className="virtual-match-row" style={{ paddingBottom: 8 }}>
+                    {renderMatchCard(m)}
+                  </div>
+                ))}
+              </div>
+            ) : (
               <div
                 ref={matchListRef}
                 className="match-list match-list-virtual"
@@ -1457,43 +1522,6 @@ export default function Dashboard() {
                 {matchVirtualizer.getVirtualItems().map(virtualRow => {
                   const m = sorted[virtualRow.index];
                   if (!m) return null;
-                  const isMatchAnalyzed = analyzedSet.has(m.fixture.id);
-                  if (isMatchAnalyzed) {
-                    return (
-                      <div
-                        key={m.fixture.id}
-                        ref={matchVirtualizer.measureElement}
-                        data-index={virtualRow.index}
-                        className="virtual-match-row"
-                        style={{
-                          position: 'absolute',
-                          top: 0,
-                          left: 0,
-                          width: '100%',
-                          paddingBottom: 8,
-                          boxSizing: 'border-box',
-                          transform: `translateY(${virtualRow.start - matchListOffset}px)`,
-                        }}
-                      >
-                        <AccordionCard
-                          match={m}
-                          data={analyzedData[m.fixture.id]}
-                          odds={analyzedOdds[m.fixture.id]}
-                          standings={standings}
-                          liveStats={liveStats[m.fixture.id]}
-                          isExpanded={expandedMatch === m.fixture.id}
-                          onToggle={toggleExpandedMatch}
-                          selMarkets={selectedMarkets[m.fixture.id] || EMPTY_MARKETS}
-                          onToggleMarket={toggleAccordionMarket}
-                          onViewFull={openAnalysisModal}
-                          onRemove={dismissMatch}
-                          isFavorite={favoritesSet.has(m.fixture.id)}
-                          onFavorite={toggleFavorite}
-                          userTz={userTz}
-                        />
-                      </div>
-                    );
-                  }
                   return (
                     <div
                       key={m.fixture.id}
@@ -1510,26 +1538,12 @@ export default function Dashboard() {
                         transform: `translateY(${virtualRow.start - matchListOffset}px)`,
                       }}
                     >
-                      <MatchCard
-                        match={m}
-                        isAnalyzed={false}
-                        isSelected={selected.has(m.fixture.id)}
-                        isFavorite={favoritesSet.has(m.fixture.id)}
-                        odds={analyzedOdds[m.fixture.id]}
-                        standings={standings}
-                        matchData={analyzedData[m.fixture.id]}
-                        liveStats={liveStats[m.fixture.id]}
-                        onSelect={toggleSelect}
-                        onHide={doHide}
-                        onFavorite={toggleFavorite}
-                        onView={goToAnalysis}
-                        userTz={userTz}
-                      />
+                      {renderMatchCard(m)}
                     </div>
                   );
                 })}
               </div>
-            )}
+            ))}
           </>
         )}
 
