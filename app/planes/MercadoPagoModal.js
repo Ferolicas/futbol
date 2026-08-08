@@ -266,12 +266,13 @@ export default function MercadoPagoModal({
           Elige tu método de pago
         </div>
 
-        <details className="mp-pse-details" ref={pseDetailsRef}>
-          <summary>¿Pagaras con PSE o Nequi? Completa aqui tus datos primero</summary>
+        <details className="mp-pse-details" ref={pseDetailsRef} open>
+          <summary>Datos obligatorios para pagar con PSE, Nequi o DaviPlata</summary>
           <p>
-            Nequi y DaviPlata se pagan desde <strong>PSE</strong>: elige PSE abajo y luego
-            seleccionalos en la lista de bancos. PSE exige estos datos reales para enviarte
-            a tu banco. Con tarjeta o efectivo puedes omitirlos.
+            Nequi y DaviPlata se pagan desde <strong>PSE</strong>: mas abajo elige
+            &laquo;Transferencia con PSE&raquo; y seleccionalos en la lista de bancos. PSE no
+            crea el pago sin estos datos, asi que completalos antes de darle a Pagar.
+            <strong> Si pagas con tarjeta o en efectivo, ignora esta seccion.</strong>
           </p>
           <div className="mp-pse-grid">
             <label>Nombre<input {...billingInput('firstName', { maxLength: 32, autoComplete: 'given-name' })} /></label>
