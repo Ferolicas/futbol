@@ -30,7 +30,8 @@ const billingSchema = z.object({
   neighborhood: z.string().trim().min(1).max(18),
   city: z.string().trim().min(1).max(18),
   phoneAreaCode: z.string().regex(/^\d{3}$/),
-  phoneNumber: z.string().regex(/^\d{1,5}$/),
+  phoneNumber: z.string().regex(/^\d{1,7}$/),
+  federalUnit: z.string().trim().max(18).optional().default(''),
 });
 
 const subscribeSchema = z.object({
@@ -114,7 +115,12 @@ export async function POST(request) {
 
     const token = formData?.token;
     const methodId = paymentMethodId(formData, selectedPaymentMethod);
-    const isPse = methodId === 'pse' || selectedPaymentMethod === 'bank_transfer';
+    // Nequi y PSE viajan los dos como `bank_transfer` en el Payment Brick, pero
+    // solo PSE exige banco + direccion completa. Meter a Nequi en la rama de PSE
+    // pedia datos que ese metodo nunca entrega y dejaba el pago bloqueado en
+    // "completa los datos".
+    const isNequi = methodId === 'nequi';
+    const isPse = !isNequi && (methodId === 'pse' || selectedPaymentMethod === 'bank_transfer');
     if (!token && !methodId) {
       return Response.json({ error: 'Selecciona un metodo de pago.' }, { status: 400 });
     }
@@ -122,7 +128,7 @@ export async function POST(request) {
       const billing = billingSchema.safeParse(billingDetails);
       if (!billing.success) {
         return Response.json({
-          error: 'Completa los datos reales de contacto y direccion requeridos por PSE.',
+          error: 'PSE (incluido el banco Nequi) exige tus datos reales de contacto y direccion. Completalos arriba y reintenta.',
           code: 'PSE_BILLING_REQUIRED',
           fields: billing.error.flatten().fieldErrors,
         }, { status: 400 });

@@ -52,10 +52,12 @@ export default function MercadoPagoModal({
     streetNumber: '',
     neighborhood: '',
     city: '',
+    federalUnit: '',
     phoneAreaCode: '',
     phoneNumber: '',
   };
   const [billingDetails, setBillingDetails] = useState(initialBillingDetails);
+  const [invalidFields, setInvalidFields] = useState({});
   const billingDetailsRef = useRef(initialBillingDetails);
   const controllerRef = useRef(null);
   const pseDetailsRef = useRef(null);
@@ -71,7 +73,28 @@ export default function MercadoPagoModal({
       billingDetailsRef.current = next;
       return next;
     });
+    setInvalidFields((current) => (current[field] ? { ...current, [field]: false } : current));
   };
+
+  // Los datos de PSE viven en un desplegable: al rechazarlos hay que abrirlo,
+  // llevar la vista hasta el y marcar exactamente que campo falta.
+  const revealBillingErrors = (fields) => {
+    setInvalidFields(
+      Object.fromEntries(Object.keys(fields || {}).map((field) => [field, true])),
+    );
+    const panel = pseDetailsRef.current;
+    if (!panel) return;
+    panel.open = true;
+    panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const billingInput = (field, props = {}) => ({
+    value: billingDetails[field],
+    onChange: setBillingField(field),
+    'aria-invalid': invalidFields[field] ? 'true' : undefined,
+    className: invalidFields[field] ? 'mp-pse-input-error' : undefined,
+    ...props,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -147,8 +170,8 @@ export default function MercadoPagoModal({
                     window.location.href = `/pago/estado?attempt=${encodeURIComponent(data.attemptId)}`;
                     return;
                   }
-                  if (data.code === 'PSE_BILLING_REQUIRED' && pseDetailsRef.current) {
-                    pseDetailsRef.current.open = true;
+                  if (data.code === 'PSE_BILLING_REQUIRED') {
+                    revealBillingErrors(data.fields);
                   }
                   if (data.code === 'PAYMENT_REJECTED' || data.code === 'ATTEMPT_EXPIRED') freshAttempt();
                   setError(data.error || 'No se pudo procesar el pago.');
@@ -230,7 +253,7 @@ export default function MercadoPagoModal({
             <strong>
               {amountCop ? `${Math.round(amountCop).toLocaleString('es-CO')} COP` : ''}
             </strong>
-            <small>Selecciona tarjeta, PSE, Nequi o efectivo</small>
+            <small>Tarjeta, PSE (Nequi y DaviPlata incluidos) o efectivo</small>
           </div>
         </header>
 
@@ -244,19 +267,24 @@ export default function MercadoPagoModal({
         </div>
 
         <details className="mp-pse-details" ref={pseDetailsRef}>
-          <summary>¿Pagaras con PSE? Completa tus datos reales</summary>
-          <p>Mercado Pago exige estos datos para enviarte al banco. Con tarjeta puedes omitirlos.</p>
+          <summary>¿Pagaras con PSE o Nequi? Completa aqui tus datos primero</summary>
+          <p>
+            Nequi y DaviPlata se pagan desde <strong>PSE</strong>: elige PSE abajo y luego
+            seleccionalos en la lista de bancos. PSE exige estos datos reales para enviarte
+            a tu banco. Con tarjeta o efectivo puedes omitirlos.
+          </p>
           <div className="mp-pse-grid">
-            <label>Nombre<input value={billingDetails.firstName} maxLength={32} onChange={setBillingField('firstName')} autoComplete="given-name" /></label>
-            <label>Apellido<input value={billingDetails.lastName} maxLength={32} onChange={setBillingField('lastName')} autoComplete="family-name" /></label>
-            <label>Codigo postal<input value={billingDetails.zipCode} maxLength={5} inputMode="numeric" pattern="[0-9]{5}" onChange={setBillingField('zipCode')} autoComplete="postal-code" /></label>
-            <label>Ciudad<input value={billingDetails.city} maxLength={18} onChange={setBillingField('city')} autoComplete="address-level2" /></label>
-            <label>Calle<input value={billingDetails.streetName} maxLength={18} onChange={setBillingField('streetName')} autoComplete="address-line1" /></label>
-            <label>Numero<input value={billingDetails.streetNumber} maxLength={5} onChange={setBillingField('streetNumber')} /></label>
-            <label>Barrio<input value={billingDetails.neighborhood} maxLength={18} onChange={setBillingField('neighborhood')} autoComplete="address-level3" /></label>
+            <label>Nombre<input {...billingInput('firstName', { maxLength: 32, autoComplete: 'given-name' })} /></label>
+            <label>Apellido<input {...billingInput('lastName', { maxLength: 32, autoComplete: 'family-name' })} /></label>
+            <label>Codigo postal<input {...billingInput('zipCode', { maxLength: 5, inputMode: 'numeric', pattern: '[0-9]{5}', autoComplete: 'postal-code', placeholder: '11001' })} /></label>
+            <label>Ciudad<input {...billingInput('city', { maxLength: 18, autoComplete: 'address-level2' })} /></label>
+            <label>Departamento<input {...billingInput('federalUnit', { maxLength: 18, autoComplete: 'address-level1', placeholder: 'Cundinamarca' })} /></label>
+            <label>Calle<input {...billingInput('streetName', { maxLength: 18, autoComplete: 'address-line1' })} /></label>
+            <label>Numero<input {...billingInput('streetNumber', { maxLength: 5 })} /></label>
+            <label>Barrio<input {...billingInput('neighborhood', { maxLength: 18, autoComplete: 'address-level3' })} /></label>
             <div className="mp-pse-phone">
-              <label>Indicativo<input value={billingDetails.phoneAreaCode} maxLength={3} inputMode="numeric" onChange={setBillingField('phoneAreaCode')} placeholder="601" /></label>
-              <label>Telefono<input value={billingDetails.phoneNumber} maxLength={5} inputMode="numeric" onChange={setBillingField('phoneNumber')} autoComplete="tel-national" /></label>
+              <label>Indicativo<input {...billingInput('phoneAreaCode', { maxLength: 3, inputMode: 'numeric', placeholder: '601' })} /></label>
+              <label>Telefono<input {...billingInput('phoneNumber', { maxLength: 7, inputMode: 'numeric', autoComplete: 'tel-national', placeholder: '1234567' })} /></label>
             </div>
           </div>
         </details>
