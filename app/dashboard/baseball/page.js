@@ -1087,27 +1087,29 @@ function ApuestaDelDiaBlock({ apuesta, show, onToggle }) {
                 {' '}con fiabilidad mínima del {apuesta.minReliability ?? BASEBALL_DAILY_MIN_RELIABILITY}%
                 {' '}— carreras, hits, entradas, bateadores y lanzadores
               </div>
-              {apuesta.selections.map((s, i) => (
-                <article className="baseball-apuesta-item" key={i}>
-                  <span className="apuesta-index">{String(i + 1).padStart(2, '0')}</span>
-                  <span className="apuesta-item-copy">
-                    <span className="apuesta-match">
-                      <i className={s.priority === 1 ? 'is-live' : ''}>{s.priority === 2 ? 'Próximo' : s.priority === 1 ? 'En vivo' : 'Final'}</i>
-                      {s.matchName}
-                    </span>
-                    <span className="apuesta-mkt">Bet365 · {displayBettingText(s.name || s.market || 'Pick')}</span>
-                  </span>
-                  <span className="apuesta-item-metrics">
-                    <span className="apuesta-prob"><small>Prob.</small>{cap(s.rawProbability ?? s.probability)}%</span>
-                    {Number.isFinite(Number(s.reliability)) && (
-                      <span className="apuesta-prob" title={s.sampleN ? `${s.sampleHits} de ${s.sampleN} partidos comparables` : undefined}>
-                        <small>Fiab.</small>{Math.floor(Number(s.reliability))}%
+              <div className="apuesta-scroll">
+                {apuesta.selections.map((s, i) => (
+                  <article className="baseball-apuesta-item" key={i}>
+                    <span className="apuesta-index">{String(i + 1).padStart(2, '0')}</span>
+                    <span className="apuesta-item-copy">
+                      <span className="apuesta-match">
+                        <i className={s.priority === 1 ? 'is-live' : ''}>{s.priority === 2 ? 'Próximo' : s.priority === 1 ? 'En vivo' : 'Final'}</i>
+                        {s.matchName}
                       </span>
-                    )}
-                    {s.odd && <span className="apuesta-odd"><small>Cuota</small>{s.odd}</span>}
-                  </span>
-                </article>
-              ))}
+                      <span className="apuesta-mkt">Bet365 · {displayBettingText(s.name || s.market || 'Pick')}</span>
+                    </span>
+                    <span className="apuesta-item-metrics">
+                      <span className="apuesta-prob"><small>Prob.</small>{cap(s.rawProbability ?? s.probability)}%</span>
+                      {Number.isFinite(Number(s.reliability)) && (
+                        <span className="apuesta-prob" title={s.sampleN ? `${s.sampleHits} de ${s.sampleN} partidos comparables` : undefined}>
+                          <small>Fiab.</small>{Math.floor(Number(s.reliability))}%
+                        </span>
+                      )}
+                      {s.odd && <span className="apuesta-odd"><small>Cuota</small>{s.odd}</span>}
+                    </span>
+                  </article>
+                ))}
+              </div>
             </div>
           </motion.div>
         )}

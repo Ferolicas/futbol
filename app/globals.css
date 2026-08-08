@@ -3713,6 +3713,22 @@ body {
   gap: 5px;
 }
 
+/* La lista de la apuesta del día deja ver dos selecciones y asoma la tercera,
+   para que se lea como scroll. Baseball usa items más bajos que Fútbol, así
+   que necesita su propia altura para mostrar exactamente las mismas dos.
+   Se maqueta con flex y `flex: 0 0 auto`: en un contenedor grid con altura
+   acotada las filas `auto` se encogen hasta el `min-height` del item. */
+.app-baseball .apuesta-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 188px;
+}
+
+.app-baseball .apuesta-scroll > .baseball-apuesta-item {
+  flex: 0 0 auto;
+}
+
 .app .apuesta-item,
 .baseball-apuesta-item {
   display: grid !important;
