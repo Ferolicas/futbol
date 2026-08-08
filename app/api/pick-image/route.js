@@ -1,9 +1,18 @@
 /**
- * GET /api/pick-image
+ * GET /api/pick-image?match=<JSON>[&fecha=]
  *
- * Genera la tarjeta PNG vertical que n8n publica en Telegram. Acepta una
- * selección legacy o `selections=<JSON>` con hasta tres partidos. El render es
- * deliberadamente determinista: no contiene análisis generado por IA.
+ * Genera la tarjeta PNG vertical que n8n publica en Telegram: UN partido con
+ * sus TRES opciones. Para publicar tres partidos, n8n pide tres imágenes.
+ *
+ * `match` es un elemento de `data.matches` de /api/combinada-dia:
+ *   { homeTeam, awayTeam, homeLogo, awayLogo, league, leagueLogo, kickoff,
+ *     options: [{ name, probability, confidence, odd }, ...] }
+ *
+ * También admite los parámetros sueltos `home`, `away`, `league`, `hora`,
+ * `homeLogo`, `awayLogo` y `options=<JSON>` para probar a mano.
+ *
+ * El render es deliberadamente determinista: solo muestra las opciones y sus
+ * números, sin recomendaciones ni análisis generado por IA.
  */
 
 import satori from 'satori';
@@ -15,7 +24,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const WIDTH = 800;
-const MAX_SELECTIONS = 3;
+const MAX_OPTIONS = 3;
 const MAX_PAYLOAD_LENGTH = 12_000;
 const ALLOWED_IMG_HOSTS = new Set([
   'media.api-sports.io',
@@ -32,12 +41,20 @@ function cleanOdd(value) {
   return Number.isFinite(odd) && odd > 0 ? odd.toFixed(2) : '—';
 }
 
-function cleanProbability(value) {
-  const probability = Number(value);
-  if (!Number.isFinite(probability)) return '—';
-  const safe = Math.max(0, Math.min(100, probability));
-  if (safe >= 95) return '95';
+function cleanPercent(value) {
+  const percent = Number(value);
+  if (!Number.isFinite(percent)) return '—';
+  const safe = Math.max(0, Math.min(100, percent));
   return String(Math.floor((safe + 1e-9) * 100) / 100);
+}
+
+// La probabilidad se publica topada al 95%; es política de producto y no debe
+// aplicarse a la fiabilidad, que sí se muestra tal cual (96,4% no es 95%).
+function cleanProbability(value) {
+  const percent = Number(value);
+  if (!Number.isFinite(percent)) return '—';
+  if (percent >= 95) return '95';
+  return cleanPercent(percent);
 }
 
 function initials(name) {
@@ -47,45 +64,63 @@ function initials(name) {
   return `${words[0][0]}${words.at(-1)[0]}`.toUpperCase();
 }
 
-function sanitizeSelection(selection = {}) {
+function kickoffTime(value) {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return cleanText(value, 24);
+  return parsed.toISOString().slice(11, 16);
+}
+
+function sanitizeOption(option = {}) {
   return {
-    homeTeam: cleanText(selection.homeTeam || selection.home, 60),
-    awayTeam: cleanText(selection.awayTeam || selection.away, 60),
-    homeLogo: cleanText(selection.homeLogo, 500),
-    awayLogo: cleanText(selection.awayLogo, 500),
-    leagueLogo: cleanText(selection.leagueLogo, 500),
-    league: cleanText(selection.league, 70),
-    name: cleanText(selection.name || selection.pick, 150),
-    probability: cleanProbability(selection.probability),
-    odd: cleanOdd(selection.odd),
-    time: cleanText(selection.time || selection.hora, 24),
+    name: cleanText(option.name || option.pick, 150),
+    probability: cleanProbability(option.probability),
+    confidence: cleanPercent(option.confidence ?? option.reliability),
+    odd: cleanOdd(option.odd),
   };
 }
 
-function readSelections(searchParams) {
-  const raw = searchParams.get('selections');
-  if (raw) {
-    if (raw.length > MAX_PAYLOAD_LENGTH) throw new Error('Payload de selecciones demasiado grande');
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) throw new Error('Selecciones inválidas');
-    const selections = parsed.slice(0, MAX_SELECTIONS).map(sanitizeSelection);
-    if (selections.length) return selections;
+function sanitizeMatch(match = {}, options = []) {
+  return {
+    homeTeam: cleanText(match.homeTeam || match.home, 60),
+    awayTeam: cleanText(match.awayTeam || match.away, 60),
+    homeLogo: cleanText(match.homeLogo, 500),
+    awayLogo: cleanText(match.awayLogo, 500),
+    league: cleanText(match.league, 70),
+    time: cleanText(match.time || match.hora, 24) || kickoffTime(match.kickoff),
+    options: options.slice(0, MAX_OPTIONS).map(sanitizeOption),
+  };
+}
+
+function parseJsonParam(raw, label) {
+  if (!raw) return null;
+  if (raw.length > MAX_PAYLOAD_LENGTH) throw new Error(`Payload de ${label} demasiado grande`);
+  return JSON.parse(raw);
+}
+
+function readMatch(searchParams) {
+  const parsed = parseJsonParam(searchParams.get('match'), 'partido');
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const options = Array.isArray(parsed.options) ? parsed.options : [];
+    if (!options.length) throw new Error('El partido no trae opciones');
+    return sanitizeMatch(parsed, options);
   }
 
-  const match = cleanText(searchParams.get('match') || 'Partido del día', 120);
-  const [fallbackHome = '', fallbackAway = ''] = match.split(/\s+vs\s+/i);
-  return [sanitizeSelection({
+  const looseOptions = parseJsonParam(searchParams.get('options'), 'opciones');
+  if (!Array.isArray(looseOptions) || !looseOptions.length) {
+    throw new Error('Falta el partido: usa match=<JSON> u options=<JSON>');
+  }
+
+  const label = cleanText(searchParams.get('match') || '', 120);
+  const [fallbackHome = '', fallbackAway = ''] = label.split(/\s+vs\s+/i);
+  return sanitizeMatch({
     homeTeam: searchParams.get('home') || fallbackHome,
     awayTeam: searchParams.get('away') || fallbackAway,
     homeLogo: searchParams.get('homeLogo'),
     awayLogo: searchParams.get('awayLogo'),
-    leagueLogo: searchParams.get('leagueLogo'),
     league: searchParams.get('league'),
-    name: searchParams.get('pick'),
-    probability: searchParams.get('prob'),
-    odd: searchParams.get('odd'),
-    time: searchParams.get('hora'),
-  })];
+    hora: searchParams.get('hora'),
+  }, looseOptions);
 }
 
 async function toBase64(url) {
@@ -118,85 +153,64 @@ function logoBadge(logo, team, accent) {
     type: 'div',
     props: {
       style: {
-        width: '72px', height: '72px', borderRadius: '18px', flexShrink: 0,
+        width: '86px', height: '86px', borderRadius: '22px', flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: `${accent}18`, border: `1px solid ${accent}70`,
       },
       children: logo
-        ? [{ type: 'img', props: { src: logo, width: 56, height: 56, style: { objectFit: 'contain' } } }]
-        : [{ type: 'span', props: { style: { color: accent, fontSize: '22px', fontWeight: 700 }, children: initials(team) } }],
+        ? [{ type: 'img', props: { src: logo, width: 66, height: 66, style: { objectFit: 'contain' } } }]
+        : [{ type: 'span', props: { style: { color: accent, fontSize: '26px', fontWeight: 700 }, children: initials(team) } }],
     },
   };
 }
 
-function metric(label, value, color) {
+function optionMetric(label, value, color) {
   return {
     type: 'div',
     props: {
-      style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', flex: 1 },
+      style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', width: '108px' },
       children: [
-        { type: 'span', props: { style: { color: '#93a4bd', fontSize: '15px', letterSpacing: '3px' }, children: label } },
-        { type: 'span', props: { style: { color, fontSize: '54px', fontWeight: 700 }, children: value } },
+        { type: 'span', props: { style: { color: '#93a4bd', fontSize: '13px', letterSpacing: '2px' }, children: label } },
+        { type: 'span', props: { style: { color, fontSize: '30px', fontWeight: 700 }, children: value } },
       ],
     },
   };
 }
 
-function selectionCard(selection, logos, index, total) {
-  const compact = total === 3;
+function optionRow(option, index) {
   return {
     type: 'div',
     props: {
       style: {
-        width: '100%', display: 'flex', flexDirection: 'column',
-        padding: compact ? '20px 22px' : '24px 26px',
-        borderRadius: '20px', border: '1px solid rgba(0,212,255,0.24)',
+        width: '100%', display: 'flex', alignItems: 'center', gap: '18px',
+        padding: '20px 24px', borderRadius: '20px',
+        border: '1px solid rgba(0,212,255,0.24)',
         background: 'linear-gradient(135deg, rgba(0,212,255,0.08), rgba(124,58,237,0.08))',
-        gap: compact ? '14px' : '18px',
       },
       children: [
         {
           type: 'div', props: {
-            style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' },
-            children: [
-              { type: 'span', props: { style: { color: '#00d4ff', fontSize: '15px', fontWeight: 700, letterSpacing: '2px' }, children: total === 1 ? 'SELECCIÓN' : `SELECCIÓN ${index + 1}` } },
-              { type: 'span', props: { style: { color: '#93a4bd', fontSize: '15px' }, children: [selection.league, selection.time].filter(Boolean).join(' · ') } },
-            ],
+            style: {
+              width: '44px', height: '44px', borderRadius: '14px', flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgba(0,212,255,0.14)', border: '1px solid rgba(0,212,255,0.42)',
+            },
+            children: [{ type: 'span', props: { style: { color: '#00d4ff', fontSize: '20px', fontWeight: 700 }, children: String(index + 1) } }],
+          },
+        },
+        {
+          type: 'span', props: {
+            style: { color: '#ffffff', fontSize: '24px', fontWeight: 700, lineHeight: 1.25, flex: 1 },
+            children: option.name || 'Opción disponible',
           },
         },
         {
           type: 'div', props: {
-            style: { display: 'flex', alignItems: 'center', width: '100%', gap: '18px' },
+            style: { display: 'flex', alignItems: 'center', flexShrink: 0 },
             children: [
-              logoBadge(logos.home, selection.homeTeam, '#00d4ff'),
-              {
-                type: 'div', props: {
-                  style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: '5px' },
-                  children: [
-                    { type: 'span', props: { style: { color: '#ffffff', fontSize: compact ? '18px' : '21px', fontWeight: 700, textAlign: 'center' }, children: selection.homeTeam || 'Local' } },
-                    { type: 'span', props: { style: { color: '#64748b', fontSize: '13px', letterSpacing: '2px' }, children: 'VS' } },
-                    { type: 'span', props: { style: { color: '#ffffff', fontSize: compact ? '18px' : '21px', fontWeight: 700, textAlign: 'center' }, children: selection.awayTeam || 'Visitante' } },
-                  ],
-                },
-              },
-              logoBadge(logos.away, selection.awayTeam, '#a78bfa'),
-            ],
-          },
-        },
-        {
-          type: 'div', props: {
-            style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: '16px' },
-            children: [
-              { type: 'span', props: { style: { color: '#ffffff', fontSize: compact ? '22px' : '27px', fontWeight: 700, lineHeight: 1.25, flex: 1 }, children: selection.name || 'Pronóstico disponible' } },
-              {
-                type: 'div', props: {
-                  style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0, gap: '4px' },
-                  children: [
-                    { type: 'span', props: { style: { color: '#00d4ff', fontSize: '20px', fontWeight: 700 }, children: `${selection.probability}%` } },
-                    { type: 'span', props: { style: { color: '#f59e0b', fontSize: '20px', fontWeight: 700 }, children: `${selection.odd}x` } },
-                  ],
-                },
-              },
+              optionMetric('PROB', `${option.probability}%`, '#00d4ff'),
+              optionMetric('FIAB', `${option.confidence}%`, '#4ade80'),
+              optionMetric('CUOTA', `${option.odd}x`, '#f59e0b'),
             ],
           },
         },
@@ -208,11 +222,10 @@ function selectionCard(selection, logos, index, total) {
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const selections = readSelections(searchParams);
-    const combinedOdd = cleanOdd(searchParams.get('odd'));
-    const combinedProbability = cleanProbability(searchParams.get('prob'));
+    const match = readMatch(searchParams);
     const date = cleanText(searchParams.get('fecha'), 40);
-    const height = selections.length === 1 ? 1000 : selections.length === 2 ? 1220 : 1422;
+    // Cabecera + bloque del partido + una fila por opción + pie.
+    const height = 570 + match.options.length * 118;
 
     const fontPath = join(process.cwd(), 'public/fonts/Inter-Bold.ttf');
     if (!existsSync(fontPath)) {
@@ -227,10 +240,10 @@ export async function GET(request) {
       break;
     }
 
-    const selectionLogos = await Promise.all(selections.map(async selection => ({
-      home: await toBase64(selection.homeLogo),
-      away: await toBase64(selection.awayLogo),
-    })));
+    const [homeLogo, awayLogo] = await Promise.all([
+      toBase64(match.homeLogo),
+      toBase64(match.awayLogo),
+    ]);
 
     const svg = await satori({
       type: 'div',
@@ -251,21 +264,43 @@ export async function GET(request) {
           {
             type: 'div', props: {
               style: {
-                width: '100%', display: 'flex', alignItems: 'center',
-                margin: '28px 0', padding: '22px 30px', borderRadius: '20px',
+                width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center',
+                margin: '26px 0', padding: '24px 28px', borderRadius: '20px', gap: '16px',
                 background: 'rgba(15,23,42,0.92)', border: '1px solid rgba(255,255,255,0.10)',
               },
               children: [
-                metric('CUOTA TOTAL', `${combinedOdd}x`, '#f59e0b'),
-                { type: 'div', props: { style: { width: '1px', height: '68px', background: 'rgba(255,255,255,0.12)' } } },
-                metric('PROBABILIDAD', `${combinedProbability}%`, '#00d4ff'),
+                {
+                  type: 'div', props: {
+                    style: { display: 'flex', alignItems: 'center', width: '100%', gap: '20px' },
+                    children: [
+                      logoBadge(homeLogo, match.homeTeam, '#00d4ff'),
+                      {
+                        type: 'div', props: {
+                          style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: '6px' },
+                          children: [
+                            { type: 'span', props: { style: { color: '#ffffff', fontSize: '24px', fontWeight: 700, textAlign: 'center' }, children: match.homeTeam || 'Local' } },
+                            { type: 'span', props: { style: { color: '#64748b', fontSize: '14px', letterSpacing: '3px' }, children: 'VS' } },
+                            { type: 'span', props: { style: { color: '#ffffff', fontSize: '24px', fontWeight: 700, textAlign: 'center' }, children: match.awayTeam || 'Visitante' } },
+                          ],
+                        },
+                      },
+                      logoBadge(awayLogo, match.awayTeam, '#a78bfa'),
+                    ],
+                  },
+                },
+                {
+                  type: 'span', props: {
+                    style: { color: '#93a4bd', fontSize: '17px' },
+                    children: [match.league, match.time].filter(Boolean).join(' · ') || ' ',
+                  },
+                },
               ],
             },
           },
           {
             type: 'div', props: {
-              style: { width: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: selections.length === 3 ? '14px' : '20px', flex: 1 },
-              children: selections.map((selection, index) => selectionCard(selection, selectionLogos[index], index, selections.length)),
+              style: { width: '100%', display: 'flex', flexDirection: 'column', gap: '14px', flex: 1 },
+              children: match.options.map((option, index) => optionRow(option, index)),
             },
           },
           {

@@ -130,15 +130,19 @@ Tras login o registro, las pantallas cliente llaman `refreshSession()` antes de 
 
 El workflow n8n `COMBINADA DEL DIA` se ejecuta diariamente a las 13:00 de
 Madrid. Una sola llamada autenticada a `/api/cron/publish-combinada` reúne los
-análisis y devuelve la selección final. `lib/telegram-daily-pick.js` exige al
-menos 80% de frecuencia y 80% de fiabilidad por opción, admite únicamente
-goles, córners, tarjetas o remates a puerta y limita cada cuota individual al
-rango 1.20–1.60. Prioriza una sola apuesta y, si hace falta, combina hasta tres
-partidos distintos para una cuota total entre 1.50 y 2.00, manteniendo también
-una probabilidad conjunta mínima de 80%. El ranking prioriza probabilidad,
-fiabilidad y después cuota. El workflow no usa IA: construye la URL de
-`/api/pick-image` y Telegram publica la tarjeta con escudos, cuota, probabilidad
-y un único enlace a CF Análisis. `scripts/build-n8n-telegram-workflow.mjs`
+análisis y devuelve los partidos publicables. `lib/telegram-daily-pick.js` exige
+al menos 85% de frecuencia y 90% de fiabilidad por opción, admite únicamente
+goles, córners, tarjetas o remates a puerta y descarta las cuotas por debajo de
+1.20 (no hay techo de cuota). Un partido solo entra si reúne tres opciones
+válidas, y se publican hasta tres partidos: si solo hay dos, se publican dos, y
+si solo hay uno, uno. Ya no se arma combinada, así que no existe cuota total ni
+probabilidad conjunta. La cuota no ordena nada: el ranking es probabilidad y
+después fiabilidad, tanto entre opciones de un partido como entre partidos. El
+workflow no usa IA: emite un item por partido, construye una URL de
+`/api/pick-image?match=<JSON>` para cada uno y Telegram publica **tres imágenes
+distintas**, cada una con el partido y sus tres opciones (probabilidad,
+fiabilidad y cuota) y un único enlace a CF Análisis en la primera.
+`scripts/build-n8n-telegram-workflow.mjs`
 mantiene en n8n las mismas validaciones defensivas que el publicador y un
 disparador interno, no público, para poder ejecutar el mismo flujo en QA sin
 alterar su programación diaria.

@@ -17,12 +17,25 @@ test('el publicador recupera fiabilidad durable antes de aplicar las reglas Tele
   assert.match(source, /reliabilityPercent\(sel\.confidence/);
 });
 
-test('n8n conserva la defensa de probabilidad, fiabilidad y cuotas de Telegram', () => {
+test('n8n conserva la defensa de probabilidad, fiabilidad y cuota de Telegram', () => {
   const source = fs.readFileSync(path.join(__dirname, '../scripts/build-n8n-telegram-workflow.mjs'), 'utf8');
-  assert.match(source, /totalProbability < 80/);
-  assert.match(source, /rawProbability < 80/);
-  assert.match(source, /reliability < 80/);
-  assert.match(source, /odd < 1\.2 \|\| odd > 1\.6/);
+  assert.match(source, /rawProbability < 85/);
+  assert.match(source, /reliability < 90/);
+  // La cuota solo filtra por debajo de 1.20: ya no existe techo.
+  assert.match(source, /odd < 1\.2/);
+  assert.doesNotMatch(source, /odd > 1\.6/);
   assert.match(source, /n8n-nodes-base\.executeWorkflowTrigger/);
   assert.match(source, /telegramResponse\.result\?\.message_id/);
+});
+
+test('n8n publica una imagen por partido, sin combinada', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../scripts/build-n8n-telegram-workflow.mjs'), 'utf8');
+  assert.match(source, /Array\.isArray\(data\.matches\)/);
+  assert.match(source, /options\.length !== 3/);
+  assert.match(source, /return matches\.map\(\(match, index\) => \(\{/);
+  assert.match(source, /'match=' \+ encode\(JSON\.stringify\(match\)\)/);
+  // Sin combinada no hay cuota total ni probabilidad conjunta.
+  assert.doesNotMatch(source, /totalOdd/);
+  assert.doesNotMatch(source, /totalProbability/);
+  assert.doesNotMatch(source, /selections=/);
 });

@@ -1,11 +1,15 @@
 /**
  * GET/POST /api/cron/publish-combinada?secret=CRON_SECRET[&date=YYYY-MM-DD][&status=draft|published]
  *
- * Recorre todos los partidos analizados del día y elige una apuesta publicable:
- * probabilidad y fiabilidad individual >=80%, únicamente goles/córners/
- * tarjetas/remates a puerta, cuota individual 1.20–1.60 y cuota total entre
- * 1.50 y 2.00. Prefiere una sola selección; si no alcanza el mínimo, combina
- * hasta tres partidos distintos sin bajar de 80% conjunto.
+ * Recorre todos los partidos analizados del día y elige hasta TRES partidos
+ * publicables, cada uno con sus TRES mejores opciones: probabilidad >=85%,
+ * fiabilidad >=90%, cuota >=1.20 sin techo y únicamente goles/córners/
+ * tarjetas/remates a puerta. Un partido solo entra si reúne tres opciones
+ * válidas; si solo hay dos partidos así se publican dos, y si solo hay uno, uno.
+ *
+ * Ya NO se arma una combinada: no hay cuota total ni probabilidad conjunta, y
+ * la cuota no ordena nada (solo filtra por debajo de 1.20). n8n publica una
+ * imagen por partido con sus tres opciones.
  *
  * Status semantics:
  *   - 'draft'     = creada/calculada pero NO lista para publicar
@@ -142,30 +146,34 @@ async function handle(request) {
     });
   }
 
-  // 4. Una sola selección si ya queda entre 1.50 y 1.60. Si no, buscar la
-  // combinación mínima (máximo tres partidos distintos) entre 1.50 y 2.00.
+  // 4. Hasta tres partidos con tres opciones cada uno, ordenados por
+  // probabilidad y fiabilidad. La cuota solo filtra por debajo de 1.20.
   const dailyPick = selectTelegramDailyPick(all);
-  if (dailyPick.selections.length === 0) {
+  if (dailyPick.matches.length === 0) {
     return Response.json({
       ok: false,
-      reason: 'no allowed combination in target odds',
+      reason: 'no match with three eligible options',
       date,
       analyzedCount: fixtureIds.length,
       eligibleCount: dailyPick.eligibleCount,
+      eligibleMatchCount: dailyPick.eligibleMatchCount,
       rules: TELEGRAM_DAILY_PICK_RULES,
     });
   }
 
-  const publishedSelections = dailyPick.selections;
+  const publishedMatches = dailyPick.matches;
 
-  // 5. Upsert en combinada_dia (UNIQUE por fecha)
+  // 5. Upsert en combinada_dia (UNIQUE por fecha). La columna `selections`
+  // guarda ahora un array de PARTIDOS, cada uno con su array `options`.
+  // `combined_odd` y `combined_probability` quedan a null: sin combinada no
+  // existe cuota total ni probabilidad conjunta.
   const { data: row, error } = await supabaseAdmin
     .from('combinada_dia')
     .upsert({
       fecha: date,
-      selections: publishedSelections,
-      combined_odd:         dailyPick.combinedOdd,
-      combined_probability: dailyPick.combinedProbability,
+      selections: publishedMatches,
+      combined_odd:         null,
+      combined_probability: null,
       status,
     }, { onConflict: 'fecha' })
     .select()
@@ -179,17 +187,15 @@ async function handle(request) {
     ok: true,
     date,
     id: row.id,
-    selections: publishedSelections.length,
-    combinedOdd:         dailyPick.combinedOdd,
-    combinedProbability: dailyPick.combinedProbability,
+    matches: publishedMatches.length,
+    options: publishedMatches.reduce((total, match) => total + match.options.length, 0),
     status,
     eligibleCount: dailyPick.eligibleCount,
+    eligibleMatchCount: dailyPick.eligibleMatchCount,
     rules: TELEGRAM_DAILY_PICK_RULES,
     data: {
       fecha: row.fecha,
-      selections: publishedSelections,
-      combinedOdd: dailyPick.combinedOdd,
-      combinedProbability: dailyPick.combinedProbability,
+      matches: publishedMatches,
       status,
     },
   });

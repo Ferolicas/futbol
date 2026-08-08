@@ -68,7 +68,7 @@ code.parameters.jsCode = String.raw`const payload = $input.first()?.json || {};
 const expectedNoPick = new Set([
   'no analyzed fixtures',
   'no analyzed selections',
-  'no allowed combination in target odds',
+  'no match with three eligible options',
 ]);
 
 if (payload.ok !== true) {
@@ -77,21 +77,13 @@ if (payload.ok !== true) {
 }
 
 const data = payload.data || {};
-const source = Array.isArray(data.selections) ? data.selections : [];
-const totalOdd = Number(data.combinedOdd);
-const totalProbability = Number(data.combinedProbability);
+const source = Array.isArray(data.matches) ? data.matches : [];
 const state = $getWorkflowStaticData('global');
 
 if (state.lastTelegramDate === data.fecha) return [];
 
 if (source.length < 1 || source.length > 3) {
-  throw new Error('Cantidad de selecciones fuera de regla');
-}
-if (!Number.isFinite(totalOdd) || totalOdd < 1.5 || totalOdd > 2) {
-  throw new Error('Cuota total fuera del rango 1.50–2.00');
-}
-if (!Number.isFinite(totalProbability) || totalProbability < 80) {
-  throw new Error('Probabilidad conjunta inferior al 80%');
+  throw new Error('Cantidad de partidos fuera de regla');
 }
 
 const normalize = value => String(value || '')
@@ -117,48 +109,65 @@ const formatTime = kickoff => {
   });
 };
 
-const selections = source.map(selection => {
-  const rawProbability = Number(selection.rawProbability ?? selection.probability);
-  const probability = Number(selection.probability);
-  const rawReliability = Number(selection.confidence);
-  const reliability = rawReliability >= 0 && rawReliability <= 1
-    ? rawReliability * 100
-    : rawReliability;
-  const odd = Number(selection.odd);
-  if (!allowedMarket(selection)
-      || !Number.isFinite(rawProbability) || rawProbability < 80
-      || !Number.isFinite(reliability) || reliability < 80
-      || !Number.isFinite(odd) || odd < 1.2 || odd > 1.6) {
-    throw new Error('El backend devolvió un mercado fuera de las reglas de Telegram');
+// La cuota solo filtra por debajo de 1.20 y no tiene techo: lo que decide es
+// probabilidad (>=85%) y fiabilidad (>=90%).
+const matches = source.map(match => {
+  const options = Array.isArray(match.options) ? match.options : [];
+  if (options.length !== 3) {
+    throw new Error('El backend devolvió un partido sin sus tres opciones');
   }
   return {
-    homeTeam: selection.homeTeam || '',
-    awayTeam: selection.awayTeam || '',
-    homeLogo: selection.homeLogo || '',
-    awayLogo: selection.awayLogo || '',
-    league: selection.league || '',
-    name: String(selection.name || '')
-      .replace(/\bOver\b/gi, 'Más de')
-      .replace(/\bUnder\b/gi, 'Menos de'),
-    probability: Math.min(95, probability),
-    odd,
-    time: formatTime(selection.kickoff),
+    homeTeam: match.homeTeam || '',
+    awayTeam: match.awayTeam || '',
+    homeLogo: match.homeLogo || '',
+    awayLogo: match.awayLogo || '',
+    league: match.league || '',
+    time: formatTime(match.kickoff),
+    options: options.map(option => {
+      const rawProbability = Number(option.rawProbability ?? option.probability);
+      const probability = Number(option.probability);
+      const rawReliability = Number(option.confidence);
+      const reliability = rawReliability >= 0 && rawReliability <= 1
+        ? rawReliability * 100
+        : rawReliability;
+      const odd = Number(option.odd);
+      if (!allowedMarket(option)
+          || !Number.isFinite(rawProbability) || rawProbability < 85
+          || !Number.isFinite(reliability) || reliability < 90
+          || !Number.isFinite(odd) || odd < 1.2) {
+        throw new Error('El backend devolvió un mercado fuera de las reglas de Telegram');
+      }
+      return {
+        name: String(option.name || '')
+          .replace(/\bOver\b/gi, 'Más de')
+          .replace(/\bUnder\b/gi, 'Menos de'),
+        probability: Math.min(95, probability),
+        confidence: reliability,
+        odd,
+      };
+    }),
   };
 });
 
 const [year, month, day] = String(data.fecha || '').split('-');
 const displayDate = year && month && day ? day + '/' + month + '/' + year : '';
 const encode = value => encodeURIComponent(String(value ?? ''));
-const imageUrl = 'https://cfanalisis.com/api/pick-image?' + [
-  'odd=' + encode(totalOdd.toFixed(2)),
-  'prob=' + encode(Number.isFinite(totalProbability) ? totalProbability.toFixed(1) : ''),
-  'fecha=' + encode(displayDate),
-  'selections=' + encode(JSON.stringify(selections)),
-  'ts=' + encode(data.fecha || ''),
-].join('&');
-
 const caption = '<a href="https://cfanalisis.com">Si quieres cuotas más altas y más análisis, entra a CF Análisis</a>';
-return [{ json: { imageUrl, caption, selections: selections.length, totalOdd, date: data.fecha } }];`;
+
+// Un item por partido: el nodo de Telegram se ejecuta una vez por item, así que
+// salen tres fotos distintas. El enlace va solo en la primera para no repetirlo.
+return matches.map((match, index) => ({
+  json: {
+    imageUrl: 'https://cfanalisis.com/api/pick-image?' + [
+      'fecha=' + encode(displayDate),
+      'match=' + encode(JSON.stringify(match)),
+      'ts=' + encode(data.fecha || ''),
+    ].join('&'),
+    caption: index === 0 ? caption : '',
+    matches: matches.length,
+    date: data.fecha,
+  },
+}));`;
 
 telegram.parameters = {
   ...telegram.parameters,
@@ -199,7 +208,7 @@ workflow.connections = {
   },
 };
 workflow.active = true;
-workflow.description = 'Publica una apuesta diaria determinista de cuota 1.50–2.00 en Telegram, sin IA.';
+workflow.description = 'Publica cada día hasta 3 partidos en Telegram, una imagen por partido con sus 3 opciones (>=85% probabilidad, >=90% fiabilidad, cuota >=1.20), sin IA.';
 workflow.pinData = {};
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });

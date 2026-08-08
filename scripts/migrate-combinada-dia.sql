@@ -35,7 +35,7 @@ create index if not exists combinada_dia_status_idx
 -- Comentarios para que el schema sea autoexplicativo
 comment on table  public.combinada_dia                      is 'Snapshot publicable de la combinada del dia (cron-generated).';
 comment on column public.combinada_dia.fecha                is 'Dia al que pertenece la combinada (UNIQUE — solo una por dia).';
-comment on column public.combinada_dia.selections           is 'Array JSON con las selecciones del cron (>=90% prob, >=1.20 cuota).';
-comment on column public.combinada_dia.combined_odd         is 'Producto de cuotas de todas las selecciones.';
-comment on column public.combinada_dia.combined_probability is 'Promedio de probabilidades de todas las selecciones (proxy de confianza).';
+comment on column public.combinada_dia.selections           is 'Array JSON de hasta 3 PARTIDOS; cada uno con `options` (3 opciones: >=85% prob, >=90% fiabilidad, cuota >=1.20 sin techo).';
+comment on column public.combinada_dia.combined_odd         is 'OBSOLETA: siempre null desde que la apuesta del dia dejo de ser una combinada.';
+comment on column public.combinada_dia.combined_probability is 'OBSOLETA: siempre null desde que la apuesta del dia dejo de ser una combinada.';
 comment on column public.combinada_dia.status               is 'draft = en proceso/sin revisar | published = lista para mostrar.';

@@ -1,9 +1,14 @@
 /**
  * GET /api/combinada-dia?date=YYYY-MM-DD
  *
- * Lee la combinada del día guardada por el cron /api/cron/publish-combinada.
+ * Lee la apuesta del día guardada por el cron /api/cron/publish-combinada.
  * Si no se pasa date, usa la fecha de hoy.
  * Solo devuelve filas con status = 'published'.
+ *
+ * FORMATO (cambió): devuelve `data.matches`, un array de hasta 3 PARTIDOS y
+ * cada uno con `options` (3 opciones). Ya no existe `data.selections` plana ni
+ * cuota/probabilidad combinadas. n8n debe recorrer `matches` y pedir una imagen
+ * por partido a /api/pick-image?match=<JSON>.
  *
  * ⚠️ USO EXCLUSIVO DE n8n — NO LO LLAMA EL FRONTEND.
  *
@@ -20,7 +25,10 @@
 
 import { supabaseAdmin } from '../../../lib/supabase';
 import { jsonError } from '../../../lib/api-error';
-import { meetsTelegramDailyPickReliability } from '../../../lib/telegram-daily-pick';
+import {
+  meetsTelegramDailyPickReliability,
+  TELEGRAM_DAILY_PICK_RULES,
+} from '../../../lib/telegram-daily-pick';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,20 +72,32 @@ export async function GET(request) {
     return Response.json({ ok: false, reason: 'not published', status: data.status, date }, { status: 404 });
   }
 
-  // Filtro defensivo: descartar selecciones cuyo partido ya empezo hace >110min.
-  // El cron publish-combinada ya las filtra al crear el snapshot, pero esto
-  // protege contra snapshots viejos del dia (el cron solo se re-corre 1x cada
-  // pocas horas y entre ejecuciones partidos cambian de NS a FT).
-  if (Array.isArray(data.selections)) {
-    const nowMs = Date.now();
-    data.selections = data.selections.filter(sel => {
-      if (!meetsTelegramDailyPickReliability(sel?.confidence)) return false;
-      if (!sel?.kickoff) return true;
-      const kMs = new Date(sel.kickoff).getTime();
-      if (!Number.isFinite(kMs)) return true;
-      return (nowMs - kMs) <= 110 * 60 * 1000;
+  // Filtro defensivo: descartar partidos que ya empezaron hace >110min y
+  // opciones que hayan bajado de la fiabilidad mínima. El cron ya los filtra al
+  // crear el snapshot, pero esto protege contra snapshots viejos del día (el
+  // cron solo se re-corre 1x cada pocas horas y entre ejecuciones los partidos
+  // cambian de NS a FT). Un partido que se quede sin sus tres opciones deja de
+  // ser publicable y se descarta entero.
+  const nowMs = Date.now();
+  const stored = Array.isArray(data.selections) ? data.selections : [];
+  const matches = stored
+    .map((match) => ({
+      ...match,
+      options: (Array.isArray(match?.options) ? match.options : [])
+        .filter(option => meetsTelegramDailyPickReliability(option?.confidence)),
+    }))
+    .filter((match) => {
+      if (match.options.length < TELEGRAM_DAILY_PICK_RULES.optionsPerMatch) return false;
+      if (!match.kickoff) return true;
+      const kickoffMs = new Date(match.kickoff).getTime();
+      if (!Number.isFinite(kickoffMs)) return true;
+      return (nowMs - kickoffMs) <= 110 * 60 * 1000;
     });
+
+  if (matches.length === 0) {
+    return Response.json({ ok: false, reason: 'no publishable matches', date }, { status: 404 });
   }
 
-  return Response.json({ ok: true, data });
+  const { selections, combined_odd: _odd, combined_probability: _prob, ...rest } = data;
+  return Response.json({ ok: true, data: { ...rest, matches } });
 }
