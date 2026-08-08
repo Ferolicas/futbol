@@ -34,8 +34,9 @@ const billingSchema = z.object({
   streetNumber: z.string().trim().min(1).max(5),
   neighborhood: z.string().trim().min(1).max(18),
   city: z.string().trim().min(1).max(18),
-  phoneAreaCode: z.string().regex(/^\d{3}$/),
-  phoneNumber: z.string().regex(/^\d{1,7}$/),
+  // MP parte el telefono en area_code (3) + number (1-7). Un celular colombiano
+  // son justo 3+7, asi que lo pedimos entero y lo partimos nosotros.
+  phone: z.string().regex(/^\d{10}$/),
   federalUnit: z.string().trim().max(18).optional().default(''),
 });
 

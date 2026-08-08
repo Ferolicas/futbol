@@ -8120,11 +8120,8 @@ input:checked + .cb-mark::after {
   box-shadow: 0 0 0 3px rgba(255,122,122,.12);
 }
 
-.mp-pse-phone {
-  display: grid;
+.mp-pse-grid label.mp-pse-wide {
   grid-column: span 2;
-  grid-template-columns: minmax(0, .65fr) minmax(0, 1.35fr);
-  gap: 9px;
 }
 
 .payment-modal-loading,

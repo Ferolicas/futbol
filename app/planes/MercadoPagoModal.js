@@ -53,8 +53,7 @@ export default function MercadoPagoModal({
     neighborhood: '',
     city: '',
     federalUnit: '',
-    phoneAreaCode: '',
-    phoneNumber: '',
+    phone: '',
   };
   const [billingDetails, setBillingDetails] = useState(initialBillingDetails);
   const [invalidFields, setInvalidFields] = useState({});
@@ -283,10 +282,10 @@ export default function MercadoPagoModal({
             <label>Calle<input {...billingInput('streetName', { maxLength: 18, autoComplete: 'address-line1' })} /></label>
             <label>Numero<input {...billingInput('streetNumber', { maxLength: 5 })} /></label>
             <label>Barrio<input {...billingInput('neighborhood', { maxLength: 18, autoComplete: 'address-level3' })} /></label>
-            <div className="mp-pse-phone">
-              <label>Indicativo<input {...billingInput('phoneAreaCode', { maxLength: 3, inputMode: 'numeric', placeholder: '601' })} /></label>
-              <label>Telefono<input {...billingInput('phoneNumber', { maxLength: 7, inputMode: 'numeric', autoComplete: 'tel-national', placeholder: '1234567' })} /></label>
-            </div>
+            <label className="mp-pse-wide">
+              Celular (10 digitos)
+              <input {...billingInput('phone', { maxLength: 10, inputMode: 'numeric', autoComplete: 'tel-national', placeholder: '3001234567' })} />
+            </label>
           </div>
         </details>
 
