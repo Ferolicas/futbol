@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-11 · Commit base: `6baa43d`
+Actualizado: 2026-08-11 · Commit base: `7a4437a`
 
 ## Identidad y stack
 
@@ -187,7 +187,9 @@ fútbol conserva su transporte y presentación anteriores. Telegram cachea el
 archivo de `sendPhoto` por su URL: el builder añade
 `BASEBALL_IMAGE_LAYOUT_VERSION` como parámetro `layout`, y esa versión debe
 incrementarse cada vez que cambien el renderer o la geometría para que Telegram
-no reutilice una imagen anterior.
+no reutilice una imagen anterior. El envío admite 180 segundos por imagen y
+continúa ante errores individuales; `Registrar Baseball` persiste cada éxito y
+deja solo el fixture fallido para el siguiente intento horario.
 
 Una opción de fútbol entra en recomendaciones generales cuando su frecuencia
 ponderada real es de 80% o más, existe cuota real y la fiabilidad propia del
