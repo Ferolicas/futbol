@@ -207,6 +207,10 @@ workflow.connections = {
     main: [[{ node: 'Registrar envio', type: 'main', index: 0 }]],
   },
 };
+workflow.settings = {
+  ...(workflow.settings || {}),
+  timezone: 'Europe/Madrid',
+};
 workflow.active = true;
 workflow.description = 'Publica cada día hasta 3 partidos en Telegram, una imagen por partido con sus 3 opciones (>=85% probabilidad, >=90% fiabilidad, cuota >=1.20), sin IA.';
 workflow.pinData = {};

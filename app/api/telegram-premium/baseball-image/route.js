@@ -1,9 +1,9 @@
 /**
  * GET /api/telegram-premium/baseball-image?secret=CRON_SECRET[&date=YYYY-MM-DD][&fixture=ID]
  *
- * Tarjeta PNG del canal Picks Premium (béisbol) con las opciones de carreras,
- * hándicap, hits, hits del bateador y ponches del lanzador (prob >= 60,
- * fiab >= 90) del día Bogotá. Con `fixture` renderiza SOLO ese juego — n8n
+ * Tarjeta PNG del canal Picks Premium (béisbol) con todas las opciones
+ * calculadas de carreras, hándicap, hits, bateadores y lanzadores (prob >= 70,
+ * fiab >= 90), tengan cuota o no. Con `fixture` renderiza SOLO ese juego — n8n
  * publica una imagen por juego; sin él, el tablero completo.
  */
 

@@ -138,26 +138,27 @@ test('béisbol clasifica hándicap, hits, bateador y lanzador', () => {
   assert.equal(premium.classifyBaseballPremiumOption({ category: 'first5-handicap--0.5' }), 'handicap');
   assert.equal(premium.classifyBaseballPremiumOption({ category: 'stat-hits-total-8.5' }), 'hits');
   assert.equal(premium.classifyBaseballPremiumOption({ category: 'stat-hits-home-4.5' }), 'hits');
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-hits-aaronjudge' }), 'hits-bateador');
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-strikeouts-gerritcole' }), 'ponches');
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-hits-aaronjudge' }), 'bateadores');
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-totalBases-aaronjudge' }), 'bateadores');
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-strikeouts-gerritcole' }), 'lanzadores');
 });
 
-test('béisbol excluye moneyline, especiales y otras props de jugador', () => {
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'moneyline' }), null);
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'first5-moneyline' }), null);
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'special-total-parity' }), null);
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'special-correct-score' }), null);
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-homeRuns-aaronjudge' }), null);
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-battingStrikeouts-x' }), null);
+test('béisbol clasifica ganador, especiales y todas las props de bateador', () => {
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'moneyline' }), 'ganador');
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'first5-moneyline' }), 'ganador');
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'special-total-parity' }), 'especiales');
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'special-correct-score' }), 'especiales');
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-homeRuns-aaronjudge' }), 'bateadores');
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-battingStrikeouts-x' }), 'bateadores');
 });
 
 // ---------------------------------------------------------------------------
-// Elegibilidad béisbol: probabilidad >= 60 y fiabilidad >= 90
+// Elegibilidad béisbol: probabilidad >= 70 y fiabilidad >= 90
 // ---------------------------------------------------------------------------
 
-test('béisbol exige probabilidad >= 60 y fiabilidad >= 90', () => {
-  assert.equal(premium.isBaseballPremiumEligible({ rawProbability: 60, reliability: 90 }), true);
-  assert.equal(premium.isBaseballPremiumEligible({ rawProbability: 59.9, reliability: 99 }), false);
+test('béisbol exige probabilidad >= 70 y fiabilidad >= 90', () => {
+  assert.equal(premium.isBaseballPremiumEligible({ rawProbability: 70, reliability: 90 }), true);
+  assert.equal(premium.isBaseballPremiumEligible({ rawProbability: 69.9, reliability: 99 }), false);
   assert.equal(premium.isBaseballPremiumEligible({ rawProbability: 80, reliability: 89.9 }), false);
   assert.equal(premium.isBaseballPremiumEligible({ rawProbability: 80, reliability: null }), false);
 });
@@ -193,10 +194,10 @@ function baseballRow(overrides = {}, selectable = [bbOption()]) {
 test('ensambla juego de béisbol con todas las familias pedidas', () => {
   const rows = [baseballRow({}, [
     bbOption(),
-    bbOption({ id: 'handicap-home--1.5', category: 'handicap--1.5', name: 'Yankees -1.5', rawProbability: 61 }),
+    bbOption({ id: 'handicap-home--1.5', category: 'handicap--1.5', name: 'Yankees -1.5', rawProbability: 71 }),
     bbOption({ id: 'stat-hits-total-8.5-over', category: 'stat-hits-total-8.5', name: 'Ambos: más de 8.5 hits', rawProbability: 88 }),
     bbOption({ id: 'player-hits-judge-1.5-over', category: 'player-hits-aaronjudge', name: 'Judge: más de 0.5 hits', rawProbability: 75 }),
-    bbOption({ id: 'player-strikeouts-cole-5.5-over', category: 'player-strikeouts-gerritcole', name: 'Cole: más de 5.5 ponches', rawProbability: 66 }),
+    bbOption({ id: 'player-strikeouts-cole-5.5-over', category: 'player-strikeouts-gerritcole', name: 'Cole: más de 5.5 ponches', rawProbability: 76 }),
     bbOption({ id: 'ml-home', category: 'moneyline', name: 'Yankees gana', rawProbability: 80 }),          // excluida
     bbOption({ id: 'total-7.5-over', category: 'total-7.5', name: 'Más de 7.5 carreras', rawProbability: 80, reliability: 80 }), // fiab < 90
   ])];
@@ -204,12 +205,63 @@ test('ensambla juego de béisbol con todas las familias pedidas', () => {
   const matches = premium.assembleBaseballPremiumMatches(rows, NOW);
   assert.equal(matches.length, 1);
   const match = matches[0];
-  assert.equal(match.optionsCount, 5);
+  assert.equal(match.optionsCount, 6);
+  assert.equal(match.groups.ganador.length, 1);
   assert.equal(match.groups.carreras.length, 1);
   assert.equal(match.groups.handicap.length, 1);
   assert.equal(match.groups.hits.length, 1);
-  assert.equal(match.groups['hits-bateador'].length, 1);
-  assert.equal(match.groups.ponches.length, 1);
+  assert.equal(match.groups.bateadores.length, 1);
+  assert.equal(match.groups.lanzadores.length, 1);
+});
+
+test('béisbol publica carreras, bateadores y lanzadores sin exigir cuota', () => {
+  const evidence = (hits, n = 100) => ({
+    probability: hits,
+    rawProbability: hits / 100,
+    evidence: { hits, n, rawProbability: hits / n },
+  });
+  const rows = [baseballRow({
+    combinada: { source: 'empirical-exact', selectable: [] },
+    probabilities: {
+      // Shape real persistido: la capa visual puede traer solo porcentajes,
+      // mientras `evidence` conserva las entradas empíricas completas.
+      totals: { lines: { '7.5': { over: 82, under: 18 } } },
+      teamTotals: {
+        home: { '2.5': { over: evidence(81), under: evidence(19) } },
+        away: {},
+      },
+      players: {
+        hits: [{
+          id: 99,
+          name: 'Aaron Judge',
+          lineSides: { '0.5': { over: evidence(84), under: evidence(16) } },
+        }],
+        strikeouts: [{
+          id: 77,
+          name: 'Gerrit Cole',
+          lineSides: { '4.5': { over: evidence(80), under: evidence(20) } },
+        }],
+      },
+      pitchers: {
+        home: { name: 'Gerrit Cole', stats: { era: 3.1, whip: 1.05, k9: 9.8 } },
+      },
+      evidence: {
+        totals: { lines: { '7.5': { over: evidence(82), under: evidence(18) } } },
+        teamTotals: {
+          home: { '2.5': { over: evidence(81), under: evidence(19) } },
+          away: {},
+        },
+      },
+    },
+  }, [])];
+
+  const matches = premium.assembleBaseballPremiumMatches(rows, NOW);
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].groups.carreras.length, 2);
+  assert.equal(matches[0].groups.bateadores.length, 1);
+  assert.equal(matches[0].groups.lanzadores.length, 1);
+  assert.equal(matches[0].groups.bateadores[0].odd, null);
+  assert.equal(matches[0].pitchers.home.name, 'Gerrit Cole');
 });
 
 test('béisbol descarta juegos ya comenzados y ordena por hora de inicio', () => {
