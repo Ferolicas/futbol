@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-11 · Commit base: `10dfe92`
+Actualizado: 2026-08-11 · Commit base: `409a064`
 
 ## Identidad y stack
 
@@ -190,7 +190,9 @@ archivo por su URL: el builder añade
 incrementarse cada vez que cambien el renderer o la geometría para que Telegram
 no reutilice una imagen anterior. El envío admite 180 segundos por imagen y
 continúa ante errores individuales; `Registrar Baseball` persiste cada éxito y
-deja solo el fixture fallido para el siguiente intento horario.
+deja solo el fixture fallido para el siguiente intento horario. Solo registra
+éxito si Telegram devuelve un documento `image/png` de al menos 10 KB; una
+respuesta JSON de error nunca puede pasar por imagen válida.
 
 Una opción de fútbol entra en recomendaciones generales cuando su frecuencia
 ponderada real es de 80% o más, existe cuota real y la fiabilidad propia del
