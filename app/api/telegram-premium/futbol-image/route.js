@@ -3,7 +3,7 @@
  *
  * Tarjeta PNG del canal Picks Premium (fútbol): una sola imagen con todos los
  * partidos del día y todas sus opciones de hándicap, córners y goles
- * (prob > 90, fiab >= 90). n8n la descarga como binario y la sube a Telegram.
+ * (prob >= 70, fiab >= 90). n8n la descarga como binario y la sube a Telegram.
  *
  * Protegida con CRON_SECRET porque renderiza datos del producto de pago; a
  * diferencia de /api/pick-image, aquí los datos salen de la base, no de la URL.

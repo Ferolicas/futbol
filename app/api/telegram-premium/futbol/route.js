@@ -3,7 +3,7 @@
  *
  * Feed JSON del canal Picks Premium (fútbol): todos los partidos del día aún
  * no comenzados con TODAS sus opciones de hándicap, córners y goles que tengan
- * probabilidad > 90 y fiabilidad >= 90.
+ * probabilidad >= 70 y fiabilidad >= 90.
  *
  * ⚠️ USO EXCLUSIVO DE n8n (workflow PICKS PREMIUM DIARIO). No lo llama el
  * frontend. Lee los análisis ya calculados; no dispara ningún motor.

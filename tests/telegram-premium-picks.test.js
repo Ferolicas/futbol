@@ -35,12 +35,12 @@ test('fútbol excluye btts, doble oportunidad, tarjetas, ganador y remates', () 
 });
 
 // ---------------------------------------------------------------------------
-// Elegibilidad fútbol: probabilidad ESTRICTAMENTE > 90 y fiabilidad >= 90
+// Elegibilidad fútbol: probabilidad >= 70 y fiabilidad >= 90
 // ---------------------------------------------------------------------------
 
-test('fútbol exige probabilidad por encima de 90 (estricto)', () => {
-  assert.equal(premium.isFootballPremiumEligible({ rawProbability: 90, confidence: 95 }), false);
-  assert.equal(premium.isFootballPremiumEligible({ rawProbability: 90.01, confidence: 95 }), true);
+test('fútbol exige probabilidad desde 70 hacia arriba', () => {
+  assert.equal(premium.isFootballPremiumEligible({ rawProbability: 69.9, confidence: 95 }), false);
+  assert.equal(premium.isFootballPremiumEligible({ rawProbability: 70, confidence: 95 }), true);
   assert.equal(premium.isFootballPremiumEligible({ rawProbability: 96, confidence: 95 }), true);
 });
 
@@ -88,7 +88,7 @@ test('ensambla partido de fútbol con grupos ordenados por probabilidad', () => 
     fbOption({ id: 'total_goals_over0_5', category: 'total_goals-over', name: 'Más de 0.5 goles', rawProbability: 97, probability: 97 }),
     fbOption({ id: 'total_goals_over1_5', category: 'total_goals-over', name: 'Más de 1.5 goles', rawProbability: 91, probability: 91 }),
     fbOption({ id: 'btts', name: 'Ambos equipos marcan', rawProbability: 99 }),         // familia excluida
-    fbOption({ id: 'total_goals_over2_5', category: 'total_goals-over', name: 'Más de 2.5 goles', rawProbability: 89 }), // no llega a 90
+    fbOption({ id: 'total_goals_over2_5', category: 'total_goals-over', name: 'Más de 2.5 goles', rawProbability: 65 }), // no llega a 70
   ])];
 
   const matches = premium.assembleFootballPremiumMatches(rows, NOW);
