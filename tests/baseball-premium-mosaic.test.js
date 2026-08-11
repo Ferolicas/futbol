@@ -50,32 +50,33 @@ const labels = {
   strikeouts: 'STRIKEOUTS',
 };
 
-test('divide cada mercado en tarjetas legibles y páginas de hasta cuatro tarjetas', () => {
+test('incluye todas las tarjetas del partido en una única imagen horizontal', () => {
   const pages = layout.buildBaseballMosaicPages(match(), order, labels);
-  assert.equal(pages.length, 2);
-  assert.deepEqual(pages.map((page) => page.cards.length), [4, 3]);
-  assert.ok(pages.every((page) => page.cards.length <= 4));
-  assert.ok(pages.flatMap((page) => page.cards).every((card) => card.options.length <= 10));
+  assert.equal(pages.length, 1);
+  assert.equal(pages[0].cards.length, 8);
+  assert.ok(pages[0].cards.every((card) => card.options.length <= 6));
   assert.equal(
-    pages.flatMap((page) => page.cards).reduce((total, card) => total + card.options.length, 0),
+    pages[0].cards.reduce((total, card) => total + card.options.length, 0),
     45,
   );
-  assert.equal(layout.baseballMosaicPageCount(match(), order, labels), 2);
+  assert.equal(layout.baseballMosaicPageCount(match(), order, labels), 1);
+  assert.deepEqual(layout.baseballMosaicGrid(pages[0].cards.length), { columns: 4, rows: 2 });
 });
 
 test('conserva orden, familia y numeración de las continuaciones', () => {
   const cards = layout.buildBaseballMosaicCards(match(), order, labels);
-  assert.deepEqual(cards.slice(0, 3).map((card) => [card.family, card.part, card.parts]), [
-    ['carreras', 1, 3],
-    ['carreras', 2, 3],
-    ['carreras', 3, 3],
+  assert.deepEqual(cards.slice(0, 4).map((card) => [card.family, card.part, card.parts]), [
+    ['carreras', 1, 4],
+    ['carreras', 2, 4],
+    ['carreras', 3, 4],
+    ['carreras', 4, 4],
   ]);
   assert.deepEqual(cards.map((card) => card.family), [
-    'carreras', 'carreras', 'carreras', 'hits', 'hits', 'bateadores', 'strikeouts',
+    'carreras', 'carreras', 'carreras', 'carreras', 'hits', 'hits', 'bateadores', 'strikeouts',
   ]);
 });
 
-test('renderiza cada página en 1920x1080 exactos', async () => {
+test('renderiza la imagen única en 2560x1440 exactos', async () => {
   const pages = layout.buildBaseballMosaicPages(match(), order, labels);
   const png = await image.renderBaseballPremiumMosaicPng({
     match: match(),
@@ -83,7 +84,7 @@ test('renderiza cada página en 1920x1080 exactos', async () => {
     page: pages[0],
   });
   const metadata = await sharp(png).metadata();
-  assert.equal(metadata.width, 1920);
-  assert.equal(metadata.height, 1080);
+  assert.equal(metadata.width, 2560);
+  assert.equal(metadata.height, 1440);
   assert.equal(metadata.format, 'png');
 });

@@ -1,9 +1,9 @@
 /**
  * GET /api/telegram-premium/baseball-image?secret=CRON_SECRET&fixture=ID[&date=YYYY-MM-DD][&page=N]
  *
- * Página PNG 16:9 del canal Picks Premium (béisbol). Cada imagen contiene un
- * mosaico de hasta cuatro tarjetas del mismo partido; `page` permite recorrer
- * todas las opciones sin comprimirlas en una lista vertical ilegible.
+ * PNG 16:9 del canal Picks Premium (béisbol). Cada partido se representa en
+ * una única imagen horizontal con todas las tarjetas necesarias distribuidas
+ * automáticamente en filas y columnas.
  */
 
 import {

@@ -74,8 +74,8 @@ workflow.connections['Schedule Trigger'] = {
 workflow.connections['Schedule Baseball'] = {
   main: [[{ node: 'Feed Baseball', type: 'main', index: 0 }]],
 };
-// Cada partido puede producir varias páginas 16:9. La llave persistida incluye
-// fixture + página para que un error puntual reintente solo esa imagen.
+// Cada partido produce exactamente un mosaico 16:9 con todas sus tarjetas. La
+// deduplicación vuelve a ser por fixture: un error reintenta solo ese juego.
 gateBaseball.parameters.jsCode = `const payload = $input.first()?.json || {};
 if (payload.ok !== true) return [];
 const data = payload.data || {};
@@ -87,33 +87,21 @@ const bogotaHour = Number(new Intl.DateTimeFormat('en-US', {
 if (bogotaHour < 11) return [];
 
 const state = $getWorkflowStaticData('global');
-const sentPages = (state.baseballSent && state.baseballSent.date === data.fecha)
-  ? (state.baseballSent.pages || [])
+const sentFixtures = (state.baseballSent && state.baseballSent.date === data.fecha)
+  ? (state.baseballSent.fixtures || [])
   : [];
-const pending = [];
-for (const match of data.matches) {
-  if (match.fixtureId == null) continue;
-  const pages = Math.max(1, Number(match.imagePages) || 1);
-  for (let page = 1; page <= pages; page += 1) {
-    const pageKey = String(match.fixtureId) + ':' + String(page);
-    if (sentPages.includes(pageKey)) continue;
-    pending.push({
-      json: {
-        date: data.fecha,
-        fixtureId: match.fixtureId,
-        page,
-        pages,
-        pageKey,
-        match: (match.homeTeam || '') + ' vs ' + (match.awayTeam || ''),
-        imageUrl: ${JSON.stringify(baseballImageBaseUrl)}
-          + '&date=' + encodeURIComponent(data.fecha)
-          + '&fixture=' + encodeURIComponent(match.fixtureId)
-          + '&page=' + encodeURIComponent(page),
-      },
-    });
-  }
-}
-return pending;`;
+return data.matches
+  .filter(match => match.fixtureId != null && !sentFixtures.includes(match.fixtureId))
+  .map(match => ({
+    json: {
+      date: data.fecha,
+      fixtureId: match.fixtureId,
+      match: (match.homeTeam || '') + ' vs ' + (match.awayTeam || ''),
+      imageUrl: ${JSON.stringify(baseballImageBaseUrl)}
+        + '&date=' + encodeURIComponent(data.fecha)
+        + '&fixture=' + encodeURIComponent(match.fixtureId),
+    },
+  }));`;
 
 registerBaseball.parameters.jsCode = `const state = $getWorkflowStaticData('global');
 const items = $input.all();
@@ -121,13 +109,13 @@ const gateItems = $('Gate Baseball').all();
 for (let i = 0; i < items.length; i++) {
   const response = items[i].json || {};
   const gate = (gateItems[i] || {}).json || {};
-  if (response.ok === true && gate.pageKey) {
+  if (response.ok === true && gate.fixtureId != null) {
     if (!state.baseballSent || state.baseballSent.date !== gate.date) {
-      state.baseballSent = { date: gate.date, pages: [] };
+      state.baseballSent = { date: gate.date, fixtures: [] };
     }
-    if (!Array.isArray(state.baseballSent.pages)) state.baseballSent.pages = [];
-    if (!state.baseballSent.pages.includes(gate.pageKey)) {
-      state.baseballSent.pages.push(gate.pageKey);
+    if (!Array.isArray(state.baseballSent.fixtures)) state.baseballSent.fixtures = [];
+    if (!state.baseballSent.fixtures.includes(gate.fixtureId)) {
+      state.baseballSent.fixtures.push(gate.fixtureId);
     }
     state.lastBaseballMessageId = (response.result && response.result.message_id)
       || state.lastBaseballMessageId || null;
@@ -136,7 +124,6 @@ for (let i = 0; i < items.length; i++) {
     state.lastBaseballError = {
       at: new Date().toISOString(),
       fixtureId: gate.fixtureId || null,
-      page: gate.page || null,
       response,
     };
   }
@@ -167,7 +154,7 @@ workflow.settings = {
   timezone: 'Europe/Madrid',
 };
 workflow.active = true;
-workflow.description = 'Publica picks premium diarios por partido: fútbol conserva sus disparos a los :10 y béisbol sale desde las 18:00 de España a horas en punto, enviando mosaicos PNG 16:9 por URL directa con deduplicación fixture+página y reintentos hasta la 01:00.';
+workflow.description = 'Publica picks premium diarios por partido: fútbol conserva sus disparos a los :10 y béisbol sale desde las 18:00 de España a horas en punto, enviando un mosaico PNG 16:9 por juego mediante URL directa, con deduplicación por fixture y reintentos hasta la 01:00.';
 workflow.pinData = {};
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });
