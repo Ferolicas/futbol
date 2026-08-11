@@ -3,8 +3,9 @@
  *
  * Feed JSON del canal Picks Premium (béisbol): todos los juegos del día (fecha
  * Bogotá, como el motor) aún no comenzados con TODAS sus opciones calculadas:
- * ganador, carreras, hándicap, hits, bateadores y lanzadores con probabilidad
- * >= 70 y fiabilidad >= 90, aunque todavía no exista cuota.
+ * carreras (partido/equipo/primeras 5), hits, bateadores, abridores y
+ * strikeouts con probabilidad >= 70 y fiabilidad >= 90, aunque todavía no
+ * exista cuota.
  *
  * ⚠️ USO EXCLUSIVO DE n8n (workflow PICKS PREMIUM DIARIO). No lo llama el
  * frontend. Lee los análisis ya calculados; no dispara ningún motor.

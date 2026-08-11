@@ -133,21 +133,21 @@ test('béisbol clasifica carreras (partido, equipo, entradas y habrá carrera)',
   assert.equal(premium.classifyBaseballPremiumOption({ category: 'inning1-run' }), 'carreras');
 });
 
-test('béisbol clasifica hándicap, hits, bateador y lanzador', () => {
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'handicap--1.5' }), 'handicap');
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'first5-handicap--0.5' }), 'handicap');
+test('béisbol clasifica únicamente hits, bateadores y strikeouts además de carreras', () => {
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'handicap--1.5' }), null);
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'first5-handicap--0.5' }), null);
   assert.equal(premium.classifyBaseballPremiumOption({ category: 'stat-hits-total-8.5' }), 'hits');
   assert.equal(premium.classifyBaseballPremiumOption({ category: 'stat-hits-home-4.5' }), 'hits');
   assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-hits-aaronjudge' }), 'bateadores');
   assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-totalBases-aaronjudge' }), 'bateadores');
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-strikeouts-gerritcole' }), 'lanzadores');
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-strikeouts-gerritcole' }), 'strikeouts');
 });
 
-test('béisbol clasifica ganador, especiales y todas las props de bateador', () => {
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'moneyline' }), 'ganador');
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'first5-moneyline' }), 'ganador');
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'special-total-parity' }), 'especiales');
-  assert.equal(premium.classifyBaseballPremiumOption({ category: 'special-correct-score' }), 'especiales');
+test('béisbol excluye ganador, hándicap y especiales pero conserva props de bateador', () => {
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'moneyline' }), null);
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'first5-moneyline' }), null);
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'special-total-parity' }), null);
+  assert.equal(premium.classifyBaseballPremiumOption({ category: 'special-correct-score' }), null);
   assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-homeRuns-aaronjudge' }), 'bateadores');
   assert.equal(premium.classifyBaseballPremiumOption({ category: 'player-battingStrikeouts-x' }), 'bateadores');
 });
@@ -191,7 +191,7 @@ function baseballRow(overrides = {}, selectable = [bbOption()]) {
   };
 }
 
-test('ensambla juego de béisbol con todas las familias pedidas', () => {
+test('ensambla juego de béisbol solo con las cuatro familias pedidas', () => {
   const rows = [baseballRow({}, [
     bbOption(),
     bbOption({ id: 'handicap-home--1.5', category: 'handicap--1.5', name: 'Yankees -1.5', rawProbability: 71 }),
@@ -205,16 +205,15 @@ test('ensambla juego de béisbol con todas las familias pedidas', () => {
   const matches = premium.assembleBaseballPremiumMatches(rows, NOW);
   assert.equal(matches.length, 1);
   const match = matches[0];
-  assert.equal(match.optionsCount, 6);
-  assert.equal(match.groups.ganador.length, 1);
+  assert.equal(match.optionsCount, 4);
   assert.equal(match.groups.carreras.length, 1);
-  assert.equal(match.groups.handicap.length, 1);
   assert.equal(match.groups.hits.length, 1);
   assert.equal(match.groups.bateadores.length, 1);
-  assert.equal(match.groups.lanzadores.length, 1);
+  assert.equal(match.groups.strikeouts.length, 1);
+  assert.deepEqual(Object.keys(match.groups), ['carreras', 'hits', 'bateadores', 'strikeouts']);
 });
 
-test('béisbol publica carreras, bateadores y lanzadores sin exigir cuota', () => {
+test('béisbol publica carreras, bateadores y strikeouts sin exigir cuota', () => {
   const evidence = (hits, n = 100) => ({
     probability: hits,
     rawProbability: hits / 100,
@@ -259,7 +258,7 @@ test('béisbol publica carreras, bateadores y lanzadores sin exigir cuota', () =
   assert.equal(matches.length, 1);
   assert.equal(matches[0].groups.carreras.length, 2);
   assert.equal(matches[0].groups.bateadores.length, 1);
-  assert.equal(matches[0].groups.lanzadores.length, 1);
+  assert.equal(matches[0].groups.strikeouts.length, 1);
   assert.equal(matches[0].groups.bateadores[0].odd, null);
   assert.equal(matches[0].pitchers.home.name, 'Gerrit Cole');
 });
