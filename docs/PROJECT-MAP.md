@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-11 · Commit base: `7a4437a`
+Actualizado: 2026-08-11 · Commit base: `10dfe92`
 
 ## Identidad y stack
 
@@ -171,7 +171,7 @@ aún no fue publicada. Cada imagen también identifica los abridores y muestra
 ERA, WHIP y K/9. El filtro es de producto y no recalcula ni altera el motor.
 
 El béisbol nunca vuelve a una lista vertical ni divide el mismo juego entre
-mensajes: cada partido genera una única PNG horizontal 16:9 de 2560×1440. Todas
+mensajes: cada partido genera una única PNG horizontal 16:9 de 3840×2160. Todas
 las tarjetas que necesite el juego se distribuyen automáticamente en filas y
 columnas; cada tarjeta contiene hasta seis opciones de una sola familia para
 conservar el nombre y las métricas. El feed expone exactamente una imagen por
@@ -180,11 +180,12 @@ partido.
 `scripts/build-n8n-premium-workflow.mjs` fija ambos horarios y conexiones de
 forma reproducible. Después de importar cualquier JSON hay que ejecutar
 `n8n publish:workflow` y reiniciar n8n para registrar los cron de la versión
-publicada. En la rama de béisbol, Telegram recibe directamente la URL HTTPS de
-cada PNG; n8n no descarga ni retiene el binario. La llave persistida por fixture
+publicada. En la rama de béisbol, n8n descarga cada PNG de uno en uno y lo sube
+a Telegram con `sendDocument`, conservando el archivo 4K sin la recompresión de
+`sendPhoto`. La llave persistida por fixture
 evita duplicados y permite reintentar únicamente el partido fallido. La rama de
 fútbol conserva su transporte y presentación anteriores. Telegram cachea el
-archivo de `sendPhoto` por su URL: el builder añade
+archivo por su URL: el builder añade
 `BASEBALL_IMAGE_LAYOUT_VERSION` como parámetro `layout`, y esa versión debe
 incrementarse cada vez que cambien el renderer o la geometría para que Telegram
 no reutilice una imagen anterior. El envío admite 180 segundos por imagen y

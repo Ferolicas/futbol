@@ -58,7 +58,8 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   faltas tienen símbolos distintos. Sustituciones y VAR no relacionado con
   penalti no se notifican.
 - Picks Premium de béisbol en Telegram: una única imagen horizontal 16:9 de
-  2560×1440 por partido, con cabecera común de horario y abridores. No existe un
+  3840×2160 por partido, con cabecera común de horario y abridores. Se entrega
+  como documento PNG sin compresión para conservar la nitidez al ampliar. No existe un
   límite de cuatro tarjetas ni paginación: todas las tarjetas necesarias se
   reparten dinámicamente en filas y columnas. Cada tarjeta pertenece a una
   familia y contiene hasta seis opciones para conservar nombres y métricas.
