@@ -2,6 +2,11 @@
 
 import { readFileSync, writeFileSync } from 'fs';
 
+// Telegram conserva por URL el archivo que recibe en sendPhoto. Este valor debe
+// cambiar cada vez que se modifique el renderer o la geometría del mosaico para
+// impedir que vuelva a entregar una imagen antigua desde su propia caché.
+const BASEBALL_IMAGE_LAYOUT_VERSION = 'horizontal-grid-2560-20260811-1';
+
 const [inputPath, outputPath] = process.argv.slice(2);
 if (!inputPath || !outputPath) {
   throw new Error('Uso: node scripts/build-n8n-premium-workflow.mjs <entrada.json> <salida.json>');
@@ -99,7 +104,8 @@ return data.matches
       match: (match.homeTeam || '') + ' vs ' + (match.awayTeam || ''),
       imageUrl: ${JSON.stringify(baseballImageBaseUrl)}
         + '&date=' + encodeURIComponent(data.fecha)
-        + '&fixture=' + encodeURIComponent(match.fixtureId),
+        + '&fixture=' + encodeURIComponent(match.fixtureId)
+        + '&layout=' + encodeURIComponent(${JSON.stringify(BASEBALL_IMAGE_LAYOUT_VERSION)}),
     },
   }));`;
 
@@ -163,5 +169,6 @@ console.log(JSON.stringify({
   timezone: workflow.settings.timezone,
   footballSchedule: schedule.parameters.rule.interval,
   baseballSchedule: baseballSchedule.parameters.rule.interval,
+  baseballImageLayoutVersion: BASEBALL_IMAGE_LAYOUT_VERSION,
   outputPath,
 }, null, 2));
