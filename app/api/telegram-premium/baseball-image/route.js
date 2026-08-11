@@ -1,10 +1,10 @@
 /**
- * GET /api/telegram-premium/baseball-image?secret=CRON_SECRET[&date=YYYY-MM-DD]
+ * GET /api/telegram-premium/baseball-image?secret=CRON_SECRET[&date=YYYY-MM-DD][&fixture=ID]
  *
- * Tarjeta PNG del canal Picks Premium (béisbol): una sola imagen con todos los
- * juegos del día (fecha Bogotá) y todas sus opciones de carreras, hándicap,
- * hits, hits del bateador y ponches del lanzador (prob >= 60, fiab >= 90).
- * n8n la descarga como binario y la sube a Telegram.
+ * Tarjeta PNG del canal Picks Premium (béisbol) con las opciones de carreras,
+ * hándicap, hits, hits del bateador y ponches del lanzador (prob >= 60,
+ * fiab >= 90) del día Bogotá. Con `fixture` renderiza SOLO ese juego — n8n
+ * publica una imagen por juego; sin él, el tablero completo.
  */
 
 import {
@@ -39,16 +39,20 @@ export async function GET(request) {
   try {
     const url = new URL(request.url);
     const date = url.searchParams.get('date') || bogotaToday();
+    const fixture = url.searchParams.get('fixture');
     const board = await buildBaseballPremiumBoard(date);
 
-    if (!board.matches.length) {
-      return Response.json({ ok: false, reason: 'no eligible options', date }, { status: 404 });
+    const matches = fixture
+      ? board.matches.filter((match) => String(match.fixtureId) === String(fixture))
+      : board.matches;
+    if (!matches.length) {
+      return Response.json({ ok: false, reason: 'no eligible options', date, fixture }, { status: 404 });
     }
 
     const png = await renderPremiumBoardPng({
       title: 'PICKS PREMIUM · BÉISBOL',
       date: displayDate(board.fecha),
-      matches: board.matches,
+      matches,
       groupOrder: BASEBALL_PREMIUM_RULES.groups,
       groupLabels: BASEBALL_GROUP_LABELS,
     });

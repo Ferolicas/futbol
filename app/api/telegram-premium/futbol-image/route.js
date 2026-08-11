@@ -1,9 +1,9 @@
 /**
- * GET /api/telegram-premium/futbol-image?secret=CRON_SECRET[&date=YYYY-MM-DD]
+ * GET /api/telegram-premium/futbol-image?secret=CRON_SECRET[&date=YYYY-MM-DD][&fixture=ID]
  *
- * Tarjeta PNG del canal Picks Premium (fútbol): una sola imagen con todos los
- * partidos del día y todas sus opciones de hándicap, córners y goles
- * (prob >= 70, fiab >= 90). n8n la descarga como binario y la sube a Telegram.
+ * Tarjeta PNG del canal Picks Premium (fútbol) con las opciones de hándicap,
+ * córners y goles (prob >= 70, fiab >= 90). Con `fixture` renderiza SOLO ese
+ * partido — n8n publica una imagen por partido; sin él, el tablero completo.
  *
  * Protegida con CRON_SECRET porque renderiza datos del producto de pago; a
  * diferencia de /api/pick-image, aquí los datos salen de la base, no de la URL.
@@ -41,16 +41,20 @@ export async function GET(request) {
   try {
     const url = new URL(request.url);
     const date = url.searchParams.get('date') || utcToday();
+    const fixture = url.searchParams.get('fixture');
     const board = await buildFootballPremiumBoard(date);
 
-    if (!board.matches.length) {
-      return Response.json({ ok: false, reason: 'no eligible options', date }, { status: 404 });
+    const matches = fixture
+      ? board.matches.filter((match) => String(match.fixtureId) === String(fixture))
+      : board.matches;
+    if (!matches.length) {
+      return Response.json({ ok: false, reason: 'no eligible options', date, fixture }, { status: 404 });
     }
 
     const png = await renderPremiumBoardPng({
       title: 'PICKS PREMIUM · FÚTBOL',
       date: displayDate(board.fecha),
-      matches: board.matches,
+      matches,
       groupOrder: FOOTBALL_PREMIUM_RULES.groups,
       groupLabels: FOOTBALL_GROUP_LABELS,
     });
