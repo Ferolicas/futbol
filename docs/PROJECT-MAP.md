@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-11 · Commit base: `c83e935`
+Actualizado: 2026-08-11 · Commit base: `27a599a`
 
 ## Identidad y stack
 
@@ -173,7 +173,10 @@ de producto y no recalcula ni altera el motor.
 `scripts/build-n8n-premium-workflow.mjs` fija ambos horarios y conexiones de
 forma reproducible. Después de importar cualquier JSON hay que ejecutar
 `n8n publish:workflow` y reiniciar n8n para registrar los cron de la versión
-publicada.
+publicada. En la rama de béisbol, Telegram recibe directamente la URL HTTPS de
+la PNG; n8n no descarga ni retiene el binario, porque los tableros altos podían
+agotar el buffer y producir archivos vacíos. La rama de fútbol conserva su
+transporte anterior.
 
 Una opción de fútbol entra en recomendaciones generales cuando su frecuencia
 ponderada real es de 80% o más, existe cuota real y la fiabilidad propia del
