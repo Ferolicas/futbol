@@ -148,7 +148,17 @@ sendBaseball.parameters = {
       { name: 'photo', value: '={{ $json.imageUrl }}' },
     ],
   },
+  options: {
+    ...(sendBaseball.parameters.options || {}),
+    // Telegram descarga y procesa el PNG remoto antes de responder. Un mosaico
+    // grande puede tardar más de un minuto en frío, especialmente si incluye
+    // muchas fotos de jugadores.
+    timeout: 180000,
+  },
 };
+// Un timeout aislado no debe cancelar el lote completo: Registrar Baseball
+// conserva los éxitos y deja exclusivamente ese fixture para el próximo pase.
+sendBaseball.onError = 'continueRegularOutput';
 workflow.nodes = workflow.nodes.filter(node => node.name !== 'Imagen Baseball');
 workflow.connections['Gate Baseball'] = {
   main: [[{ node: 'Enviar Baseball', type: 'main', index: 0 }]],
@@ -160,7 +170,7 @@ workflow.settings = {
   timezone: 'Europe/Madrid',
 };
 workflow.active = true;
-workflow.description = 'Publica picks premium diarios por partido: fútbol conserva sus disparos a los :10 y béisbol sale desde las 18:00 de España a horas en punto, enviando un mosaico PNG 16:9 por juego mediante URL directa, con deduplicación por fixture y reintentos hasta la 01:00.';
+workflow.description = 'Publica picks premium diarios por partido: fútbol conserva sus disparos a los :10 y béisbol sale desde las 18:00 de España a horas en punto, enviando un mosaico PNG 16:9 por juego mediante URL directa, con deduplicación por fixture, tolerancia a fallos por partido y reintentos hasta la 01:00.';
 workflow.pinData = {};
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });
