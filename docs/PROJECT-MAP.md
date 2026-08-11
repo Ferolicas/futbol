@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-11 · Commit base: `3e877f0`
+Actualizado: 2026-08-11 · Commit base: `76e06ea`
 
 ## Identidad y stack
 
@@ -57,7 +57,7 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `GET /api/pick-image` | `app/api/pick-image/route.js` | n8n/Telegram | Renderiza la tarjeta PNG sin IA, con hasta tres selecciones y escudos |
 | `GET /api/telegram-premium/futbol` | `app/api/telegram-premium/futbol/route.js` | n8n | Catálogo Premium de fútbol (hándicap, córners y goles ≥70/90) |
 | `GET /api/telegram-premium/baseball` | `app/api/telegram-premium/baseball/route.js` | n8n | Catálogo Premium completo de béisbol ≥70/90, incluso sin cuota |
-| `GET /api/telegram-premium/{futbol,baseball}-image` | `app/api/telegram-premium/*-image/route.js` | n8n/Telegram | Renderiza una imagen por partido con todas sus opciones elegibles |
+| `GET /api/telegram-premium/{futbol,baseball}-image` | `app/api/telegram-premium/*-image/route.js` | n8n/Telegram | Fútbol renderiza su tarjeta; béisbol pagina mosaicos 16:9 por partido |
 | `GET /api/fixtures` | `app/api/fixtures/route.js` | Dashboard | Partidos y análisis diarios |
 | `GET /api/match/[id]` | `app/api/match/[id]/route.js` | Análisis | Detalle estadístico |
 | `GET/POST /api/refresh-live` | `app/api/refresh-live/route.js` | Dashboard | Compatibilidad cache-only; ambos leen Redis |
@@ -156,8 +156,8 @@ El workflow n8n `PICKS PREMIUM DIARIO` mantiene dos disparadores separados para
 que un deporte no desplace al otro. Fútbol conserva sus intentos horarios a los
 `:10` desde las 13:10; béisbol empieza exactamente a las 18:00 de
 `Europe/Madrid` y reintenta a horas en punto hasta la 01:00. La deduplicación
-por fecha y fixture evita repetir partidos ya entregados y deja pendientes los
-fallidos.
+de fútbol usa fecha y fixture; la de béisbol usa fecha, fixture y página para
+reintentar únicamente la imagen que haya fallado.
 
 Fútbol no comparte las reglas de béisbol: publica únicamente hándicap, córners
 y goles con probabilidad ≥70% y fiabilidad ≥90%. Béisbol lee la predicción
@@ -166,18 +166,24 @@ el catálogo `combinada.selectable` ligado a Bet365. Por eso publica todos los
 mercados calculados que demuestren probabilidad ≥70% y fiabilidad ≥90% aunque
 no tengan cuota: carreras de partido/equipo/primeras cinco entradas, hits,
 props de bateadores y strikeouts. Ganador, hándicaps, especiales y ladders de
-cada entrada quedan fuera para que una imagen por juego siga siendo legible.
-La cuota se muestra cuando existe y como `—` cuando aún no fue publicada. Cada
-imagen también identifica los abridores y muestra ERA, WHIP y K/9. El filtro es
-de producto y no recalcula ni altera el motor.
+cada entrada quedan fuera. La cuota se muestra cuando existe y como `—` cuando
+aún no fue publicada. Cada imagen también identifica los abridores y muestra
+ERA, WHIP y K/9. El filtro es de producto y no recalcula ni altera el motor.
+
+El béisbol nunca vuelve a comprimirse en una tarjeta vertical: cada partido se
+pagina en PNG 1920×1080. Cada página coloca hasta cuatro tarjetas en mosaico
+2×2 y cada tarjeta contiene como máximo diez opciones de una sola familia; si
+quedan tarjetas, n8n envía otra página 16:9 del mismo partido. El feed expone
+`imagePages` por partido y `totalImages` para que el workflow recorra todas las
+páginas sin perder opciones.
 
 `scripts/build-n8n-premium-workflow.mjs` fija ambos horarios y conexiones de
 forma reproducible. Después de importar cualquier JSON hay que ejecutar
 `n8n publish:workflow` y reiniciar n8n para registrar los cron de la versión
 publicada. En la rama de béisbol, Telegram recibe directamente la URL HTTPS de
-la PNG; n8n no descarga ni retiene el binario, porque los tableros altos podían
-agotar el buffer y producir archivos vacíos. La rama de fútbol conserva su
-transporte anterior.
+cada página PNG; n8n no descarga ni retiene el binario. La llave persistida
+`fixture:página` evita duplicados y permite reintentos parciales. La rama de
+fútbol conserva su transporte y presentación anteriores.
 
 Una opción de fútbol entra en recomendaciones generales cuando su frecuencia
 ponderada real es de 80% o más, existe cuota real y la fiabilidad propia del
