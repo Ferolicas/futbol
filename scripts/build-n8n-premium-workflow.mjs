@@ -15,6 +15,7 @@ if (!workflow || workflow.id !== 'PicksPremiumDia1') {
 
 const schedule = workflow.nodes.find(node => node.name === 'Schedule Trigger');
 let baseballSchedule = workflow.nodes.find(node => node.name === 'Schedule Baseball');
+const sendBaseball = workflow.nodes.find(node => node.name === 'Enviar Baseball');
 const requiredNodes = [
   'Feed Futbol',
   'Gate Futbol',
@@ -23,12 +24,11 @@ const requiredNodes = [
   'Registrar Futbol',
   'Feed Baseball',
   'Gate Baseball',
-  'Imagen Baseball',
   'Enviar Baseball',
   'Registrar Baseball',
 ];
 const existingNodes = new Set(workflow.nodes.map(node => node.name));
-if (!schedule || requiredNodes.some(name => !existingNodes.has(name))) {
+if (!schedule || !sendBaseball || requiredNodes.some(name => !existingNodes.has(name))) {
   throw new Error('Faltan nodos esenciales en el workflow premium');
 }
 
@@ -65,13 +65,32 @@ workflow.connections['Schedule Trigger'] = {
 workflow.connections['Schedule Baseball'] = {
   main: [[{ node: 'Feed Baseball', type: 'main', index: 0 }]],
 };
+// Telegram acepta una URL HTTPS en `photo`. Evitamos descargar decenas de PNG
+// altos dentro de n8n: el binario podía agotarse y llegar como archivo de 0 B.
+// Telegram descarga la imagen directamente y n8n solo transporta la URL.
+sendBaseball.parameters = {
+  ...sendBaseball.parameters,
+  sendBody: true,
+  contentType: 'multipart-form-data',
+  bodyParameters: {
+    parameters: [
+      { name: 'chat_id', value: '-1003870511303' },
+      { name: 'photo', value: '={{ $json.imageUrl }}' },
+    ],
+  },
+};
+workflow.nodes = workflow.nodes.filter(node => node.name !== 'Imagen Baseball');
+workflow.connections['Gate Baseball'] = {
+  main: [[{ node: 'Enviar Baseball', type: 'main', index: 0 }]],
+};
+delete workflow.connections['Imagen Baseball'];
 
 workflow.settings = {
   ...(workflow.settings || {}),
   timezone: 'Europe/Madrid',
 };
 workflow.active = true;
-workflow.description = 'Publica picks premium diarios por partido: fútbol conserva sus disparos a los :10 y béisbol sale desde las 18:00 de España a horas en punto, con deduplicación y reintentos hasta la 01:00.';
+workflow.description = 'Publica picks premium diarios por partido: fútbol conserva sus disparos a los :10 y béisbol sale desde las 18:00 de España a horas en punto, enviando las PNG por URL directa con deduplicación y reintentos hasta la 01:00.';
 workflow.pinData = {};
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });
