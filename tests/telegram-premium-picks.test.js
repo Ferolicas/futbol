@@ -220,6 +220,22 @@ test('béisbol descarta juegos ya comenzados y ordena por hora de inicio', () =>
   assert.deepEqual(matches.map((match) => match.fixtureId), [3, 2]);
 });
 
+test('béisbol usa el día de Bogotá aunque la fecha UTC cruce medianoche', () => {
+  // 19:05 Bogotá del 11-ago = 00:05 UTC del 12-ago: pertenece al día 11.
+  const eveningGame = baseballRow({ fixture_id: 10, start_time: '2026-08-12T00:05:00Z' });
+  // Mediodía Bogotá del 12-ago: pertenece al día siguiente.
+  const nextDayGame = baseballRow({ fixture_id: 11, start_time: '2026-08-12T17:05:00Z' });
+  const matches = premium.assembleBaseballPremiumMatches([eveningGame, nextDayGame], NOW, '2026-08-11');
+  assert.deepEqual(matches.map((match) => match.fixtureId), [10]);
+});
+
+test('shiftIsoDate avanza días y bogotaDayOf traduce a fecha de Bogotá', () => {
+  assert.equal(premium.shiftIsoDate('2026-08-11', 1), '2026-08-12');
+  assert.equal(premium.shiftIsoDate('2026-12-31', 1), '2027-01-01');
+  assert.equal(premium.bogotaDayOf('2026-08-12T00:05:00Z'), '2026-08-11');
+  assert.equal(premium.bogotaDayOf('2026-08-12T17:05:00Z'), '2026-08-12');
+});
+
 test('la probabilidad mostrada se topa en 95 y la fiabilidad no', () => {
   const rows = [baseballRow({}, [bbOption({ rawProbability: 98.4, probability: 95, reliability: 96.6 })])];
   const matches = premium.assembleBaseballPremiumMatches(rows, NOW);
