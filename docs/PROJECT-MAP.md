@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-11 · Commit base: `3bb3ccb`
+Actualizado: 2026-08-11 · Commit base: `6baa43d`
 
 ## Identidad y stack
 
@@ -57,7 +57,7 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `GET /api/pick-image` | `app/api/pick-image/route.js` | n8n/Telegram | Renderiza la tarjeta PNG sin IA, con hasta tres selecciones y escudos |
 | `GET /api/telegram-premium/futbol` | `app/api/telegram-premium/futbol/route.js` | n8n | Catálogo Premium de fútbol (hándicap, córners y goles ≥70/90) |
 | `GET /api/telegram-premium/baseball` | `app/api/telegram-premium/baseball/route.js` | n8n | Catálogo Premium completo de béisbol ≥70/90, incluso sin cuota |
-| `GET /api/telegram-premium/{futbol,baseball}-image` | `app/api/telegram-premium/*-image/route.js` | n8n/Telegram | Fútbol renderiza su tarjeta; béisbol pagina mosaicos 16:9 por partido |
+| `GET /api/telegram-premium/{futbol,baseball}-image` | `app/api/telegram-premium/*-image/route.js` | n8n/Telegram | Fútbol renderiza su tarjeta; béisbol genera un mosaico 16:9 por partido |
 | `GET /api/fixtures` | `app/api/fixtures/route.js` | Dashboard | Partidos y análisis diarios |
 | `GET /api/match/[id]` | `app/api/match/[id]/route.js` | Análisis | Detalle estadístico |
 | `GET/POST /api/refresh-live` | `app/api/refresh-live/route.js` | Dashboard | Compatibilidad cache-only; ambos leen Redis |
@@ -183,7 +183,11 @@ forma reproducible. Después de importar cualquier JSON hay que ejecutar
 publicada. En la rama de béisbol, Telegram recibe directamente la URL HTTPS de
 cada PNG; n8n no descarga ni retiene el binario. La llave persistida por fixture
 evita duplicados y permite reintentar únicamente el partido fallido. La rama de
-fútbol conserva su transporte y presentación anteriores.
+fútbol conserva su transporte y presentación anteriores. Telegram cachea el
+archivo de `sendPhoto` por su URL: el builder añade
+`BASEBALL_IMAGE_LAYOUT_VERSION` como parámetro `layout`, y esa versión debe
+incrementarse cada vez que cambien el renderer o la geometría para que Telegram
+no reutilice una imagen anterior.
 
 Una opción de fútbol entra en recomendaciones generales cuando su frecuencia
 ponderada real es de 80% o más, existe cuota real y la fiabilidad propia del
