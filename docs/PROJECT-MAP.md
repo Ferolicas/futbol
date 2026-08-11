@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-03 · Commit base: `d98d275`
+Actualizado: 2026-08-11 · Commit base: `c83e935`
 
 ## Identidad y stack
 
@@ -55,6 +55,9 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `GET/POST /api/cron/payments` | `app/api/cron/payments/route.js` | Cron VPS | Reconcilia operaciones, perfiles y emails |
 | `GET/POST /api/cron/publish-combinada` | `app/api/cron/publish-combinada/route.js` | n8n | Elige y guarda la apuesta Telegram dentro de las reglas comerciales |
 | `GET /api/pick-image` | `app/api/pick-image/route.js` | n8n/Telegram | Renderiza la tarjeta PNG sin IA, con hasta tres selecciones y escudos |
+| `GET /api/telegram-premium/futbol` | `app/api/telegram-premium/futbol/route.js` | n8n | Catálogo Premium de fútbol (hándicap, córners y goles ≥70/90) |
+| `GET /api/telegram-premium/baseball` | `app/api/telegram-premium/baseball/route.js` | n8n | Catálogo Premium completo de béisbol ≥70/90, incluso sin cuota |
+| `GET /api/telegram-premium/{futbol,baseball}-image` | `app/api/telegram-premium/*-image/route.js` | n8n/Telegram | Renderiza una imagen por partido con todas sus opciones elegibles |
 | `GET /api/fixtures` | `app/api/fixtures/route.js` | Dashboard | Partidos y análisis diarios |
 | `GET /api/match/[id]` | `app/api/match/[id]/route.js` | Análisis | Detalle estadístico |
 | `GET/POST /api/refresh-live` | `app/api/refresh-live/route.js` | Dashboard | Compatibilidad cache-only; ambos leen Redis |
@@ -146,6 +149,31 @@ fiabilidad y cuota) y un único enlace a CF Análisis en la primera.
 mantiene en n8n las mismas validaciones defensivas que el publicador y un
 disparador interno, no público, para poder ejecutar el mismo flujo en QA sin
 alterar su programación diaria.
+
+### Picks Premium en Telegram
+
+El workflow n8n `PICKS PREMIUM DIARIO` mantiene dos disparadores separados para
+que un deporte no desplace al otro. Fútbol conserva sus intentos horarios a los
+`:10` desde las 13:10; béisbol empieza exactamente a las 18:00 de
+`Europe/Madrid` y reintenta a horas en punto hasta la 01:00. La deduplicación
+por fecha y fixture evita repetir partidos ya entregados y deja pendientes los
+fallidos.
+
+Fútbol no comparte las reglas de béisbol: publica únicamente hándicap, córners
+y goles con probabilidad ≥70% y fiabilidad ≥90%. Béisbol lee la predicción
+empírica completa de `baseball_match_analysis.probabilities.evidence`, no solo
+el catálogo `combinada.selectable` ligado a Bet365. Por eso publica todos los
+mercados calculados que demuestren probabilidad ≥70% y fiabilidad ≥90% aunque
+no tengan cuota: ganador, carreras de partido/equipo/periodo/entrada,
+hándicaps, hits, props de bateadores, props de lanzadores y especiales. La
+cuota se muestra cuando existe y como `—` cuando aún no fue publicada. Cada
+imagen también identifica los abridores y muestra ERA, WHIP y K/9. El filtro es
+de producto y no recalcula ni altera el motor.
+
+`scripts/build-n8n-premium-workflow.mjs` fija ambos horarios y conexiones de
+forma reproducible. Después de importar cualquier JSON hay que ejecutar
+`n8n publish:workflow` y reiniciar n8n para registrar los cron de la versión
+publicada.
 
 Una opción de fútbol entra en recomendaciones generales cuando su frecuencia
 ponderada real es de 80% o más, existe cuota real y la fiabilidad propia del
