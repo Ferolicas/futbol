@@ -2,10 +2,10 @@
 
 import { readFileSync, writeFileSync } from 'fs';
 
-// Telegram conserva por URL el archivo que recibe en sendPhoto. Este valor debe
+// Telegram conserva por URL el archivo que recibe. Este valor debe
 // cambiar cada vez que se modifique el renderer o la geometría del mosaico para
 // impedir que vuelva a entregar una imagen antigua desde su propia caché.
-const BASEBALL_IMAGE_LAYOUT_VERSION = 'horizontal-grid-2560-20260811-1';
+const BASEBALL_IMAGE_LAYOUT_VERSION = 'horizontal-grid-4k-document-20260811-1';
 
 const [inputPath, outputPath] = process.argv.slice(2);
 if (!inputPath || !outputPath) {
@@ -21,6 +21,7 @@ if (!workflow || workflow.id !== 'PicksPremiumDia1') {
 const schedule = workflow.nodes.find(node => node.name === 'Schedule Trigger');
 let baseballSchedule = workflow.nodes.find(node => node.name === 'Schedule Baseball');
 const gateBaseball = workflow.nodes.find(node => node.name === 'Gate Baseball');
+let imageBaseball = workflow.nodes.find(node => node.name === 'Imagen Baseball');
 const sendBaseball = workflow.nodes.find(node => node.name === 'Enviar Baseball');
 const registerBaseball = workflow.nodes.find(node => node.name === 'Registrar Baseball');
 const requiredNodes = [
@@ -44,6 +45,11 @@ const currentGateCode = String(gateBaseball.parameters?.jsCode || '');
 const baseballImageBaseUrl = currentGateCode.match(/['"](https:\/\/cfanalisis\.com\/api\/telegram-premium\/baseball-image\?secret=[^'"]+)['"]/)?.[1];
 if (!baseballImageBaseUrl) {
   throw new Error('No se pudo conservar la URL autenticada de imágenes de béisbol');
+}
+const telegramSendDocumentUrl = String(sendBaseball.parameters?.url || '')
+  .replace(/\/send(?:Photo|Document)$/, '/sendDocument');
+if (!telegramSendDocumentUrl.endsWith('/sendDocument')) {
+  throw new Error('No se pudo conservar la URL autenticada de Telegram');
 }
 
 // Fútbol conserva su programación original a los :10. Béisbol usa un trigger
@@ -112,10 +118,15 @@ return data.matches
 registerBaseball.parameters.jsCode = `const state = $getWorkflowStaticData('global');
 const items = $input.all();
 const gateItems = $('Gate Baseball').all();
+let lastError = null;
 for (let i = 0; i < items.length; i++) {
   const response = items[i].json || {};
-  const gate = (gateItems[i] || {}).json || {};
-  if (response.ok === true && gate.fixtureId != null) {
+  const paired = items[i].pairedItem;
+  const sourceIndex = Number.isInteger(paired?.item)
+    ? paired.item
+    : (Number.isInteger(paired) ? paired : i);
+  const gate = (gateItems[sourceIndex] || gateItems[i] || {}).json || {};
+  if (response.ok === true && response.result?.document && gate.fixtureId != null) {
     if (!state.baseballSent || state.baseballSent.date !== gate.date) {
       state.baseballSent = { date: gate.date, fixtures: [] };
     }
@@ -125,27 +136,54 @@ for (let i = 0; i < items.length; i++) {
     }
     state.lastBaseballMessageId = (response.result && response.result.message_id)
       || state.lastBaseballMessageId || null;
-    state.lastBaseballError = null;
-  } else if (response.ok !== true) {
-    state.lastBaseballError = {
+  } else {
+    lastError = {
       at: new Date().toISOString(),
       fixtureId: gate.fixtureId || null,
       response,
     };
   }
 }
+state.lastBaseballError = lastError;
 return items;`;
-// Telegram acepta una URL HTTPS en `photo`. Evitamos descargar decenas de PNG
-// altos dentro de n8n: el binario podía agotarse y llegar como archivo de 0 B.
-// Telegram descarga la imagen directamente y n8n solo transporta la URL.
+// sendPhoto recomprime la imagen. Para conservar el PNG 4K exacto, n8n lo
+// descarga de uno en uno y lo sube como documento multipart sin compresión.
+if (!imageBaseball) {
+  imageBaseball = {
+    id: '3f8e2a10-0000-4c60-9a0d-aaaaaaaa000b',
+    name: 'Imagen Baseball',
+    type: 'n8n-nodes-base.httpRequest',
+    typeVersion: 4.4,
+    position: [0, 220],
+    parameters: {},
+  };
+  workflow.nodes.push(imageBaseball);
+}
+imageBaseball.parameters = {
+  url: '={{ $json.imageUrl }}',
+  options: {
+    timeout: 180000,
+    batching: { batch: { batchSize: 1, batchInterval: 1000 } },
+    response: {
+      response: { neverError: true, fullResponse: false, responseFormat: 'file' },
+    },
+  },
+};
+imageBaseball.onError = 'continueRegularOutput';
 sendBaseball.parameters = {
   ...sendBaseball.parameters,
+  method: 'POST',
+  url: telegramSendDocumentUrl,
   sendBody: true,
   contentType: 'multipart-form-data',
   bodyParameters: {
     parameters: [
       { name: 'chat_id', value: '-1003870511303' },
-      { name: 'photo', value: '={{ $json.imageUrl }}' },
+      {
+        parameterType: 'formBinaryData',
+        name: 'document',
+        inputDataFieldName: 'data',
+      },
     ],
   },
   options: {
@@ -159,18 +197,19 @@ sendBaseball.parameters = {
 // Un timeout aislado no debe cancelar el lote completo: Registrar Baseball
 // conserva los éxitos y deja exclusivamente ese fixture para el próximo pase.
 sendBaseball.onError = 'continueRegularOutput';
-workflow.nodes = workflow.nodes.filter(node => node.name !== 'Imagen Baseball');
 workflow.connections['Gate Baseball'] = {
+  main: [[{ node: 'Imagen Baseball', type: 'main', index: 0 }]],
+};
+workflow.connections['Imagen Baseball'] = {
   main: [[{ node: 'Enviar Baseball', type: 'main', index: 0 }]],
 };
-delete workflow.connections['Imagen Baseball'];
 
 workflow.settings = {
   ...(workflow.settings || {}),
   timezone: 'Europe/Madrid',
 };
 workflow.active = true;
-workflow.description = 'Publica picks premium diarios por partido: fútbol conserva sus disparos a los :10 y béisbol sale desde las 18:00 de España a horas en punto, enviando un mosaico PNG 16:9 por juego mediante URL directa, con deduplicación por fixture, tolerancia a fallos por partido y reintentos hasta la 01:00.';
+workflow.description = 'Publica picks premium diarios por partido: fútbol conserva sus disparos a los :10 y béisbol sale desde las 18:00 de España a horas en punto, enviando un mosaico PNG 4K 16:9 por juego como documento sin compresión, con deduplicación por fixture, tolerancia a fallos por partido y reintentos hasta la 01:00.';
 workflow.pinData = {};
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });

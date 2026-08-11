@@ -76,7 +76,7 @@ test('conserva orden, familia y numeración de las continuaciones', () => {
   ]);
 });
 
-test('renderiza la imagen única en 2560x1440 exactos', async () => {
+test('renderiza la imagen única en 4K 3840x2160 exactos', async () => {
   const pages = layout.buildBaseballMosaicPages(match(), order, labels);
   const png = await image.renderBaseballPremiumMosaicPng({
     match: match(),
@@ -84,7 +84,8 @@ test('renderiza la imagen única en 2560x1440 exactos', async () => {
     page: pages[0],
   });
   const metadata = await sharp(png).metadata();
-  assert.equal(metadata.width, 2560);
-  assert.equal(metadata.height, 1440);
+  assert.equal(metadata.width, 3840);
+  assert.equal(metadata.height, 2160);
   assert.equal(metadata.format, 'png');
+  assert.ok(png.length < 50 * 1024 * 1024, 'el PNG debe caber en el límite de documento de Telegram');
 });

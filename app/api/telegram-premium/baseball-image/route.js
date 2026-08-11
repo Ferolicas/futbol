@@ -78,8 +78,10 @@ export async function GET(request) {
     return new Response(png, {
       headers: {
         'Content-Type': 'image/png',
+        'Content-Disposition': `attachment; filename="cf-premium-baseball-${fixture}.png"`,
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff',
+        'X-Mosaic-Resolution': '3840x2160',
         'X-Mosaic-Page': String(page.page),
         'X-Mosaic-Pages': String(page.pages),
         'X-Mosaic-Cards': String(page.cards.length),
