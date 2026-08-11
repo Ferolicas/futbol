@@ -121,12 +121,15 @@ const gateItems = $('Gate Baseball').all();
 let lastError = null;
 for (let i = 0; i < items.length; i++) {
   const response = items[i].json || {};
+  const document = response.result?.document;
   const paired = items[i].pairedItem;
   const sourceIndex = Number.isInteger(paired?.item)
     ? paired.item
     : (Number.isInteger(paired) ? paired : i);
   const gate = (gateItems[sourceIndex] || gateItems[i] || {}).json || {};
-  if (response.ok === true && response.result?.document && gate.fixtureId != null) {
+  const validPng = document?.mime_type === 'image/png'
+    && Number(document.file_size) >= 10000;
+  if (response.ok === true && validPng && gate.fixtureId != null) {
     if (!state.baseballSent || state.baseballSent.date !== gate.date) {
       state.baseballSent = { date: gate.date, fixtures: [] };
     }
@@ -165,7 +168,7 @@ imageBaseball.parameters = {
     timeout: 180000,
     batching: { batch: { batchSize: 1, batchInterval: 1000 } },
     response: {
-      response: { neverError: true, fullResponse: false, responseFormat: 'file' },
+      response: { neverError: false, fullResponse: false, responseFormat: 'file' },
     },
   },
 };
