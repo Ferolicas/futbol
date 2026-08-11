@@ -57,11 +57,11 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   es un CF monocromo; goles, anulaciones, penaltis, tarjetas, córners, remates y
   faltas tienen símbolos distintos. Sustituciones y VAR no relacionado con
   penalti no se notifican.
-- Picks Premium de béisbol en Telegram: lienzo fijo 16:9 de 1920×1080, cabecera
-  única con partido, horario y abridores, y mosaico 2×2 de hasta cuatro tarjetas.
-  Cada tarjeta pertenece a una familia y admite como máximo diez opciones; una
-  continuación crea otra tarjeta y, después de cuatro, otra página 16:9. Nunca
-  se reduce el lienzo ni la tipografía para hacer entrar una lista vertical.
+- Picks Premium de béisbol en Telegram: una única imagen horizontal 16:9 de
+  2560×1440 por partido, con cabecera común de horario y abridores. No existe un
+  límite de cuatro tarjetas ni paginación: todas las tarjetas necesarias se
+  reparten dinámicamente en filas y columnas. Cada tarjeta pertenece a una
+  familia y contiene hasta seis opciones para conservar nombres y métricas.
   Probabilidad, fiabilidad y cuota usan respectivamente verde, cian y ámbar.
 
 ## Motion y rendimiento

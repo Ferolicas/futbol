@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-11 · Commit base: `76e06ea`
+Actualizado: 2026-08-11 · Commit base: `3bb3ccb`
 
 ## Identidad y stack
 
@@ -156,8 +156,8 @@ El workflow n8n `PICKS PREMIUM DIARIO` mantiene dos disparadores separados para
 que un deporte no desplace al otro. Fútbol conserva sus intentos horarios a los
 `:10` desde las 13:10; béisbol empieza exactamente a las 18:00 de
 `Europe/Madrid` y reintenta a horas en punto hasta la 01:00. La deduplicación
-de fútbol usa fecha y fixture; la de béisbol usa fecha, fixture y página para
-reintentar únicamente la imagen que haya fallado.
+de cada deporte usa fecha y fixture para evitar repeticiones y deja pendientes
+únicamente los partidos cuyo envío haya fallado.
 
 Fútbol no comparte las reglas de béisbol: publica únicamente hándicap, córners
 y goles con probabilidad ≥70% y fiabilidad ≥90%. Béisbol lee la predicción
@@ -170,19 +170,19 @@ cada entrada quedan fuera. La cuota se muestra cuando existe y como `—` cuando
 aún no fue publicada. Cada imagen también identifica los abridores y muestra
 ERA, WHIP y K/9. El filtro es de producto y no recalcula ni altera el motor.
 
-El béisbol nunca vuelve a comprimirse en una tarjeta vertical: cada partido se
-pagina en PNG 1920×1080. Cada página coloca hasta cuatro tarjetas en mosaico
-2×2 y cada tarjeta contiene como máximo diez opciones de una sola familia; si
-quedan tarjetas, n8n envía otra página 16:9 del mismo partido. El feed expone
-`imagePages` por partido y `totalImages` para que el workflow recorra todas las
-páginas sin perder opciones.
+El béisbol nunca vuelve a una lista vertical ni divide el mismo juego entre
+mensajes: cada partido genera una única PNG horizontal 16:9 de 2560×1440. Todas
+las tarjetas que necesite el juego se distribuyen automáticamente en filas y
+columnas; cada tarjeta contiene hasta seis opciones de una sola familia para
+conservar el nombre y las métricas. El feed expone exactamente una imagen por
+partido.
 
 `scripts/build-n8n-premium-workflow.mjs` fija ambos horarios y conexiones de
 forma reproducible. Después de importar cualquier JSON hay que ejecutar
 `n8n publish:workflow` y reiniciar n8n para registrar los cron de la versión
 publicada. En la rama de béisbol, Telegram recibe directamente la URL HTTPS de
-cada página PNG; n8n no descarga ni retiene el binario. La llave persistida
-`fixture:página` evita duplicados y permite reintentos parciales. La rama de
+cada PNG; n8n no descarga ni retiene el binario. La llave persistida por fixture
+evita duplicados y permite reintentar únicamente el partido fallido. La rama de
 fútbol conserva su transporte y presentación anteriores.
 
 Una opción de fútbol entra en recomendaciones generales cuando su frecuencia
