@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-11 · Commit base: `27a599a`
+Actualizado: 2026-08-11 · Commit base: `3e877f0`
 
 ## Identidad y stack
 
@@ -164,9 +164,10 @@ y goles con probabilidad ≥70% y fiabilidad ≥90%. Béisbol lee la predicción
 empírica completa de `baseball_match_analysis.probabilities.evidence`, no solo
 el catálogo `combinada.selectable` ligado a Bet365. Por eso publica todos los
 mercados calculados que demuestren probabilidad ≥70% y fiabilidad ≥90% aunque
-no tengan cuota: ganador, carreras de partido/equipo/periodo/entrada,
-hándicaps, hits, props de bateadores, props de lanzadores y especiales. La
-cuota se muestra cuando existe y como `—` cuando aún no fue publicada. Cada
+no tengan cuota: carreras de partido/equipo/primeras cinco entradas, hits,
+props de bateadores y strikeouts. Ganador, hándicaps, especiales y ladders de
+cada entrada quedan fuera para que una imagen por juego siga siendo legible.
+La cuota se muestra cuando existe y como `—` cuando aún no fue publicada. Cada
 imagen también identifica los abridores y muestra ERA, WHIP y K/9. El filtro es
 de producto y no recalcula ni altera el motor.
 
