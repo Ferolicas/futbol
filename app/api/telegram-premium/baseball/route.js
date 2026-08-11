@@ -11,7 +11,13 @@
  * frontend. Lee los análisis ya calculados; no dispara ningún motor.
  */
 
-import { buildBaseballPremiumBoard, bogotaToday } from '../../../../lib/telegram-premium-picks';
+import {
+  buildBaseballPremiumBoard,
+  bogotaToday,
+  BASEBALL_PREMIUM_RULES,
+  BASEBALL_GROUP_LABELS,
+} from '../../../../lib/telegram-premium-picks';
+import { baseballMosaicPageCount } from '../../../../lib/baseball-premium-mosaic-layout';
 import { jsonError } from '../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
@@ -47,7 +53,22 @@ export async function GET(request) {
       });
     }
 
-    return Response.json({ ok: true, data: board });
+    const matches = board.matches.map((match) => ({
+      ...match,
+      imagePages: baseballMosaicPageCount(
+        match,
+        BASEBALL_PREMIUM_RULES.groups,
+        BASEBALL_GROUP_LABELS,
+      ),
+    }));
+    return Response.json({
+      ok: true,
+      data: {
+        ...board,
+        matches,
+        totalImages: matches.reduce((total, match) => total + match.imagePages, 0),
+      },
+    });
   } catch (error) {
     return jsonError(error);
   }

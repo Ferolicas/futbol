@@ -15,7 +15,9 @@ if (!workflow || workflow.id !== 'PicksPremiumDia1') {
 
 const schedule = workflow.nodes.find(node => node.name === 'Schedule Trigger');
 let baseballSchedule = workflow.nodes.find(node => node.name === 'Schedule Baseball');
+const gateBaseball = workflow.nodes.find(node => node.name === 'Gate Baseball');
 const sendBaseball = workflow.nodes.find(node => node.name === 'Enviar Baseball');
+const registerBaseball = workflow.nodes.find(node => node.name === 'Registrar Baseball');
 const requiredNodes = [
   'Feed Futbol',
   'Gate Futbol',
@@ -28,8 +30,15 @@ const requiredNodes = [
   'Registrar Baseball',
 ];
 const existingNodes = new Set(workflow.nodes.map(node => node.name));
-if (!schedule || !sendBaseball || requiredNodes.some(name => !existingNodes.has(name))) {
+if (!schedule || !gateBaseball || !sendBaseball || !registerBaseball
+    || requiredNodes.some(name => !existingNodes.has(name))) {
   throw new Error('Faltan nodos esenciales en el workflow premium');
+}
+
+const currentGateCode = String(gateBaseball.parameters?.jsCode || '');
+const baseballImageBaseUrl = currentGateCode.match(/['"](https:\/\/cfanalisis\.com\/api\/telegram-premium\/baseball-image\?secret=[^'"]+)['"]/)?.[1];
+if (!baseballImageBaseUrl) {
+  throw new Error('No se pudo conservar la URL autenticada de imágenes de béisbol');
 }
 
 // Fútbol conserva su programación original a los :10. Béisbol usa un trigger
@@ -65,6 +74,74 @@ workflow.connections['Schedule Trigger'] = {
 workflow.connections['Schedule Baseball'] = {
   main: [[{ node: 'Feed Baseball', type: 'main', index: 0 }]],
 };
+// Cada partido puede producir varias páginas 16:9. La llave persistida incluye
+// fixture + página para que un error puntual reintente solo esa imagen.
+gateBaseball.parameters.jsCode = `const payload = $input.first()?.json || {};
+if (payload.ok !== true) return [];
+const data = payload.data || {};
+if (!Array.isArray(data.matches) || data.matches.length === 0) return [];
+
+const bogotaHour = Number(new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Bogota', hour: 'numeric', hourCycle: 'h23',
+}).format(new Date()));
+if (bogotaHour < 11) return [];
+
+const state = $getWorkflowStaticData('global');
+const sentPages = (state.baseballSent && state.baseballSent.date === data.fecha)
+  ? (state.baseballSent.pages || [])
+  : [];
+const pending = [];
+for (const match of data.matches) {
+  if (match.fixtureId == null) continue;
+  const pages = Math.max(1, Number(match.imagePages) || 1);
+  for (let page = 1; page <= pages; page += 1) {
+    const pageKey = String(match.fixtureId) + ':' + String(page);
+    if (sentPages.includes(pageKey)) continue;
+    pending.push({
+      json: {
+        date: data.fecha,
+        fixtureId: match.fixtureId,
+        page,
+        pages,
+        pageKey,
+        match: (match.homeTeam || '') + ' vs ' + (match.awayTeam || ''),
+        imageUrl: ${JSON.stringify(baseballImageBaseUrl)}
+          + '&date=' + encodeURIComponent(data.fecha)
+          + '&fixture=' + encodeURIComponent(match.fixtureId)
+          + '&page=' + encodeURIComponent(page),
+      },
+    });
+  }
+}
+return pending;`;
+
+registerBaseball.parameters.jsCode = `const state = $getWorkflowStaticData('global');
+const items = $input.all();
+const gateItems = $('Gate Baseball').all();
+for (let i = 0; i < items.length; i++) {
+  const response = items[i].json || {};
+  const gate = (gateItems[i] || {}).json || {};
+  if (response.ok === true && gate.pageKey) {
+    if (!state.baseballSent || state.baseballSent.date !== gate.date) {
+      state.baseballSent = { date: gate.date, pages: [] };
+    }
+    if (!Array.isArray(state.baseballSent.pages)) state.baseballSent.pages = [];
+    if (!state.baseballSent.pages.includes(gate.pageKey)) {
+      state.baseballSent.pages.push(gate.pageKey);
+    }
+    state.lastBaseballMessageId = (response.result && response.result.message_id)
+      || state.lastBaseballMessageId || null;
+    state.lastBaseballError = null;
+  } else if (response.ok !== true) {
+    state.lastBaseballError = {
+      at: new Date().toISOString(),
+      fixtureId: gate.fixtureId || null,
+      page: gate.page || null,
+      response,
+    };
+  }
+}
+return items;`;
 // Telegram acepta una URL HTTPS en `photo`. Evitamos descargar decenas de PNG
 // altos dentro de n8n: el binario podía agotarse y llegar como archivo de 0 B.
 // Telegram descarga la imagen directamente y n8n solo transporta la URL.
@@ -90,7 +167,7 @@ workflow.settings = {
   timezone: 'Europe/Madrid',
 };
 workflow.active = true;
-workflow.description = 'Publica picks premium diarios por partido: fútbol conserva sus disparos a los :10 y béisbol sale desde las 18:00 de España a horas en punto, enviando las PNG por URL directa con deduplicación y reintentos hasta la 01:00.';
+workflow.description = 'Publica picks premium diarios por partido: fútbol conserva sus disparos a los :10 y béisbol sale desde las 18:00 de España a horas en punto, enviando mosaicos PNG 16:9 por URL directa con deduplicación fixture+página y reintentos hasta la 01:00.';
 workflow.pinData = {};
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });

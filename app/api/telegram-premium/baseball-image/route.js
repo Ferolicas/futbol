@@ -1,10 +1,9 @@
 /**
- * GET /api/telegram-premium/baseball-image?secret=CRON_SECRET[&date=YYYY-MM-DD][&fixture=ID]
+ * GET /api/telegram-premium/baseball-image?secret=CRON_SECRET&fixture=ID[&date=YYYY-MM-DD][&page=N]
  *
- * Tarjeta PNG del canal Picks Premium (béisbol) con todas las opciones
- * calculadas de carreras, hits, bateadores, abridores y strikeouts (prob >=
- * 70, fiab >= 90), tengan cuota o no. Con `fixture` renderiza SOLO ese juego — n8n
- * publica una imagen por juego; sin él, el tablero completo.
+ * Página PNG 16:9 del canal Picks Premium (béisbol). Cada imagen contiene un
+ * mosaico de hasta cuatro tarjetas del mismo partido; `page` permite recorrer
+ * todas las opciones sin comprimirlas en una lista vertical ilegible.
  */
 
 import {
@@ -13,7 +12,8 @@ import {
   BASEBALL_PREMIUM_RULES,
   BASEBALL_GROUP_LABELS,
 } from '../../../../lib/telegram-premium-picks';
-import { renderPremiumBoardPng } from '../../../../lib/premium-picks-image';
+import { buildBaseballMosaicPages } from '../../../../lib/baseball-premium-mosaic-layout';
+import { renderBaseballPremiumMosaicPng } from '../../../../lib/baseball-premium-mosaic-image';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -40,21 +40,39 @@ export async function GET(request) {
     const url = new URL(request.url);
     const date = url.searchParams.get('date') || bogotaToday();
     const fixture = url.searchParams.get('fixture');
+    const requestedPage = Number(url.searchParams.get('page') || 1);
+    if (!fixture) {
+      return Response.json({ ok: false, reason: 'fixture is required', date }, { status: 400 });
+    }
+    if (!Number.isInteger(requestedPage) || requestedPage < 1) {
+      return Response.json({ ok: false, reason: 'invalid page', date, fixture }, { status: 400 });
+    }
     const board = await buildBaseballPremiumBoard(date);
 
-    const matches = fixture
-      ? board.matches.filter((match) => String(match.fixtureId) === String(fixture))
-      : board.matches;
-    if (!matches.length) {
+    const match = board.matches.find((item) => String(item.fixtureId) === String(fixture));
+    if (!match) {
       return Response.json({ ok: false, reason: 'no eligible options', date, fixture }, { status: 404 });
     }
+    const pages = buildBaseballMosaicPages(
+      match,
+      BASEBALL_PREMIUM_RULES.groups,
+      BASEBALL_GROUP_LABELS,
+    );
+    const page = pages[requestedPage - 1];
+    if (!page) {
+      return Response.json({
+        ok: false,
+        reason: 'page not found',
+        date,
+        fixture,
+        pages: pages.length,
+      }, { status: 404 });
+    }
 
-    const png = await renderPremiumBoardPng({
-      title: 'PICKS PREMIUM · BÉISBOL',
+    const png = await renderBaseballPremiumMosaicPng({
+      match,
       date: displayDate(board.fecha),
-      matches,
-      groupOrder: BASEBALL_PREMIUM_RULES.groups,
-      groupLabels: BASEBALL_GROUP_LABELS,
+      page,
     });
 
     return new Response(png, {
@@ -62,6 +80,9 @@ export async function GET(request) {
         'Content-Type': 'image/png',
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff',
+        'X-Mosaic-Page': String(page.page),
+        'X-Mosaic-Pages': String(page.pages),
+        'X-Mosaic-Cards': String(page.cards.length),
       },
     });
   } catch (error) {
