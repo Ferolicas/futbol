@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-11 · Commit base: `409a064`
+Actualizado: 2026-08-12 · Commit base: `fb520aa`
 
 ## Identidad y stack
 
@@ -180,7 +180,11 @@ partido.
 `scripts/build-n8n-premium-workflow.mjs` fija ambos horarios y conexiones de
 forma reproducible. Después de importar cualquier JSON hay que ejecutar
 `n8n publish:workflow` y reiniciar n8n para registrar los cron de la versión
-publicada. En la rama de béisbol, n8n descarga cada PNG de uno en uno y lo sube
+publicada. En la rama de béisbol, un nodo `Loop Over Items` real entrega un
+fixture por iteración; el batching del nodo HTTP no serializa peticiones, solo
+escalona su inicio, y no debe usarse como control de concurrencia. Además, el
+endpoint mantiene una cola defensiva de un único render pesado por proceso. Así
+n8n descarga cada PNG de uno en uno y lo sube
 a Telegram con `sendDocument`, conservando el archivo 4K sin la recompresión de
 `sendPhoto`. La llave persistida por fixture
 evita duplicados y permite reintentar únicamente el partido fallido. La rama de
@@ -467,6 +471,12 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - 2026-08-01: la migración `migrate-payment-reliability.sql` debe ejecutarse antes del build; incluye permisos explícitos para el rol `cfanalisis`.
 - 2026-08-01: Stripe escucha facturas, suscripciones y compatibilidad de PaymentIntent legado. Añadir eventos con `scripts/configure-stripe-webhook.mjs` solo después de desplegar el handler.
 - 2026-08-01: n8n ejecuta la versión publicada de cada workflow, no necesariamente el borrador visible en `workflow_entity`. Tras importar un cambio hay que publicarlo y reiniciar n8n; de lo contrario puede seguir activa una URL o conexión antigua.
+- 2026-08-12: `HTTP Request > batching` de n8n no espera a que termine cada
+  petición: con mosaicos 4K deja varias activas y puede superar el límite de
+  memoria de PM2. Premium béisbol debe conservar `Loop Baseball` con batch 1 y
+  la cola defensiva del endpoint. Los fallos parciales se registran primero y
+  `Verificar Baseball` marca después la ejecución como error; nunca volver a
+  ocultarlos como `success`.
 - 2026-08-01: fútbol, MLB, NBA y NFL no usan calibración isotónica, shrinkage
   ni mínimos de muestra en serving. `baseball-calibrate` queda solo como cola
   de compatibilidad y responde `retired-empirical-engine`.

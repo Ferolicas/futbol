@@ -14,6 +14,7 @@ import {
 } from '../../../../lib/telegram-premium-picks';
 import { buildBaseballMosaicPages } from '../../../../lib/baseball-premium-mosaic-layout';
 import { renderBaseballPremiumMosaicPng } from '../../../../lib/baseball-premium-mosaic-image';
+import { runBaseballPremiumRenderExclusive } from '../../../../lib/baseball-premium-render-queue';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -69,11 +70,13 @@ export async function GET(request) {
       }, { status: 404 });
     }
 
-    const png = await renderBaseballPremiumMosaicPng({
-      match,
-      date: displayDate(board.fecha),
-      page,
-    });
+    const png = await runBaseballPremiumRenderExclusive(() => (
+      renderBaseballPremiumMosaicPng({
+        match,
+        date: displayDate(board.fecha),
+        page,
+      })
+    ));
 
     return new Response(png, {
       headers: {

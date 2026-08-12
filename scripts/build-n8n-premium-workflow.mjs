@@ -21,9 +21,11 @@ if (!workflow || workflow.id !== 'PicksPremiumDia1') {
 const schedule = workflow.nodes.find(node => node.name === 'Schedule Trigger');
 let baseballSchedule = workflow.nodes.find(node => node.name === 'Schedule Baseball');
 const gateBaseball = workflow.nodes.find(node => node.name === 'Gate Baseball');
+let loopBaseball = workflow.nodes.find(node => node.name === 'Loop Baseball');
 let imageBaseball = workflow.nodes.find(node => node.name === 'Imagen Baseball');
 const sendBaseball = workflow.nodes.find(node => node.name === 'Enviar Baseball');
 const registerBaseball = workflow.nodes.find(node => node.name === 'Registrar Baseball');
+let verifyBaseball = workflow.nodes.find(node => node.name === 'Verificar Baseball');
 const requiredNodes = [
   'Feed Futbol',
   'Gate Futbol',
@@ -98,6 +100,12 @@ const bogotaHour = Number(new Intl.DateTimeFormat('en-US', {
 if (bogotaHour < 11) return [];
 
 const state = $getWorkflowStaticData('global');
+state.baseballRun = {
+  date: data.fecha,
+  attempted: 0,
+  sent: 0,
+  errors: [],
+};
 const sentFixtures = (state.baseballSent && state.baseballSent.date === data.fecha)
   ? (state.baseballSent.fixtures || [])
   : [];
@@ -117,18 +125,16 @@ return data.matches
 
 registerBaseball.parameters.jsCode = `const state = $getWorkflowStaticData('global');
 const items = $input.all();
-const gateItems = $('Gate Baseball').all();
-let lastError = null;
+const gate = $('Loop Baseball').item.json || {};
+const run = state.baseballRun || (state.baseballRun = {
+  date: gate.date || null, attempted: 0, sent: 0, errors: [],
+});
 for (let i = 0; i < items.length; i++) {
   const response = items[i].json || {};
   const document = response.result?.document;
-  const paired = items[i].pairedItem;
-  const sourceIndex = Number.isInteger(paired?.item)
-    ? paired.item
-    : (Number.isInteger(paired) ? paired : i);
-  const gate = (gateItems[sourceIndex] || gateItems[i] || {}).json || {};
   const validPng = document?.mime_type === 'image/png'
     && Number(document.file_size) >= 10000;
+  run.attempted += 1;
   if (response.ok === true && validPng && gate.fixtureId != null) {
     if (!state.baseballSent || state.baseballSent.date !== gate.date) {
       state.baseballSent = { date: gate.date, fixtures: [] };
@@ -139,16 +145,56 @@ for (let i = 0; i < items.length; i++) {
     }
     state.lastBaseballMessageId = (response.result && response.result.message_id)
       || state.lastBaseballMessageId || null;
+    run.sent += 1;
   } else {
-    lastError = {
+    const failure = {
       at: new Date().toISOString(),
       fixtureId: gate.fixtureId || null,
-      response,
+      message: response.error?.message || response.description
+        || (response.ok === true ? 'Telegram no devolvio un PNG valido' : 'Fallo de imagen o Telegram'),
     };
+    run.errors.push(failure);
+    state.lastBaseballError = failure;
   }
 }
-state.lastBaseballError = lastError;
 return items;`;
+
+if (!loopBaseball) {
+  loopBaseball = {
+    id: '6b4f2c11-0000-4c60-9a0d-bbbbbbbb000b',
+    name: 'Loop Baseball',
+    type: 'n8n-nodes-base.splitInBatches',
+    typeVersion: 3,
+    position: [-180, 220],
+    parameters: {},
+  };
+  workflow.nodes.push(loopBaseball);
+}
+loopBaseball.parameters = { batchSize: 1, options: {} };
+
+if (!verifyBaseball) {
+  verifyBaseball = {
+    id: '7c5f3d22-0000-4c60-9a0d-cccccccc000b',
+    name: 'Verificar Baseball',
+    type: 'n8n-nodes-base.code',
+    typeVersion: 2,
+    position: [800, 80],
+    parameters: {},
+  };
+  workflow.nodes.push(verifyBaseball);
+}
+verifyBaseball.parameters = {
+  mode: 'runOnceForAllItems',
+  jsCode: `const state = $getWorkflowStaticData('global');
+const run = state.baseballRun || { attempted: 0, sent: 0, errors: [] };
+if (run.errors.length > 0) {
+  const fixtures = run.errors.map(error => error.fixtureId).filter(Boolean).join(', ');
+  throw new Error('Baseball Premium fallo en ' + run.errors.length + '/' + run.attempted
+    + ' envios. Fixtures: ' + (fixtures || 'desconocidos'));
+}
+state.lastBaseballError = null;
+return [{ json: { ok: true, attempted: run.attempted, sent: run.sent } }];`,
+};
 // sendPhoto recomprime la imagen. Para conservar el PNG 4K exacto, n8n lo
 // descarga de uno en uno y lo sube como documento multipart sin compresión.
 if (!imageBaseball) {
@@ -166,7 +212,6 @@ imageBaseball.parameters = {
   url: '={{ $json.imageUrl }}',
   options: {
     timeout: 180000,
-    batching: { batch: { batchSize: 1, batchInterval: 1000 } },
     response: {
       response: { neverError: false, fullResponse: false, responseFormat: 'file' },
     },
@@ -201,10 +246,19 @@ sendBaseball.parameters = {
 // conserva los éxitos y deja exclusivamente ese fixture para el próximo pase.
 sendBaseball.onError = 'continueRegularOutput';
 workflow.connections['Gate Baseball'] = {
-  main: [[{ node: 'Imagen Baseball', type: 'main', index: 0 }]],
+  main: [[{ node: 'Loop Baseball', type: 'main', index: 0 }]],
+};
+workflow.connections['Loop Baseball'] = {
+  main: [
+    [{ node: 'Verificar Baseball', type: 'main', index: 0 }],
+    [{ node: 'Imagen Baseball', type: 'main', index: 0 }],
+  ],
 };
 workflow.connections['Imagen Baseball'] = {
   main: [[{ node: 'Enviar Baseball', type: 'main', index: 0 }]],
+};
+workflow.connections['Registrar Baseball'] = {
+  main: [[{ node: 'Loop Baseball', type: 'main', index: 0 }]],
 };
 
 workflow.settings = {
@@ -212,7 +266,7 @@ workflow.settings = {
   timezone: 'Europe/Madrid',
 };
 workflow.active = true;
-workflow.description = 'Publica picks premium diarios por partido: fútbol conserva sus disparos a los :10 y béisbol sale desde las 18:00 de España a horas en punto, enviando un mosaico PNG 4K 16:9 por juego como documento sin compresión, con deduplicación por fixture, tolerancia a fallos por partido y reintentos hasta la 01:00.';
+workflow.description = 'Publica picks premium diarios por partido: fútbol conserva sus disparos a los :10 y béisbol sale desde las 18:00 de España a horas en punto, procesando estrictamente un juego por vez y enviando un mosaico PNG 4K 16:9 como documento sin compresión, con deduplicación por fixture, fallo operativo visible y reintentos hasta la 01:00.';
 workflow.pinData = {};
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });
