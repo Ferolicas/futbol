@@ -184,7 +184,9 @@ publicada. En la rama de béisbol, un nodo `Loop Over Items` real entrega un
 fixture por iteración; el batching del nodo HTTP no serializa peticiones, solo
 escalona su inicio, y no debe usarse como control de concurrencia. Además, el
 endpoint mantiene una cola defensiva de un único render pesado por proceso. Así
-n8n descarga cada PNG de uno en uno y lo sube
+cada imagen se rasteriza además en un proceso efímero: al finalizar, el sistema
+operativo recupera toda la memoria nativa de Satori/Sharp/libvips, que glibc no
+devuelve de forma fiable en un proceso web longevo. Así n8n descarga cada PNG de uno en uno y lo sube
 a Telegram con `sendDocument`, conservando el archivo 4K sin la recompresión de
 `sendPhoto`. La llave persistida por fixture
 evita duplicados y permite reintentar únicamente el partido fallido. La rama de
@@ -474,7 +476,9 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - 2026-08-12: `HTTP Request > batching` de n8n no espera a que termine cada
   petición: con mosaicos 4K deja varias activas y puede superar el límite de
   memoria de PM2. Premium béisbol debe conservar `Loop Baseball` con batch 1 y
-  la cola defensiva del endpoint. Los fallos parciales se registran primero y
+  la cola defensiva del endpoint; cada render 4K debe seguir aislado en el hijo
+  `scripts/render-baseball-premium-mosaic.mjs`, porque aun sin concurrencia el
+  RSS nativo se acumula entre mosaicos grandes. Los fallos parciales se registran primero y
   `Verificar Baseball` marca después la ejecución como error; nunca volver a
   ocultarlos como `success`.
 - 2026-08-01: fútbol, MLB, NBA y NFL no usan calibración isotónica, shrinkage

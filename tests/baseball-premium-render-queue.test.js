@@ -31,3 +31,30 @@ test('continua la cola cuando un render falla', async () => {
   await assert.rejects(failed, /render fallido/);
   assert.equal(await recovered, 'ok');
 });
+
+test('el render aislado devuelve PNG 4K desde un proceso efimero', async () => {
+  const sharp = require('sharp');
+  const layout = await import('../lib/baseball-premium-mosaic-layout.js');
+  const { renderBaseballPremiumMosaicPngIsolated } = await import('../lib/baseball-premium-render-queue.js');
+  const match = {
+    fixtureId: 77,
+    homeTeam: 'Local',
+    awayTeam: 'Visitante',
+    league: 'MLB',
+    pitchers: {},
+    groups: {
+      carreras: [{ name: 'Más de 7.5 carreras', probability: 73, confidence: 91, odd: 1.8 }],
+    },
+  };
+  const page = layout.buildBaseballMosaicPages(
+    match,
+    ['carreras'],
+    { carreras: 'CARRERAS' },
+  )[0];
+  const png = await renderBaseballPremiumMosaicPngIsolated({ match, date: '12/08/2026', page });
+  const metadata = await sharp(png).metadata();
+
+  assert.equal(metadata.format, 'png');
+  assert.equal(metadata.width, 3840);
+  assert.equal(metadata.height, 2160);
+});

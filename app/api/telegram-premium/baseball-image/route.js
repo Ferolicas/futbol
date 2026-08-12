@@ -13,12 +13,14 @@ import {
   BASEBALL_GROUP_LABELS,
 } from '../../../../lib/telegram-premium-picks';
 import { buildBaseballMosaicPages } from '../../../../lib/baseball-premium-mosaic-layout';
-import { renderBaseballPremiumMosaicPng } from '../../../../lib/baseball-premium-mosaic-image';
-import { runBaseballPremiumRenderExclusive } from '../../../../lib/baseball-premium-render-queue';
+import {
+  renderBaseballPremiumMosaicPngIsolated,
+  runBaseballPremiumRenderExclusive,
+} from '../../../../lib/baseball-premium-render-queue';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 function verifyAuth(request) {
   const { searchParams } = new URL(request.url);
@@ -71,7 +73,7 @@ export async function GET(request) {
     }
 
     const png = await runBaseballPremiumRenderExclusive(() => (
-      renderBaseballPremiumMosaicPng({
+      renderBaseballPremiumMosaicPngIsolated({
         match,
         date: displayDate(board.fecha),
         page,
