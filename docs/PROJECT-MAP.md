@@ -478,7 +478,10 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   memoria de PM2. Premium béisbol debe conservar `Loop Baseball` con batch 1 y
   la cola defensiva del endpoint; cada render 4K debe seguir aislado en el hijo
   `scripts/render-baseball-premium-mosaic.mjs`, porque aun sin concurrencia el
-  RSS nativo se acumula entre mosaicos grandes. Los fallos parciales se registran primero y
+  RSS nativo se acumula entre mosaicos grandes. El standalone cambia su `cwd` a
+  `.next/standalone`: el lanzador debe resolver el script tanto desde esa ruta
+  como desde la raíz del repositorio y ejecutar el hijo con `/apps/futbol` como
+  directorio de trabajo. Los fallos parciales se registran primero y
   `Verificar Baseball` marca después la ejecución como error; nunca volver a
   ocultarlos como `success`.
 - 2026-08-01: fútbol, MLB, NBA y NFL no usan calibración isotónica, shrinkage
