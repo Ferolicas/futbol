@@ -455,7 +455,7 @@ del proveedor rompan React.
 
 | Grupo | Variables |
 |---|---|
-| PostgreSQL | `DATABASE_URL`, `DATABASE_SSL`, `DATABASE_POOL_MAX`, límites opcionales `DATABASE_QUERY_TIMEOUT_MS`/`DATABASE_STATEMENT_TIMEOUT_MS` |
+| PostgreSQL | `DATABASE_URL`, `DATABASE_SSL`, `DATABASE_POOL_MAX`, límite opcional `DATABASE_QUERY_TIMEOUT_MS` |
 | Auth | `AUTH_PROVIDER`, `AUTH_JWT_SECRET`, `NEXTAUTH_SECRET` |
 | Redis | `LOCAL_REDIS_HOST`, `LOCAL_REDIS_PORT`, contraseñas opcionales |
 | Stripe | `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` |
@@ -476,6 +476,9 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   decenas de ticks en espera. `/health` considera degradada una cola crítica con
   job demasiado antiguo o backlog anómalo; el cron alerta solo en transiciones
   `up/degraded/down`.
+- 2026-08-13: el pool conectado por PgBouncer usa `query_timeout` del cliente;
+  no añadir `statement_timeout` a la configuración de `pg.Pool`, porque se
+  convierte en startup parameter y PgBouncer rechaza toda conexión.
 - 2026-08-13: Telegram deduplica en Redis entre los procesos rt/heavy durante
   seis horas por error. Los blips transitorios de Redis/PostgreSQL comparten una
   sola clave de infraestructura durante 30 minutos; si Redis está precisamente
