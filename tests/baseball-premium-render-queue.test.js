@@ -58,3 +58,13 @@ test('el render aislado devuelve PNG 4K desde un proceso efimero', async () => {
   assert.equal(metadata.width, 3840);
   assert.equal(metadata.height, 2160);
 });
+
+test('resuelve los assets desde un cwd standalone anidado', async () => {
+  const path = require('node:path');
+  const {
+    resolveBaseballPremiumProjectRoot,
+  } = await import('../lib/baseball-premium-render-queue.js');
+  const expected = path.resolve(__dirname, '..');
+  const standalone = path.join(expected, '.next', 'standalone', '.next', 'server');
+  assert.equal(resolveBaseballPremiumProjectRoot([standalone]), expected);
+});

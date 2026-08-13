@@ -227,19 +227,56 @@ async function pingRedis(): Promise<'ok' | 'error'> {
   }
 }
 
+type QueueHealthIssue = {
+  queue: QueueName;
+  kind: 'active-too-long' | 'waiting-backlog';
+  value: number;
+  limit: number;
+  jobId?: string | number;
+};
+
+const QUEUE_HEALTH_LIMITS: Partial<Record<QueueName, { activeMs: number; waiting: number }>> = {
+  'futbol-finalize': { activeMs: 20 * 60_000, waiting: 8 },
+  'futbol-lineups': { activeMs: 15 * 60_000, waiting: 3 },
+  'baseball-coverage': { activeMs: 12 * 60_000, waiting: 2 },
+};
+
 async function collectHealthQueues() {
-  const out: Record<string, { waiting: number; active: number; failed: number; completed: number }> = {};
+  const out: Record<string, {
+    waiting: number;
+    active: number;
+    failed: number;
+    completed: number;
+    oldest_active_ms: number | null;
+  }> = {};
+  const issues: QueueHealthIssue[] = [];
   await Promise.all(QUEUE_NAMES.map(async (name) => {
     const q = queues[name];
-    const [waiting, active, failed, completed] = await Promise.all([
+    const [waiting, active, failed, completed, activeJobs] = await Promise.all([
       q.getWaitingCount(),
       q.getActiveCount(),
       q.getFailedCount(),
       q.getCompletedCount(),
+      q.getActive(0, 4),
     ]);
-    out[name] = { waiting, active, failed, completed };
+    const now = Date.now();
+    const oldest = activeJobs.reduce<{ elapsed: number; id?: string | number } | null>((value, job) => {
+      const startedAt = job.processedOn ?? job.timestamp;
+      const elapsed = Math.max(0, now - startedAt);
+      return !value || elapsed > value.elapsed ? { elapsed, id: job.id } : value;
+    }, null);
+    out[name] = { waiting, active, failed, completed, oldest_active_ms: oldest?.elapsed ?? null };
+
+    const limits = QUEUE_HEALTH_LIMITS[name];
+    if (limits && oldest && oldest.elapsed > limits.activeMs) {
+      issues.push({ queue: name, kind: 'active-too-long', value: oldest.elapsed, limit: limits.activeMs, jobId: oldest.id });
+    }
+    if (limits && waiting > limits.waiting) {
+      issues.push({ queue: name, kind: 'waiting-backlog', value: waiting, limit: limits.waiting });
+    }
   }));
-  return out;
+  issues.sort((a, b) => a.queue.localeCompare(b.queue) || a.kind.localeCompare(b.kind));
+  return { queues: out, issues };
 }
 
 export function buildServer() {
@@ -338,20 +375,29 @@ export function buildServer() {
   // /health — sin auth (lo usan BetterUptime, scripts locales, Caddy).
   app.get('/health', async (_req, reply) => {
     const startedAt = Date.now();
-    const [db, redis, queuesSummary] = await Promise.all([
+    const [db, redis, queueHealth] = await Promise.all([
       pingPostgres(),
       pingRedis(),
-      collectHealthQueues().catch(() => ({})),
+      collectHealthQueues().catch((error) => ({
+        queues: {},
+        issues: [] as QueueHealthIssue[],
+        collection_error: error instanceof Error ? error.message : String(error),
+      })),
     ]);
     const totalMem = os.totalmem();
     const freeMem  = os.freemem();
     const usedMem  = totalMem - freeMem;
-    const status = (db === 'ok' && redis === 'ok') ? 'ok' : 'degraded';
+    const queueCollectionOk = !('collection_error' in queueHealth);
+    const status = (db === 'ok' && redis === 'ok' && queueCollectionOk && queueHealth.issues.length === 0)
+      ? 'ok'
+      : 'degraded';
     const body = {
       status,
       uptime: Math.round(process.uptime()),
       db, redis,
-      queues: queuesSummary,
+      queues: queueHealth.queues,
+      issues: queueHealth.issues,
+      ...('collection_error' in queueHealth ? { queue_collection_error: queueHealth.collection_error } : {}),
       memory: {
         used_mb:  Math.round(usedMem  / 1024 / 1024),
         total_mb: Math.round(totalMem / 1024 / 1024),

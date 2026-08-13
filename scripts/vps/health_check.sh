@@ -6,15 +6,11 @@
 # Cron sugerido (cada 5 min):
 #   */5 * * * * /apps/scripts/health_check.sh >> /apps/scripts/health.log 2>&1
 #
-# Se considera UP si:
-#   - HTTP status == 200
-#   - body contiene "status":"ok"   (degraded NO alerta — el cron lo notifica
-#     pero la pagina sigue sirviendo. Cambiar la regex de abajo si quieres
-#     alertas mas agresivas).
+# Distingue UP, DEGRADED (dependencias/colas) y DOWN.
 #
 # Si esta DOWN, manda un mensaje al bot Telegram. Para evitar spam de alertas
 # repetidas mientras el servicio sigue caido, usamos un archivo de estado.
-# Solo se manda alerta cuando cambia de UP→DOWN o DOWN→UP.
+# Solo se manda alerta cuando cambia el estado.
 # ============================================================================
 
 set -uo pipefail
@@ -41,33 +37,51 @@ telegram() {
     -d "parse_mode=HTML" >/dev/null 2>&1 || true
 }
 
-# ── Probe ───────────────────────────────────────────────────────────────
-RESPONSE="$(curl -sS -o /tmp/cfanalisis_health_body -w '%{http_code}' \
-                  --max-time 10 "${URL}" 2>/dev/null || echo '000')"
-BODY="$(cat /tmp/cfanalisis_health_body 2>/dev/null || echo '')"
-
-UP=0
-if [ "${RESPONSE}" = "200" ] && echo "${BODY}" | grep -q '"status":"\(ok\|degraded\)"'; then
-  UP=1
-fi
+# ── Probe con reintentos (descarta blips de deploy) ─────────────────────
+MAX_ATTEMPTS="${HEALTH_MAX_ATTEMPTS:-3}"
+RETRY_DELAY="${HEALTH_RETRY_DELAY:-10}"
+RESPONSE='000'
+BODY=''
+PROBE_STATE='down'
+for attempt in $(seq 1 "${MAX_ATTEMPTS}"); do
+  RESPONSE="$(curl -sS -o /tmp/cfanalisis_health_body -w '%{http_code}' \
+                    --max-time 10 "${URL}" 2>/dev/null || echo '000')"
+  BODY="$(cat /tmp/cfanalisis_health_body 2>/dev/null || echo '')"
+  if [ "${RESPONSE}" = "200" ] && echo "${BODY}" | grep -q '"status":"ok"'; then
+    PROBE_STATE='up'
+    break
+  fi
+  if [ "${RESPONSE}" = "200" ] && echo "${BODY}" | grep -q '"status":"degraded"'; then
+    PROBE_STATE='degraded'
+    break
+  fi
+  if [ "${attempt}" -lt "${MAX_ATTEMPTS}" ]; then sleep "${RETRY_DELAY}"; fi
+done
 
 PREV_STATE="$(cat "${STATE_FILE}" 2>/dev/null || echo 'unknown')"
-NEW_STATE="$([ "${UP}" = "1" ] && echo 'up' || echo 'down')"
+NEW_STATE="${PROBE_STATE}"
 echo "${NEW_STATE}" > "${STATE_FILE}"
 
 TS="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
 if [ "${NEW_STATE}" = "down" ] && [ "${PREV_STATE}" != "down" ]; then
-  REASON="HTTP ${RESPONSE}"
+  REASON="HTTP ${RESPONSE} (tras ${MAX_ATTEMPTS} intentos)"
   if [ -n "${BODY}" ]; then
     SHORT="$(echo "${BODY}" | head -c 200 | tr -d '\n')"
     REASON="${REASON} body=${SHORT}"
   fi
   telegram "🔴" "<b>worker DOWN</b> ${URL}%0A${REASON}"
   echo "[${TS}] DOWN ${REASON}"
+elif [ "${NEW_STATE}" = "degraded" ] && [ "${PREV_STATE}" != "degraded" ]; then
+  SHORT="$(echo "${BODY}" | head -c 700 | tr -d '\n')"
+  telegram "🟡" "<b>worker DEGRADED</b> ${URL}%0A${SHORT}"
+  echo "[${TS}] DEGRADED ${SHORT}"
 elif [ "${NEW_STATE}" = "up" ] && [ "${PREV_STATE}" = "down" ]; then
   telegram "🟢" "worker recovered ${URL}"
   echo "[${TS}] RECOVERED"
+elif [ "${NEW_STATE}" = "up" ] && [ "${PREV_STATE}" = "degraded" ]; then
+  telegram "🟢" "worker healthy again ${URL}"
+  echo "[${TS}] HEALTHY AGAIN"
 else
   # Estado estable — no alerta. Logueamos solo cuando hay cambio.
   echo "[${TS}] ${NEW_STATE}"

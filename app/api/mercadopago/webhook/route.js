@@ -301,14 +301,17 @@ async function handleOrder(id) {
 
 export async function POST(request) {
   const url = new URL(request.url);
-  const queryId = url.searchParams.get('data.id') || url.searchParams.get('id');
+  const signedDataId = url.searchParams.get('data.id');
+  const queryId = signedDataId || url.searchParams.get('id');
   let type = url.searchParams.get('type') || url.searchParams.get('topic');
   const body = await request.json().catch(() => null);
   type = body?.type || body?.topic || type;
   const resourceId = queryId || body?.data?.id || body?.id;
   if (!resourceId || !type) return Response.json({ received: true, ignored: true });
 
-  const signatureValid = verifyWebhookSignature(request, queryId || resourceId);
+  // La firma de MP usa exclusivamente data.id de la URL. Si no vino en query,
+  // el par id se omite del manifest; el id del body NO debe sustituirlo.
+  const signatureValid = verifyWebhookSignature(request, signedDataId);
   if (signatureValid !== true && process.env.MP_ENV === 'live') {
     console.warn('[mp:webhook] firma invalida', { resourceId, type });
     return Response.json({ error: 'Webhook signature failed' }, { status: 401 });

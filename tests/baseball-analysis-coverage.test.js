@@ -105,6 +105,14 @@ test('los schedulers de MLB usan el pase tardío y el prepartido en hora Colombi
   assert.match(source, /const BOGOTA_TZ = 'America\/Bogota'/);
   assert.match(source, /id: 'baseball-analyze-daily', pattern: '30 10 \* \* \*', tz: BOGOTA_TZ/);
   assert.match(source, /id: 'baseball-analyze-pregame', pattern: '0 12,14,16,18,20,22 \* \* \*', tz: BOGOTA_TZ/);
+  assert.match(source, /id: 'baseball-retrain-daily',\s+pattern: '40 10 \* \* \*', tz: TZ/);
+});
+
+test('la guardia limita cada fecha y solo considera críticas hoy y mañana', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../apps/cfanalisis-worker/src/jobs/baseball/analyze.js'), 'utf8');
+  assert.match(source, /dateTimeoutMs: 3 \* 60_000/);
+  assert.match(source, /targetDates\.filter\(\(date\) => date >= today\)/);
+  assert.match(source, /ok: criticalFailed === 0/);
 });
 
 test('el mapeo de cuotas conserva en Colombia los juegos que cruzan medianoche UTC', () => {

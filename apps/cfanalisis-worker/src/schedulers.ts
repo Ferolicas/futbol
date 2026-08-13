@@ -107,7 +107,8 @@ const SCHEDULES: Sched[] = [
   { queue: 'baseball-finalize',  id: 'baseball-finalize-daily',  pattern: '0 5,9 * * *',  tz: TZ },
   // La calibración isotónica quedó retirada: el porcentaje servido es la
   // frecuencia empírica. Retrain solo escoge pesos de semejanza walk-forward.
-  { queue: 'baseball-retrain',   id: 'baseball-retrain-daily',   pattern: '30 10 * * *', tz: TZ },
+  // 10:40 evita competir exactamente a :30 con la guardia de cobertura.
+  { queue: 'baseball-retrain',   id: 'baseball-retrain-daily',   pattern: '40 10 * * *', tz: TZ },
   { queue: 'baseball-cleanup',   id: 'baseball-cleanup-weekly',  pattern: '0 3 * * 0',  tz: TZ }, // dom 3:00
   // ── Baseball — live (cada 1 min) ──
   // MLB Stats API es gratuita y sin límite, así que polleamos cada minuto.

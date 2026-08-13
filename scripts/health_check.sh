@@ -5,11 +5,11 @@
 # Cron (cada 5 min):
 #   */5 * * * * /apps/scripts/health_check.sh >> /apps/scripts/health.log 2>&1
 #
-# UP si HTTP 200 y body contiene "status":"ok" (o "degraded").
+# Estados separados: UP, DEGRADED (dependencias/colas) y DOWN.
 # Reintenta la sonda antes de declarar DOWN, para no alertar por el parpadeo
 # de ~3-5s de 'pm2 restart' en cada deploy. Ajustable via health.env:
 #   HEALTH_MAX_ATTEMPTS (def 3), HEALTH_RETRY_DELAY seg (def 10).
-# Solo alerta en transicion UP->DOWN o DOWN->UP (archivo de estado).
+# Solo alerta al cambiar de estado; un degradado persistente no genera spam.
 # ============================================================================
 
 set -uo pipefail
@@ -41,13 +41,17 @@ MAX_ATTEMPTS="${HEALTH_MAX_ATTEMPTS:-3}"
 RETRY_DELAY="${HEALTH_RETRY_DELAY:-10}"
 RESPONSE='000'
 BODY=''
-UP=0
+PROBE_STATE='down'
 for attempt in $(seq 1 "${MAX_ATTEMPTS}"); do
   RESPONSE="$(curl -sS -o /tmp/cfanalisis_health_body -w '%{http_code}' \
                     --max-time 10 "${URL}" 2>/dev/null || echo '000')"
   BODY="$(cat /tmp/cfanalisis_health_body 2>/dev/null || echo '')"
-  if [ "${RESPONSE}" = "200" ] && echo "${BODY}" | grep -q '"status":"\(ok\|degraded\)"'; then
-    UP=1
+  if [ "${RESPONSE}" = "200" ] && echo "${BODY}" | grep -q '"status":"ok"'; then
+    PROBE_STATE='up'
+    break
+  fi
+  if [ "${RESPONSE}" = "200" ] && echo "${BODY}" | grep -q '"status":"degraded"'; then
+    PROBE_STATE='degraded'
     break
   fi
   if [ "${attempt}" -lt "${MAX_ATTEMPTS}" ]; then
@@ -56,7 +60,7 @@ for attempt in $(seq 1 "${MAX_ATTEMPTS}"); do
 done
 
 PREV_STATE="$(cat "${STATE_FILE}" 2>/dev/null || echo 'unknown')"
-NEW_STATE="$([ "${UP}" = "1" ] && echo 'up' || echo 'down')"
+NEW_STATE="${PROBE_STATE}"
 echo "${NEW_STATE}" > "${STATE_FILE}"
 
 TS="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
@@ -69,9 +73,16 @@ if [ "${NEW_STATE}" = "down" ] && [ "${PREV_STATE}" != "down" ]; then
   fi
   telegram "🔴" "<b>worker DOWN</b> ${URL}%0A${REASON}"
   echo "[${TS}] DOWN ${REASON}"
+elif [ "${NEW_STATE}" = "degraded" ] && [ "${PREV_STATE}" != "degraded" ]; then
+  SHORT="$(echo "${BODY}" | head -c 700 | tr -d '\n')"
+  telegram "🟡" "<b>worker DEGRADED</b> ${URL}%0A${SHORT}"
+  echo "[${TS}] DEGRADED ${SHORT}"
 elif [ "${NEW_STATE}" = "up" ] && [ "${PREV_STATE}" = "down" ]; then
   telegram "🟢" "worker recovered ${URL}"
   echo "[${TS}] RECOVERED"
+elif [ "${NEW_STATE}" = "up" ] && [ "${PREV_STATE}" = "degraded" ]; then
+  telegram "🟢" "worker healthy again ${URL}"
+  echo "[${TS}] HEALTHY AGAIN"
 else
   echo "[${TS}] ${NEW_STATE}"
 fi

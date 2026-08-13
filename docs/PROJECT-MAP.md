@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-12 · Commit base: `fb520aa`
+Actualizado: 2026-08-13 · Commit base: `4756c2f`
 
 ## Identidad y stack
 
@@ -455,7 +455,7 @@ del proveedor rompan React.
 
 | Grupo | Variables |
 |---|---|
-| PostgreSQL | `DATABASE_URL`, `DATABASE_SSL`, `DATABASE_POOL_MAX` |
+| PostgreSQL | `DATABASE_URL`, `DATABASE_SSL`, `DATABASE_POOL_MAX`, límites opcionales `DATABASE_QUERY_TIMEOUT_MS`/`DATABASE_STATEMENT_TIMEOUT_MS` |
 | Auth | `AUTH_PROVIDER`, `AUTH_JWT_SECRET`, `NEXTAUTH_SECRET` |
 | Redis | `LOCAL_REDIS_HOST`, `LOCAL_REDIS_PORT`, contraseñas opcionales |
 | Stripe | `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` |
@@ -468,6 +468,28 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 
 ## Gotchas vivos
 
+- 2026-08-13: los jobs periódicos `futbol-finalize`, `futbol-lineups` y
+  `baseball-coverage` tienen techo externo en `job-timeout.ts`. Si lo exceden,
+  BullMQ libera el intento y el proceso heavy se reinicia para matar también la
+  operación subyacente que un `Promise.race` no puede cancelar. No retirar este
+  reinicio: sin él un Promise vivo renueva el lock indefinidamente y acumula
+  decenas de ticks en espera. `/health` considera degradada una cola crítica con
+  job demasiado antiguo o backlog anómalo; el cron alerta solo en transiciones
+  `up/degraded/down`.
+- 2026-08-13: Telegram deduplica en Redis entre los procesos rt/heavy durante
+  seis horas por error. Los blips transitorios de Redis/PostgreSQL comparten una
+  sola clave de infraestructura durante 30 minutos; si Redis está precisamente
+  caído queda el respaldo local por proceso. Esto evita una tormenta por cola
+  durante reinicios de paquetes sin silenciar incidentes distintos.
+- 2026-08-13: ESPN responde 403 cuando se fuerza el antiguo User-Agent de
+  CF Análisis; `espnFetch` debe conservar solo `Accept`. La cobertura MLB limita
+  cada fecha a tres minutos y trata ayer como recuperación no crítica si hoy y
+  mañana terminaron bien; el retrain de béisbol corre a las 10:40 Madrid para no
+  coincidir con el tick de cobertura de :30.
+- 2026-08-13: la firma de Mercado Pago se construye solo con `data.id` de la
+  URL, nunca con el ID del body; cualquier par ausente (`id` o `request-id`) se
+  omite del manifiesto oficial. Después de validar HMAC se sigue releyendo el
+  recurso con el token privado antes de cambiar acceso.
 - 2026-07-29: el entorno local usa túneles al VPS; auth y pagos son producción real.
 - 2026-08-01: nunca probar cobros locales con credenciales LIVE. QA llega al formulario o usa base/proveedor sandbox aislados.
 - 2026-08-01: la migración `migrate-payment-reliability.sql` debe ejecutarse antes del build; incluye permisos explícitos para el rol `cfanalisis`.

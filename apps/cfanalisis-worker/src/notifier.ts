@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * notifier — envia alertas de error a Telegram con dedup 1/min.
+ * notifier — envia alertas de error a Telegram con dedup distribuido.
  *
  * Configuracion via env:
  *   TELEGRAM_BOT_TOKEN        token del bot
@@ -8,34 +8,61 @@
  *
  * Sin esas vars → notifyError es no-op (solo loguea internamente).
  *
- * Dedup: 1 alerta/minuto por (contexto + mensaje). Si el mismo error se
- * dispara 100 veces en un minuto, solo el primero se envia. La key se
- * construye con `${source}::${err_message.slice(0, 200)}` para que
- * mensajes similares pero de fuentes distintas no compartan cooldown.
+ * Dedup: Redis comparte el cooldown entre cfanalisis-rt y cfanalisis-heavy.
+ * Un mismo error normal alerta como máximo cada 6 h. Los blips de
+ * Redis/PostgreSQL se agrupan como un único incidente de infraestructura y
+ * alertan como máximo cada 30 min, aunque fallen muchas colas a la vez.
  *
- * Memoria: el Map se purga cuando supera 500 entradas — borra todas las
- * que excedan 5x el cooldown (5 minutos). Suficiente para evitar memory
- * leak sin perder funcionalidad.
+ * Memoria: el Map se purga cuando supera 500 entradas y elimina claves que
+ * superaron dos veces el cooldown normal.
  */
+import { createHash } from 'crypto';
 import { logger } from './logger.js';
+import { bullConnection } from './redis.js';
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const CHAT_ID = process.env.TELEGRAM_ALERT_CHAT_ID || '';
-const COOLDOWN_MS = 60_000;
+const COOLDOWN_MS = 6 * 60 * 60_000;
+const INFRA_COOLDOWN_MS = 30 * 60_000;
 const MAX_KEYS = 500;
+
+const TRANSIENT_INFRA_RE = /(?:LOADING Redis|Redis is loading|connection (?:terminated|closed|reset)|ECONNREFUSED|ECONNRESET|EPIPE|database system is (?:starting|shutting down)|the database system is starting up|terminating connection due to administrator command|server closed the connection unexpectedly)/i;
 
 const recent = new Map<string, number>();
 
-function shouldSend(key: string): boolean {
+function localShouldSend(key: string, cooldownMs: number): boolean {
   const now = Date.now();
   const last = recent.get(key);
-  if (last && (now - last) < COOLDOWN_MS) return false;
+  if (last && (now - last) < cooldownMs) return false;
   recent.set(key, now);
   if (recent.size > MAX_KEYS) {
-    const cutoff = now - 5 * COOLDOWN_MS;
+    const cutoff = now - 2 * COOLDOWN_MS;
     for (const [k, t] of recent) if (t < cutoff) recent.delete(k);
   }
   return true;
+}
+
+async function shouldSend(key: string, cooldownMs: number): Promise<boolean> {
+  if (!localShouldSend(key, cooldownMs)) return false;
+  if (bullConnection.status !== 'ready') return true;
+
+  const hash = createHash('sha256').update(key).digest('hex');
+  try {
+    const timeoutSentinel = Symbol('redis-dedup-timeout');
+    const result = await Promise.race([
+      bullConnection.set(`cf:telegram:dedup:${hash}`, '1', 'PX', cooldownMs, 'NX'),
+      new Promise<symbol>((resolve) => {
+        const timer = setTimeout(() => resolve(timeoutSentinel), 750);
+        timer.unref?.();
+      }),
+    ]);
+    if (result === timeoutSentinel) return true;
+    return result === 'OK';
+  } catch {
+    // Redis puede ser precisamente el servicio que se está reiniciando. El
+    // Map local mantiene como máximo una alerta por proceso durante ese blip.
+    return true;
+  }
 }
 
 function escapeHtml(s: string): string {
@@ -68,8 +95,12 @@ export async function notifyError(ctx: ErrorContext, err: unknown): Promise<void
 
   if (!BOT_TOKEN || !CHAT_ID) return;
 
-  const key = `${ctx.source}::${ctx.name ?? ''}::${msg.slice(0, 200)}`;
-  if (!shouldSend(key)) {
+  const infraTransient = TRANSIENT_INFRA_RE.test(msg);
+  const key = infraTransient
+    ? 'infra::redis-postgres-transient'
+    : `${ctx.source}::${ctx.name ?? ''}::${msg.slice(0, 200)}`;
+  const cooldownMs = infraTransient ? INFRA_COOLDOWN_MS : COOLDOWN_MS;
+  if (!(await shouldSend(key, cooldownMs))) {
     logger.debug({ key }, 'notifyError dedup: skip Telegram (cooldown)');
     return;
   }

@@ -30,6 +30,13 @@ function validDates(values) {
 async function runCoverage(payload, job) {
   const dates = validDates(payload.dates);
   const targetDates = dates.length ? dates : buildSportAnalysisCoverageDates(bogotaToday());
+  const today = bogotaToday();
+  // En la pasada automática, ayer es recuperación oportunista; hoy y mañana
+  // son las fechas que alimentan al usuario. Una lentitud histórica no debe
+  // convertir una cobertura actual sana en fallo terminal/Telegram.
+  const criticalDates = new Set(dates.length
+    ? targetDates
+    : targetDates.filter((date) => date >= today));
   const startedAt = Date.now();
   const reports = [];
 
@@ -48,6 +55,11 @@ async function runCoverage(payload, job) {
         // su siguiente tick y deja de hacerlo en cuanto aparecen cuotas.
         oddsTtl: 10 * 60,
         oddsMappingTtl: 10 * 60,
+        // La guardia corre cada 15 min. Una fecha no puede retener la cola 20
+        // min: si proveedor/DB se atasca, falla en 3 min y la siguiente pasada
+        // vuelve a intentar únicamente lo que siga pendiente.
+        dateTimeoutMs: 3 * 60_000,
+        gameTimeoutMs: 60_000,
       }));
     } catch (error) {
       reports.push({
@@ -58,14 +70,19 @@ async function runCoverage(payload, job) {
     }
   }
 
+  const criticalFailed = reports
+    .filter((report) => criticalDates.has(report.date))
+    .reduce((sum, report) => sum + Number(report.failed || 0), 0);
   const result = {
-    ok: reports.every((report) => report.ok),
+    ok: criticalFailed === 0,
+    degraded: reports.some((report) => !report.ok),
     sport: 'baseball', mode: 'coverage', dates: targetDates,
     scheduled: reports.reduce((sum, report) => sum + Number(report.scheduled || 0), 0),
     total: reports.reduce((sum, report) => sum + Number(report.total || 0), 0),
     analyzed: reports.reduce((sum, report) => sum + Number(report.analyzed || 0), 0),
     alreadyCurrent: reports.reduce((sum, report) => sum + Number(report.alreadyCurrent || 0), 0),
     failed: reports.reduce((sum, report) => sum + Number(report.failed || 0), 0),
+    criticalFailed,
     reports,
     durationSec: Math.round((Date.now() - startedAt) / 100) / 10,
   };

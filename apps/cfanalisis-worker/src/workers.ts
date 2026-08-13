@@ -3,6 +3,7 @@ import { bullConnection } from './redis.js';
 import { logger } from './logger.js';
 import { notifyError } from './notifier.js';
 import type { QueueName } from './queues.js';
+import { runWithJobTimeout } from './job-timeout.js';
 
 // Futbol jobs
 import { runFixtures } from './jobs/futbol/fixtures.js';
@@ -204,7 +205,12 @@ export function startWorkers(role: WorkerRole = 'all'): Worker[] {
   const workers: Worker[] = [];
   const names = queuesForRole(role);
   for (const name of names) {
-    const handler = handlers[name];
+    const rawHandler = handlers[name];
+    const handler: Processor = async (job, token) => runWithJobTimeout(
+      name,
+      job?.id,
+      () => rawHandler(job, token),
+    );
     const lo = lockOpts[name];
     const w = new Worker(name, handler, {
       connection: bullConnection,
@@ -228,6 +234,14 @@ export function startWorkers(role: WorkerRole = 'all'): Worker[] {
         ).catch(() => {});
       } else {
         logger.warn({ queue: name, jobId: job?.id, attempt: job?.attemptsMade }, 'job failed (will retry)');
+      }
+      if ((err as Error & { code?: string })?.code === 'JOB_EXECUTION_TIMEOUT') {
+        // Promise.race libera el job, pero no puede cancelar una consulta JS ya
+        // iniciada. Reiniciar únicamente el proceso heavy elimina la operación
+        // colgada; PM2 lo levanta de nuevo y BullMQ recupera el siguiente tick.
+        logger.fatal({ queue: name, jobId: job?.id }, 'job timeout: restarting worker process');
+        const timer = setTimeout(() => process.exit(1), 1_000);
+        timer.unref?.();
       }
     });
     w.on('error', (err) => {
