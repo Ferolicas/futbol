@@ -187,7 +187,7 @@ export type WorkerRole = 'all' | 'realtime' | 'heavy';
 // + sus broadcasts WS. Deben ir AISLADAS de los jobs CPU-bound (daily, analyze,
 // retrain) que bloquean el event loop. Todo lo que NO esté aquí = "heavy".
 // Esta es la línea divisoria de la Fase 1: un retrain de 20 min en 'heavy' ya
-// no puede congelar el tick de 20s de 'futbol-live' ni el /health en 'realtime'.
+// no puede congelar el tick de 90s de 'futbol-live' ni el /health en 'realtime'.
 const REALTIME_QUEUES: QueueName[] = ['futbol-live', 'baseball-live', 'basketball-live', 'american-football-live'];
 
 function queuesForRole(role: WorkerRole): QueueName[] {

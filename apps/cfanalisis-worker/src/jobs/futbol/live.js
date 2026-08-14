@@ -339,13 +339,13 @@ function isGoalVarDetail(detail) {
 // consecutivos de 20s. Causa: `existingLive` se lee de Redis al inicio del
 // tick, pero `mergedLive` (con los contadores nuevos) se ESCRIBE de vuelta a
 // Redis DESPUÉS de invocar sendBundledPushes (que es fire-and-forget). Si el
-// siguiente tick de 20s arranca antes de que esa escritura se vea reflejada
+// siguiente tick de 90s arranca antes de que esa escritura se vea reflejada
 // (latencia de Redis, pipelining, o porque sendBundledPushes await-ea
 // subscriptions y favoritos primero), `existingLive` en el tick N+1 sigue
 // mostrando los contadores viejos → mismo delta → mismo push.
 //
 // FIX: en lugar de confiar solo en `existingLive` para evitar repeticiones,
-// marcamos en Redis con TTL=90s (3 ticks de 20s + buffer) una clave por
+// marcamos en Redis con TTL=300s (3 ticks de 90s + buffer) una clave por
 // EVENTO ya notificado:
 //   push:sent:{fid}:goal:{side}:{N}          — gol cuando el marcador llega a N
 //   push:sent:{fid}:goalcancel:{side}:{N}    — gol anulado: marcador revertido DESDE N
@@ -367,13 +367,13 @@ function isGoalVarDetail(detail) {
 //  - Eventos "de una vez" en el partido (gol, tarjeta, penalti, remate, falta,
 //    VAR de penalti, gol anulado) usan 7200s (2h) para disparo único: no se
 //    re-notifican aunque la API reordene/reenvíe el evento mucho después.
-//  - Córner: TTL corto (90s, default). Su clave incluye el valor exacto del
+//  - Córner: TTL corto (300s, default). Su clave incluye el valor exacto del
 //    contador monótono; cada córner nuevo es un valor nuevo que debe poder
 //    notificarse en cuanto ocurra, y nunca baja (Math.max).
 //  - goal y goalcancel además se LIMPIAN activamente (redisDel) cuando el
 //    marcador autoritativo sube/baja, para que un gol re-anotado al mismo valor
 //    y una segunda anulación de un gol distinto vuelvan a notificar.
-const DEDUP_TTL_SEC = 90; // default (córner)
+const DEDUP_TTL_SEC = 300; // default (córner): 3 ticks de 90s + buffer
 const DEDUP_TTL_BY_TYPE = {
   goal: 7200,
   goalcancel: 7200,
@@ -1556,7 +1556,7 @@ export async function runLive(_payload = {}) {
   // (`/fixtures?id=X` para goleador + `/fixtures/statistics?fixture=X`). Cada
   // fixture detallado ya contiene events, statistics y players, así que el mismo
   // payload alimenta TODO el canal live. Para 36 partidos: 2 llamadas en vez de
-  // 36–72; para 400 simultáneos: 20, siempre con el mismo refresco de 20 s.
+  // 36–72; para 400 simultáneos: 20, siempre con el mismo refresco de 90 s.
   const detailResult = await fetchDetailedLiveMatches(tracked);
   apiCalls += detailResult.apiCalls;
   const detailedById = new Map(detailResult.matches

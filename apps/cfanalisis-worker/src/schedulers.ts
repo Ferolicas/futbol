@@ -15,8 +15,8 @@ import { MULTISPORT_CACHE_VERSION, bogotaToday } from './shared.js';
 const TZ = 'Europe/Madrid';
 const BOGOTA_TZ = 'America/Bogota';
 
-// `pattern` = cron (granularidad mínima 1 min). `every` = intervalo en ms
-// (para sub-minuto, ej. live cada 20s). Usar uno u otro, no ambos.
+// `pattern` = cron (granularidad mínima 1 min). `every` = intervalo exacto en
+// ms (ej. live cada 90s). Usar uno u otro, no ambos.
 type Sched = { queue: QueueName; id: string; pattern?: string; every?: number; tz?: string; data?: Record<string, unknown> };
 
 // IDs de schedulers viejos a eliminar en cada arranque (evita que sigan
@@ -24,7 +24,7 @@ type Sched = { queue: QueueName; id: string; pattern?: string; every?: number; t
 // 'futbol-raw-backfill-half2' fue un seed one-shot (ya completado a mano). Al
 // añadirlo aquí, registerSchedulers() llama removeJobScheduler() en el arranque
 // → borra el scheduler Y su job delayed pendiente de Redis (no corre a las 4am).
-// 'futbol-live-corners-30m': el polling de córners se integró al tick de 20s de
+// 'futbol-live-corners-30m': el polling de córners se integró al tick live de
 // futbol-live (PARTE 1: /fixtures/statistics dentro de live.js). El job dedicado
 // de 30 min queda obsoleto → al añadir su id aquí, registerSchedulers() borra el
 // scheduler Y su job delayed pendiente en el arranque (no quedan dos corriendo).
@@ -32,7 +32,7 @@ type Sched = { queue: QueueName; id: string; pattern?: string; every?: number; t
 // 'baseball-coverage'. Su id viejo entra aquí para que BullMQ borre el
 // scheduler Y el job delayed pendiente en la cola 'baseball-analyze' y no
 // queden las dos versiones disparando en paralelo.
-const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-odds-15m', 'futbol-raw-backfill-half2', 'baseball-live-5m', 'futbol-live-corners-30m', 'futbol-odds-30m', 'baseball-calibrate-daily', 'baseball-analyze-all-today-daily', 'american-football-live-10m', 'futbol-finalize-daily', 'baseball-analysis-coverage-15m'];
+const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-live-20s', 'futbol-odds-15m', 'futbol-raw-backfill-half2', 'baseball-live-5m', 'futbol-live-corners-30m', 'futbol-odds-30m', 'baseball-calibrate-daily', 'baseball-analyze-all-today-daily', 'american-football-live-10m', 'futbol-finalize-daily', 'baseball-analysis-coverage-15m'];
 
 const SCHEDULES: Sched[] = [
   // ── Fútbol — diarios (hora España) ──
@@ -51,13 +51,12 @@ const SCHEDULES: Sched[] = [
   { queue: 'futbol-watchdog',  id: 'futbol-watchdog-daily',  pattern: '30 7 * * *',  tz: TZ },
   { queue: 'futbol-cleanup',   id: 'futbol-cleanup-daily',   pattern: '0 3 * * *',   tz: TZ },
   // ── Fútbol — periódicos ──
-  // Live cada 20s: el handler hace smart-skip (0 llamadas fuera de partidos),
-  // así que el 3x del intervalo solo aplica durante ventanas en vivo. La reserva
-  // dinámica protege esta operación dentro del plan Pro. Objetivo: ver el gol
-  // a los ~20s.
-  { queue: 'futbol-live',         id: 'futbol-live-20s',         every: 20_000 },
+  // Live cada 90s: el handler hace smart-skip (0 llamadas fuera de partidos).
+  // La cadencia conserva marcador/eventos/córners/detalle por lotes y permite
+  // cubrir jornadas de alta simultaneidad dentro del plan Pro de 7.500/día.
+  { queue: 'futbol-live',         id: 'futbol-live-90s',         every: 90_000 },
   { queue: 'futbol-lineups',      id: 'futbol-lineups-5m',       pattern: '*/5 * * * *' },
-  // futbol-live-corners ELIMINADO — los córners se traen ahora en el tick de 20s
+  // futbol-live-corners ELIMINADO — los córners se traen ahora en el tick live
   // de futbol-live (PARTE 1). Su id viejo está en STALE_SCHEDULER_IDS para que
   // BullMQ lo limpie. La cola/worker (queues.ts, workers.ts) quedan inertes (sin
   // job que los dispare); no se borran para minimizar riesgo.

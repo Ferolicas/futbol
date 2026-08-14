@@ -259,7 +259,9 @@ llamadas exclusivas; análisis y enriquecidos nunca pueden consumir esa reserva.
 El límite se persiste junto al contador restante para que un cambio de plan no
 deje bloqueado el sistema con la reserva del plan anterior. Si falta el
 calendario del día actual, el worker live ignora el
-smart-skip histórico y consulta el feed en modo fail-open cada 20 segundos.
+smart-skip histórico y consulta el feed en modo fail-open cada 90 segundos. La
+misma cadencia se usa durante partidos para que jornadas de alta simultaneidad
+quepan dentro del plan Pro de 7.500 llamadas sin retirar ningún evento live.
 El cierre de resultados corre incrementalmente cada 15 minutos y solo consulta
 fixtures cuyo final estimado ya pasó; no vuelve a pedir partidos futuros. Si el
 realtime confirma un FT/AET/PEN, encola además un cierre durable dirigido e
