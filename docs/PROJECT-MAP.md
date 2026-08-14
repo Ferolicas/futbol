@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-13 · Commit base: `4756c2f`
+Actualizado: 2026-08-14 · Commit base: `3138992`
 
 ## Identidad y stack
 
@@ -240,9 +240,11 @@ línea/dirección exacta permanece como diagnóstico auditable, no como bloqueo.
 o rechazar el candidato y renovar el diagnóstico de cada familia exacta en las
 bandas general, alta, diaria-90 y élite-95. Un candidato peor queda inactivo; el
 campeón conserva producción y refresca sus métricas, que no actúan como gate.
-`apps/cfanalisis-worker/src/jobs/futbol/retrain.js` ejecuta captura → ingesta →
-perfiles → entrenamiento, falla si cualquier etapa queda incompleta y deja un
-sello Redis que comprueba el watchdog.
+`apps/cfanalisis-worker/src/jobs/futbol/retrain.js` ejecuta captura reciente →
+ingesta → perfiles → entrenamiento, falla si cualquier etapa queda incompleta
+y deja un sello Redis que comprueba el watchdog. `futbol-model-sync` conserva
+su segundo pase nocturno; ambos forman parte del funcionamiento normal también
+con el plan Pro de 7.500 llamadas.
 
 `lib/football-api-client.cjs` es la única salida a API-Football para web,
 workers y scripts activos. Reserva slots globales con Lua/Redis a un techo
@@ -251,8 +253,12 @@ local conservador si Redis cae. Distingue límite por minuto de cuota diaria: la
 segunda no se reintenta, pero el cortacircuito Redis se vuelve a sondear cada
 cinco minutos porque el reinicio real depende de la cuenta. Los flujos críticos
 (`fixtures`, `live` y `results`) pueden comprobar antes la recuperación y tienen
-20.000 llamadas reservadas; análisis y enriquecidos nunca pueden consumir esa
-reserva. Si falta el calendario del día actual, el worker live ignora el
+una reserva dinámica del 15% del límite diario comunicado por el proveedor,
+con suelo de 1.000 y techo de 20.000. En el plan Pro de 7.500 quedan 1.125
+llamadas exclusivas; análisis y enriquecidos nunca pueden consumir esa reserva.
+El límite se persiste junto al contador restante para que un cambio de plan no
+deje bloqueado el sistema con la reserva del plan anterior. Si falta el
+calendario del día actual, el worker live ignora el
 smart-skip histórico y consulta el feed en modo fail-open cada 20 segundos.
 El cierre de resultados corre incrementalmente cada 15 minutos y solo consulta
 fixtures cuyo final estimado ya pasó; no vuelve a pedir partidos futuros. Si el
@@ -468,6 +474,11 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 
 ## Gotchas vivos
 
+- 2026-08-14: `futbol-daily` persiste `startedBy` con el ID de BullMQ. El mismo
+  job puede continuar en su siguiente intento después de una caída de API; un
+  job concurrente distinto sí respeta la exclusión de 20 minutos. Sin distinguir
+  propietario, el reintento se daba a sí mismo por completado y dejaba el día
+  marcado `started` sin encolar análisis.
 - 2026-08-13: los jobs periódicos `futbol-finalize`, `futbol-lineups` y
   `baseball-coverage` tienen techo externo en `job-timeout.ts`. Si lo exceden,
   BullMQ libera el intento y el proceso heavy se reinicia para matar también la

@@ -37,7 +37,7 @@ import { runBasketballRetrain, runAmericanFootballRetrain } from './jobs/multisp
 
 const handlers: Record<QueueName, Processor> = {
   'futbol-fixtures':         async (job) => runFixtures(job.data),
-  'futbol-daily':            async (job) => runDaily(job.data),
+  'futbol-daily':            async (job) => runDaily(job.data, job),
   // Pass the job to analyze/lineups handlers so they can call job.updateProgress()
   'futbol-analyze-batch':    async (job) => runAnalyzeBatch(job.data, job),
   'futbol-analyze-all-today':async (job) => runAnalyzeAllToday(job.data, job),

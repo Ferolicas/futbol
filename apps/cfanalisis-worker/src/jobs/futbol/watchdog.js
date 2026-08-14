@@ -2,13 +2,9 @@
 /**
  * Job: futbol-watchdog — dead-man's switch del pipeline nocturno (JS-1).
  *
- * Corre a las 07:30 Madrid (después de futbol-retrain 06:30) y verifica que los
- * dos jobs críticos COMPLETARON en su ventana:
- *   1. futbol-daily   → flag Redis `dailyBatch:{date}` con .completed === true
- *   2. futbol-retrain → flag Redis `lastRun:futbol-retrain` con completedAt de hoy
- *
- * Si alguno NO completó, avisa a Telegram con el comando exacto para
- * re-dispararlo. Silencio = todo bien (no alerta si ambos están OK).
+ * Corre a las 07:30 Madrid y verifica que los tres trabajos críticos
+ * (daily, retrain y model-sync) completaron. El plan Pro de 7.500 llamadas
+ * conserva íntegro este ciclo normal.
  *
  * Idempotente y read-only: solo lee flags y, si procede, notifica.
  */
