@@ -63,12 +63,12 @@ export async function runDaily(payload = {}, job = null) {
   // No HTTP chain — enqueue a single batch job. The worker has no time limit so
   // analyze-batch processes the entire fixture list in one go (or in chunks if
   // it chooses to).
-  const job = await queues['futbol-analyze-batch'].add('analyze-batch', {
+  const batchJob = await queues['futbol-analyze-batch'].add('analyze-batch', {
     offset: 0,
     batchSize: 10,
     date: today,
     totalFixtures: fixtures.length,
   });
 
-  return { ok: true, date: today, fixtureCount: fixtures.length, batchJobId: job.id };
+  return { ok: true, date: today, fixtureCount: fixtures.length, batchJobId: batchJob.id };
 }
