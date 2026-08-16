@@ -9,7 +9,7 @@
  * Throws on any partial failure → BullMQ retries; cached fixtures
  * short-circuit on the next attempt.
  *
- * Payload: { date?: string, force?: boolean }
+ * Payload: { date?: string, force?: boolean, fixtureIds?: number[] }
  */
 import {
   getFixtures, analyzeMatch, getQuota,
@@ -64,8 +64,14 @@ export async function runAnalyzeAllToday(payload = {}, job = null) {
   // (la del día que el usuario está viendo) se respeta; si no, hoy en Bogotá.
   const date = payload.date || bogotaToday();
   const forceAll = payload.force === true;
+  const requestedIds = [...new Set(
+    (Array.isArray(payload.fixtureIds) ? payload.fixtureIds : [])
+      .map(Number)
+      .filter(id => Number.isInteger(id) && id > 0),
+  )];
+  const requestedSet = requestedIds.length > 0 ? new Set(requestedIds) : null;
   const startTime = Date.now();
-  console.log(`[analyze-all-today] start date=${date} force=${forceAll}`);
+  console.log(`[analyze-all-today] start date=${date} force=${forceAll} scope=${requestedSet ? requestedSet.size : 'all'}`);
   const reportProgress = async (extra) => {
     if (!job?.updateProgress) return;
     try { await job.updateProgress(extra); } catch {}
@@ -83,21 +89,29 @@ export async function runAnalyzeAllToday(payload = {}, job = null) {
   const { fixtures } = await getFixtures(date);
   console.log(`[analyze-all-today] getFixtures took ${Date.now() - tFixtures}ms`);
   const allFixtures = fixtures || [];
+  const scopedFixtures = requestedSet
+    ? allFixtures.filter(fixture => requestedSet.has(Number(fixture.fixture?.id)))
+    : allFixtures;
 
   if (allFixtures.length === 0) {
     return { ok: true, message: 'no fixtures', analyzed: 0, date };
+  }
+  if (requestedSet && scopedFixtures.length !== requestedSet.size) {
+    const found = new Set(scopedFixtures.map(fixture => Number(fixture.fixture?.id)));
+    const missing = requestedIds.filter(id => !found.has(id));
+    throw new Error(`fixtureIds no presentes en la jornada ${date}: ${missing.join(',')}`);
   }
 
   const tAlready = Date.now();
   const alreadyAnalyzed = forceAll ? [] : await getAnalyzedFixtureIds(date);
   const alreadySet = new Set(alreadyAnalyzed.map(Number));
   const toAnalyze = forceAll
-    ? allFixtures
-    : allFixtures.filter(f => !alreadySet.has(Number(f.fixture.id)));
-  console.log(`[analyze-all-today] toAnalyze=${toAnalyze.length}/${allFixtures.length} (already=${alreadyAnalyzed.length}) lookup=${Date.now() - tAlready}ms`);
+    ? scopedFixtures
+    : scopedFixtures.filter(f => !alreadySet.has(Number(f.fixture.id)));
+  console.log(`[analyze-all-today] toAnalyze=${toAnalyze.length}/${scopedFixtures.length} scope (day=${allFixtures.length}, already=${alreadyAnalyzed.length}) lookup=${Date.now() - tAlready}ms`);
 
   if (toAnalyze.length === 0) {
-    return { ok: true, message: 'all already analyzed', analyzed: 0, total: allFixtures.length, date };
+    return { ok: true, message: 'all already analyzed', analyzed: 0, total: scopedFixtures.length, date };
   }
 
   // SIEMPRE arrancar con el set existente — aunque sea forceAll. Si el
@@ -225,7 +239,8 @@ export async function runAnalyzeAllToday(payload = {}, job = null) {
   return {
     ok: true,
     date,
-    total: allFixtures.length,
+    total: scopedFixtures.length,
+    fixtureIds: requestedSet ? requestedIds : undefined,
     analyzed: success,
     skipped,
     durationSec: Number(durationSec),

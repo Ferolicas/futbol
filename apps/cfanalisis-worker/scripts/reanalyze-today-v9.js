@@ -7,9 +7,10 @@
 // con la concurrencia normal (analyze-all-today, concurrency=1, attempts=5).
 //
 // USO (desde el VPS, en /apps/futbol/apps/cfanalisis-worker):
-//   node scripts/reanalyze-today-v9.js                # hoy (UTC)
+//   node scripts/reanalyze-today-v9.js                # hoy completo en Colombia
 //   node scripts/reanalyze-today-v9.js 2026-05-15     # fecha concreta
 //   node scripts/reanalyze-today-v9.js --no-force     # sin force (skipea analyzed)
+//   node scripts/reanalyze-today-v9.js 2026-08-16 --fixture-ids=123,456
 //
 // El job futbol-analyze-all-today por defecto se queda con force=true para
 // invalidar los cache_version<9 anteriores. Con --no-force solo re-analiza
@@ -20,6 +21,7 @@
 //   (../.env relativo a este script). Mismos valores que usa src/redis.ts.
 
 import 'dotenv/config';
+import { createHash } from 'node:crypto';
 import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 
@@ -27,7 +29,25 @@ import IORedis from 'ioredis';
 const args = process.argv.slice(2);
 const force = !args.includes('--no-force');
 const dateArg = args.find((a) => /^\d{4}-\d{2}-\d{2}$/.test(a));
-const date = dateArg || new Date().toISOString().split('T')[0];
+const date = dateArg || new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Bogota',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+}).format(new Date());
+const fixtureIdsArg = args.find((arg) => arg.startsWith('--fixture-ids='));
+const fixtureIds = fixtureIdsArg
+  ? [...new Set(fixtureIdsArg.slice('--fixture-ids='.length)
+      .split(',')
+      .map(Number)
+      .filter(id => Number.isInteger(id) && id > 0))]
+  : [];
+if (fixtureIdsArg && fixtureIds.length === 0) {
+  throw new Error('--fixture-ids requiere al menos un ID entero positivo');
+}
+if (fixtureIds.length > 500) {
+  throw new Error('--fixture-ids admite como máximo 500 IDs');
+}
 
 // ── Conexion Redis (mismas opciones que src/redis.ts) ────────────────────
 const host = process.env.REDIS_HOST || '127.0.0.1';
@@ -60,11 +80,14 @@ async function main() {
   });
 
   try {
-    const payload = { date, force };
+    const payload = { date, force, ...(fixtureIds.length > 0 ? { fixtureIds } : {}) };
+    const scope = fixtureIds.length > 0
+      ? `scope-${createHash('sha256').update(fixtureIds.join(',')).digest('hex').slice(0, 12)}`
+      : 'all';
     const job = await queue.add('analyze-all-today', payload, {
       // Si por error se intenta encolar dos veces seguidas con el mismo
       // (date, force), evitamos duplicados.
-      jobId: `manual-reanalyze-v9-${date}-${force ? 'force' : 'soft'}`,
+      jobId: `manual-reanalyze-v9-${date}-${force ? 'force' : 'soft'}-${scope}`,
       removeOnComplete: { count: 50, age: 24 * 3600 },
       removeOnFail: { count: 100, age: 7 * 24 * 3600 },
     });

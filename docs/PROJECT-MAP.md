@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-14 · Commit base: `3138992`
+Actualizado: 2026-08-16 · Commit base: `ba4a0a1`
 
 ## Identidad y stack
 
@@ -251,13 +251,14 @@ workers y scripts activos. Reserva slots globales con Lua/Redis a un techo
 conservador de 420 peticiones por minuto, reintenta con backoff y usa un fallback
 local conservador si Redis cae. Distingue límite por minuto de cuota diaria: la
 segunda no se reintenta, pero el cortacircuito Redis se vuelve a sondear cada
-cinco minutos porque el reinicio real depende de la cuenta. Los flujos críticos
-(`fixtures`, `live` y `results`) pueden comprobar antes la recuperación y tienen
-una reserva dinámica del 15% del límite diario comunicado por el proveedor,
-con suelo de 1.000 y techo de 20.000. En el plan Pro de 7.500 quedan 1.125
-llamadas exclusivas; análisis y enriquecidos nunca pueden consumir esa reserva.
-El límite se persiste junto al contador restante para que un cambio de plan no
-deje bloqueado el sistema con la reserva del plan anterior. Si falta el
+cinco minutos porque el reinicio real depende de la cuenta. No existe ninguna
+reserva preventiva de cuota diaria: todos los flujos pueden consumir hasta la
+última llamada contractual. `fixtures`, `live` y `results` solo tienen prioridad
+para sondear antes la recuperación después de un agotamiento real. Un error al
+consultar cuotas invalida el análisis completo y activa los reintentos de BullMQ;
+nunca se persiste como una respuesta válida sin cuotas. La operación manual
+`futbol-analyze-all-today` admite `fixtureIds` para reparar únicamente los
+partidos afectados sin recalcular los sanos. Si falta el
 calendario del día actual, el worker live ignora el
 smart-skip histórico y consulta el feed en modo fail-open cada 90 segundos. La
 misma cadencia se usa durante partidos para que jornadas de alta simultaneidad

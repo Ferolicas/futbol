@@ -6,8 +6,7 @@ const {
   classifyApiErrorText,
   dailyLimitCooldownMs,
   isCriticalPriority,
-  criticalReserveForDailyLimit,
-  DAILY_LIMIT_RECHECK_MS, DAILY_CRITICAL_RESERVE,
+  DAILY_LIMIT_RECHECK_MS,
   SLOT_MS, RATE_PER_MINUTE, FALLBACK_RATE_PER_MINUTE,
 } = require('../lib/football-api-client.cjs');
 
@@ -35,19 +34,11 @@ test('la cuota diaria abre circuito sin reintentos y el límite por minuto sí r
   );
 });
 
-test('la cuota reserva capacidad exclusiva para calendario, live y resultados', () => {
+test('no existe reserva preventiva; la prioridad solo gobierna la sonda tras agotamiento real', () => {
   assert.equal(isCriticalPriority('live'), true);
   assert.equal(isCriticalPriority('fixtures'), true);
   assert.equal(isCriticalPriority('results'), true);
   assert.equal(isCriticalPriority('standard'), false);
-  assert.ok(DAILY_CRITICAL_RESERVE >= 10_000);
-  assert.ok(DAILY_CRITICAL_RESERVE < 75_000);
-  assert.equal(criticalReserveForDailyLimit(7_500, 7_393), 1_125);
-  assert.equal(criticalReserveForDailyLimit(150_000, 149_000), 20_000);
-  assert.equal(criticalReserveForDailyLimit(500, 499), 500);
-  // Sin cabecera de límite aún, el remaining desbloquea de forma conservadora
-  // una migración de plan y la siguiente respuesta persistirá el límite real.
-  assert.equal(criticalReserveForDailyLimit(null, 7_393), 1_108);
 });
 
 test('el ritmo por defecto queda por debajo de 450 solicitudes/minuto', () => {
