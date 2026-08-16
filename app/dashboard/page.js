@@ -1182,12 +1182,15 @@ export default function Dashboard() {
       (b.odd || 0) - (a.odd || 0)
     );
 
-    const combinedOdd         = all.reduce((acc, m) => acc * (m.odd || 1), 1);
     const combinedProbability = all.reduce((acc, m) => acc + Number(m.rawProbability ?? m.probability), 0) / all.length;
 
+    // “Apuesta del día” es un catálogo ordenado, no un cupón combinable: puede
+    // contener varias líneas del mismo partido, incluso correlacionadas o
+    // incompatibles entre sí. Multiplicar todas sus cuotas producía cifras
+    // falsas como 1e+28. Las cuotas válidas se muestran individualmente en
+    // cada selección; solo la combinada construida por el usuario tiene total.
     return {
       selections: all,
-      combinedOdd: +combinedOdd.toFixed(2),
       combinedProbability: +combinedProbability.toFixed(2),
     };
   }, [analyzedData, fixtureById]);
@@ -1439,7 +1442,6 @@ export default function Dashboard() {
               </span>
               <span className="apuesta-head-metrics">
                 <span><small>Prob. media</small><strong>{cap(apuestaDelDia.combinedProbability)}%</strong></span>
-                {apuestaDelDia.combinedOdd > 1 && <span><small>Cuota</small><strong>{apuestaDelDia.combinedOdd}</strong></span>}
                 <ChevronDown className={showApuesta ? 'is-open' : ''} size={17} aria-hidden="true" />
               </span>
             </button>
@@ -1447,7 +1449,7 @@ export default function Dashboard() {
               <div className="apuesta-body">
                 <div className="apuesta-summary">
                   <Sparkles size={15} aria-hidden="true" />
-                  {apuestaDelDia.selections.length} selecciones desde {FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY}% ordenadas por oportunidad
+                  {apuestaDelDia.selections.length} selecciones desde {FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY}% ordenadas por oportunidad · cuotas individuales
                 </div>
                 <ApuestaSelectionList selections={apuestaDelDia.selections} />
               </div>

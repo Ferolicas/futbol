@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-16 · Commit base: `ba4a0a1`
+Actualizado: 2026-08-16 · Commit base: `48fe704`
 
 ## Identidad y stack
 
@@ -205,7 +205,10 @@ ponderada real es de 80% o más, existe cuota real y la fiabilidad propia del
 mercado es de 90% o más; el constructor puede listar frecuencias desde 70%,
 siempre con la misma fiabilidad mínima. La Apuesta del Día visible en la app
 empieza en 75% de frecuencia, conserva la fiabilidad mínima de 90%, exige cuota
-real desde 1.20 y aplica su whitelist de mercados. Las métricas fuera de
+real desde 1.20 y aplica su whitelist de mercados. Como puede mostrar varias
+líneas correlacionadas o incompatibles del mismo partido, es un catálogo y no
+un cupón: muestra cada cuota individual y nunca las multiplica en una cuota
+total ficticia. Las métricas fuera de
 muestra son únicamente diagnósticas: nunca cambian el porcentaje ni bloquean
 una frecuencia calculada. Los props de jugador siguen la misma regla cuando
 existe historial y una cuota atribuible. El constructor distingue únicamente

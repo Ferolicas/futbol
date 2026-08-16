@@ -10,6 +10,13 @@ test('el frontend diario lee el catálogo selectable para poder incluir 75–79%
   assert.doesNotMatch(source, /const MIN_PROB = 90/);
 });
 
+test('la Apuesta del Día muestra cuotas individuales y no fabrica una cuota total', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../app/dashboard/page.js'), 'utf8');
+  assert.match(source, /cuotas individuales/);
+  assert.doesNotMatch(source, /apuestaDelDia\.combinedOdd/);
+  assert.doesNotMatch(source, /const combinedOdd\s*=\s*all\.reduce/);
+});
+
 test('el publicador recupera fiabilidad durable antes de aplicar las reglas Telegram', () => {
   const source = fs.readFileSync(path.join(__dirname, '../app/api/cron/publish-combinada/route.js'), 'utf8');
   assert.match(source, /combinada\.selectable \|\| combinada\.selections/);
