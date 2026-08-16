@@ -2030,7 +2030,7 @@ body {
 
 /* ===================== CHAT WIDGET ===================== */
 .chat-widget {
-  position: fixed; bottom: 20px; right: 20px; z-index: 8000;
+  position: fixed; bottom: max(20px, calc(env(safe-area-inset-bottom) + 12px)); right: 20px; z-index: 8000;
 }
 .chat-trigger {
   width: 56px; height: 56px; border-radius: 50%; border: none;
@@ -3512,6 +3512,212 @@ body {
 
 .dashboard-picker.is-amber .dashboard-picker-menu > button > svg {
   color: #f8c95d;
+}
+
+/* Selector múltiple de ligas. Es un filtro visual persistido y mantiene el
+   menú abierto para permitir marcar varias competiciones de una sola vez. */
+.dashboard-picker-trigger:disabled {
+  opacity: .62;
+  cursor: wait;
+}
+
+.league-multi-menu {
+  padding: 0;
+  overflow: hidden;
+}
+
+.league-picker-actions {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid rgba(255,255,255,.075);
+  background: rgba(5,15,22,.99);
+}
+
+.league-picker-actions > button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(94,230,177,.18);
+  border-radius: 9px;
+  color: #c8eee0;
+  background: rgba(94,230,177,.07);
+  font: inherit;
+  font-size: .61rem;
+  font-weight: 850;
+  cursor: pointer;
+  transition: border-color .16s ease, background .16s ease, transform .16s ease;
+}
+
+.league-picker-actions > button:hover,
+.league-picker-actions > button:focus-visible {
+  border-color: rgba(94,230,177,.42);
+  background: rgba(94,230,177,.14);
+  outline: none;
+}
+
+.league-picker-actions > button:active { transform: scale(.97); }
+
+.league-picker-actions > span {
+  overflow: hidden;
+  color: #70858d;
+  font-size: .56rem;
+  font-weight: 750;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.league-picker-list {
+  max-height: min(360px, 50dvh);
+  padding: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.league-picker-list > label {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 7px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: #9db0b5;
+  cursor: pointer;
+  transition: color .16s ease, border-color .16s ease, background .16s ease;
+}
+
+.league-picker-list > label:hover,
+.league-picker-list > label.is-active {
+  border-color: rgba(94,230,177,.13);
+  color: #e7f5f1;
+  background: rgba(94,230,177,.06);
+}
+
+.league-picker-list > label:focus-within {
+  outline: 2px solid rgba(94,230,177,.48);
+  outline-offset: -2px;
+}
+
+.league-picker-list input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.league-checkbox {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: 5px;
+  color: #04100c;
+  background: rgba(255,255,255,.035);
+  transition: border-color .16s ease, background .16s ease, transform .16s ease;
+}
+
+.league-picker-list > label.is-active .league-checkbox {
+  border-color: #5ee6b1;
+  background: #5ee6b1;
+  box-shadow: 0 0 14px rgba(94,230,177,.18);
+}
+
+.league-picker-list > label:active .league-checkbox { transform: scale(.9); }
+
+.league-picker-option-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.league-picker-option-copy strong {
+  overflow: hidden;
+  font-size: .69rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.league-picker-option-copy small {
+  margin-top: 2px;
+  color: #667b84;
+  font-size: .57rem;
+}
+
+/* Compañero fijo del botón de soporte para jornadas muy largas. */
+.scroll-top-trigger {
+  position: fixed;
+  right: 88px;
+  bottom: max(24px, calc(env(safe-area-inset-bottom) + 16px));
+  z-index: 7999;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 74px;
+  height: 48px;
+  padding: 0 12px;
+  border: 1px solid rgba(94,230,177,.28);
+  border-radius: 999px;
+  color: #dff8ef;
+  background: rgba(5,18,23,.94);
+  box-shadow: 0 10px 30px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.055);
+  font: inherit;
+  font-size: .62rem;
+  font-weight: 850;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(10px) scale(.96);
+  transition: opacity .18s ease, visibility .18s ease, transform .18s ease, border-color .18s ease, background .18s ease;
+}
+
+.scroll-top-trigger.is-visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+.scroll-top-trigger:hover,
+.scroll-top-trigger:focus-visible {
+  border-color: rgba(94,230,177,.56);
+  color: #f2fffa;
+  background: rgba(12,43,39,.97);
+  outline: none;
+}
+
+.scroll-top-trigger:active { transform: scale(.96); }
+
+@media (max-width: 359px) {
+  .scroll-top-trigger {
+    right: 82px;
+    min-width: 48px;
+    padding: 0 10px;
+  }
+  .scroll-top-trigger > span { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .league-picker-actions > button,
+  .league-picker-list > label,
+  .league-checkbox,
+  .scroll-top-trigger {
+    transition: none !important;
+  }
 }
 
 .app .tabs,

@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-16 · Commit base: `48fe704`
+Actualizado: 2026-08-16 · Commit base: `27e2387`
 
 ## Identidad y stack
 
@@ -75,7 +75,9 @@ Las migraciones viven en `scripts/`. Tablas clave:
 
 - `users`: email, hash, verificación y bloqueos.
 - `auth_sessions`: sesión revocable, expiración, agente/IP y último uso.
-- `user_profiles`: rol, plan, estado, IDs de Stripe/MP y preferencias.
+- `user_profiles`: rol, plan, estado, IDs de Stripe/MP y preferencias. El campo
+  `custom_league_ids` es exclusivamente el filtro visual de ligas de fútbol:
+  `NULL` muestra todas, `[]` ninguna y un arreglo conserva la selección.
 - `payment_attempts`: intención durable, recurso del proveedor, estado y entrega de email.
 - `payment_webhook_events`: idempotencia persistente y reintentos de webhooks.
 - `payment_exchange_rates`: última tasa EUR→COP válida para tolerar caídas del proveedor FX.
@@ -410,6 +412,14 @@ solo se montan las filas próximas al viewport, independientemente de que exista
 20, 100, 400 o más partidos. Una tarjeta analizada cerrada no monta mercados,
 probabilidades ni jugadores; al abrirse, `ResizeObserver` mide solo esa fila sin
 compensar el scroll. Las tarjetas están memoizadas y reciben handlers estables.
+El selector de competición de fútbol es multiselección con checkboxes y acciones
+“Todas”/“Ninguna”. `GET/PUT /api/user/leagues` persiste la preferencia por
+usuario, pero nunca limita fixtures, workers, análisis ni cuotas: el filtro se
+aplica únicamente al arreglo renderizado y se combina con Estado (`Próximos`,
+`En vivo`, etc.). Las escrituras del cliente se serializan para que varios clics
+rápidos no dejen una versión anterior en PostgreSQL. Un botón flotante “Arriba”
+acompaña al chat después de 520 px y vuelve al inicio con movimiento reducido
+respetado.
 
 Baloncesto y fútbol americano usan el mismo armazón visual móvil de fútbol:
 selector de fecha, competición/estado, pestañas Partidos/Combinada, tarjetas

@@ -43,6 +43,10 @@ import { DateCaption, LeaguePicker, StatusPicker } from './components/DashboardF
 import DashboardBuffer from './components/DashboardBuffer';
 import AnalysisFullModal from './components/AnalysisFullModal';
 import { displayBettingText } from './utils/display-betting-text';
+import {
+  leagueSelectionIncludes,
+  normalizeLeagueSelection,
+} from '../../lib/league-view-filter';
 
 const AnalysisExperience = dynamic(
   () => import('./analisis/[id]/page').then((module) => module.AnalysisExperience),
@@ -121,7 +125,12 @@ export default function Dashboard() {
   const [standings, setStandings] = useState({});
   const [sortBy] = useState('time');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [leagueFilter, setLeagueFilter] = useState('');
+  // Filtro visual persistido: null=todas, []=ninguna, [ids]=personalizado.
+  // No participa en getFixtures, análisis, cuotas ni workers.
+  const [leagueFilter, setLeagueFilter] = useState(null);
+  const [allLeagueIds, setAllLeagueIds] = useState([]);
+  const [leagueFilterReady, setLeagueFilterReady] = useState(false);
+  const [leagueFilterSaving, setLeagueFilterSaving] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [analyzing, setAnalyzing] = useState(false);
   const [batchRunning, setBatchRunning] = useState(false);
@@ -171,6 +180,8 @@ export default function Dashboard() {
   const pushEnabledRef = useRef(pushEnabled);
   const pushSupportedRef = useRef(pushSupported);
   const subscribePushRef = useRef(null); // asignado tras definir subscribePush
+  const leagueSaveQueueRef = useRef(Promise.resolve());
+  const leagueSaveVersionRef = useRef(0);
   favoritesRef.current = favorites;
   hiddenRef.current = hidden;
   analyzedRef.current = analyzed;
@@ -178,6 +189,65 @@ export default function Dashboard() {
   dateRef.current = date;
   pushEnabledRef.current = pushEnabled;
   pushSupportedRef.current = pushSupported;
+
+  // Recuperar una sola vez la preferencia visual del usuario. Un perfil sin
+  // valor usa "todas"; un arreglo vacío conserva explícitamente "ninguna".
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/user/leagues')
+      .then(async (response) => {
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+        if (cancelled) return;
+        const ids = normalizeLeagueSelection(body.leagueIds) || [];
+        setAllLeagueIds(ids);
+        setLeagueFilter(body.isCustom ? ids : null);
+      })
+      .catch((preferenceError) => {
+        if (cancelled) return;
+        console.error('[league-filter:load]', preferenceError.message);
+        setLeagueFilter(null);
+        setError('No pudimos recuperar tu filtro de ligas; se muestran todas.');
+      })
+      .finally(() => {
+        if (!cancelled) setLeagueFilterReady(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Escrituras serializadas: si se marcan cinco checks rápidamente, la última
+  // selección siempre llega de última a PostgreSQL. keepalive permite terminar
+  // el guardado aunque el usuario cierre o cambie de pantalla enseguida.
+  const updateLeagueFilter = useCallback((nextValue) => {
+    const normalized = normalizeLeagueSelection(nextValue);
+    const version = ++leagueSaveVersionRef.current;
+    setLeagueFilter(normalized);
+    setLeagueFilterSaving(true);
+
+    leagueSaveQueueRef.current = leagueSaveQueueRef.current
+      .catch(() => {})
+      .then(async () => {
+        const response = await fetch('/api/user/leagues', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            leagueIds: normalized === null ? null : normalized.map(Number),
+          }),
+          keepalive: true,
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+      })
+      .catch((saveError) => {
+        console.error('[league-filter:save]', saveError.message);
+        if (version === leagueSaveVersionRef.current) {
+          setError('El filtro se aplicó en pantalla, pero no pudo guardarse. Inténtalo de nuevo.');
+        }
+      })
+      .finally(() => {
+        if (version === leagueSaveVersionRef.current) setLeagueFilterSaving(false);
+      });
+  }, []);
 
   // liveStats persiste a traves de SPA-navigation via su Context propio
   // (live-stats-context.js), no requiere reseed manual aqui.
@@ -845,7 +915,7 @@ export default function Dashboard() {
     if (statusFilter === 'upcoming' && status !== 'NS') return false;
     if (statusFilter === 'finished' && !isFinished(status)) return false;
     if (statusFilter === 'favoritos' && !favoritesSet.has(f.fixture.id)) return false;
-    if (leagueFilter && String(f.league.id) !== leagueFilter) return false;
+    if (!leagueSelectionIncludes(leagueFilter, f.league.id)) return false;
     return true;
   }), [fixtures, hiddenSet, statusFilter, favoritesSet, leagueFilter]);
 
@@ -1094,15 +1164,6 @@ export default function Dashboard() {
     for (const fixture of fixtures) {
       const fixtureId = fixture.fixture.id;
       if (hiddenSet.has(fixtureId)) continue;
-      const status = fixture.fixture.status.short;
-      if (isLive(status)) liveTotal++;
-      if (status === 'NS') upcomingTotal++;
-      if (isFinished(status)) finishedTotal++;
-      if (favoritesSet.has(fixtureId)) favoriteTotal++;
-      if (!isPostponed(status) &&
-          (!leagueFilter || String(fixture.league.id) === leagueFilter)) {
-        visibleTotal++;
-      }
       if (!leagueMap[fixture.league.id]) {
         leagueMap[fixture.league.id] = {
           id: fixture.league.id,
@@ -1110,6 +1171,15 @@ export default function Dashboard() {
           country: fixture.leagueMeta?.country || fixture.league.country,
           logo: fixture.league.logo,
         };
+      }
+      if (!leagueSelectionIncludes(leagueFilter, fixture.league.id)) continue;
+      const status = fixture.fixture.status.short;
+      if (isLive(status)) liveTotal++;
+      if (status === 'NS') upcomingTotal++;
+      if (isFinished(status)) finishedTotal++;
+      if (favoritesSet.has(fixtureId)) favoriteTotal++;
+      if (!isPostponed(status)) {
+        visibleTotal++;
       }
     }
 
@@ -1401,7 +1471,11 @@ export default function Dashboard() {
             <LeaguePicker
               leagues={Object.values(leagues).sort((a, b) => a.name.localeCompare(b.name))}
               value={leagueFilter}
-              onChange={setLeagueFilter}
+              onChange={updateLeagueFilter}
+              multiple
+              allLeagueIds={allLeagueIds}
+              disabled={!leagueFilterReady}
+              saving={leagueFilterSaving}
             />
           </div>
         </div>
@@ -1491,8 +1565,10 @@ export default function Dashboard() {
             {sorted.length === 0 && !error && (
               <div className="empty-state fade-in">
                 <div className="empty-icon">&#9917;</div>
-                <h3>Sin partidos</h3>
-                <p>No hay partidos para esta fecha</p>
+                <h3>{Array.isArray(leagueFilter) && leagueFilter.length === 0 ? 'Ninguna liga seleccionada' : 'Sin partidos'}</h3>
+                <p>{Array.isArray(leagueFilter) && leagueFilter.length === 0
+                  ? 'Abre el filtro de competición y marca las ligas que quieras ver.'
+                  : 'No hay partidos que coincidan con los filtros de esta fecha.'}</p>
               </div>
             )}
             {sorted.length > 0 && (isIOS ? (

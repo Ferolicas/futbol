@@ -1,6 +1,6 @@
 # CF Análisis — sistema visual
 
-Actualizado: 2026-08-01
+Actualizado: 2026-08-16
 
 ## Dirección
 
@@ -31,7 +31,10 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   monograma cuadrado CF verde/ámbar sobre negro. Sus rutas PWA son versionadas
   para invalidar la caché del icono anterior; el logo horizontal animado se
   conserva dentro de la interfaz.
-- Controles: jornada y competición comparten siempre una sola fila. Las opciones mantienen texto claro sobre fondo oscuro.
+- Controles: jornada y competición comparten siempre una sola fila. El filtro
+  de ligas de fútbol conserva el menú abierto, usa checkboxes reales y ofrece
+  acciones compactas “Todas”/“Ninguna”; la selección se guarda automáticamente.
+  Las opciones mantienen texto claro sobre fondo oscuro.
 - Navegación del dashboard: orden fijo `Partidos → Combinada → Estado`.
 - Tabs y chips: estado activo con color, borde y fondo; nunca dependen solo del color.
 - Tarjetas: una sola capa de profundidad, sin `backdrop-filter` ni animaciones de sombra repetidas por tarjeta.
@@ -64,6 +67,9 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   reparten dinámicamente en filas y columnas. Cada tarjeta pertenece a una
   familia y contiene hasta seis opciones para conservar nombres y métricas.
   Probabilidad, fiabilidad y cuota usan respectivamente verde, cian y ámbar.
+- Jornadas largas: después de 520 px aparece el control flotante “Arriba” junto
+  al botón de soporte. Usa icono Lucide, área táctil mínima de 48 px, foco
+  visible y scroll instantáneo cuando el usuario reduce el movimiento.
 
 ## Motion y rendimiento
 

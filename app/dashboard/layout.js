@@ -5,6 +5,7 @@ import ChatWidget from './chat-widget';
 import LiveStatsProvider from './live-stats-context';
 import SelectedMarketsProvider from './selected-markets-context';
 import DashboardHeader from './components/DashboardHeader';
+import ScrollToTopButton from './components/ScrollToTopButton';
 import { hasActiveEntitlement } from '../../lib/entitlements';
 
 export const metadata = {
@@ -52,6 +53,7 @@ export default async function DashboardLayout({ children }) {
           {children}
         </LiveStatsProvider>
       </SelectedMarketsProvider>
+      <ScrollToTopButton />
       <ChatWidget />
     </div>
   );

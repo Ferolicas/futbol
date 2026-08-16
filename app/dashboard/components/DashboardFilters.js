@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarClock,
   Check,
@@ -12,6 +12,11 @@ import {
   Star,
   Trophy,
 } from 'lucide-react';
+import {
+  leagueSelectionIncludes,
+  normalizeLeagueSelection,
+  toggleLeagueSelection,
+} from '../../../lib/league-view-filter';
 
 function Picker({ value, onChange, options, label, placeholder, variant = 'green' }) {
   const [open, setOpen] = useState(false);
@@ -105,26 +110,157 @@ function Picker({ value, onChange, options, label, placeholder, variant = 'green
   );
 }
 
-export function LeaguePicker({ leagues, value, onChange, variant = 'green' }) {
-  const options = [
-    { value: '', label: 'Todas las ligas', meta: 'Sin limitar competiciones', icon: Trophy },
-    ...leagues.map((league) => ({
-      value: String(league.id),
-      label: league.name,
-      meta: league.country || 'Competición',
-      logo: league.logo,
-    })),
-  ];
+export function LeaguePicker({
+  leagues,
+  value,
+  onChange,
+  variant = 'green',
+  multiple = false,
+  allLeagueIds = [],
+  disabled = false,
+  saving = false,
+}) {
+  if (!multiple) {
+    const options = [
+      { value: '', label: 'Todas las ligas', meta: 'Sin limitar competiciones', icon: Trophy },
+      ...leagues.map((league) => ({
+        value: String(league.id),
+        label: league.name,
+        meta: league.country || 'Competición',
+        logo: league.logo,
+      })),
+    ];
+
+    return (
+      <Picker
+        value={value}
+        onChange={onChange}
+        options={options}
+        label="Competición"
+        placeholder="Todas las ligas"
+        variant={variant}
+      />
+    );
+  }
 
   return (
-    <Picker
+    <MultiLeaguePicker
+      leagues={leagues}
       value={value}
       onChange={onChange}
-      options={options}
-      label="Competición"
-      placeholder="Todas las ligas"
       variant={variant}
+      allLeagueIds={allLeagueIds}
+      disabled={disabled}
+      saving={saving}
     />
+  );
+}
+
+function MultiLeaguePicker({ leagues, value, onChange, variant, allLeagueIds, disabled, saving }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const normalized = useMemo(() => normalizeLeagueSelection(value), [value]);
+  const selectedSet = useMemo(() => new Set(normalized || []), [normalized]);
+  const availableSelected = normalized === null
+    ? leagues.length
+    : leagues.filter(league => selectedSet.has(String(league.id))).length;
+  const singleLeague = availableSelected === 1
+    ? leagues.find(league => leagueSelectionIncludes(normalized, league.id))
+    : null;
+  const summary = disabled
+    ? 'Cargando ligas…'
+    : normalized === null
+      ? 'Todas las ligas'
+      : normalized.length === 0
+        ? 'Ninguna liga'
+        : singleLeague?.name || `${availableSelected} ligas visibles`;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOutside = (event) => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    const closeEscape = (event) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('keydown', closeEscape);
+    };
+  }, [open]);
+
+  const toggle = (leagueId) => {
+    const knownIds = allLeagueIds.length > 0
+      ? allLeagueIds
+      : leagues.map(league => String(league.id));
+    onChange(toggleLeagueSelection(normalized, leagueId, knownIds));
+  };
+
+  return (
+    <div className={`dashboard-picker league-multi-picker is-${variant}`} ref={rootRef}>
+      <button
+        type="button"
+        className={`dashboard-picker-trigger ${open ? 'is-open' : ''}`}
+        onClick={() => setOpen(current => !current)}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        disabled={disabled}
+      >
+        <span className="dashboard-picker-leading">
+          {singleLeague?.logo ? (
+            <img src={singleLeague.logo} alt="" loading="lazy" decoding="async" />
+          ) : (
+            <Trophy size={18} aria-hidden="true" />
+          )}
+        </span>
+        <span className="dashboard-picker-copy">
+          <small>Competición</small>
+          <strong>{summary}</strong>
+        </span>
+        {!disabled && <span className="dashboard-picker-count">{availableSelected}</span>}
+        <ChevronDown className="dashboard-picker-chevron" size={16} aria-hidden="true" />
+      </button>
+
+      {open && !disabled && (
+        <div className="dashboard-picker-menu league-multi-menu" role="group" aria-label="Filtrar ligas visibles">
+          <div className="league-picker-actions">
+            <button type="button" onClick={() => onChange(null)}>Todas</button>
+            <button type="button" onClick={() => onChange([])}>Ninguna</button>
+            <span aria-live="polite">{saving ? 'Guardando…' : `${availableSelected}/${leagues.length} visibles`}</span>
+          </div>
+          <div className="league-picker-list">
+            {leagues.map((league) => {
+              const checked = leagueSelectionIncludes(normalized, league.id);
+              return (
+                <label key={league.id} className={checked ? 'is-active' : ''}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggle(league.id)}
+                  />
+                  <span className="league-checkbox" aria-hidden="true">
+                    {checked && <Check size={13} />}
+                  </span>
+                  <span className="dashboard-picker-option-icon">
+                    {league.logo ? (
+                      <img src={league.logo} alt="" loading="lazy" decoding="async" />
+                    ) : (
+                      <Trophy size={17} aria-hidden="true" />
+                    )}
+                  </span>
+                  <span className="league-picker-option-copy">
+                    <strong>{league.name}</strong>
+                    <small>{league.country || 'Competición'}</small>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
