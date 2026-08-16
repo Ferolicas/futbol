@@ -69,7 +69,8 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   Probabilidad, fiabilidad y cuota usan respectivamente verde, cian y ámbar.
 - Jornadas largas: después de 520 px aparece el control flotante “Arriba” junto
   al botón de soporte. Usa icono Lucide, área táctil mínima de 48 px, foco
-  visible y scroll instantáneo cuando el usuario reduce el movimiento.
+  visible y siempre salta de inmediato al encabezado; no anima el recorrido
+  porque las listas virtualizadas muy largas pueden interrumpirlo al remedirse.
 
 ## Motion y rendimiento
 

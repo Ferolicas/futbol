@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-16 · Commit base: `27e2387`
+Actualizado: 2026-08-16 · Commit base: `b20e715`
 
 ## Identidad y stack
 
@@ -95,6 +95,12 @@ Las migraciones viven en `scripts/`. Tablas clave:
   de reintentos; un error HTTP/rate-limit nunca se guarda como evidencia.
 - `prediction_models` + `market_segment_diagnostics`: pesos versionados del
   motor y validación fuera de muestra por mercado, dirección y línea exacta.
+
+El botón flotante `Arriba` no usa desplazamiento suave: en jornadas con cientos
+de partidos la medición dinámica del virtualizador podía interrumpir esa
+animación antes de alcanzar el encabezado. Restablece inmediatamente el scroll
+de `document.scrollingElement`, `html`, `body` y `window`, y lo confirma durante
+dos frames para absorber el reajuste de filas y la inercia de Safari.
 
 `lib/supabase.js` ya no conecta Supabase: conserva la API antigua y delega en `lib/db.js`.
 

@@ -46,3 +46,14 @@ test('el layout mantiene el botón Arriba junto al soporte en todas las vistas',
   const source = fs.readFileSync(path.join(__dirname, '../app/dashboard/layout.js'), 'utf8');
   assert.match(source, /<ScrollToTopButton \/>\s*<ChatWidget \/>/);
 });
+
+test('el botón Arriba salta al inicio sin animarse contra la lista virtual', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '../app/dashboard/components/ScrollToTopButton.js'),
+    'utf8',
+  );
+  assert.match(source, /document\.scrollingElement \|\| document\.documentElement/);
+  assert.match(source, /window\.scrollTo\(0, 0\)/);
+  assert.match(source, /requestAnimationFrame\(resetPosition\)/);
+  assert.doesNotMatch(source, /behavior:\s*reduceMotion \? 'auto' : 'smooth'/);
+});
