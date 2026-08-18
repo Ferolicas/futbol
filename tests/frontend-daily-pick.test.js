@@ -38,7 +38,8 @@ test('n8n conserva la defensa de probabilidad, fiabilidad y cuota de Telegram', 
 test('n8n publica una imagen por partido, sin combinada', () => {
   const source = fs.readFileSync(path.join(__dirname, '../scripts/build-n8n-telegram-workflow.mjs'), 'utf8');
   assert.match(source, /Array\.isArray\(data\.matches\)/);
-  assert.match(source, /options\.length !== 3/);
+  assert.match(source, /options\.length < 1 \|\| options\.length > 3/);
+  assert.doesNotMatch(source, /source\.length > 3/);
   assert.match(source, /return matches\.map\(\(match, index\) => \(\{/);
   assert.match(source, /'match=' \+ encode\(JSON\.stringify\(match\)\)/);
   // Sin combinada no hay cuota total ni probabilidad conjunta.

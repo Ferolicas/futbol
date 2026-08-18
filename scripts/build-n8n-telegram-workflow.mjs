@@ -40,8 +40,8 @@ code.position = [-220, 0];
 telegram.position = [80, 0];
 finalize.position = [340, 0];
 
-// Reintenta durante la tarde si a las 13:00 todavía no hay suficientes
-// análisis. El estado global impide publicar más de una vez por fecha.
+// Reintenta durante la tarde si a las 13:00 todavía no hay opciones válidas.
+// El estado global impide publicar más de una vez por fecha.
 schedule.parameters.rule = {
   interval: [13, 14, 15, 16, 17, 18].map(hour => ({
     field: 'days',
@@ -68,6 +68,7 @@ code.parameters.jsCode = String.raw`const payload = $input.first()?.json || {};
 const expectedNoPick = new Set([
   'no analyzed fixtures',
   'no analyzed selections',
+  'no eligible matches',
   'no match with three eligible options',
 ]);
 
@@ -82,7 +83,7 @@ const state = $getWorkflowStaticData('global');
 
 if (state.lastTelegramDate === data.fecha) return [];
 
-if (source.length < 1 || source.length > 3) {
+if (source.length < 1) {
   throw new Error('Cantidad de partidos fuera de regla');
 }
 
@@ -113,8 +114,8 @@ const formatTime = kickoff => {
 // probabilidad (>=85%) y fiabilidad (>=90%).
 const matches = source.map(match => {
   const options = Array.isArray(match.options) ? match.options : [];
-  if (options.length !== 3) {
-    throw new Error('El backend devolvió un partido sin sus tres opciones');
+  if (options.length < 1 || options.length > 3) {
+    throw new Error('El backend devolvió un partido fuera del rango de una a tres opciones');
   }
   return {
     homeTeam: match.homeTeam || '',
@@ -155,7 +156,8 @@ const encode = value => encodeURIComponent(String(value ?? ''));
 const caption = '<a href="https://cfanalisis.com">Si quieres cuotas más altas y más análisis, entra a CF Análisis</a>';
 
 // Un item por partido: el nodo de Telegram se ejecuta una vez por item, así que
-// salen tres fotos distintas. El enlace va solo en la primera para no repetirlo.
+// sale una foto distinta por partido. El enlace va solo en la primera para no
+// repetirlo.
 return matches.map((match, index) => ({
   json: {
     imageUrl: 'https://cfanalisis.com/api/pick-image?' + [
@@ -212,7 +214,7 @@ workflow.settings = {
   timezone: 'Europe/Madrid',
 };
 workflow.active = true;
-workflow.description = 'Publica cada día hasta 3 partidos en Telegram, una imagen por partido con sus 3 opciones (>=85% probabilidad, >=90% fiabilidad, cuota >=1.20), sin IA.';
+workflow.description = 'Publica cada día todos los partidos válidos en Telegram, una imagen por partido con 1 a 3 opciones (>=85% probabilidad, >=90% fiabilidad, cuota >=1.20), sin IA.';
 workflow.pinData = {};
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });

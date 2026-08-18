@@ -5,8 +5,9 @@
  * Si no se pasa date, usa la fecha de hoy.
  * Solo devuelve filas con status = 'published'.
  *
- * FORMATO (cambió): devuelve `data.matches`, un array de hasta 3 PARTIDOS y
- * cada uno con `options` (3 opciones). Ya no existe `data.selections` plana ni
+ * FORMATO (cambió): devuelve `data.matches`, un array con TODOS los partidos
+ * publicables y cada uno con `options` (entre 1 y 3 opciones). Ya no existe
+ * `data.selections` plana ni
  * cuota/probabilidad combinadas. n8n debe recorrer `matches` y pedir una imagen
  * por partido a /api/pick-image?match=<JSON>.
  *
@@ -26,7 +27,7 @@
 import { supabaseAdmin } from '../../../lib/supabase';
 import { jsonError } from '../../../lib/api-error';
 import {
-  meetsTelegramDailyPickReliability,
+  isTelegramDailyPickOptionEligible,
   TELEGRAM_DAILY_PICK_RULES,
 } from '../../../lib/telegram-daily-pick';
 
@@ -73,10 +74,10 @@ export async function GET(request) {
   }
 
   // Filtro defensivo: descartar partidos que ya empezaron hace >110min y
-  // opciones que hayan bajado de la fiabilidad mínima. El cron ya los filtra al
+  // opciones que ya no cumplan las reglas. El cron ya los filtra al
   // crear el snapshot, pero esto protege contra snapshots viejos del día (el
   // cron solo se re-corre 1x cada pocas horas y entre ejecuciones los partidos
-  // cambian de NS a FT). Un partido que se quede sin sus tres opciones deja de
+  // cambian de NS a FT). Un partido que se quede sin opciones válidas deja de
   // ser publicable y se descarta entero.
   const nowMs = Date.now();
   const stored = Array.isArray(data.selections) ? data.selections : [];
@@ -84,10 +85,11 @@ export async function GET(request) {
     .map((match) => ({
       ...match,
       options: (Array.isArray(match?.options) ? match.options : [])
-        .filter(option => meetsTelegramDailyPickReliability(option?.confidence)),
+        .filter(option => isTelegramDailyPickOptionEligible(option))
+        .slice(0, TELEGRAM_DAILY_PICK_RULES.maxOptionsPerMatch),
     }))
     .filter((match) => {
-      if (match.options.length < TELEGRAM_DAILY_PICK_RULES.optionsPerMatch) return false;
+      if (match.options.length < TELEGRAM_DAILY_PICK_RULES.minOptionsPerMatch) return false;
       if (!match.kickoff) return true;
       const kickoffMs = new Date(match.kickoff).getTime();
       if (!Number.isFinite(kickoffMs)) return true;

@@ -2,7 +2,7 @@
  * GET /api/pick-image?match=<JSON>[&fecha=]
  *
  * Genera la tarjeta PNG vertical que n8n publica en Telegram: UN partido con
- * sus TRES opciones. Para publicar tres partidos, n8n pide tres imágenes.
+ * entre UNA y TRES opciones. n8n pide una imagen por cada partido publicable.
  *
  * `match` es un elemento de `data.matches` de /api/combinada-dia:
  *   { homeTeam, awayTeam, homeLogo, awayLogo, league, leagueLogo, kickoff,

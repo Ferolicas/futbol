@@ -1,15 +1,15 @@
 /**
  * GET/POST /api/cron/publish-combinada?secret=CRON_SECRET[&date=YYYY-MM-DD][&status=draft|published]
  *
- * Recorre todos los partidos analizados del día y elige hasta TRES partidos
- * publicables, cada uno con sus TRES mejores opciones: probabilidad >=85%,
+ * Recorre todos los partidos analizados del día y elige TODOS los partidos
+ * publicables, cada uno con entre UNA y TRES de sus mejores opciones:
+ * probabilidad >=85%,
  * fiabilidad >=90%, cuota >=1.20 sin techo y únicamente goles/córners/
- * tarjetas/remates a puerta. Un partido solo entra si reúne tres opciones
- * válidas; si solo hay dos partidos así se publican dos, y si solo hay uno, uno.
+ * tarjetas/remates a puerta. Un partido entra desde que reúne una opción válida.
  *
  * Ya NO se arma una combinada: no hay cuota total ni probabilidad conjunta, y
  * la cuota no ordena nada (solo filtra por debajo de 1.20). n8n publica una
- * imagen por partido con sus tres opciones.
+ * imagen por partido con entre una y tres opciones.
  *
  * Status semantics:
  *   - 'draft'     = creada/calculada pero NO lista para publicar
@@ -78,9 +78,8 @@ async function handle(request) {
   // 2. Cargar analisis completos (Redis L1 + Supabase L2)
   const { analyzedData } = await getAnalyzedMatchesFull(fixtureIds).catch(() => ({ analyzedData: {} }));
 
-  // Telegram tiene una fiabilidad mínima propia de 80%, mientras el catálogo
-  // público del frontend se sanea a 90%. Leemos aquí el documento durable
-  // original para no perder opciones válidas 80–89%; la evidencia _scored
+  // Telegram y el catálogo público exigen 90% de fiabilidad. Leemos aquí el
+  // documento durable original para no perder el valor exacto; la evidencia _scored
   // recupera la fiabilidad exacta en caches v20 que aún no la incluían dentro
   // de cada selección. Si la lectura durable falla, el fallback saneado sigue
   // siendo seguro porque es más estricto (>=90%).
@@ -146,13 +145,14 @@ async function handle(request) {
     });
   }
 
-  // 4. Hasta tres partidos con tres opciones cada uno, ordenados por
-  // probabilidad y fiabilidad. La cuota solo filtra por debajo de 1.20.
+  // 4. Todos los partidos con al menos una opción válida, cada uno con un
+  // máximo de tres, ordenados por probabilidad y fiabilidad. La cuota solo
+  // filtra por debajo de 1.20.
   const dailyPick = selectTelegramDailyPick(all);
   if (dailyPick.matches.length === 0) {
     return Response.json({
       ok: false,
-      reason: 'no match with three eligible options',
+      reason: 'no eligible matches',
       date,
       analyzedCount: fixtureIds.length,
       eligibleCount: dailyPick.eligibleCount,

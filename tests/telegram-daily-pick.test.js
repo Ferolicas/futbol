@@ -32,22 +32,28 @@ test('Telegram publica un partido con sus tres opciones', () => {
   assert.equal(result.matches[0].options.length, 3);
 });
 
-test('Telegram descarta el partido que no reúne tres opciones válidas', () => {
+test('Telegram publica partidos con una o dos opciones válidas', () => {
   const result = dailyPickModule.selectTelegramDailyPick([
     option({ fixtureId: 1, id: 'goals-1' }),
     option({ fixtureId: 1, id: 'corners-1', name: 'Más de 7.5 córners' }),
+    option({ fixtureId: 2, id: 'goals-2', matchName: 'Otro vs Rival' }),
   ]);
-  assert.equal(result.matches.length, 0);
-  assert.equal(result.eligibleCount, 2);
-  assert.equal(result.eligibleMatchCount, 0);
+  assert.equal(result.matches.length, 2);
+  assert.deepEqual(result.matches.map(match => match.options.length), [2, 1]);
+  assert.equal(result.eligibleCount, 3);
+  assert.equal(result.eligibleMatchCount, 2);
 });
 
-test('Telegram publica como mucho tres partidos', () => {
-  const result = dailyPickModule.selectTelegramDailyPick([
-    ...matchOptions(1), ...matchOptions(2), ...matchOptions(3), ...matchOptions(4),
-  ]);
-  assert.equal(result.matches.length, 3);
-  assert.equal(result.eligibleMatchCount, 4);
+test('Telegram publica los diez partidos si cada uno tiene una opción válida', () => {
+  const selections = Array.from({ length: 10 }, (_, index) => option({
+    fixtureId: index + 1,
+    matchName: `Local ${index + 1} vs Visitante ${index + 1}`,
+    id: `goals-${index + 1}`,
+  }));
+  const result = dailyPickModule.selectTelegramDailyPick(selections);
+  assert.equal(result.matches.length, 10);
+  assert.equal(result.eligibleMatchCount, 10);
+  assert.ok(result.matches.every(match => match.options.length === 1));
 });
 
 test('Telegram publica dos partidos si solo hay dos, y uno si solo hay uno', () => {
@@ -146,7 +152,8 @@ test('el contrato Telegram expone todos sus límites operativos', () => {
     minProbability: 85,
     minReliability: 90,
     minSelectionOdd: 1.2,
-    optionsPerMatch: 3,
-    maxMatches: 3,
+    minOptionsPerMatch: 1,
+    maxOptionsPerMatch: 3,
+    maxMatches: null,
   });
 });
