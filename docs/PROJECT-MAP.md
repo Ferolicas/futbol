@@ -286,6 +286,11 @@ cobertura y jamás se convierte en cero).
 `scripts/audit-football-model-data.js` verifica de punta a punta
 crudo, ledger, hechos, dimensiones, marcadores y contadores de jugador; código
 de salida 2 significa una invariancia crítica rota.
+`scripts/audit-football-market-catalog.js` recalcula en solo lectura todos los
+mercados de una fecha, incluidos los inferiores a 70%, adjunta probabilidad,
+fiabilidad, cuota y motivo de exclusión, y compara cada definición contra todos
+los resultados finalizados de `model`. También comprueba complementos y
+monotonicidad de las escaleras O/U y puede exportar un CSV por fixture.
 
 ### Motores empíricos de béisbol, baloncesto y fútbol americano
 
