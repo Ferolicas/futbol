@@ -12,8 +12,31 @@ const {
 
 let buildModelCombinada;
 let buildCalculatedProbabilities;
+let inspectMarketOdd;
 test.before(async () => {
-  ({ buildModelCombinada, buildCalculatedProbabilities } = await import('../lib/model-probabilities.js'));
+  ({ buildModelCombinada, buildCalculatedProbabilities, inspectMarketOdd } = await import('../lib/model-probabilities.js'));
+});
+
+test('el diagnóstico de cuota distingue oferta, mínimo, línea ausente y mercado sin adaptador', () => {
+  const odds = {
+    allBookmakerOdds: [{
+      name: 'Bet365',
+      corners: { Over_9: 1.5 },
+      overUnder: { Over_0_5: 1.03 },
+      homeSot: { Over_3_5: 1.8 },
+      offsides: { Under_5_5: 1.72 },
+    }],
+  };
+
+  assert.deepEqual(inspectMarketOdd('total_corners_over9_5', odds), {
+    status: 'offered', field: 'corners', lineKey: 'Over_9_5',
+    candidates: ['Over_9_5', 'Over_9'], odd: 1.5, bookmaker: 'Bet365',
+  });
+  assert.equal(inspectMarketOdd('total_goals_over0_5', odds).status, 'below_minimum');
+  assert.equal(inspectMarketOdd('total_corners_over8_5', odds).status, 'line_not_offered');
+  assert.equal(inspectMarketOdd('home_sot_over3_5', odds).odd, 1.8);
+  assert.equal(inspectMarketOdd('total_offsides_under5_5', odds).odd, 1.72);
+  assert.equal(inspectMarketOdd('first_goal_45', odds).status, 'unsupported_market');
 });
 
 test('la presentación limita a 95% sin alterar la frecuencia del motor', () => {

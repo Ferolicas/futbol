@@ -25,6 +25,19 @@ const isAllowed = (name) => { const n = normBk(name); return ALLOWED.find(a => n
 // extractor real SÍ mapea). Copiado verbatim del extractor.
 const BET_NAMES = {
   matchWinner: ['Match Winner', 'Full Time Result', '1X2'],
+  doubleChance:['Double Chance'],
+  cleanSheetHome: ['Clean Sheet - Home'],
+  cleanSheetAway: ['Clean Sheet - Away'],
+  dnb:         ['Home/Away'],
+  oddEven:     ['Odd/Even'],
+  exactGoals:  ['Exact Goals Number'],
+  winBothHalves: ['Win Both Halves'],
+  winEitherHalf: ['To Win Either Half'],
+  highestScoringHalf: ['Highest Scoring Half'],
+  homeOddEven: ['Home Odd/Even'],
+  awayOddEven: ['Away Odd/Even'],
+  homeExactGoals: ['Home Team Exact Goals Number'],
+  awayExactGoals: ['Away Team Exact Goals Number'],
   overUnder:   ['Goals Over/Under', 'Over/Under', 'Total Goals', 'Goal Line'],
   btts:        ['Both Teams Score', 'Both Teams To Score'],
   cornersTotal:['Total - Corners', 'Corners Over Under', 'Corners Over/Under', 'Total Corners', 'Corners 2-Way', 'Total Corners (3 way)', 'Total Corners (2 way)'],
@@ -51,6 +64,9 @@ const BET_NAMES = {
   homeFouls:     ['Fouls. Home Total', 'Home Team Fouls'],
   awayFouls:     ['Fouls. Away Total', 'Away Team Fouls'],
   fouls1x2:      ['Fouls. 1x2'],
+  offsidesTotal: ['Offsides. Total', 'Total Offsides', 'Offsides Over/Under', 'Offsides Over Under'],
+  homeOffsides:  ['Offsides. Home Total', 'Home Team Offsides', 'Home Offsides Over/Under'],
+  awayOffsides:  ['Offsides. Away Total', 'Away Team Offsides', 'Away Offsides Over/Under'],
   goalsOu1H:     ['Goals Over/Under First Half', 'Goal Line (1st Half)'],
   goalsOu2H:     ['Goals Over/Under - Second Half'],
   homeGoals1H:   ['Home Team Total Goals(1st Half)'],
@@ -59,6 +75,9 @@ const BET_NAMES = {
   awayGoals2H:   ['Away Team Total Goals(2nd Half)'],
   winner1H:      ['First Half Winner'],
   winner2H:      ['Second Half Winner'],
+  asianHandicap: ['Asian Handicap'],
+  handicap:      ['Handicap Result', 'Handicap', '3-Way Handicap', 'European Handicap'],
+  correctScore:  ['Correct Score', 'Exact Score'],
   cornersTotal1H: ['Total Corners (1st Half)'],
   cornersTotal2H: ['Total Corners (2nd Half)'],
   corners1x2:     ['Corners 1x2'],
@@ -67,7 +86,6 @@ const BET_NAMES = {
   playerAssists:   ['Player Assists', 'Home Player Assists', 'Away Player Assists'],
 };
 const familyOf = (name) => { for (const [fam, list] of Object.entries(BET_NAMES)) if (list.includes(name)) return fam; return null; };
-const isHandicap = (name) => /handicap/i.test(name || '');
 
 (async () => {
   if (!KEY) { console.error('Falta FOOTBALL_API_KEY.'); process.exit(1); }
@@ -84,10 +102,9 @@ const isHandicap = (name) => /handicap/i.test(name || '');
     const bets = bk.bets || [];
     console.log(`\n══ ${bk.name} (id=${bk.id}) ${allowedAs ? `[autorizada: ${allowedAs}]` : '[NO autorizada]'} · ${bets.length} mercados ══`);
 
-    const mapped = [], extra = [], excluded = [];
+    const mapped = [], extra = [];
     for (const bet of bets) {
       const row = `  id=${String(bet.id).padStart(3)} "${bet.name}" (${(bet.values || []).length} values)`;
-      if (isHandicap(bet.name)) { excluded.push(row); continue; }
       const fam = familyOf(bet.name);
       if (fam) mapped.push(`${row}  → familia ${fam} (puede entrar a combinada si el motor lo predice)`);
       else extra.push(`${row}  → extraMarkets (informativo)`);
@@ -96,10 +113,8 @@ const isHandicap = (name) => /handicap/i.test(name || '');
     mapped.forEach(r => console.log(r));
     console.log(` ── EXTRA / informativo (${extra.length}) — se guardan en allBookmakerOdds[bk].extraMarkets ──`);
     extra.forEach(r => console.log(r));
-    console.log(` ── EXCLUIDOS: hándicap (${excluded.length}) — NO se extraen (regla del usuario) ──`);
-    excluded.forEach(r => console.log(r));
   }
-  console.log('\nAhora TODO mercado de bet365/bwin excepto hándicap queda capturado: los de familia');
+  console.log('\nLos mercados con familia quedan disponibles para cruzarse con el motor:');
   console.log('en allBookmakerOdds[bk].<familia>, el resto en allBookmakerOdds[bk].extraMarkets.');
   await closeFootballApiClient();
 })().catch(async e => { console.error('FATAL:', e.message); await closeFootballApiClient(); process.exit(1); });

@@ -2,101 +2,192 @@
 /**
  * Job: futbol-odds
  *
- * Trae cuotas de The Odds API con PRESUPUESTO DIARIO acotado (ODDS_BUDGET=2
- * ejecuciones/día; el tope DURO real son créditos región×mercado en
- * lib/odds-api.js). Distribución:
- *   - Primera llamada: 2 horas ANTES del primer partido del día.
- *   - Resto: repartidas uniformemente hasta el último partido (spacing dinámico).
+ * Refresca las cuotas ricas de API-Football (Bet365/Bwin) después del análisis
+ * nocturno. Las casas suelen publicar mercados estadísticos horas más tarde;
+ * conservar la foto de T-24h dejaba partidos sin cuota aunque ya existiera en
+ * Bet365. Cada fixture tiene tres fases idempotentes: T-12h, T-3h y T-60m.
  *
- * El cron invoca este handler cada 30 min, pero el handler decide si gasta:
- * smart-skip si ya agotó el presupuesto, si aún no entra la ventana (2h pre
- * primer partido), o si no toca por el espaciado. Mismo patrón que el live de
- * baseball. No necesitamos ver cuotas cambiar en vivo todo el día.
+ * El job NO recalcula probabilidades. Sustituye únicamente las cuotas y vuelve
+ * a construir las opciones con `_scored`/playerMarkets ya calculados.
+ *
+ * Payload: { date?: 'YYYY-MM-DD', force?: boolean, fixtureIds?: number[] }
  */
-import { redisGet, redisSet, KEYS, getMatchSchedule, fetchOddsForFixtures, triggerEvent } from '../../shared.js';
+import {
+  redisGet, redisSet, KEYS, bogotaToday,
+  getCachedAnalysis, cacheAnalysis, incrementApiCallCount,
+  footballApiRequest, extractOdds, buildModelCombinada, triggerEvent,
+} from '../../shared.js';
+import { mapPool } from '../../pool.js';
+import { logError } from '../../errors-log.js';
 
-const FINISHED = ['FT', 'AET', 'PEN', 'AWD', 'WO'];
-// Ejecuciones/día (cada una trae TODAS las ligas con partidos). El límite DURO
-// de requests vive en lib/odds-api.js (tope diario 15 req compartido fútbol+
-// baseball → ≤450/mes). 2 ejecuciones: la 1ª (2h pre primer partido) trae la
-// cuota inicial de todas las ligas; la 2ª una actualización más tarde si el
-// tope de requests lo permite. Las cuotas son referencia, no críticas.
-const ODDS_BUDGET = 2;
-const PRE_FIRST_MATCH_MS = 2 * 3600 * 1000; // primera llamada 2h antes del 1er partido
-const MIN_INTERVAL_MIN = 30;      // nunca más seguido que cada 30 min
+const FINISHED = new Set(['FT', 'AET', 'PEN', 'AWD', 'WO', 'CANC', 'ABD', 'PST']);
+const HOUR_MS = 60 * 60 * 1000;
+const EMPTY_RETRY_MS = 30 * 60 * 1000;
+const MAX_EMPTY_ATTEMPTS_PER_PHASE = 4;
+const REFRESH_CONCURRENCY = 8;
 
-const lastCallKey = 'odds:last-call:futbol';
+// Una fase nueva siempre vuelve a consultar, aunque una fase anterior ya haya
+// encontrado cuotas: Bet365 añade props/líneas al acercarse el kickoff.
+export function oddsRefreshPhase(timeUntilKickoffMs) {
+  if (!Number.isFinite(timeUntilKickoffMs) || timeUntilKickoffMs <= 0 || timeUntilKickoffMs > 12 * HOUR_MS) return null;
+  if (timeUntilKickoffMs <= HOUR_MS) return 'final';
+  if (timeUntilKickoffMs <= 3 * HOUR_MS) return 'pregame';
+  return 'early';
+}
 
-export async function runOdds(_payload = {}) {
-  if (!process.env.THE_ODDS_API_KEY) throw new Error('THE_ODDS_API_KEY not configured');
+function refreshStateKey(date, fixtureId, phase) {
+  return `football-odds-refresh:${date}:${fixtureId}:${phase}`;
+}
 
-  const today = new Date().toISOString().split('T')[0];
-  const quotaKey = `odds-quota:${today}`;
-  const callsToday = Number(await redisGet(quotaKey)) || 0;
-  const now = Date.now();
+function shouldRetryEmpty(state, now) {
+  if (!state || state.complete !== true) return true;
+  if (state.hasOdds) return false;
+  if (Number(state.attempts || 0) >= MAX_EMPTY_ATTEMPTS_PER_PHASE) return false;
+  const lastAttempt = Date.parse(state.lastAttemptAt || '');
+  return !Number.isFinite(lastAttempt) || now - lastAttempt >= EMPTY_RETRY_MS;
+}
 
-  // Presupuesto agotado → no más llamadas hoy.
-  if (callsToday >= ODDS_BUDGET) {
-    return { ok: true, skipped: true, reason: `budget exhausted (${callsToday}/${ODDS_BUDGET})` };
-  }
-
-  const fixtures = await redisGet(KEYS.fixtures(today));
-  if (!fixtures || fixtures.length === 0) {
-    return { ok: true, skipped: true, reason: 'no fixtures for today' };
-  }
-  const activeFixtures = fixtures.filter(f => !FINISHED.includes(f.fixture?.status?.short));
-  if (activeFixtures.length === 0) {
-    return { ok: true, skipped: true, reason: 'all matches finished' };
-  }
-
-  // Ventana de gasto: [primer partido − 2h, último partido].
-  const schedule = (await redisGet(KEYS.schedule(today))) || (await getMatchSchedule(today).catch(() => null));
-  const firstKickoff = schedule?.firstKickoff || null;
-  const lastEnd = schedule?.lastExpectedEnd || null;
-  const windowStart = firstKickoff ? firstKickoff - PRE_FIRST_MATCH_MS : now;
-
-  if (firstKickoff && now < windowStart) {
-    const minsTo = Math.round((windowStart - now) / 60000);
-    return { ok: true, skipped: true, reason: `before odds window (${minsTo}min hasta 2h pre primer partido)` };
-  }
-
-  // Espaciado dinámico: repartir las llamadas restantes hasta el fin de la ventana.
-  const windowEnd = lastEnd || (windowStart + 12 * 3600 * 1000);
-  const callsRemaining = ODDS_BUDGET - callsToday;
-  const minsUntilEnd = Math.max(1, (windowEnd - now) / 60000);
-  const intervalMin = Math.max(MIN_INTERVAL_MIN, minsUntilEnd / callsRemaining);
-  const lastCallAt = Number(await redisGet(lastCallKey)) || 0;
-  if (lastCallAt && (now - lastCallAt) < intervalMin * 60000) {
-    return {
-      ok: true, skipped: true, reason: 'throttled',
-      intervalMin: +intervalMin.toFixed(0), callsToday, callsRemaining,
-      nextEligibleIn: Math.round((lastCallAt + intervalMin * 60000 - now) / 1000),
-    };
-  }
-
-  // ── Gastar una llamada ──
-  const { oddsByFixture, apiCallsUsed, remaining } = await fetchOddsForFixtures(activeFixtures);
-  const matchedCount = Object.keys(oddsByFixture).length;
-
-  await Promise.all(
-    Object.entries(oddsByFixture).map(([fixtureId, odds]) =>
-      redisSet(`odds:fixture:${fixtureId}`, { ...odds, fetchedAt: new Date().toISOString() }, 86400)
-    )
+function rebuildWithOdds(existing, odds) {
+  if (!existing?._scored || typeof existing._scored !== 'object') return null;
+  const teamNames = {
+    home: existing.homeTeam,
+    away: existing.awayTeam,
+    homeId: existing.homeId,
+    awayId: existing.awayId,
+  };
+  const combinada = buildModelCombinada(
+    existing._scored,
+    odds,
+    teamNames,
+    existing.playerMarkets || {},
+    existing.calculatedProbabilities || {},
+    existing.cornerCardData || null,
   );
-  await redisSet(`odds:date:${today}`, oddsByFixture, 86400).catch(() => {});
-  await redisSet(quotaKey, callsToday + 1, 86400).catch(() => {});
-  await redisSet(lastCallKey, String(now), 86400).catch(() => {});
+  return {
+    ...existing,
+    odds,
+    combinada,
+    oddsUpdatedAt: new Date().toISOString(),
+  };
+}
 
-  if (matchedCount > 0) {
-    await triggerEvent('live-scores', 'odds-update', {
-      date: today, odds: oddsByFixture, timestamp: new Date().toISOString(),
-    });
+/** @param {any} payload */
+export async function runOdds(payload = {}) {
+  const date = payload.date || bogotaToday();
+  const force = payload.force === true;
+  const requestedIds = new Set(
+    (Array.isArray(payload.fixtureIds) ? payload.fixtureIds : [])
+      .map(Number)
+      .filter(id => Number.isInteger(id) && id > 0),
+  );
+  const now = Date.now();
+  const fixtures = await redisGet(KEYS.fixtures(date));
+  if (!Array.isArray(fixtures) || fixtures.length === 0) {
+    return { ok: true, skipped: true, reason: 'no fixtures for date', date };
   }
 
-  console.log(`[job:futbol-odds] llamada ${callsToday + 1}/${ODDS_BUDGET} — matched=${matchedCount}/${activeFixtures.length} apiReqs=${apiCallsUsed} theOddsRestante=${remaining} intervalo=${intervalMin.toFixed(0)}min`);
+  const candidates = [];
+  for (const fixture of fixtures) {
+    const fixtureId = Number(fixture.fixture?.id);
+    if (!fixtureId || (requestedIds.size && !requestedIds.has(fixtureId))) continue;
+    if (FINISHED.has(fixture.fixture?.status?.short)) continue;
+    const kickoff = Date.parse(fixture.fixture?.date || '');
+    const phase = force ? 'manual' : oddsRefreshPhase(kickoff - now);
+    if (!phase) continue;
+    const stateKey = refreshStateKey(date, fixtureId, phase);
+    const state = force ? null : await redisGet(stateKey);
+    if (!force && !shouldRetryEmpty(state, now)) continue;
+    candidates.push({ fixture, fixtureId, phase, stateKey, state });
+  }
+
+  if (requestedIds.size && !candidates.length) {
+    return { ok: true, skipped: true, reason: 'requested fixtures not eligible', date };
+  }
+  if (!candidates.length) {
+    return { ok: true, skipped: true, reason: 'no refresh phase due', date };
+  }
+
+  let apiCalls = 0;
+  let updated = 0;
+  let noOdds = 0;
+  let noAnalysis = 0;
+  const updatedFixtureIds = [];
+  const errors = [];
+
+  const results = await mapPool(candidates, REFRESH_CONCURRENCY, async (item) => {
+    const { fixture, fixtureId, phase, stateKey, state } = item;
+    const response = await footballApiRequest(`/odds?fixture=${fixtureId}`, {
+      apiKey: process.env.FOOTBALL_API_KEY,
+      timeoutMs: 20_000,
+      retries: 2,
+    });
+    apiCalls += 1;
+    const odds = extractOdds(response.response);
+    const attempts = Number(state?.attempts || 0) + 1;
+    if (!odds) {
+      noOdds += 1;
+      await redisSet(stateKey, {
+        complete: true, hasOdds: false, attempts,
+        lastAttemptAt: new Date().toISOString(), phase,
+      }, 36 * 3600);
+      return { fixtureId, status: 'no-odds' };
+    }
+
+    const existing = await getCachedAnalysis(fixtureId, date);
+    const rebuilt = rebuildWithOdds(existing, odds);
+    if (!rebuilt) {
+      noAnalysis += 1;
+      // No marcar complete: cuando el análisis aparezca, el siguiente tick
+      // debe poder aplicar las cuotas ya publicadas.
+      await redisSet(stateKey, {
+        complete: false, hasOdds: true, attempts,
+        lastAttemptAt: new Date().toISOString(), phase, reason: 'analysis-missing',
+      }, 36 * 3600);
+      return { fixtureId, status: 'no-analysis' };
+    }
+
+    const persist = await cacheAnalysis(fixtureId, rebuilt);
+    if (persist?.db !== true) {
+      throw new Error(`persistencia de cuotas falló: ${persist?.error || 'sin confirmación de PostgreSQL'}`);
+    }
+    await redisSet(stateKey, {
+      complete: true, hasOdds: true, attempts,
+      lastAttemptAt: new Date().toISOString(), phase,
+      selectable: rebuilt.combinada?.selectable?.length || 0,
+    }, 36 * 3600);
+    updated += 1;
+    updatedFixtureIds.push(fixtureId);
+    return { fixtureId, status: 'updated' };
+  });
+
+  for (let index = 0; index < results.length; index += 1) {
+    const result = results[index];
+    if (result.ok) continue;
+    const item = candidates[index];
+    errors.push({ fixtureId: item.fixtureId, error: result.error.message });
+    await logError(date, {
+      job: 'futbol-odds', fixtureId: item.fixtureId,
+      homeTeam: item.fixture.teams?.home?.name,
+      awayTeam: item.fixture.teams?.away?.name,
+      league: item.fixture.league?.name,
+      kickoff: item.fixture.fixture?.date,
+      error: result.error.message,
+    }).catch(() => {});
+  }
+
+  if (apiCalls > 0) await incrementApiCallCount(apiCalls);
+  if (updatedFixtureIds.length > 0) {
+    await triggerEvent('match-updates', 'odds-ready', {
+      date, fixtureIds: updatedFixtureIds, timestamp: new Date().toISOString(),
+    }).catch(() => {});
+  }
+
+  if (errors.length > 0 && errors.length / candidates.length > 0.25) {
+    throw new Error(`football odds refresh partial failure: ${errors.length}/${candidates.length}`);
+  }
+
   return {
-    ok: true, matchedFixtures: matchedCount, totalActive: activeFixtures.length,
-    apiCallsUsed, remaining, callsToday: callsToday + 1, budget: ODDS_BUDGET,
-    intervalMin: +intervalMin.toFixed(0),
+    ok: true, date, checked: candidates.length, updated, noOdds, noAnalysis,
+    apiCalls, errors: errors.length, fixtureIds: updatedFixtureIds,
   };
 }

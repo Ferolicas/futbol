@@ -767,6 +767,13 @@ export default function Dashboard() {
     loadFixtures(date);
   }, [date, loadFixtures]));
 
+  // Las cuotas Bet365/Bwin se completan en fases prepartido. Al recibir una
+  // actualización recargamos el análisis ya reconstruido (probabilidades y
+  // reglas intactas; solo cambian cuotas/opciones disponibles).
+  usePusherEvent(isViewingToday ? 'match-updates' : null, 'odds-ready', useCallback((data) => {
+    if (data?.date === date && data?.fixtureIds?.length) loadFixtures(date);
+  }, [date, loadFixtures]));
+
   // Odds update from The Odds API cron
   usePusherEvent(isViewingToday ? 'live-scores' : null, 'odds-update', useCallback((data) => {
     if (!data?.odds) return;

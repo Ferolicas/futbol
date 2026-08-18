@@ -149,12 +149,15 @@ function globalHistory(key, completed, cache) {
   return result;
 }
 
-function omissionReason({ probability, reliability, shown }) {
+function omissionReason({ probability, reliability, shown, quoteStatus }) {
   if (shown) return '';
   if (probability == null) return 'sin probabilidad';
   if (probability < 70) return 'probabilidad < 70%';
   if (reliability == null || reliability < 90) return 'fiabilidad < 90%';
-  return 'sin cuota exacta >=1.20 en bet365/bwin o mercado no ofrecido';
+  if (quoteStatus === 'below_minimum') return 'cuota real < 1.20';
+  if (quoteStatus === 'unsupported_market') return 'mercado sin adaptador de cuota';
+  if (quoteStatus === 'line_not_offered') return 'línea exacta no entregada por bet365/bwin';
+  return 'cuota no utilizable';
 }
 
 function playerStartXi(lineups) {
@@ -179,7 +182,7 @@ function playerStartXi(lineups) {
     import('../lib/model-probabilities.js'),
     import('../lib/market-labels.js'),
   ]);
-  const { buildModelCtx, buildModelDescriptives, buildCalculatedProbabilities, buildModelCombinada } = modelProbabilities;
+  const { buildModelCtx, buildModelDescriptives, buildCalculatedProbabilities, buildModelCombinada, inspectMarketOdd } = modelProbabilities;
   const { marketLabel } = labels;
 
   const { rows: analyses } = await pool.query(
@@ -254,6 +257,7 @@ function playerStartXi(lineups) {
       const probability = pct(entry.prob_final);
       const reliability = pct(entry.confidence);
       const selection = shown.get(key);
+      const quote = inspectMarketOdd(key, analysis.odds);
       const history = globalHistory(key, completed, historyCache);
       const validation = entry.validation || {};
       fixtureRows.push({
@@ -279,10 +283,13 @@ function playerStartXi(lineups) {
         all_results_hits: history.hits,
         all_results_actual_pct: history.rate,
         platform_shown: Boolean(selection),
-        exact_odd: selection?.odd ?? null,
-        bookmaker: selection?.bookmaker ?? '',
+        exact_odd: quote.odd,
+        bookmaker: quote.bookmaker || '',
+        quote_status: quote.status,
+        quote_field: quote.field || '',
+        quote_line_candidates: quote.candidates.join('|'),
         recommended_80: Boolean(entry.recommended),
-        omission_reason: omissionReason({ probability, reliability, shown: Boolean(selection) }),
+        omission_reason: omissionReason({ probability, reliability, shown: Boolean(selection), quoteStatus: quote.status }),
       });
     }
 
@@ -315,8 +322,11 @@ function playerStartXi(lineups) {
         platform_shown: Boolean(current),
         exact_odd: current?.odd ?? null,
         bookmaker: current?.bookmaker ?? '',
+        quote_status: current ? 'offered' : 'player_quote_not_resolved',
+        quote_field: '',
+        quote_line_candidates: '',
         recommended_80: probability >= 80,
-        omission_reason: omissionReason({ probability, reliability, shown: Boolean(current) }),
+        omission_reason: omissionReason({ probability, reliability, shown: Boolean(current), quoteStatus: 'player_quote_not_resolved' }),
       });
     }
 
@@ -348,7 +358,11 @@ function playerStartXi(lineups) {
       probability70: fixtureRows.filter(row => row.probability_pct >= 70).length,
       reliability90: fixtureRows.filter(row => row.probability_pct >= 70 && row.reliability_pct >= 90).length,
       shown: fixtureRows.filter(row => row.platform_shown).length,
-      noExactOdd: fixtureRows.filter(row => row.probability_pct >= 70 && row.reliability_pct >= 90 && !row.platform_shown).length,
+      quoted: fixtureRows.filter(row => row.exact_odd != null).length,
+      quotedEligible: fixtureRows.filter(row => row.probability_pct >= 70 && row.reliability_pct >= 90 && row.quote_status === 'offered').length,
+      belowMinimumOdd: fixtureRows.filter(row => row.probability_pct >= 70 && row.reliability_pct >= 90 && row.quote_status === 'below_minimum').length,
+      lineNotOffered: fixtureRows.filter(row => row.probability_pct >= 70 && row.reliability_pct >= 90 && row.quote_status === 'line_not_offered').length,
+      unsupportedMarket: fixtureRows.filter(row => row.probability_pct >= 70 && row.reliability_pct >= 90 && row.quote_status === 'unsupported_market').length,
       playerMarkets: fixtureRows.filter(row => row.scope === 'player').length,
     });
     console.log(`[market-audit] ${stored.fixture_id} ${analysis.homeTeam} vs ${analysis.awayTeam}: ${fixtureRows.length} mercados, ${combinada.selectable?.length || 0} visibles`);
@@ -359,7 +373,8 @@ function playerStartXi(lineups) {
     'probability_pct', 'reliability_pct', 'context_sample_n', 'context_hits', 'context_raw_hit_rate_pct',
     'validation_band', 'validation_sample_n', 'validation_predicted_pct', 'validation_actual_pct', 'validation_gap_pp',
     'all_results_sample_n', 'all_results_hits', 'all_results_actual_pct',
-    'platform_shown', 'exact_odd', 'bookmaker', 'recommended_80', 'omission_reason',
+    'platform_shown', 'exact_odd', 'bookmaker', 'quote_status', 'quote_field', 'quote_line_candidates',
+    'recommended_80', 'omission_reason',
   ];
   fs.mkdirSync(outDir, { recursive: true, mode: 0o700 });
   writeCsv(path.join(outDir, 'all-markets.csv'), rows, columns);
@@ -397,6 +412,11 @@ function playerStartXi(lineups) {
     probability70Rows: rows.filter(row => row.probability_pct >= 70).length,
     probability70Reliability90Rows: rows.filter(row => row.probability_pct >= 70 && row.reliability_pct >= 90).length,
     platformShownRows: shownRows.length,
+    quotedRows: rows.filter(row => row.exact_odd != null).length,
+    eligibleOfferedRows: rows.filter(row => row.probability_pct >= 70 && row.reliability_pct >= 90 && row.quote_status === 'offered').length,
+    eligibleBelowMinimumRows: rows.filter(row => row.probability_pct >= 70 && row.reliability_pct >= 90 && row.quote_status === 'below_minimum').length,
+    eligibleLineNotOfferedRows: rows.filter(row => row.probability_pct >= 70 && row.reliability_pct >= 90 && row.quote_status === 'line_not_offered').length,
+    eligibleUnsupportedMarketRows: rows.filter(row => row.probability_pct >= 70 && row.reliability_pct >= 90 && row.quote_status === 'unsupported_market').length,
     shownOverRows: shownRows.filter(row => /_over\d+_5$/.test(row.market_key)).length,
     shownUnderRows: shownRows.filter(row => /_under\d+_5$/.test(row.market_key)).length,
     shownOtherRows: shownRows.filter(row => !/_(?:over|under)\d+_5$/.test(row.market_key)).length,

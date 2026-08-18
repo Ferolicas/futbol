@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-18 · Commit base: `31f26b0`
+Actualizado: 2026-08-18 · Commit base: `6d5a8aa`
 
 ## Identidad y stack
 
@@ -276,6 +276,17 @@ calendario del día actual, el worker live ignora el
 smart-skip histórico y consulta el feed en modo fail-open cada 90 segundos. La
 misma cadencia se usa durante partidos para que jornadas de alta simultaneidad
 quepan dentro del plan Pro de 7.500 llamadas sin retirar ningún evento live.
+
+El análisis nocturno puede ejecutarse hasta unas 30 horas antes del kickoff,
+cuando Bet365 todavía no ha publicado toda su oferta en API-Football. El job
+`futbol-odds` consulta de nuevo el feed oficial en tres fases idempotentes por
+fixture (T-12h, T-3h y T-60m), reintenta respuestas vacías de forma acotada y
+reconstruye `combinada` con `_scored`/`playerMarkets` ya calculados. Nunca cambia
+probabilidades ni fiabilidad. Solo persiste cuotas reales de Bet365/Bwin y
+emite `match-updates/odds-ready` para que el dashboard recargue las opciones.
+La auditoría de mercados separa ahora cuota ofrecida, cuota inferior a 1.20,
+línea exacta no entregada y mercado sin adaptador; una celda vacía ya no se usa
+como sinónimo ambiguo de cualquiera de esos casos.
 El cierre de resultados corre incrementalmente cada 15 minutos y solo consulta
 fixtures cuyo final estimado ya pasó; no vuelve a pedir partidos futuros. Si el
 realtime confirma un FT/AET/PEN, encola además un cierre durable dirigido e

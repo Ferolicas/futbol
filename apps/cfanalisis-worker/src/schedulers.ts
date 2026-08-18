@@ -60,10 +60,11 @@ const SCHEDULES: Sched[] = [
   // de futbol-live (PARTE 1). Su id viejo está en STALE_SCHEDULER_IDS para que
   // BullMQ lo limpie. La cola/worker (queues.ts, workers.ts) quedan inertes (sin
   // job que los dispare); no se borran para minimizar riesgo.
-  // Odds de FÚTBOL: ELIMINADO. The Odds API se quitó del fútbol — API-Football ya
-  // trae bet365/bwin (superset). Su id 'futbol-odds-30m' está en STALE_SCHEDULER_IDS
-  // para que BullMQ borre el scheduler + su job delayed en el arranque. La cola/
-  // worker quedan inertes (sin job que los dispare). Baseball sigue usando odds.
+  // Cuotas ricas Bet365/Bwin: el análisis nocturno ocurre hasta ~30h antes y
+  // API-Football suele publicar mercados estadísticos más tarde. Tres fases
+  // idempotentes por fixture (T-12h/T-3h/T-60m) refrescan solo las cuotas y
+  // reconstruyen opciones sin recalcular probabilidades.
+  { queue: 'futbol-odds',        id: 'futbol-api-odds-15m',      pattern: '*/15 * * * *' },
   // ── Baseball — diarios (hora Colombia) ──
   // La madrugada española era demasiado pronto: API-Baseball aún no había
   // publicado la cartelera/cuotas de Bet365 y el análisis quedaba completo

@@ -106,6 +106,7 @@ export const getFixtures = _apiFootball.getFixtures;
 export const analyzeMatch = _apiFootball.analyzeMatch;
 export const getQuota = _apiFootball.getQuota;
 export const recomputeAnalysisWithConfirmedLineups = _apiFootball.recomputeAnalysisWithConfirmedLineups;
+export const extractOdds = _apiFootball.extractOdds;
 
 // Cliente distribuido único de API-Football (Redis, 420/min por defecto).
 const footballApiClient = _footballApiClient.default || _footballApiClient;
