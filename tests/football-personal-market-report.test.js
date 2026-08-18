@@ -30,6 +30,7 @@ test('genera las 60 líneas pedidas por cada partido sin aplicar umbrales', asyn
   assert.ok(csv.startsWith('\uFEFFFecha;Hora Bogotá;'));
   assert.match(csv, /61,00%;84,00%/);
   assert.match(csv, /—;—;—;home_goals_over0_5/);
+  assert.match(csv, /≥ 1 gol \(Más de 0.5\)/);
 });
 
 test('el endpoint exige secreto y entrega CSV como archivo', () => {
