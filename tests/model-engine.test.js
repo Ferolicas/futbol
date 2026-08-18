@@ -31,6 +31,31 @@ test('usa cualquier cantidad de partidos sin mínimo de muestra', () => {
   assert.equal(two.p, 0.5);
 });
 
+test('calcula siempre las líneas del informe aunque queden fuera del p95', async () => {
+  const row = {
+    fixture_id: 10, team_id: 1, opponent_id: 2,
+    kickoff: new Date('2026-01-01T12:00:00Z'), season: 2026,
+    competition_id: 39, is_home: true, phase: 'regular', result: 'W',
+    goals_for: 1, goals_against: 0, total_goals: 1,
+    corners_for: 3, corners_against: 2,
+    gf_1h: 1, ga_1h: 0, gf_2h: 0, ga_2h: 0,
+  };
+  const fakePool = {
+    async query(_sql, params) {
+      if (Number(params[0]) === 1) return { rows: [row] };
+      return { rows: [{ ...row, team_id: 2, opponent_id: 1, is_home: false }] };
+    },
+  };
+  const result = await computeBaseMarkets(fakePool, {
+    fixtureId: 99, homeTeamId: 1, awayTeamId: 2, competitionId: 39,
+    season: 2026, phase: 'regular', nTeams: 20,
+    cutoff: new Date('2026-02-01T12:00:00Z'),
+  }, { config: DEFAULT_ENGINE_CONFIG });
+  assert.ok(result.markets.goals_total.lines.some(line => line.line === 2.5));
+  assert.ok(result.markets.goals_1h_home.lines.some(line => line.line === 2.5));
+  assert.ok(result.markets.corners_total.lines.some(line => line.line === 10.5));
+});
+
 test('la actualidad domina al histórico sin borrar ninguno de los dos', () => {
   const result = empiricalRate([
     { hit: 1, _current: true, _weight: 1 },

@@ -215,13 +215,18 @@ respuesta JSON de error nunca puede pasar por imagen válida.
 
 El workflow n8n `CF MERCADOS PERSONAL` se ejecuta todos los días a las 08:30 de
 `America/Bogota` y descarga un CSV autenticado de
-`/api/cron/personal-market-report`. Incluye **60 filas por partido** sin filtrar
+`/api/cron/personal-market-report`. El archivo expone únicamente cinco columnas:
+partido, hora, línea, probabilidad y fiabilidad. Incluye **60 filas por partido** sin filtrar
 por cuota, probabilidad ni fiabilidad: más/menos de 8.5, 9.5 y 10.5 córners del
 partido; y más/menos de 0.5, 1.5 y 2.5 goles para el total, cada equipo, cada
 tiempo total y cada equipo dentro de cada tiempo. Las etiquetas también expresan
 el número entero equivalente (por ejemplo, `≥ 2 goles`) para evitar ambigüedad.
-Si una medición todavía no existe, la fila se conserva y muestra `—`; nunca se
-omite. `scripts/build-n8n-personal-market-report-workflow.mjs` hereda el secreto
+El análisis conserva estas 60 evidencias en `_reportScored` sin el recorte
+comercial de 70% aplicado a `_scored`; además, el motor extiende siempre el
+cálculo hasta 2.5 goles y 10.5 córners aunque la línea quede fuera del p95. El
+CSV no publica filas vacías: un partido realmente `no-data`, sin ningún hecho
+previo de ninguno de los equipos, queda fuera para no fabricar porcentajes.
+`scripts/build-n8n-personal-market-report-workflow.mjs` hereda el secreto
 del cron y la credencial cifrada de Telegram desde el workflow vivo, mientras
 el chat personal se pasa únicamente al instalarlo y no se guarda en Git.
 

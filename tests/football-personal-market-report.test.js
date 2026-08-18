@@ -27,10 +27,12 @@ test('genera las 60 líneas pedidas por cada partido sin aplicar umbrales', asyn
   assert.equal(rows.find(row => row.market_key === 'home_goals_over0_5').probability, null);
 
   const csv = renderFootballPersonalMarketCsv(rows);
-  assert.ok(csv.startsWith('\uFEFFFecha;Hora Bogotá;'));
+  assert.ok(csv.startsWith('\uFEFFPartido;Hora;Línea;Probabilidad;Fiabilidad'));
   assert.match(csv, /61,00%;84,00%/);
-  assert.match(csv, /—;—;—;home_goals_over0_5/);
-  assert.match(csv, /≥ 1 gol \(Más de 0.5\)/);
+  assert.doesNotMatch(csv, /home_goals_over0_5/);
+  assert.doesNotMatch(csv, /Fixture|Liga|Muestra|Clave interna/);
+  assert.equal(csv.trim().split('\n')[1].split(';').length, 5);
+  assert.equal(rows.find(row => row.market_key === 'home_goals_over0_5').linea, '≥ 1 gol (Más de 0.5)');
 });
 
 test('el endpoint exige secreto y entrega CSV como archivo', () => {

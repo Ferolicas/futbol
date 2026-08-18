@@ -29,7 +29,9 @@ export async function GET(request) {
         'Content-Disposition': `attachment; filename="${report.filename}"`,
         'Cache-Control': 'no-store',
         'X-CF-Fixtures': String(report.fixtures),
+        'X-CF-Fixtures-With-Data': String(report.fixturesWithData),
         'X-CF-Market-Rows': String(report.rows),
+        'X-CF-Omitted-Rows': String(report.omittedRows),
       },
     });
   } catch (error) {
