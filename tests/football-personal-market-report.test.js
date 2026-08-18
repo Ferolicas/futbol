@@ -7,6 +7,7 @@ test('genera las 60 líneas pedidas por cada partido sin aplicar umbrales', asyn
   process.env.DATABASE_URL ||= 'postgresql://unused:unused@127.0.0.1:1/unused';
   const {
     buildFootballPersonalMarketRows,
+    buildFootballFallbackEvidence,
     renderFootballPersonalMarketCsv,
   } = await import('../lib/football-market-report.js');
   const analyses = [{
@@ -33,6 +34,18 @@ test('genera las 60 líneas pedidas por cada partido sin aplicar umbrales', asyn
   assert.doesNotMatch(csv, /Fixture|Liga|Muestra|Clave interna/);
   assert.equal(csv.trim().split('\n')[1].split(';').length, 5);
   assert.equal(rows.find(row => row.market_key === 'home_goals_over0_5').linea, '≥ 1 gol (Más de 0.5)');
+
+  const fallback = buildFootballFallbackEvidence({
+    total_corners_over8_5: 0.52,
+    'total_corners_over8_5__n': 25000,
+  });
+  const fallbackRows = buildFootballPersonalMarketRows([{
+    fixture_id: 999,
+    analysis: { homeTeam: 'Sin', awayTeam: 'Datos', _reportScored: {} },
+  }], '2026-08-18', fallback);
+  const fallbackRow = fallbackRows.find(row => row.market_key === 'total_corners_under8_5');
+  assert.equal(fallbackRow.probability, 48);
+  assert.equal(fallbackRow.reliability, 69);
 });
 
 test('el endpoint exige secreto y entrega CSV como archivo', () => {

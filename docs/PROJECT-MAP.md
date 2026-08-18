@@ -224,8 +224,11 @@ el número entero equivalente (por ejemplo, `≥ 2 goles`) para evitar ambigüed
 El análisis conserva estas 60 evidencias en `_reportScored` sin el recorte
 comercial de 70% aplicado a `_scored`; además, el motor extiende siempre el
 cálculo hasta 2.5 goles y 10.5 córners aunque la línea quede fuera del p95. El
-CSV no publica filas vacías: un partido realmente `no-data`, sin ningún hecho
-previo de ninguno de los equipos, queda fuera para no fabricar porcentajes.
+CSV no publica filas vacías. Cuando una familia carece de hechos específicos de
+los equipos, usa como último respaldo una frecuencia global de partidos reales
+de los 730 días anteriores; esa evidencia se limita a menos de 70% de
+fiabilidad, nunca entra en recomendaciones y siempre es reemplazada por la
+evidencia del partido cuando existe.
 `scripts/build-n8n-personal-market-report-workflow.mjs` hereda el secreto
 del cron y la credencial cifrada de Telegram desde el workflow vivo, mientras
 el chat personal se pasa únicamente al instalarlo y no se guarda en Git.
