@@ -43,6 +43,7 @@ import { DateCaption, LeaguePicker, StatusPicker } from './components/DashboardF
 import DashboardBuffer from './components/DashboardBuffer';
 import AnalysisFullModal from './components/AnalysisFullModal';
 import { displayBettingText } from './utils/display-betting-text';
+import { buildFootballProbabilityGroups } from './utils/probability-lines';
 import {
   leagueSelectionIncludes,
   normalizeLeagueSelection,
@@ -2403,7 +2404,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                 );
               })()}
 
-              {/* ── % Probabilidades calculadas (todas las categorias con cuota real) ── */}
+              {/* ── % Frecuencias calculadas (independientes de la publicación de cuota) ── */}
               <AccordionProbBlock
                 id="probs" openSub={openSub} setOpenSub={setOpenSub}
                 probabilities={data.calculatedProbabilities}
@@ -2620,80 +2621,12 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
   // catOpen exclusivo (key de categoría abierta o null) — una categoría a la vez.
   const [catOpen, setCatOpen] = useState(null);
 
-  // TODO el cálculo de categorías (≈25 categorías × muchos hasOdd) se memoiza:
+  // TODO el cálculo de categorías se memoiza:
   // antes corría en CADA toggle (setState re-renderiza) → era lo que trababa
   // la apertura. Con useMemo solo recalcula si cambian las props reales.
   const groupDefs = useMemo(() => {
   if (!p) return [];
-  const o = odds || {};
-  const hasOdd = (v) => isFinite(parseFloat(v)) && parseFloat(v) > 1;
-
-  // Iterado por las líneas que el bookmaker REALMENTE ofrece (oddObj.Over_N_5 con
-  // cuota real), con prob del motor en cualquier convención (over7_5 nueva o over75
-  // legacy). Así expone TODAS las líneas del motor sin romper análisis viejos.
-  const adaptiveCat = (probObj, oddObj, namePrefix) => {
-    if (!probObj || !oddObj) return [];
-    const out = [];
-    for (const oddKey of Object.keys(oddObj)) {
-      const m = oddKey.match(/^Over_(\d+)_5$/);
-      if (!m || !hasOdd(oddObj[oddKey])) continue;
-      const n = m[1];
-      const prob = probObj[`over${n}_5`] ?? probObj[`over${n}5`];
-      if (prob == null) continue;
-      out.push({ line: parseFloat(`${n}.5`), label: `${namePrefix} ${n}.5`, value: prob });
-    }
-    return out.sort((a, b) => a.line - b.line).map(({ label, value }) => ({ label, value }));
-  };
-
-  const allCats = [
-    { title: 'Ambos marcan', group: 'goles', items: [
-      hasOdd(o.btts?.yes) && { label: 'Sí', value: p.btts },
-      hasOdd(o.btts?.no)  && { label: 'No', value: p.bttsNo },
-    ].filter(Boolean) },
-    { title: 'Ganador', group: 'goles', items: [
-      hasOdd(o.matchWinner?.home) && { label: homeTeam, value: p.winner?.home },
-      hasOdd(o.matchWinner?.draw) && { label: 'Empate',  value: p.winner?.draw },
-      hasOdd(o.matchWinner?.away) && { label: awayTeam, value: p.winner?.away },
-    ].filter(Boolean) },
-    { title: 'Goles totales', group: 'goles', subtitle: p.overUnder?.expectedTotal != null ? `Media anotadora combinada: ${p.overUnder.expectedTotal} goles por partido` : null,
-      items: adaptiveCat(p.overUnder, o.overUnder, 'Más de') },
-    { title: 'Goles 1ª parte', group: 'goles', items: adaptiveCat(p.halfGoals?.firstHalf, o.goals1H, 'Más de') },
-    { title: 'Goles 2ª parte', group: 'goles', items: adaptiveCat(p.halfGoals?.secondHalf, o.goals2H, 'Más de') },
-    { title: 'Ganador 1ª parte', group: 'goles', items: [
-      hasOdd(o.winner1H?.home) && p.halfWinner?.firstHalf && { label: homeTeam, value: p.halfWinner.firstHalf.home },
-      hasOdd(o.winner1H?.draw) && p.halfWinner?.firstHalf && { label: 'Empate', value: p.halfWinner.firstHalf.draw },
-      hasOdd(o.winner1H?.away) && p.halfWinner?.firstHalf && { label: awayTeam, value: p.halfWinner.firstHalf.away },
-    ].filter(Boolean) },
-    { title: 'Ganador 2ª parte', group: 'goles', items: [
-      hasOdd(o.winner2H?.home) && p.halfWinner?.secondHalf && { label: homeTeam, value: p.halfWinner.secondHalf.home },
-      hasOdd(o.winner2H?.draw) && p.halfWinner?.secondHalf && { label: 'Empate', value: p.halfWinner.secondHalf.draw },
-      hasOdd(o.winner2H?.away) && p.halfWinner?.secondHalf && { label: awayTeam, value: p.halfWinner.secondHalf.away },
-    ].filter(Boolean) },
-    { title: `Goles — ${homeTeam}`, group: 'goles', items: adaptiveCat(p.perTeam?.home?.goals, o.homeGoals, 'Más de') },
-    { title: `Goles — ${awayTeam}`, group: 'goles', items: adaptiveCat(p.perTeam?.away?.goals, o.awayGoals, 'Más de') },
-    { title: 'Córners totales', group: 'corners', items: adaptiveCat(p.corners, o.corners, 'Más de') },
-    { title: `Córners — ${homeTeam}`, group: 'corners', items: adaptiveCat(p.perTeam?.home?.corners, o.homeCorners, 'Más de') },
-    { title: `Córners — ${awayTeam}`, group: 'corners', items: adaptiveCat(p.perTeam?.away?.corners, o.awayCorners, 'Más de') },
-    { title: 'Tarjetas totales', group: 'tarjetas', items: adaptiveCat(p.cards, o.cards, 'Más de') },
-    { title: `Tarjetas — ${homeTeam}`, group: 'tarjetas', items: adaptiveCat(p.perTeam?.home?.cards, o.homeCards, 'Más de') },
-    { title: `Tarjetas — ${awayTeam}`, group: 'tarjetas', items: adaptiveCat(p.perTeam?.away?.cards, o.awayCards, 'Más de') },
-    p.shots && { title: 'Tiros totales', group: 'tiros', subtitle: p.shots._mean ? `Media observada: ${p.shots._mean}` : null,
-      items: adaptiveCat(p.shots, o.shots, 'Más de') },
-    p.sot && { title: 'Tiros a puerta', group: 'tiros', subtitle: p.sot._mean ? `Media observada: ${p.sot._mean}` : null,
-      items: adaptiveCat(p.sot, o.sot, 'Más de') },
-    p.perTeamShots?.home && { title: `Tiros — ${homeTeam}`, group: 'tiros', items: adaptiveCat(p.perTeamShots.home, o.homeShots, 'Más de') },
-    p.perTeamShots?.away && { title: `Tiros — ${awayTeam}`, group: 'tiros', items: adaptiveCat(p.perTeamShots.away, o.awayShots, 'Más de') },
-    p.fouls && { title: 'Faltas totales', group: 'faltas', subtitle: p.fouls._mean ? `Media observada: ${p.fouls._mean}` : null,
-      items: adaptiveCat(p.fouls, o.fouls, 'Más de') },
-    p.perTeamFouls?.home && { title: `Faltas — ${homeTeam}`, group: 'faltas', items: adaptiveCat(p.perTeamFouls.home, o.homeFouls, 'Más de') },
-    p.perTeamFouls?.away && { title: `Faltas — ${awayTeam}`, group: 'faltas', items: adaptiveCat(p.perTeamFouls.away, o.awayFouls, 'Más de') },
-    p.mostCorners && { title: 'Más córners (full)', group: 'corners', items: [
-      hasOdd(o.corners1x2?.home) && p.mostCorners.fullMatch && { label: homeTeam, value: p.mostCorners.fullMatch.home },
-      hasOdd(o.corners1x2?.draw) && p.mostCorners.fullMatch && { label: 'Empate', value: p.mostCorners.fullMatch.draw },
-      hasOdd(o.corners1x2?.away) && p.mostCorners.fullMatch && { label: awayTeam, value: p.mostCorners.fullMatch.away },
-    ].filter(Boolean) },
-    // (Hándicap asiático eliminado del catálogo.)
-  ].filter(Boolean).filter(c => c.items && c.items.length > 0);
+  const allCats = buildFootballProbabilityGroups(p, odds, homeTeam, awayTeam);
 
   return [
     { key: 'goles',    label: 'Goles',     color: '#4ade80' },
@@ -2701,6 +2634,7 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
     { key: 'tarjetas', label: 'Tarjetas',  color: '#f59e0b' },
     { key: 'tiros',    label: 'Tiros',     color: '#3b82f6' },
     { key: 'faltas',   label: 'Faltas',    color: '#fb923c' },
+    { key: 'offsides', label: 'Fueras de juego', color: '#a78bfa' },
   ].map(g => ({ ...g, cats: allCats.filter(c => c.group === g.key) }))
    .filter(g => g.cats.length > 0);
   }, [p, odds, homeTeam, awayTeam]);
@@ -2714,6 +2648,7 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
     return (
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', gap: 8 }}>
         <span style={{ fontSize: '.72rem', color: 'var(--t3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
+        <span style={{ fontSize: '.62rem', color: it.odd ? '#67e8f9' : 'var(--t3)', whiteSpace: 'nowrap' }}>{it.odd ? `Cuota ${it.odd.toFixed(2)}` : 'Cuota pendiente'}</span>
         <span style={{ fontSize: '.85rem', fontWeight: 700, color, fontFamily: 'JetBrains Mono, monospace', fontVariantNumeric: 'tabular-nums' }}>{v}%</span>
       </div>
     );

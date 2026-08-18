@@ -65,7 +65,7 @@ populated keys regardless of which side wrote them.
 | `futbol-lineups`            | `*/5 * * * *`                   | Smart: only acts T-45min before kickoff |
 | `futbol-live`               | `*/1 * * * *`                   | Smart: only acts inside game window     |
 | `futbol-live-corners`       | `*/30 * * * *`                  | Refresh corners for live matches        |
-| `futbol-odds`               | `*/15 * * * *`                  | Refresh API-Football Bet365/Bwin at T-12h/T-3h/T-60m |
+| `futbol-odds`               | `*/15 * * * *`                  | Vigilancia Bet365/Bwin adaptativa hasta kickoff; vacíos nunca cierran reintentos |
 | `baseball-fixtures`         | `20 10 * * *` Colombia          | Fetch MLB fixtures                      |
 | `baseball-analyze`          | `30 10 * * *` Colombia          | Compute probs + persist analysis/odds   |
 | `baseball-live`             | every 1 min                     | Live + durable final scores/boxscores   |

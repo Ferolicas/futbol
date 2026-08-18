@@ -5,7 +5,8 @@
  * Refresca las cuotas ricas de API-Football (Bet365/Bwin) después del análisis
  * nocturno. Las casas suelen publicar mercados estadísticos horas más tarde;
  * conservar la foto de T-24h dejaba partidos sin cuota aunque ya existiera en
- * Bet365. Cada fixture tiene tres fases idempotentes: T-12h, T-3h y T-60m.
+ * Bet365. Revisa ayer/hoy/manana de Bogota y mantiene una vigilancia adaptativa
+ * hasta el kickoff. Una respuesta vacia nunca cierra los reintentos.
  *
  * El job NO recalcula probabilidades. Sustituye únicamente las cuotas y vuelve
  * a construir las opciones con `_scored`/playerMarkets ya calculados.
@@ -13,38 +14,28 @@
  * Payload: { date?: 'YYYY-MM-DD', force?: boolean, fixtureIds?: number[] }
  */
 import {
-  redisGet, redisSet, KEYS, bogotaToday,
+  redisGet, redisSet, bogotaToday, getCachedFixturesRaw,
   getCachedAnalysis, cacheAnalysis, incrementApiCallCount,
   footballApiRequest, extractOdds, buildModelCombinada, triggerEvent,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
+import { notifyError } from '../../notifier.js';
+import oddsPolicy from './odds-policy.cjs';
+
+const {
+  HOUR_MS, scanDates, hasUsableOdds, catalogSize,
+  refreshIntervalMs, shouldAttempt,
+} = oddsPolicy;
 
 const FINISHED = new Set(['FT', 'AET', 'PEN', 'AWD', 'WO', 'CANC', 'ABD', 'PST']);
-const HOUR_MS = 60 * 60 * 1000;
-const EMPTY_RETRY_MS = 30 * 60 * 1000;
-const MAX_EMPTY_ATTEMPTS_PER_PHASE = 4;
+const PREMATCH = new Set(['NS', 'TBD']);
 const REFRESH_CONCURRENCY = 8;
 
-// Una fase nueva siempre vuelve a consultar, aunque una fase anterior ya haya
-// encontrado cuotas: Bet365 añade props/líneas al acercarse el kickoff.
-export function oddsRefreshPhase(timeUntilKickoffMs) {
-  if (!Number.isFinite(timeUntilKickoffMs) || timeUntilKickoffMs <= 0 || timeUntilKickoffMs > 12 * HOUR_MS) return null;
-  if (timeUntilKickoffMs <= HOUR_MS) return 'final';
-  if (timeUntilKickoffMs <= 3 * HOUR_MS) return 'pregame';
-  return 'early';
-}
-
-function refreshStateKey(date, fixtureId, phase) {
-  return `football-odds-refresh:${date}:${fixtureId}:${phase}`;
-}
-
-function shouldRetryEmpty(state, now) {
-  if (!state || state.complete !== true) return true;
-  if (state.hasOdds) return false;
-  if (Number(state.attempts || 0) >= MAX_EMPTY_ATTEMPTS_PER_PHASE) return false;
-  const lastAttempt = Date.parse(state.lastAttemptAt || '');
-  return !Number.isFinite(lastAttempt) || now - lastAttempt >= EMPTY_RETRY_MS;
+function refreshStateKey(date, fixtureId) {
+  // v2 invalida los estados por fases que podian dar por terminada una
+  // respuesta vacia y dejar el fixture sin otra consulta durante horas.
+  return `football-odds-refresh-v2:${date}:${fixtureId}`;
 }
 
 function rebuildWithOdds(existing, odds) {
@@ -73,7 +64,7 @@ function rebuildWithOdds(existing, odds) {
 
 /** @param {any} payload */
 export async function runOdds(payload = {}) {
-  const date = payload.date || bogotaToday();
+  const dates = scanDates(bogotaToday(), payload.date);
   const force = payload.force === true;
   const requestedIds = new Set(
     (Array.isArray(payload.fixtureIds) ? payload.fixtureIds : [])
@@ -81,41 +72,68 @@ export async function runOdds(payload = {}) {
       .filter(id => Number.isInteger(id) && id > 0),
   );
   const now = Date.now();
-  const fixtures = await redisGet(KEYS.fixtures(date));
-  if (!Array.isArray(fixtures) || fixtures.length === 0) {
-    return { ok: true, skipped: true, reason: 'no fixtures for date', date };
+  const fixtureDays = await Promise.all(dates.map(async date => ({
+    date,
+    fixtures: await getCachedFixturesRaw(date),
+  })));
+  if (!fixtureDays.some(day => Array.isArray(day.fixtures) && day.fixtures.length > 0)) {
+    return { ok: true, skipped: true, reason: 'no fixtures for dates', dates };
   }
 
   const candidates = [];
-  for (const fixture of fixtures) {
-    const fixtureId = Number(fixture.fixture?.id);
-    if (!fixtureId || (requestedIds.size && !requestedIds.has(fixtureId))) continue;
-    if (FINISHED.has(fixture.fixture?.status?.short)) continue;
-    const kickoff = Date.parse(fixture.fixture?.date || '');
-    const phase = force ? 'manual' : oddsRefreshPhase(kickoff - now);
-    if (!phase) continue;
-    const stateKey = refreshStateKey(date, fixtureId, phase);
-    const state = force ? null : await redisGet(stateKey);
-    if (!force && !shouldRetryEmpty(state, now)) continue;
-    candidates.push({ fixture, fixtureId, phase, stateKey, state });
+  const seenFixtureIds = new Set();
+  let noAnalysis = 0;
+  for (const day of fixtureDays) {
+    for (const fixture of (Array.isArray(day.fixtures) ? day.fixtures : [])) {
+      const fixtureId = Number(fixture.fixture?.id);
+      if (!fixtureId || seenFixtureIds.has(fixtureId) || (requestedIds.size && !requestedIds.has(fixtureId))) continue;
+      seenFixtureIds.add(fixtureId);
+      const status = fixture.fixture?.status?.short;
+      if (FINISHED.has(status) || !PREMATCH.has(status)) continue;
+      const kickoff = Date.parse(fixture.fixture?.date || '');
+      const timeUntilKickoffMs = kickoff - now;
+      // Ni siquiera un force manual puede convertir una cuota prepartido en
+      // recomendacion cuando el encuentro ya comenzo.
+      if (!Number.isFinite(kickoff) || timeUntilKickoffMs <= 0) continue;
+      if (!force && !refreshIntervalMs(timeUntilKickoffMs, false)) continue;
+
+      const existing = await getCachedAnalysis(fixtureId, day.date);
+      if (!existing?._scored || typeof existing._scored !== 'object') {
+        noAnalysis += 1;
+        continue;
+      }
+      const storedHasOdds = hasUsableOdds(existing.odds);
+      const intervalMs = refreshIntervalMs(timeUntilKickoffMs, storedHasOdds);
+      if (!intervalMs && !force) continue;
+      const stateKey = refreshStateKey(day.date, fixtureId);
+      const state = force ? null : await redisGet(stateKey);
+      if (!force && !shouldAttempt(state, now, intervalMs)) continue;
+      candidates.push({
+        date: day.date, fixture, fixtureId, existing, storedHasOdds,
+        timeUntilKickoffMs, stateKey, state,
+      });
+    }
   }
 
   if (requestedIds.size && !candidates.length) {
-    return { ok: true, skipped: true, reason: 'requested fixtures not eligible', date };
+    return { ok: true, skipped: true, reason: 'requested fixtures not eligible', dates, noAnalysis };
   }
   if (!candidates.length) {
-    return { ok: true, skipped: true, reason: 'no refresh phase due', date };
+    return { ok: true, skipped: true, reason: 'no odds refresh due', dates, noAnalysis };
   }
 
   let apiCalls = 0;
   let updated = 0;
   let noOdds = 0;
-  let noAnalysis = 0;
   const updatedFixtureIds = [];
+  const criticalMissingFixtureIds = [];
   const errors = [];
 
   const results = await mapPool(candidates, REFRESH_CONCURRENCY, async (item) => {
-    const { fixture, fixtureId, phase, stateKey, state } = item;
+    const {
+      date, fixture, fixtureId, existing, storedHasOdds,
+      timeUntilKickoffMs, stateKey, state,
+    } = item;
     const response = await footballApiRequest(`/odds?fixture=${fixtureId}`, {
       apiKey: process.env.FOOTBALL_API_KEY,
       timeoutMs: 20_000,
@@ -126,14 +144,28 @@ export async function runOdds(payload = {}) {
     const attempts = Number(state?.attempts || 0) + 1;
     if (!odds) {
       noOdds += 1;
+      const critical = !storedHasOdds && timeUntilKickoffMs <= HOUR_MS;
+      const criticalAlertedAt = state?.criticalAlertedAt || (critical ? new Date().toISOString() : null);
       await redisSet(stateKey, {
-        complete: true, hasOdds: false, attempts,
-        lastAttemptAt: new Date().toISOString(), phase,
-      }, 36 * 3600);
+        hasOdds: storedHasOdds, attempts,
+        lastAttemptAt: new Date().toISOString(),
+        lastEmptyAt: new Date().toISOString(),
+        criticalAlertedAt,
+      }, 72 * 3600);
+      if (critical) {
+        criticalMissingFixtureIds.push(fixtureId);
+        if (!state?.criticalAlertedAt) {
+          const home = fixture.teams?.home?.name || 'Local';
+          const away = fixture.teams?.away?.name || 'Visitante';
+          await notifyError(
+            { source: 'job', name: 'futbol-odds', extra: { fixtureId, date, check: 'critical-missing-odds' } },
+            new Error(`Cuotas Bet365/Bwin ausentes a menos de 60 minutos: fixture ${fixtureId} (${home} vs ${away}). El reintento automatico sigue activo cada 15 minutos.`),
+          ).catch(() => {});
+        }
+      }
       return { fixtureId, status: 'no-odds' };
     }
 
-    const existing = await getCachedAnalysis(fixtureId, date);
     const rebuilt = rebuildWithOdds(existing, odds);
     if (!rebuilt) {
       noAnalysis += 1;
@@ -141,8 +173,8 @@ export async function runOdds(payload = {}) {
       // debe poder aplicar las cuotas ya publicadas.
       await redisSet(stateKey, {
         complete: false, hasOdds: true, attempts,
-        lastAttemptAt: new Date().toISOString(), phase, reason: 'analysis-missing',
-      }, 36 * 3600);
+        lastAttemptAt: new Date().toISOString(), reason: 'analysis-missing',
+      }, 72 * 3600);
       return { fixtureId, status: 'no-analysis' };
     }
 
@@ -151,10 +183,13 @@ export async function runOdds(payload = {}) {
       throw new Error(`persistencia de cuotas falló: ${persist?.error || 'sin confirmación de PostgreSQL'}`);
     }
     await redisSet(stateKey, {
-      complete: true, hasOdds: true, attempts,
-      lastAttemptAt: new Date().toISOString(), phase,
+      hasOdds: true, attempts,
+      lastAttemptAt: new Date().toISOString(),
+      lastSuccessAt: new Date().toISOString(),
+      catalogSize: catalogSize(odds),
       selectable: rebuilt.combinada?.selectable?.length || 0,
-    }, 36 * 3600);
+      criticalAlertedAt: null,
+    }, 72 * 3600);
     updated += 1;
     updatedFixtureIds.push(fixtureId);
     return { fixtureId, status: 'updated' };
@@ -165,7 +200,7 @@ export async function runOdds(payload = {}) {
     if (result.ok) continue;
     const item = candidates[index];
     errors.push({ fixtureId: item.fixtureId, error: result.error.message });
-    await logError(date, {
+      await logError(item.date, {
       job: 'futbol-odds', fixtureId: item.fixtureId,
       homeTeam: item.fixture.teams?.home?.name,
       awayTeam: item.fixture.teams?.away?.name,
@@ -178,7 +213,7 @@ export async function runOdds(payload = {}) {
   if (apiCalls > 0) await incrementApiCallCount(apiCalls);
   if (updatedFixtureIds.length > 0) {
     await triggerEvent('match-updates', 'odds-ready', {
-      date, fixtureIds: updatedFixtureIds, timestamp: new Date().toISOString(),
+      dates, fixtureIds: updatedFixtureIds, timestamp: new Date().toISOString(),
     }).catch(() => {});
   }
 
@@ -187,7 +222,9 @@ export async function runOdds(payload = {}) {
   }
 
   return {
-    ok: true, date, checked: candidates.length, updated, noOdds, noAnalysis,
+    ok: true, dates, checked: candidates.length, updated, noOdds, noAnalysis,
+    criticalMissing: criticalMissingFixtureIds.length,
+    criticalMissingFixtureIds,
     apiCalls, errors: errors.length, fixtureIds: updatedFixtureIds,
   };
 }

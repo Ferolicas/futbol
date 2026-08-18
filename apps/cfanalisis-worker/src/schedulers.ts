@@ -60,10 +60,10 @@ const SCHEDULES: Sched[] = [
   // de futbol-live (PARTE 1). Su id viejo está en STALE_SCHEDULER_IDS para que
   // BullMQ lo limpie. La cola/worker (queues.ts, workers.ts) quedan inertes (sin
   // job que los dispare); no se borran para minimizar riesgo.
-  // Cuotas ricas Bet365/Bwin: el análisis nocturno ocurre hasta ~30h antes y
-  // API-Football suele publicar mercados estadísticos más tarde. Tres fases
-  // idempotentes por fixture (T-12h/T-3h/T-60m) refrescan solo las cuotas y
-  // reconstruyen opciones sin recalcular probabilidades.
+  // Cuotas ricas Bet365/Bwin: vigilancia adaptativa de ayer/hoy/mañana hasta
+  // el kickoff. Una respuesta vacía se reintenta siempre (15-60 min según la
+  // cercanía) y un catálogo existente se vuelve a consultar con más frecuencia
+  // al acercarse el partido para capturar líneas publicadas tarde.
   { queue: 'futbol-odds',        id: 'futbol-api-odds-15m',      pattern: '*/15 * * * *' },
   // ── Baseball — diarios (hora Colombia) ──
   // La madrugada española era demasiado pronto: API-Baseball aún no había

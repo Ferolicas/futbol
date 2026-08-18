@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-18 · Commit base: `6d5a8aa`
+Actualizado: 2026-08-18 · Commit base: `1199513`
 
 ## Identidad y stack
 
@@ -279,11 +279,20 @@ quepan dentro del plan Pro de 7.500 llamadas sin retirar ningún evento live.
 
 El análisis nocturno puede ejecutarse hasta unas 30 horas antes del kickoff,
 cuando Bet365 todavía no ha publicado toda su oferta en API-Football. El job
-`futbol-odds` consulta de nuevo el feed oficial en tres fases idempotentes por
-fixture (T-12h, T-3h y T-60m), reintenta respuestas vacías de forma acotada y
-reconstruye `combinada` con `_scored`/`playerMarkets` ya calculados. Nunca cambia
-probabilidades ni fiabilidad. Solo persiste cuotas reales de Bet365/Bwin y
-emite `match-updates/odds-ready` para que el dashboard recargue las opciones.
+`futbol-odds` revisa cada 15 minutos los calendarios de ayer, hoy y mañana de
+Bogotá y aplica una cadencia adaptativa por fixture durante las 36 horas previas.
+Una respuesta vacía nunca cierra los reintentos: vuelve a consultar cada 60,
+30 o 15 minutos hasta el kickoff. Los catálogos existentes también se refrescan
+con mayor frecuencia al acercarse el inicio para incorporar mercados tardíos.
+A menos de 60 minutos, un fixture todavía vacío genera una alerta operativa sin
+detener sus reintentos. El job reconstruye `combinada` con
+`_scored`/`playerMarkets` ya calculados y nunca cambia probabilidades ni
+fiabilidad. Solo persiste cuotas reales de Bet365/Bwin y emite
+`match-updates/odds-ready` para que el dashboard recargue las opciones.
+Las secciones de frecuencias del dashboard y del análisis completo no dependen
+de que la casa haya publicado una cuota: muestran el cálculo del motor y marcan
+la cuota como pendiente; únicamente el catálogo apostable `selectable` exige la
+línea real y el mínimo 1.20.
 La auditoría de mercados separa ahora cuota ofrecida, cuota inferior a 1.20,
 línea exacta no entregada y mercado sin adaptador; una celda vacía ya no se usa
 como sinónimo ambiguo de cualquiera de esos casos.

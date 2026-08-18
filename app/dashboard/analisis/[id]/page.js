@@ -16,6 +16,7 @@ import { getUserTz, fmtTimeInTz, todayInTz } from '../../../../lib/timezone';
 import { useWorkerSocketState } from '../../../../hooks/useWorkerSocket';
 import DashboardBuffer from '../../components/DashboardBuffer';
 import { displayBettingText } from '../../utils/display-betting-text';
+import { buildFootballProbabilityGroups } from '../../utils/probability-lines';
 
 function detectCountry() {
   try {
@@ -809,10 +810,13 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
               SECCIÓN 8 — PROBABILIDADES CALCULADAS
           ══════════════════════════════════════════ */}
           {p && (() => {
-            // Solo mostrar opciones cuya cuota exista en al menos una de las 8 casas autorizadas.
+            // La frecuencia es un cálculo del motor y debe verse aunque Bet365
+            // todavía no haya publicado la cuota. El catálogo nuevo se arma
+            // desde probabilidades; la lista histórica se conserva solo como
+            // compatibilidad de forma y deja de gobernar lo renderizado.
             const o = a.odds || {};
             const hasOdd = (v) => isFinite(parseFloat(v)) && parseFloat(v) > 1;
-            const cats = [
+            const legacyCats = [
               {
                 title: 'Ambos marcan (BTTS)',
                 items: [
@@ -1020,6 +1024,8 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
               },
               // (Hándicap asiático eliminado del catálogo.)
             ].filter(Boolean).filter(c => c.items.length > 0);
+            void legacyCats;
+            const cats = buildFootballProbabilityGroups(p, o, a.homeTeam, a.awayTeam);
 
             if (cats.length === 0) return null;
 
