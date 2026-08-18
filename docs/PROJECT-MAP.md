@@ -54,6 +54,7 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `POST /api/payments/cancel` | `app/api/payments/cancel/route.js` | Cuenta | Cancela renovación conservando periodo pagado |
 | `GET/POST /api/cron/payments` | `app/api/cron/payments/route.js` | Cron VPS | Reconcilia operaciones, perfiles y emails |
 | `GET/POST /api/cron/publish-combinada` | `app/api/cron/publish-combinada/route.js` | n8n | Elige y guarda la apuesta Telegram dentro de las reglas comerciales |
+| `GET /api/cron/personal-market-report` | `app/api/cron/personal-market-report/route.js` | n8n | CSV personal diario con todas las líneas solicitadas, sin filtros ni dependencia de cuota |
 | `GET /api/pick-image` | `app/api/pick-image/route.js` | n8n/Telegram | Renderiza la tarjeta PNG sin IA, con hasta tres selecciones y escudos |
 | `GET /api/telegram-premium/futbol` | `app/api/telegram-premium/futbol/route.js` | n8n | Catálogo Premium de fútbol (hándicap, córners y goles ≥70/90) |
 | `GET /api/telegram-premium/baseball` | `app/api/telegram-premium/baseball/route.js` | n8n | Catálogo Premium completo de béisbol ≥70/90, incluso sin cuota |
@@ -209,6 +210,20 @@ continúa ante errores individuales; `Registrar Baseball` persiste cada éxito y
 deja solo el fixture fallido para el siguiente intento horario. Solo registra
 éxito si Telegram devuelve un documento `image/png` de al menos 10 KB; una
 respuesta JSON de error nunca puede pasar por imagen válida.
+
+### Informe personal de mercados en Telegram
+
+El workflow n8n `CF MERCADOS PERSONAL` se ejecuta todos los días a las 08:30 de
+`America/Bogota` y descarga un CSV autenticado de
+`/api/cron/personal-market-report`. Incluye **60 filas por partido** sin filtrar
+por cuota, probabilidad ni fiabilidad: más/menos de 8.5, 9.5 y 10.5 córners del
+partido; y más/menos de 0.5, 1.5 y 2.5 goles para el total, cada equipo, cada
+tiempo total y cada equipo dentro de cada tiempo. Las etiquetas también expresan
+el número entero equivalente (por ejemplo, `≥ 2 goles`) para evitar ambigüedad.
+Si una medición todavía no existe, la fila se conserva y muestra `—`; nunca se
+omite. `scripts/build-n8n-personal-market-report-workflow.mjs` hereda el secreto
+del cron y la credencial cifrada de Telegram desde el workflow vivo, mientras
+el chat personal se pasa únicamente al instalarlo y no se guarda en Git.
 
 Una opción de fútbol entra en recomendaciones generales cuando su frecuencia
 ponderada real es de 80% o más, existe cuota real y la fiabilidad propia del
