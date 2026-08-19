@@ -1,8 +1,8 @@
 /**
  * GET/POST /api/cron/publish-combinada?secret=CRON_SECRET[&date=YYYY-MM-DD][&status=draft|published]
  *
- * Recorre todos los partidos analizados del día y elige TODOS los partidos
- * publicables, cada uno con entre UNA y TRES de sus mejores opciones:
+ * Recorre todos los partidos analizados del día y elige como máximo los DOS
+ * mejores partidos publicables, cada uno con entre UNA y TRES opciones:
  * probabilidad >=85%,
  * fiabilidad >=90%, cuota >=1.20 sin techo y únicamente goles/córners/
  * tarjetas/remates a puerta. Un partido entra desde que reúne una opción válida.
@@ -145,9 +145,9 @@ async function handle(request) {
     });
   }
 
-  // 4. Todos los partidos con al menos una opción válida, cada uno con un
-  // máximo de tres, ordenados por probabilidad y fiabilidad. La cuota solo
-  // filtra por debajo de 1.20.
+  // 4. Como máximo los dos mejores partidos con al menos una opción válida,
+  // cada uno con un máximo de tres. Se ordenan por probabilidad y después
+  // fiabilidad; la cuota solo filtra por debajo de 1.20.
   const dailyPick = selectTelegramDailyPick(all);
   if (dailyPick.matches.length === 0) {
     return Response.json({

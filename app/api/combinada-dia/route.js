@@ -5,7 +5,7 @@
  * Si no se pasa date, usa la fecha de hoy.
  * Solo devuelve filas con status = 'published'.
  *
- * FORMATO (cambió): devuelve `data.matches`, un array con TODOS los partidos
+ * FORMATO: devuelve `data.matches`, un array con un máximo de DOS partidos
  * publicables y cada uno con `options` (entre 1 y 3 opciones). Ya no existe
  * `data.selections` plana ni
  * cuota/probabilidad combinadas. n8n debe recorrer `matches` y pedir una imagen
@@ -94,7 +94,8 @@ export async function GET(request) {
       const kickoffMs = new Date(match.kickoff).getTime();
       if (!Number.isFinite(kickoffMs)) return true;
       return (nowMs - kickoffMs) <= 110 * 60 * 1000;
-    });
+    })
+    .slice(0, TELEGRAM_DAILY_PICK_RULES.maxMatches);
 
   if (matches.length === 0) {
     return Response.json({ ok: false, reason: 'no publishable matches', date }, { status: 404 });

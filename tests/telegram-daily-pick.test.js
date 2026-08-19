@@ -44,14 +44,14 @@ test('Telegram publica partidos con una o dos opciones válidas', () => {
   assert.equal(result.eligibleMatchCount, 2);
 });
 
-test('Telegram publica los diez partidos si cada uno tiene una opción válida', () => {
+test('Telegram limita a dos partidos aunque haya diez con opciones válidas', () => {
   const selections = Array.from({ length: 10 }, (_, index) => option({
     fixtureId: index + 1,
     matchName: `Local ${index + 1} vs Visitante ${index + 1}`,
     id: `goals-${index + 1}`,
   }));
   const result = dailyPickModule.selectTelegramDailyPick(selections);
-  assert.equal(result.matches.length, 10);
+  assert.equal(result.matches.length, 2);
   assert.equal(result.eligibleMatchCount, 10);
   assert.ok(result.matches.every(match => match.options.length === 1));
 });
@@ -125,7 +125,7 @@ test('los partidos se ordenan por probabilidad media y luego fiabilidad media', 
     ...matchOptions(2, { probability: 93, confidence: 91 }),
     ...matchOptions(3, { probability: 88, confidence: 97 }),
   ]);
-  assert.deepEqual(result.matches.map(item => item.fixtureId), [2, 3, 1]);
+  assert.deepEqual(result.matches.map(item => item.fixtureId), [2, 3]);
 });
 
 test('Telegram sigue vetando mercados no comerciales', () => {
@@ -154,6 +154,6 @@ test('el contrato Telegram expone todos sus límites operativos', () => {
     minSelectionOdd: 1.2,
     minOptionsPerMatch: 1,
     maxOptionsPerMatch: 3,
-    maxMatches: null,
+    maxMatches: 2,
   });
 });

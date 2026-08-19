@@ -25,13 +25,13 @@ if (!endpoint.includes('/api/cron/personal-market-report') || !endpoint.includes
 
 const schedule = {
   id: 'bf280c1a-eec8-4fc9-bbaa-4dd20cb3f001',
-  name: 'Informe diario 08:30',
+  name: 'Informe diario 08:00',
   type: 'n8n-nodes-base.scheduleTrigger',
   typeVersion: 1.3,
   position: [-720, 0],
   parameters: {
     rule: {
-      interval: [{ field: 'days', daysInterval: 1, triggerAtHour: 8, triggerAtMinute: 30 }],
+      interval: [{ field: 'days', daysInterval: 1, triggerAtHour: 8, triggerAtMinute: 0 }],
     },
   },
 };
@@ -117,15 +117,15 @@ const workflow = {
   active: true,
   nodes: [schedule, manual, gate, download, telegram, register],
   connections: {
-    'Informe diario 08:30': { main: [[{ node: 'Preparar fecha', type: 'main', index: 0 }]] },
+    'Informe diario 08:00': { main: [[{ node: 'Preparar fecha', type: 'main', index: 0 }]] },
     'Ejecución manual': { main: [[{ node: 'Preparar fecha', type: 'main', index: 0 }]] },
     'Preparar fecha': { main: [[{ node: 'Descargar CSV', type: 'main', index: 0 }]] },
     'Descargar CSV': { main: [[{ node: 'Enviar archivo personal', type: 'main', index: 0 }]] },
     'Enviar archivo personal': { main: [[{ node: 'Registrar envío', type: 'main', index: 0 }]] },
   },
-  settings: { timezone: 'America/Bogota', executionOrder: 'v1' },
+  settings: { timezone: 'Europe/Madrid', executionOrder: 'v1' },
   pinData: {},
-  description: 'Envía cada día un CSV personal con 60 líneas de córners y goles por partido, sin filtros de cuota, probabilidad ni fiabilidad.',
+  description: 'Envía cada día a las 08:00 de Europe/Madrid un CSV personal con 60 líneas de córners y goles por partido, sin filtros de cuota, probabilidad ni fiabilidad.',
 };
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });

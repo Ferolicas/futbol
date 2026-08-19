@@ -112,7 +112,10 @@ const formatTime = kickoff => {
 
 // La cuota solo filtra por debajo de 1.20 y no tiene techo: lo que decide es
 // probabilidad (>=85%) y fiabilidad (>=90%).
-const matches = source.map(match => {
+// Defensa final: aunque un backend antiguo devolviera más partidos, n8n jamás
+// genera más de dos items para Telegram. El backend ya entrega el orden por
+// probabilidad media y, a igualdad, fiabilidad media.
+const matches = source.slice(0, 2).map(match => {
   const options = Array.isArray(match.options) ? match.options : [];
   if (options.length < 1 || options.length > 3) {
     throw new Error('El backend devolvió un partido fuera del rango de una a tres opciones');
@@ -214,7 +217,7 @@ workflow.settings = {
   timezone: 'Europe/Madrid',
 };
 workflow.active = true;
-workflow.description = 'Publica cada día todos los partidos válidos en Telegram, una imagen por partido con 1 a 3 opciones (>=85% probabilidad, >=90% fiabilidad, cuota >=1.20), sin IA.';
+workflow.description = 'Publica cada día como máximo los 2 mejores partidos en Telegram, una imagen por partido con 1 a 3 opciones (>=85% probabilidad, >=90% fiabilidad, cuota >=1.20), sin IA.';
 workflow.pinData = {};
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });

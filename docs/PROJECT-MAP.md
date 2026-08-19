@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-18 · Commit base: `1199513`
+Actualizado: 2026-08-19 · Commit base: `a462bb2`
 
 ## Identidad y stack
 
@@ -147,8 +147,9 @@ análisis y devuelve los partidos publicables. `lib/telegram-daily-pick.js` exig
 al menos 85% de frecuencia y 90% de fiabilidad por opción, admite únicamente
 goles, córners, tarjetas o remates a puerta y descarta las cuotas por debajo de
 1.20 (no hay techo de cuota). Un partido entra desde que reúne una opción válida
-y aporta entre una y tres de sus mejores opciones. Se publican todos los
-partidos que cumplan, sin un límite global de partidos. Ya no se arma combinada,
+y aporta entre una y tres de sus mejores opciones. Se publican como máximo los
+dos partidos mejor clasificados por probabilidad media y, a igualdad, fiabilidad
+media. Ya no se arma combinada,
 así que no existe cuota total ni
 probabilidad conjunta. La cuota no ordena nada: el ranking es probabilidad y
 después fiabilidad, tanto entre opciones de un partido como entre partidos. El
@@ -213,8 +214,8 @@ respuesta JSON de error nunca puede pasar por imagen válida.
 
 ### Informe personal de mercados en Telegram
 
-El workflow n8n `CF MERCADOS PERSONAL` se ejecuta todos los días a las 08:30 de
-`America/Bogota` y descarga un CSV autenticado de
+El workflow n8n `CF MERCADOS PERSONAL` se ejecuta todos los días a las 08:00 de
+`Europe/Madrid` y descarga un CSV autenticado de
 `/api/cron/personal-market-report`. El archivo expone únicamente cinco columnas:
 partido, hora, línea, probabilidad y fiabilidad. Incluye **60 filas por partido** sin filtrar
 por cuota, probabilidad ni fiabilidad: más/menos de 8.5, 9.5 y 10.5 córners del
