@@ -37,7 +37,7 @@ async function main() {
   const { rows } = await pgPool.query(
     `SELECT m.fixture_id,m.provider_fixture_id,m.kickoff
        FROM baseball_engine_matches m
-      WHERE m.status='FT' AND m.season=$1
+      WHERE m.status='FT' AND m.season=$1 AND m.competition_id='1'
         AND EXISTS (
           SELECT 1 FROM baseball_engine_team_stats t
            WHERE t.fixture_id=m.fixture_id AND NOT (t.stats ? 'hitsByInning')
