@@ -61,3 +61,13 @@ test('el informe de béisbol conserva solo carreras, hits, ponches, hándicap y 
   assert.ok(rows.findIndex(row => row.direccion === 'over') < rows.findIndex(row => row.direccion === 'under'));
   assert.ok(rows.every(row => !/ganador|jonr[oó]n|bases totales/i.test(row.grupo)));
 });
+
+test('la interfaz privada limita solo la probabilidad visual a 95%', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, '../app/ferney/informes/MarketReports.js'), 'utf8');
+  assert.match(source, /metric\(row\.probability, 95\)/);
+  assert.match(source, /metric\(best\?\.probability, 95\)/);
+  assert.match(source, /metric\(row\.reliability\)/);
+  assert.match(source, /<details className=\{styles\.marketGroup\}/);
+});

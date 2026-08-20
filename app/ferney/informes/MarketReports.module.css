@@ -133,9 +133,12 @@
 .matchBody { padding: 0 10px 11px; animation: reveal 220ms ease both; }
 
 .marketGroup { overflow: hidden; margin-top: 8px; background: #0a1512; border: 1px solid rgba(163, 231, 199, .07); border-radius: 13px; }
-.marketGroup > header { display: flex; align-items: center; justify-content: space-between; padding: 10px 11px 8px; color: #a6b8b1; border-bottom: 1px solid rgba(163, 231, 199, .07); font-size: 10px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
-.marketGroup > header b { display: grid; min-width: 23px; height: 21px; place-items: center; color: #72f1b1; background: rgba(114, 241, 177, .09); border-radius: 7px; font-size: 9px; }
-.marketList { display: grid; }
+.marketGroup > summary { display: grid; min-height: 44px; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 9px 11px; color: #a6b8b1; font-size: 10px; font-weight: 850; letter-spacing: .08em; list-style: none; text-transform: uppercase; cursor: pointer; }
+.marketGroup > summary::-webkit-details-marker { display: none; }
+.marketGroup > summary b { display: grid; min-width: 23px; height: 21px; place-items: center; color: #72f1b1; background: rgba(114, 241, 177, .09); border-radius: 7px; font-size: 9px; }
+.marketGroup > summary svg { color: #61766f; transition: transform 180ms ease; }
+.marketGroup[open] > summary svg { transform: rotate(180deg); }
+.marketList { display: grid; border-top: 1px solid rgba(163, 231, 199, .07); }
 .marketLine { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; overflow: hidden; padding: 11px; border-bottom: 1px solid rgba(163, 231, 199, .055); }
 .marketLine:last-child { border-bottom: 0; }
 .marketCopy { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px 7px; }
@@ -162,6 +165,7 @@
   outline: 3px solid rgba(114, 241, 177, .72);
   outline-offset: 2px;
 }
+.page summary:focus-visible { outline: 3px solid rgba(114, 241, 177, .72); outline-offset: -3px; }
 
 @keyframes reveal { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
 

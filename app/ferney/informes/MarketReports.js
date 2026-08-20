@@ -34,9 +34,9 @@ function formatDate(date) {
   });
 }
 
-function metric(value) {
+function metric(value, maximum = 100) {
   if (value == null || !Number.isFinite(Number(value))) return '—';
-  return `${Math.floor((Number(value) + 1e-9) * 100) / 100}%`;
+  return `${Math.min(maximum, Math.floor((Number(value) + 1e-9) * 100) / 100)}%`;
 }
 
 function directionRank(value) {
@@ -69,7 +69,7 @@ function MarketLine({ row }) {
         <small>{row.periodo} · {row.ambito}</small>
       </div>
       <div className={styles.metrics}>
-        <span><small>Prob.</small><b>{metric(row.probability)}</b></span>
+        <span><small>Prob.</small><b>{metric(row.probability, 95)}</b></span>
         <span><small>Fiab.</small><b>{metric(row.reliability)}</b></span>
         {row.odd != null && <span><small>Cuota</small><b>{Number(row.odd).toFixed(2)}</b></span>}
       </div>
@@ -103,18 +103,18 @@ function MatchCard({ match, expanded, onToggle }) {
           <span>{match.rows.length} opciones disponibles</span>
         </span>
         <span className={styles.matchSignal}>
-          <small>Mayor</small><b>{metric(best?.probability)}</b><ChevronDown size={18} />
+          <small>Mayor</small><b>{metric(best?.probability, 95)}</b><ChevronDown size={18} />
         </span>
       </button>
       {expanded && (
         <div className={styles.matchBody}>
           {grouped.map(([group, rows]) => (
-            <section className={styles.marketGroup} key={group}>
-              <header><span>{group}</span><b>{rows.length}</b></header>
+            <details className={styles.marketGroup} key={group}>
+              <summary><span>{group}</span><b>{rows.length}</b><ChevronDown size={16} /></summary>
               <div className={styles.marketList}>{rows.map((row, index) => (
                 <MarketLine key={`${row.market_key}-${row.linea}-${index}`} row={row} />
               ))}</div>
-            </section>
+            </details>
           ))}
         </div>
       )}
