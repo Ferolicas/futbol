@@ -14,6 +14,7 @@ const { normalizeApiBasketballGame, normalizeApiNbaGame, nbaStatsInternals } = r
 const { normalizeMlbGame, normalizeNflGame } = require('../lib/multisport-providers.js');
 const { normalizeEspnGame, normalizeEspnOdds } = require('../lib/espn-sports-api.js');
 const { getSportCompetitions, isIsoDate } = require('../lib/multisport-config.js');
+const { isMlbHitPlay } = require('../lib/mlb-stats-api.js');
 
 test('el motor multi-deporte conserva 100% crudo y muestra máximo 95%', () => {
   const rate = multisportEngineInternals.empiricalRate(
@@ -291,6 +292,15 @@ test('MLB conserva entradas, hits y errores oficiales en los hechos históricos'
   assert.equal(fact.stats.errors, 1);
   assert.equal(fact.stats.opponentHits, 6);
   assert.equal(fact.stats._detailsAvailable, false);
+});
+
+test('MLB cuenta hits por eventType oficial y no por el tipo genérico atBat', () => {
+  for (const eventType of ['single', 'double', 'triple', 'home_run']) {
+    assert.equal(isMlbHitPlay({ result: { type: 'atBat', eventType } }), true);
+  }
+  for (const eventType of ['field_out', 'field_error', 'walk', 'strikeout']) {
+    assert.equal(isMlbHitPlay({ result: { type: 'atBat', eventType } }), false);
+  }
 });
 
 test('rechaza fechas imposibles antes de consultar un proveedor', () => {

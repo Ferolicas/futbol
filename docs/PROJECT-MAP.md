@@ -236,7 +236,7 @@ atribuir.
 MLB limita el informe a carreras de partido y equipo (equipo desde 1.5), hits
 de partido/equipo, ponches del lanzador, hándicap y carreras/hits de 1.ª entrada,
 primeras 3 y primeras 5. Las carreras salen del linescore y los hits por entrada
-se cuentan desde apariciones oficiales MLB (`result.type=hit`); nunca se reparte
+se cuentan desde los eventos oficiales MLB `single/double/triple/home_run`; nunca se reparte
 el total para estimarlos. `scripts/backfill-mlb-inning-hits.js` completa ese
 desglose histórico de forma idempotente y solo persiste un juego si la suma por
 entrada reconcilia con el total oficial.
