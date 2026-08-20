@@ -15,6 +15,10 @@ function probability(value) {
   return { probability: Math.min(95, value * 100), rawProbability: value, evidence: { n: 10, hits: value * 10 } };
 }
 
+function supportedProbability(value, n = 10000) {
+  return { probability: Math.min(95, value * 100), rawProbability: value, evidence: { n, hits: Math.round(value * n) } };
+}
+
 const fixture = {
   teams: {
     home: { id: 1, name: 'Equipo Local' },
@@ -162,6 +166,59 @@ test('Baseball publica solo selecciones cruzadas con Bet365 y cuota mínima 1.20
   assert.ok(result.selectable.every((selection) => (
     selection.id !== 'handicap-away-4_5' || selection.odd !== 7.25
   )));
+});
+
+test('NBA y NFL publican todas las líneas Bet365 con más de 60% y fiabilidad mínima 90%', () => {
+  const price = (odd, selectionName) => ({ odd, bookmaker: 'Bet365', selectionName, marketName: 'Mercado real' });
+  const prediction = {
+    sport: 'american_football',
+    moneyline: {
+      home: supportedProbability(.65),
+      away: supportedProbability(.35),
+    },
+    totals: { lines: {
+      44.5: { over: supportedProbability(.70), under: supportedProbability(.30) },
+      48.5: { over: supportedProbability(.60), under: supportedProbability(.40) },
+    } },
+    spreads: { home: { '-3.5': supportedProbability(.66) }, away: { '3.5': supportedProbability(.34) } },
+    teamTotals: { home: { 21.5: { over: supportedProbability(.68), under: supportedProbability(.32) } }, away: {} },
+    periods: {
+      firstHalf: {
+        label: '1.ª mitad',
+        moneyline: { home: supportedProbability(.64), away: supportedProbability(.36), draw: supportedProbability(.03) },
+        totals: { 20.5: { over: supportedProbability(.67), under: supportedProbability(.33) } },
+        spreads: { home: {}, away: {} }, teamTotals: { home: {}, away: {} },
+      },
+    },
+  };
+  const odds = {
+    moneyline: { home: price(1.80, 'Home'), away: price(2.10, 'Away') },
+    totals: {
+      44.5: { over: price(1.90, 'Over 44.5'), under: price(1.90, 'Under 44.5') },
+      48.5: { over: price(1.91, 'Over 48.5'), under: price(1.89, 'Under 48.5') },
+    },
+    spreads: { home: { '-3.5': price(1.91, 'Home -3.5') }, away: { '3.5': price(1.91, 'Away +3.5') } },
+    teamTotals: { home: { 21.5: { over: price(1.86, 'Over 21.5'), under: price(1.94, 'Under 21.5') } }, away: {} },
+    periods: {
+      firstHalf: {
+        label: '1.ª mitad',
+        moneyline: { home: price(1.88, 'Home'), away: price(2.02, 'Away') },
+        totals: { 20.5: { over: price(1.90, 'Over 20.5'), under: price(1.90, 'Under 20.5') } },
+        spreads: { home: {}, away: {} }, teamTotals: { home: {}, away: {} },
+      },
+    },
+  };
+
+  const result = buildMultisportCombinada(prediction, odds, fixture);
+  assert.equal(result.selectableThreshold, 60);
+  assert.equal(result.minimumReliability, 90);
+  assert.ok(result.selectable.every(selection => selection.rawProbability > 60));
+  assert.ok(result.selectable.every(selection => selection.reliability >= 90));
+  assert.ok(result.selectable.every(selection => selection.bookmaker === 'Bet365'));
+  assert.ok(result.selectable.some(selection => selection.id === 'handicap-home-m3_5'));
+  assert.ok(result.selectable.some(selection => selection.id === 'team-total-home-21.5-over'));
+  assert.ok(result.selectable.some(selection => selection.id === 'firstHalf-total-20.5-over'));
+  assert.ok(result.selectable.every(selection => selection.id !== 'total-48.5-over'));
 });
 
 test('Baseball conserva todas las líneas exactas y cruza props por nombre de jugador', () => {

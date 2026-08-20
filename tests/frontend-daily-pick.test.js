@@ -52,5 +52,8 @@ test('el informe personal queda programado a las 08:00 de Madrid', () => {
   const source = fs.readFileSync(path.join(__dirname, '../scripts/build-n8n-personal-market-report-workflow.mjs'), 'utf8');
   assert.match(source, /triggerAtHour: 8, triggerAtMinute: 0/);
   assert.match(source, /timezone: 'Europe\/Madrid'/);
+  assert.match(source, /informes\?deporte=futbol&date=/);
+  assert.match(source, /informes\?deporte=baseball&date=/);
+  assert.doesNotMatch(source, /sendDocument/);
   assert.doesNotMatch(source, /Informe diario 08:30/);
 });

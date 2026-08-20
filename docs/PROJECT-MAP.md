@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-20 · Commit base: `2f76143`
+Actualizado: 2026-08-20 · Commit base: `2645d87`
 
 ## Identidad y stack
 
@@ -34,6 +34,7 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `/dashboard/futbol-americano` | `app/dashboard/futbol-americano/page.js` | Plan activo | NFL, NCAA FBS y NCAA FCS |
 | `/admin` | `app/admin/` | Admin/owner | Operación y clientes |
 | `/ferney` | `app/ferney/` | Privada | Auditoría del propietario |
+| `/ferney/informes` | `app/ferney/informes/` | Admin/owner | Informes interactivos móviles de fútbol y MLB |
 
 ## Endpoints críticos
 
@@ -54,7 +55,8 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `POST /api/payments/cancel` | `app/api/payments/cancel/route.js` | Cuenta | Cancela renovación conservando periodo pagado |
 | `GET/POST /api/cron/payments` | `app/api/cron/payments/route.js` | Cron VPS | Reconcilia operaciones, perfiles y emails |
 | `GET/POST /api/cron/publish-combinada` | `app/api/cron/publish-combinada/route.js` | n8n | Elige y guarda la apuesta Telegram dentro de las reglas comerciales |
-| `GET /api/cron/personal-market-report` | `app/api/cron/personal-market-report/route.js` | n8n | CSV personal diario con todas las líneas solicitadas, sin filtros ni dependencia de cuota |
+| `GET /api/cron/personal-market-report` | `app/api/cron/personal-market-report/route.js` | Compatibilidad | CSV histórico de fútbol protegido por secreto de cron |
+| `GET /api/admin/personal-market-report` | `app/api/admin/personal-market-report/route.js` | Informe privado | Descarga CSV limpia de fútbol o MLB para la fecha elegida |
 | `GET /api/pick-image` | `app/api/pick-image/route.js` | n8n/Telegram | Renderiza la tarjeta PNG sin IA, con hasta tres selecciones y escudos |
 | `GET /api/telegram-premium/futbol` | `app/api/telegram-premium/futbol/route.js` | n8n | Catálogo Premium de fútbol (hándicap, córners y goles ≥70/90) |
 | `GET /api/telegram-premium/baseball` | `app/api/telegram-premium/baseball/route.js` | n8n | Catálogo Premium completo de béisbol ≥70/90, incluso sin cuota |
@@ -215,24 +217,33 @@ respuesta JSON de error nunca puede pasar por imagen válida.
 ### Informe personal de mercados en Telegram
 
 El workflow n8n `CF MERCADOS PERSONAL` se ejecuta todos los días a las 08:00 de
-`Europe/Madrid` y descarga un CSV autenticado de
-`/api/cron/personal-market-report`. El archivo expone únicamente cinco columnas:
-partido, hora, línea, probabilidad y fiabilidad. Incluye **60 filas por partido** sin filtrar
-por cuota, probabilidad ni fiabilidad: más/menos de 8.5, 9.5 y 10.5 córners del
-partido; y más/menos de 0.5, 1.5 y 2.5 goles para el total, cada equipo, cada
-tiempo total y cada equipo dentro de cada tiempo. Las etiquetas también expresan
-el número entero equivalente (por ejemplo, `≥ 2 goles`) para evitar ambigüedad.
-El análisis conserva estas 60 evidencias en `_reportScored` sin el recorte
-comercial de 70% aplicado a `_scored`; además, el motor extiende siempre el
-cálculo hasta 2.5 goles y 10.5 córners aunque la línea quede fuera del p95. El
-CSV no publica filas vacías. Cuando una familia carece de hechos específicos de
-los equipos, usa como último respaldo una frecuencia global de partidos reales
-de los 730 días anteriores; esa evidencia se limita a menos de 70% de
-fiabilidad, nunca entra en recomendaciones y siempre es reemplazada por la
-evidencia del partido cuando existe.
-`scripts/build-n8n-personal-market-report-workflow.mjs` hereda el secreto
-del cron y la credencial cifrada de Telegram desde el workflow vivo, mientras
-el chat personal se pasa únicamente al instalarlo y no se guarda en Git.
+`Europe/Madrid` y envía dos enlaces privados con fecha: fútbol y béisbol. Ambos
+abren `/ferney/informes`, que exige sesión admin/owner y presenta cada partido
+como tarjeta desplegable con búsqueda, filtros por familia, Más/Menos y orden
+por hora, probabilidad o fiabilidad. El CSV de cinco columnas permanece como
+descarga secundaria desde la propia vista.
+
+Fútbol limita el catálogo a córners totales 8.5/9.5/10.5, córners por equipo
+en partido/primera/segunda parte, goles 1.5/2.5/3.5/4.5 para partido/equipo y
+ambas mitades, resultados ganador/perdedor/empate, hándicap y tarjetas. El
+motor fuerza el cálculo hasta 10.5 córners, 4.5 goles y 5.5 tarjetas, incluso
+si la línea queda fuera del p95. El informe y su CSV escriben primero todos los
+`Más de` y después todos los `Menos de`; nunca alternan ambas direcciones por
+línea. Los respaldos globales de 730 días quedan capados por debajo de 70% de
+fiabilidad y no inventan mitades de córners que el hecho histórico no permita
+atribuir.
+
+MLB limita el informe a carreras de partido y equipo (equipo desde 1.5), hits
+de partido/equipo, ponches del lanzador, hándicap y carreras/hits de 1.ª entrada,
+primeras 3 y primeras 5. Las carreras salen del linescore y los hits por entrada
+se cuentan desde apariciones oficiales MLB (`result.type=hit`); nunca se reparte
+el total para estimarlos. `scripts/backfill-mlb-inning-hits.js` completa ese
+desglose histórico de forma idempotente y solo persiste un juego si la suma por
+entrada reconcilia con el total oficial.
+
+`scripts/build-n8n-personal-market-report-workflow.mjs` hereda únicamente la
+credencial cifrada de Telegram desde el workflow vivo. El chat personal se pasa
+al instalarlo y no se guarda en Git; los enlaces no transportan secretos.
 
 Una opción de fútbol entra en recomendaciones generales cuando su frecuencia
 ponderada real es de 80% o más, existe cuota real y la fiabilidad propia del
@@ -356,13 +367,13 @@ Las fuentes y namespaces de identificadores también están separados:
 
 - NBA: feed/CDN oficial primero; si el servidor recibe bloqueo o timeout,
   `lib/nba-stats-api.js` cambia a API-NBA. API-Basketball queda para cuotas y
-  como último respaldo de boxscores. ESPN completa calendario amplio y cuotas
-  embebidas cuando están publicadas. El índice oficial de `nba.com/players`
+  como último respaldo de boxscores. ESPN completa el calendario amplio, pero
+  una cuota embebida solo se acepta si pertenece a Bet365. El índice oficial de `nba.com/players`
   cruza nombres/equipos con el ID NBA y sus headshots CDN, incluso cuando el
   boxscore llega desde API-NBA. IDs y logos canónicos evitan duplicados al
   cambiar de fuente.
-- NCAA baloncesto: calendario, logos, marcadores, boxscores, jugadores y cuotas
-  publicadas mediante el feed deportivo de ESPN (grupo 50), con IDs aislados de
+- NCAA baloncesto: calendario, logos, marcadores y boxscores mediante el feed
+  deportivo de ESPN (grupo 50), con IDs aislados de
   NBA. No depende de la ventana de fechas de API-Sports.
 - MLB: MLB Stats oficial aporta calendario, live, boxscores, pitchers,
   alineaciones, props y logos. MiLB está fuera de la configuración activa porque
@@ -408,16 +419,27 @@ Las fuentes y namespaces de identificadores también están separados:
   un campo ausente sigue null y un cero oficial sigue siendo cero. La lista y el
   análisis completo muestran ese mismo snapshot durable.
 - NFL: API-NFL aporta la ventana reciente cuando está disponible; ESPN garantiza
-  el calendario amplio, IDs y logos canónicos, boxscores, jugadores y cuotas
-  publicadas sin duplicar encuentros al cambiar de fuente.
+  el calendario amplio, IDs y logos canónicos, boxscores y jugadores sin
+  duplicar encuentros al cambiar de fuente. Las cuotas DraftKings u otras casas
+  incluidas por ESPN se descartan.
 - NCAA fútbol americano: ESPN aporta FBS (grupo 80) y FCS (grupo 81), con
-  calendario, logos, marcador, boxscore, jugadores y cuotas cuando existen.
+  calendario, logos, marcador, boxscore y jugadores.
+
+Baloncesto y fútbol americano usan el mismo motor empírico de fútbol/MLB sobre
+sus tablas aisladas. Solo publican una selección si la línea exacta existe en
+Bet365, su frecuencia cruda es estrictamente mayor que 60% y la fiabilidad de
+que la tasa real supere 60% es al menos 90%. El normalizador conserva ganador,
+total, total por equipo y hándicap de partido, mitades y cuartos con nombre e ID
+originales de mercado/selección. Una línea de otra casa, reconstruida o sin
+evidencia permanece fuera aunque el porcentaje sea alto.
 
 `scripts/train-multisport-empirical-engine.js` realiza selección cronológica
 70/30 por deporte y guarda diagnósticos fuera de muestra sin recalibrar ni
 bloquear el porcentaje. `scripts/backfill-multisport-history.js` carga una temporada y una
 o varias competiciones por ejecución (`--competition`; MLB usa rangos oficiales
-de 45 días y NCAA consultas diarias concurrentes; `minor` se rechaza), y
+de 45 días y NCAA consultas diarias concurrentes; `minor` se rechaza).
+`scripts/backfill-mlb-inning-hits.js` completa el desglose oficial de hits de la
+temporada solicitada (`--season=YYYY`; sin `--run` solo estima), y
 `scripts/migrate-multisport-engines.sql` crea los almacenes
 independientes; la migración requiere backup y debe ejecutarse antes de activar
 las nuevas rutas en producción. Tenis permanece deshabilitado hasta aprobar una
@@ -609,9 +631,9 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   opciones sin volver a llamar a la API ni ocultar estadísticas durante el
   despliegue. Si el `selectable` v20 no trae fiabilidad, recupera por ID la
   evidencia exacta de `_scored`; si tampoco existe, solo reutiliza las
-  `selections` que sí acrediten ≥90. `MULTISPORT_CACHE_VERSION=16` deja
-  Baseball solo en MLB con baremo público 65%, catálogo Bet365 ampliado y
-  análisis estadístico completo separado de las cuotas. En el Asian Handicap
+  `selections` que sí acrediten ≥90. `MULTISPORT_CACHE_VERSION=18` deja
+  Baseball solo en MLB con catálogo Bet365 ampliado, añade hits oficiales por
+  entrada y obliga NBA/NFL a Bet365 exacto con umbral >60/90. En el Asian Handicap
   de API-Baseball, el signo de las selecciones `Away` se invierte para mostrar
   la línea canónica que ve el cliente en Bet365; se conserva el valor original
   del proveedor solo como trazabilidad. La lista identifica Local/Visitante y

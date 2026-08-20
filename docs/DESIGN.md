@@ -1,6 +1,6 @@
 # CF Análisis — sistema visual
 
-Actualizado: 2026-08-16
+Actualizado: 2026-08-20
 
 ## Dirección
 
@@ -67,6 +67,13 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   reparten dinámicamente en filas y columnas. Cada tarjeta pertenece a una
   familia y contiene hasta seis opciones para conservar nombres y métricas.
   Probabilidad, fiabilidad y cuota usan respectivamente verde, cian y ámbar.
+- Informes privados: `/ferney/informes` sustituye la hoja interminable por un
+  radar móvil de tarjetas desplegables. Cada partido ocupa una sola fila
+  cerrada; al abrirlo aparecen familias compactas con probabilidad, fiabilidad,
+  cuota cuando existe y una barra de intensidad. Fútbol/MLB comparten pestañas,
+  fecha, buscador y filtros por familia y dirección. El orden interno nunca
+  intercala líneas: `Más de` precede a `Menos de`. El CSV queda como descarga
+  secundaria, no como interfaz principal.
 - Jornadas largas: después de 520 px aparece el control flotante “Arriba” junto
   al botón de soporte. Usa icono Lucide, área táctil mínima de 48 px, foco
   visible y siempre salta de inmediato al encabezado; no anima el recorrido

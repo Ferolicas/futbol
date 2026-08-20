@@ -154,10 +154,11 @@ function PickButton({ pick, selected, onToggle }) {
     >
       <span className="ms-pick-copy">
         <strong>{displayBettingText(pick.name)}</strong>
-        <small>Frecuencia calculada con partidos registrados</small>
+        <small>{pick.bookmakerSelection ? `Bet365 · ${displayBettingText(pick.bookmakerSelection)}` : 'Línea exacta disponible en Bet365'}</small>
       </span>
       <span className="ms-pick-metrics">
         <span><small>Prob.</small><b>{probability(pick)}%</b></span>
+        <span><small>Fiab.</small><b>{Number(pick.reliability).toFixed(1)}%</b></span>
         <span><small>Cuota</small><b>{oddValue(pick.odd)?.toFixed(2) || '—'}</b></span>
       </span>
     </button>

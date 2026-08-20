@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-test('genera las 60 líneas pedidas por cada partido sin aplicar umbrales', async () => {
+test('genera el catálogo limitado, con todos los más antes de todos los menos', async () => {
   process.env.DATABASE_URL ||= 'postgresql://unused:unused@127.0.0.1:1/unused';
   const {
     buildFootballPersonalMarketRows,
@@ -22,18 +22,21 @@ test('genera las 60 líneas pedidas por cada partido sin aplicar umbrales', asyn
     },
   }];
   const rows = buildFootballPersonalMarketRows(analyses, '2026-08-18');
-  assert.equal(rows.length, 60);
+  assert.equal(rows.length, 179);
   assert.equal(rows.find(row => row.market_key === 'total_corners_over8_5').probability, 61);
   assert.equal(rows.find(row => row.market_key === 'away_goals_2h_under2_5').reliability, 95);
-  assert.equal(rows.find(row => row.market_key === 'home_goals_over0_5').probability, null);
+  assert.equal(rows.find(row => row.market_key === 'home_goals_over1_5').probability, null);
+  const firstUnder = rows.findIndex(row => row.direccion === 'under');
+  const lastOver = rows.findLastIndex(row => row.direccion === 'over');
+  assert.ok(firstUnder > lastOver);
 
   const csv = renderFootballPersonalMarketCsv(rows);
   assert.ok(csv.startsWith('\uFEFFPartido;Hora;Línea;Probabilidad;Fiabilidad'));
   assert.match(csv, /61,00%;84,00%/);
-  assert.doesNotMatch(csv, /home_goals_over0_5/);
+  assert.doesNotMatch(csv, /home_goals_over1_5/);
   assert.doesNotMatch(csv, /Fixture|Liga|Muestra|Clave interna/);
   assert.equal(csv.trim().split('\n')[1].split(';').length, 5);
-  assert.equal(rows.find(row => row.market_key === 'home_goals_over0_5').linea, '≥ 1 gol (Más de 0.5)');
+  assert.equal(rows.find(row => row.market_key === 'home_goals_over1_5').linea, '≥ 2 goles (Más de 1.5)');
 
   const fallback = buildFootballFallbackEvidence({
     total_corners_over8_5: 0.52,

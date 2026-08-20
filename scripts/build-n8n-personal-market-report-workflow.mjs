@@ -7,20 +7,14 @@ if (!inputPath || !outputPath || !/^\d{6,20}$/.test(String(chatId || ''))) {
   throw new Error('Uso: node scripts/build-n8n-personal-market-report-workflow.mjs <workflow-base.json> <salida.json> <telegram-chat-id>');
 }
 
-// Se toma un workflow vivo únicamente para heredar el secreto del cron y la
-// credencial cifrada de Telegram. Ninguno de los dos queda escrito en Git.
+// Se toma un workflow vivo únicamente para heredar la credencial cifrada de
+// Telegram. El informe web usa la sesión privada del propietario; ningún
+// secreto de cron viaja en los enlaces.
 const parsed = JSON.parse(readFileSync(inputPath, 'utf8'));
 const source = Array.isArray(parsed) ? parsed[0] : parsed;
-const sourceHttp = source?.nodes?.find(node => node.name === 'HTTP Request');
 const sourceTelegram = source?.nodes?.find(node => node.type === 'n8n-nodes-base.telegram');
-if (!sourceHttp || !sourceTelegram?.credentials?.telegramApi) {
-  throw new Error('El workflow base no contiene HTTP autenticado y credencial Telegram');
-}
-
-const endpoint = String(sourceHttp.parameters?.url || '')
-  .replace('/api/cron/publish-combinada', '/api/cron/personal-market-report');
-if (!endpoint.includes('/api/cron/personal-market-report') || !endpoint.includes('secret=')) {
-  throw new Error('No se pudo conservar la autenticación del cron');
+if (!sourceTelegram?.credentials?.telegramApi) {
+  throw new Error('El workflow base no contiene la credencial Telegram');
 }
 
 const schedule = {
@@ -59,37 +53,23 @@ return [{ json: { date } }];`,
   },
 };
 
-const download = {
-  ...structuredClone(sourceHttp),
-  id: 'bf280c1a-eec8-4fc9-bbaa-4dd20cb3f004',
-  name: 'Descargar CSV',
-  position: [-230, 0],
-  parameters: {
-    url: `={{ ${JSON.stringify(`${endpoint}&date=`)} + $json.date }}`,
-    options: {
-      response: {
-        response: { neverError: false, fullResponse: false, responseFormat: 'file' },
-      },
-      timeout: 60000,
-    },
-  },
-};
-delete download.credentials;
-
 const telegram = {
   ...structuredClone(sourceTelegram),
   id: 'bf280c1a-eec8-4fc9-bbaa-4dd20cb3f005',
-  name: 'Enviar archivo personal',
-  position: [30, 0],
+  name: 'Enviar informes interactivos',
+  position: [-170, 0],
   parameters: {
     resource: 'message',
-    operation: 'sendDocument',
+    operation: 'sendMessage',
     chatId: String(chatId),
-    binaryData: true,
-    binaryPropertyName: 'data',
+    text: `={{ '⚽ INFORME DE FÚTBOL\n' +
+      'https://cfanalisis.com/ferney/informes?deporte=futbol&date=' + $json.date + '\n\n' +
+      '⚾ INFORME DE BÉISBOL\n' +
+      'https://cfanalisis.com/ferney/informes?deporte=baseball&date=' + $json.date + '\n\n' +
+      'Abre cada partido para ver sus opciones. Puedes filtrar por mercado, Más/Menos, probabilidad y fiabilidad.' }}`,
     additionalFields: {
-      fileName: `={{ 'CF_mercados_' + $('Preparar fecha').item.json.date + '.csv' }}`,
-      caption: `={{ 'CF Análisis — probabilidades y fiabilidad del ' + $('Preparar fecha').item.json.date + '. Incluye todas las líneas solicitadas, sin filtrar por cuota ni porcentajes.' }}`,
+      disableWebPagePreview: true,
+      appendAttribution: false,
     },
   },
 };
@@ -115,17 +95,16 @@ const workflow = {
   id: 'CFPersonalMarkets1',
   name: 'CF MERCADOS PERSONAL',
   active: true,
-  nodes: [schedule, manual, gate, download, telegram, register],
+  nodes: [schedule, manual, gate, telegram, register],
   connections: {
     'Informe diario 08:00': { main: [[{ node: 'Preparar fecha', type: 'main', index: 0 }]] },
     'Ejecución manual': { main: [[{ node: 'Preparar fecha', type: 'main', index: 0 }]] },
-    'Preparar fecha': { main: [[{ node: 'Descargar CSV', type: 'main', index: 0 }]] },
-    'Descargar CSV': { main: [[{ node: 'Enviar archivo personal', type: 'main', index: 0 }]] },
-    'Enviar archivo personal': { main: [[{ node: 'Registrar envío', type: 'main', index: 0 }]] },
+    'Preparar fecha': { main: [[{ node: 'Enviar informes interactivos', type: 'main', index: 0 }]] },
+    'Enviar informes interactivos': { main: [[{ node: 'Registrar envío', type: 'main', index: 0 }]] },
   },
   settings: { timezone: 'Europe/Madrid', executionOrder: 'v1' },
   pinData: {},
-  description: 'Envía cada día a las 08:00 de Europe/Madrid un CSV personal con 60 líneas de córners y goles por partido, sin filtros de cuota, probabilidad ni fiabilidad.',
+  description: 'Envía cada día a las 08:00 de Europe/Madrid los enlaces privados a los informes interactivos de fútbol y béisbol.',
 };
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });

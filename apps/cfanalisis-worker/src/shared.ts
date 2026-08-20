@@ -77,9 +77,8 @@ const [
   import(LIB + 'model-player-markets.js'),
   import(LIB + 'model-probabilities.js'),
   import(SCRIPTS + 'train-football-empirical-engine.js'),
-  // Deploy marker: MLB-only/Baseball v16 (hándicap Bet365 canónico,
-  // victoria local/visitante y odds-refresh-v2-bogota desde 10:30)
-  // + football reliability boundary v21-v20.
+  // Deploy marker: multisport v18 (Bet365 exacto NBA/NFL, catálogo >60/90,
+  // períodos completos y hits MLB por 1/3/5 entradas) + football report v2.
   // These runtime imports live outside the TypeScript tree, so this file must
   // trigger a worker reload when their contract changes.
   import(LIB + 'multisport-analysis.js'),

@@ -83,7 +83,11 @@ test('baseball calcula las nueve entradas, tramos e hits sin depender de cuotas'
     is_home: true, score_for: 4, score_against: 2,
     period_scores: [1, 0, 1, 0, 0, 1, 0, 1, 0],
     period_scores_against: [0, 1, 0, 0, 0, 0, 1, 0, 0],
-    stats: { hits: 9, opponentHits: 7 },
+    stats: {
+      hits: 9, opponentHits: 7,
+      hitsByInning: [2, 0, 1, 1, 0, 2, 1, 1, 1],
+      opponentHitsByInning: [0, 1, 1, 0, 1, 1, 1, 1, 1],
+    },
   };
   const fixture = {
     id: 'future', date: '2026-02-01T12:00:00Z', season: '2026', league: { id: '1' },
@@ -105,6 +109,8 @@ test('baseball calcula las nueve entradas, tramos e hits sin depender de cuotas'
   assert.equal(Object.keys(prediction.innings).length, 9);
   assert.equal(prediction.innings[1].run.yes.rawProbability, 1);
   assert.equal(prediction.periods.first3.totals[2.5].over.rawProbability, 1);
+  assert.equal(prediction.periods.first3.statistics.hits.home[1.5].over.rawProbability, 1);
+  assert.equal(prediction.periods.first3.statistics.hits.total[5.5].over.rawProbability, 0);
   assert.equal(prediction.statistics.hits.home[8.5].over.rawProbability, .5);
   assert.ok(prediction.statistics.hits.total[15.5]);
   assert.ok(prediction.spreads.home[-2.5]);
@@ -112,6 +118,7 @@ test('baseball calcula las nueve entradas, tramos e hits sin depender de cuotas'
   const visual = toBaseballProbabilityShape(prediction);
   assert.equal(visual.innings[1].run.yes, 95);
   assert.equal(visual.periods.first3.totals[2.5].over, 95);
+  assert.equal(visual.periods.first3.statistics.hits.home[1.5].over, 95);
   assert.equal(visual.statistics.hits.home[8.5].over, 50);
 });
 
@@ -145,6 +152,22 @@ test('las cuotas API-Sports se normalizan sin entrar en la probabilidad', () => 
   ] }] }], { teams: { home: { name: 'Local' }, away: { name: 'Visitante' } } });
   assert.equal(odds.moneyline.home.odd, 1.8);
   assert.equal(odds.totals[8.5].under.odd, 1.95);
+});
+
+test('normaliza hándicap, total de equipo y mercados por mitad exactos de Bet365', () => {
+  const odds = normalizeApiSportsOdds([{ bookmakers: [{ name: 'Bet365', bets: [
+    { name: 'Asian Handicap', values: [{ value: 'Home -3.5', odd: '1.90' }, { value: 'Away +3.5', odd: '1.90' }] },
+    { name: 'Home Team Total', values: [{ value: 'Over 21.5', odd: '1.84' }, { value: 'Under 21.5', odd: '1.96' }] },
+    { name: '1st Half Total', values: [{ value: 'Over 20.5', odd: '1.91' }, { value: 'Under 20.5', odd: '1.89' }] },
+    { name: '1st Half Winner', values: [{ value: 'Home', odd: '1.80' }, { value: 'Away', odd: '2.10' }] },
+  ] }] }], { teams: { home: { name: 'Local' }, away: { name: 'Visitante' } } }, {
+    sport: 'american_football', bookmakers: ['Bet365'],
+  });
+  assert.equal(odds.spreads.home[-3.5].odd, 1.9);
+  assert.equal(odds.teamTotals.home[21.5].over.odd, 1.84);
+  assert.equal(odds.periods.firstHalf.totals[20.5].under.odd, 1.89);
+  assert.equal(odds.periods.firstHalf.moneyline.home.odd, 1.8);
+  assert.ok(odds.catalog.every(selection => selection.bookmaker === 'Bet365'));
 });
 
 test('API-Sports distingue el límite por minuto de la cuota diaria', () => {
