@@ -51,7 +51,16 @@ const state = $getWorkflowStaticData('global');
 // La deduplicación aplica al cron. Una ejecución manual/CLI es una orden
 // explícita del propietario para reenviar el informe del día.
 if ($execution.mode === 'trigger' && state.lastPersonalMarketReportDate === date) return [];
-return [{ json: { date } }];`,
+const message = [
+  '⚽ INFORME DE FÚTBOL',
+  'https://cfanalisis.com/ferney/informes?deporte=futbol&date=' + date,
+  '',
+  '⚾ INFORME DE BÉISBOL',
+  'https://cfanalisis.com/ferney/informes?deporte=baseball&date=' + date,
+  '',
+  'Abre cada partido para ver sus opciones. Puedes filtrar por mercado, Más/Menos, probabilidad y fiabilidad.',
+].join(String.fromCharCode(10));
+return [{ json: { date, message } }];`,
   },
 };
 
@@ -64,11 +73,7 @@ const telegram = {
     resource: 'message',
     operation: 'sendMessage',
     chatId: String(chatId),
-    text: `={{ '⚽ INFORME DE FÚTBOL\n' +
-      'https://cfanalisis.com/ferney/informes?deporte=futbol&date=' + $json.date + '\n\n' +
-      '⚾ INFORME DE BÉISBOL\n' +
-      'https://cfanalisis.com/ferney/informes?deporte=baseball&date=' + $json.date + '\n\n' +
-      'Abre cada partido para ver sus opciones. Puedes filtrar por mercado, Más/Menos, probabilidad y fiabilidad.' }}`,
+    text: '={{ $json.message }}',
     additionalFields: {
       disableWebPagePreview: true,
       appendAttribution: false,
