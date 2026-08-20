@@ -30,6 +30,12 @@ export default function SignInPage() {
   const searchParams = useSearchParams();
   const selectedPlan = normalizePurchasePlan(searchParams.get('plan'));
   const purchaseIntent = normalizePurchaseIntent(searchParams.get('intent'));
+  const requestedRedirect = searchParams.get('redirect_url');
+  const safeRedirect = requestedRedirect?.startsWith('/')
+    && !requestedRedirect.startsWith('//')
+    && !requestedRedirect.startsWith('/sign-in')
+    ? requestedRedirect
+    : null;
   const selectedPlanLabel = purchasePlanLabel(selectedPlan);
   const signUpHref = purchaseRoute('/sign-up', 'plan', selectedPlan, purchaseIntent);
   const checkoutHref = purchaseRoute('/planes', 'checkout', selectedPlan, purchaseIntent);
@@ -66,7 +72,7 @@ export default function SignInPage() {
       // La cookie ya existe; sincronizamos el contexto antes de navegar para
       // que nombre, avatar y estado por usuario aparezcan en el primer render.
       await refreshSession();
-      router.replace(selectedPlan ? checkoutHref : '/dashboard');
+      router.replace(selectedPlan ? checkoutHref : (safeRedirect || '/dashboard'));
     } catch {
       setLoading(false);
       setError('Error de red. Intenta de nuevo.');

@@ -57,8 +57,11 @@ export async function middleware(request) {
   const protectedPaths = ['/dashboard', '/admin', '/ferney'];
   const needsAuth = protectedPaths.some(p => pathname.startsWith(p));
   if (needsAuth && !userId) {
+    const destination = `${pathname}${request.nextUrl.search}`;
     const url = request.nextUrl.clone();
     url.pathname = '/sign-in';
+    url.search = '';
+    url.searchParams.set('redirect_url', destination);
     return NextResponse.redirect(url);
   }
 
