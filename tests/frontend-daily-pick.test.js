@@ -54,6 +54,7 @@ test('el informe personal queda programado a las 08:00 de Madrid', () => {
   assert.match(source, /timezone: 'Europe\/Madrid'/);
   assert.match(source, /informes\?deporte=futbol&date=/);
   assert.match(source, /informes\?deporte=baseball&date=/);
+  assert.match(source, /\$execution\.mode === 'trigger'/);
   assert.doesNotMatch(source, /sendDocument/);
   assert.doesNotMatch(source, /Informe diario 08:30/);
 });

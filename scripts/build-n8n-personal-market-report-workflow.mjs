@@ -48,7 +48,9 @@ const gate = {
   parameters: {
     jsCode: `const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
 const state = $getWorkflowStaticData('global');
-if (state.lastPersonalMarketReportDate === date) return [];
+// La deduplicación aplica al cron. Una ejecución manual/CLI es una orden
+// explícita del propietario para reenviar el informe del día.
+if ($execution.mode === 'trigger' && state.lastPersonalMarketReportDate === date) return [];
 return [{ json: { date } }];`,
   },
 };
