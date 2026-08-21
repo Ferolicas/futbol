@@ -18,8 +18,6 @@ const { Pool } = pg;
 
 const GRID = [
   DEFAULT_MULTISPORT_ENGINE_CONFIG,
-  { ...DEFAULT_MULTISPORT_ENGINE_CONFIG, currentShare: 0.60 },
-  { ...DEFAULT_MULTISPORT_ENGINE_CONFIG, currentShare: 0.82 },
   { ...DEFAULT_MULTISPORT_ENGINE_CONFIG, opponentBoost: 1.10, starterBoost: 1.10 },
   { ...DEFAULT_MULTISPORT_ENGINE_CONFIG, opponentBoost: 1.35, starterBoost: 1.30 },
   { ...DEFAULT_MULTISPORT_ENGINE_CONFIG, venueBoost: 1.08, competitionBoost: 1.02 },

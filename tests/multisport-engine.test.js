@@ -2,6 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  MULTISPORT_CURRENT_SEASON_SHARE,
+  normalizeMultisportEngineConfig,
+  invertEmpiricalEvidence,
   computeMultisportEmpiricalPrediction,
   computeMultisportEmpiricalPlayerMarkets,
   buildEmpiricalPlayerProbabilities,
@@ -35,11 +38,44 @@ test('la actualidad domina al histórico sin borrar ninguna observación', () =>
   const rate = multisportEngineInternals.empiricalRate([
     { _value: 1, _current: true, _weight: 1 },
     { _value: 0, _current: false, _weight: 1 },
-  ], (value) => value, 0.72);
+  ], (value) => value, MULTISPORT_CURRENT_SEASON_SHARE);
   assert.equal(rate.n, 2);
   assert.equal(rate.current.n, 1);
   assert.equal(rate.historical.n, 1);
-  assert.equal(rate.p, 0.72);
+  assert.equal(rate.p, 0.65);
+});
+
+test('el entrenamiento no puede alterar el contrato fijo 65/35', () => {
+  assert.equal(normalizeMultisportEngineConfig({ currentShare: 0.9 }).currentShare, 0.65);
+  assert.equal(normalizeMultisportEngineConfig({ currentShare: 0.51 }).currentShare, 0.65);
+});
+
+test('cada participante pesa 50/50 aunque tenga una muestra distinta', () => {
+  const rate = multisportEngineInternals.participantWeightedEmpiricalRate([
+    ...Array.from({ length: 10 }, (_, index) => ({ _side: 'home', _value: index < 9 ? 1 : 0, _current: true, _weight: 1 })),
+    ...Array.from({ length: 2 }, () => ({ _side: 'away', _value: 0, _current: true, _weight: 1 })),
+  ], (value) => value, MULTISPORT_CURRENT_SEASON_SHARE);
+  assert.equal(rate.p, 0.45);
+  assert.equal(rate.teams.length, 2);
+});
+
+test('la evidencia del under invierte aciertos por equipo y temporada', () => {
+  const inverted = invertEmpiricalEvidence({
+    n: 12, hits: 9, rawProbability: 0.75,
+    current: { n: 2, hits: 2, p: 1 },
+    historical: { n: 10, hits: 7, p: 0.7 },
+    teams: [{
+      participant: 'home', n: 12, hits: 9, p: 0.75,
+      current: { n: 2, hits: 2, p: 1 },
+      historical: { n: 10, hits: 7, p: 0.7 },
+    }],
+  });
+  assert.equal(inverted.hits, 3);
+  assert.equal(inverted.current.hits, 0);
+  assert.equal(inverted.historical.hits, 3);
+  assert.equal(inverted.teams[0].hits, 3);
+  assert.equal(inverted.teams[0].current.hits, 0);
+  assert.equal(inverted.teams[0].historical.hits, 3);
 });
 
 test('un H2H duplicado por las dos perspectivas cuenta una sola vez', () => {

@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-21 · Commit base: `988da6a`
+Actualizado: 2026-08-21 · Commit base: `32f4972`
 
 ## Identidad y stack
 
@@ -367,12 +367,21 @@ cruzada entre `baseball`, `basketball` y `american_football`. Una muestra real
 sirve y cero muestras devuelve “sin dato”. Temporada actual e histórico se
 mantienen separados, la actualidad conserva más del 50% del peso y localía,
 rival, competición, pitcher/quarterback y alineación solo ponderan hechos
-observados semejantes. Cuotas, Poisson, isotónica, priors y shrinkage no alteran
+observados semejantes. El reparto temporada actual/histórico es 65/35 fijo y
+cada participante obtiene primero su propia frecuencia; ambos lados pesan
+después 50/50 aunque tengan distinto número de partidos. Cuotas, Poisson,
+isotónica, priors y shrinkage no alteran
 el porcentaje. La frecuencia cruda se conserva para auditoría, filtros y
 cálculos; la presentación se limita a 95% sin escribir ese límite de vuelta en
 el motor. Una opción entra en recomendaciones por su propia frecuencia y cuota;
 la validación cronológica mide el motor, pero jamás oculta o transforma el
 resultado.
+
+La fiabilidad usa posteriores beta-binomial separados por temporada e histórico
+y por participante. Sus medias y varianzas se combinan con los mismos pesos
+65/35 y 50/50 del porcentaje. Así una muestra actual corta conserva más peso sin
+presentarse como certeza, y un histórico voluminoso no la entierra por puro
+tamaño. Over y under auditan sus propios aciertos en la dirección exacta.
 
 Las fuentes y namespaces de identificadores también están separados:
 
@@ -642,6 +651,11 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   aciertos de cada equipo. Ambos equipos se ponderan al 50/50 tanto para la
   probabilidad como para la fiabilidad; el entrenamiento conserva libertad
   sobre pesos contextuales, pero ya no puede modificar `currentShare`.
+- 2026-08-21: `MULTISPORT_CACHE_VERSION=19` aplica a MLB, NBA/NCAA y NFL/NCAA
+  el reparto fijo 65/35 y la ponderación 50/50 por participante. La fiabilidad
+  combina las posteriores separadas con esos mismos pesos; nunca vuelve a
+  juntar actualidad e histórico como una muestra bruta ni reutiliza la
+  evidencia del over para el under. El entrenamiento solo optimiza contexto.
 - 2026-08-02: `FOOTBALL_CACHE_VERSION=21` exige fiabilidad ≥90% para publicar
   opciones sin tocar las estadísticas y mantiene lectura compatible de análisis
   v20, porque sus cálculos son idénticos; la frontera pública sanea siempre las

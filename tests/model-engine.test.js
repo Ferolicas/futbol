@@ -38,8 +38,19 @@ test('probabilidad y fiabilidad se calculan por cada equipo y luego se ponderan'
   const estimate = teamWeightedEmpiricalRate(rows, (row) => row.hit, CURRENT_SEASON_SHARE);
   assert.equal(estimate.p, 0.45); // (9/10 del Equipo 1 + 0/2 del Equipo 2) / 2
   assert.equal(estimate.teams.length, 2);
-  assert.ok(teamWeightedReliability(estimate) > 0.45);
-  assert.ok(teamWeightedReliability(estimate) < 0.46);
+  assert.ok(teamWeightedReliability(estimate) > 0.07);
+  assert.ok(teamWeightedReliability(estimate) < 0.08);
+});
+
+test('la fiabilidad respeta el 65/35 y no deja que el histórico entierre la actualidad', () => {
+  const rows = [];
+  for (const team_id of [1, 2]) {
+    rows.push(...Array.from({ length: 10 }, () => ({ team_id, hit: 1, _current: true, _weight: 1 })));
+    rows.push(...Array.from({ length: 100 }, (_, index) => ({ team_id, hit: index < 60 ? 1 : 0, _current: false, _weight: 1 })));
+  }
+  const estimate = teamWeightedEmpiricalRate(rows, (row) => row.hit, CURRENT_SEASON_SHARE);
+  assert.equal(estimate.p, 0.86);
+  assert.ok(teamWeightedReliability(estimate) > 0.99);
 });
 
 test('usa cualquier cantidad de partidos sin mínimo de muestra', () => {

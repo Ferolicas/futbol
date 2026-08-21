@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { normalizeApiSportsOdds } from '../lib/api-sports-multisport.js';
-import { posteriorReliabilityPercent, evidenceSample } from '../lib/reliability.js';
+import { posteriorReliabilityPercent, evidenceSample, entryReliabilityPercent } from '../lib/reliability.js';
 
 const fixture = {
   teams: { home: { id: 1, name: 'Boston Red Sox' }, away: { id: 2, name: 'Chicago White Sox' } },
@@ -94,4 +94,20 @@ test('la fiabilidad rechaza lo que no tiene muestra que auditar', () => {
 test('la fiabilidad reconstruye los aciertos cuando la evidencia solo trae el ratio', () => {
   assert.deepEqual(evidenceSample({ n: 120, rawProbability: 0.75 }), { hits: 90, n: 120 });
   assert.deepEqual(evidenceSample({ n: 120, hits: 90 }), { hits: 90, n: 120 });
+});
+
+test('la fiabilidad estructurada respeta 65/35 y 50/50 en lugar de mezclar todo', () => {
+  const entry = {
+    evidence: {
+      currentShareContract: 0.65,
+      teams: ['home', 'away'].map((participant) => ({
+        participant,
+        current: { n: 10, hits: 10 },
+        historical: { n: 100, hits: 60 },
+      })),
+    },
+  };
+  // El pool bruto sería 140/220 = 63,6% y declararía fiabilidad casi nula.
+  // El contrato correcto reconoce 100% actual al 65% y 60% histórico al 35%.
+  assert.ok(entryReliabilityPercent(entry, 70) > 99);
 });
