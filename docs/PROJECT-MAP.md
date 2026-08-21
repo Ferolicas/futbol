@@ -645,12 +645,12 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   gratuito y coordinan un máximo de diez solicitudes/minuto entre web y workers;
   un 429 temporal pausa el host, pero nunca abre el circuito de cuota diaria.
   Las cuotas deportivas nunca se usan como probabilidad del modelo.
-- 2026-08-21: `FOOTBALL_CACHE_VERSION=22` fija el reparto temporada
+- 2026-08-21: `FOOTBALL_CACHE_VERSION=23` fija el reparto temporada
   actual/histórico en 65/35 y reemplaza la antigua confianza `n/(n+12)` de los
   mercados over/under y booleanos por fiabilidad beta-binomial basada en
   aciertos de cada equipo. Ambos equipos se ponderan al 50/50 tanto para la
-  probabilidad como para la fiabilidad; el entrenamiento conserva libertad
-  sobre pesos contextuales, pero ya no puede modificar `currentShare`.
+  probabilidad como para la fiabilidad; v23 invalida los cálculos v22 que aún
+  mezclaban el tamaño de las muestras al medir fiabilidad.
 - 2026-08-21: `MULTISPORT_CACHE_VERSION=19` aplica a MLB, NBA/NCAA y NFL/NCAA
   el reparto fijo 65/35 y la ponderación 50/50 por participante. La fiabilidad
   combina las posteriores separadas con esos mismos pesos; nunca vuelve a
