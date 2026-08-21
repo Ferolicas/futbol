@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-21 · Commit base: `956843c`
+Actualizado: 2026-08-21 · Commit base: `988da6a`
 
 ## Identidad y stack
 
@@ -270,11 +270,20 @@ presenta como 95%.
 `lib/model-engine.js` cuenta directamente hechos de `model.team_match_stats`.
 Usa todos los partidos anteriores al kickoff sin mínimo ni máximo: una sola
 muestra real sirve y cero muestras produce “sin dato”. Temporada actual e
-histórico se calculan por separado; si ambos existen, `currentShare` siempre es
-mayor a 0.50. Localía, nivel del rival, fase, H2H, árbitro y similitud del XI son
+histórico se calculan por separado; si ambos existen, la temporada actual pesa
+un 65% fijo y el histórico un 35%. El entrenamiento no puede rebajar ese reparto.
+Cada equipo obtiene primero su propia frecuencia y fiabilidad; las dos señales
+del partido se ponderan después al 50/50, sin usar tasas globales de la liga ni
+permitir que el equipo con más partidos aplaste al que tiene menos.
+Localía, nivel del rival, fase, H2H, árbitro y similitud del XI son
 pesos sobre cumplimientos observados, nunca puntos añadidos/restados a una
 probabilidad. H2H se deduplica por fixture; el árbitro solo pondera tarjetas,
 faltas y rojas; el XI confirmado pondera alineaciones históricas reales.
+
+La fiabilidad de mercados over/under y booleanos es beta-binomial: expresa la
+probabilidad de que la tasa real supere el 70% dados los aciertos observados.
+El tamaño de la muestra por sí solo nunca vuelve fiable una frecuencia baja y
+una muestra de dos partidos puede informar, pero no superar el gate del 90%.
 
 Las medias descriptivas no se presentan como goles “esperados”: la interfaz
 aclara que la media anotadora combinada y la frecuencia de superar una línea
@@ -627,6 +636,12 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   gratuito y coordinan un máximo de diez solicitudes/minuto entre web y workers;
   un 429 temporal pausa el host, pero nunca abre el circuito de cuota diaria.
   Las cuotas deportivas nunca se usan como probabilidad del modelo.
+- 2026-08-21: `FOOTBALL_CACHE_VERSION=22` fija el reparto temporada
+  actual/histórico en 65/35 y reemplaza la antigua confianza `n/(n+12)` de los
+  mercados over/under y booleanos por fiabilidad beta-binomial basada en
+  aciertos de cada equipo. Ambos equipos se ponderan al 50/50 tanto para la
+  probabilidad como para la fiabilidad; el entrenamiento conserva libertad
+  sobre pesos contextuales, pero ya no puede modificar `currentShare`.
 - 2026-08-02: `FOOTBALL_CACHE_VERSION=21` exige fiabilidad ≥90% para publicar
   opciones sin tocar las estadísticas y mantiene lectura compatible de análisis
   v20, porque sus cálculos son idénticos; la frontera pública sanea siempre las

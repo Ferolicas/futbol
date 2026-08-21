@@ -5,16 +5,41 @@ const {
   empiricalRate,
   computeBaseMarkets,
   DEFAULT_ENGINE_CONFIG,
+  CURRENT_SEASON_SHARE,
+  FOOTBALL_RELIABILITY_BASELINE,
+  footballReliability,
+  teamWeightedEmpiricalRate,
+  teamWeightedReliability,
   normalizeEngineConfig,
   lineupRowsFromApi,
   annotateLineupSimilarity,
 } = require('../lib/model-engine.js');
 
-test('el entrenamiento nunca puede hacer que el histórico pese más', () => {
-  assert.equal(normalizeEngineConfig({ currentShare: 0 }).currentShare, 0.55);
-  assert.equal(normalizeEngineConfig({ currentShare: 0.5 }).currentShare, 0.55);
-  assert.equal(normalizeEngineConfig({ currentShare: 0.72 }).currentShare, 0.72);
-  assert.equal(normalizeEngineConfig({ currentShare: 1 }).currentShare, 0.95);
+test('el reparto actualidad/histórico queda fijado en 65/35', () => {
+  assert.equal(CURRENT_SEASON_SHARE, 0.65);
+  assert.equal(normalizeEngineConfig({ currentShare: 0 }).currentShare, 0.65);
+  assert.equal(normalizeEngineConfig({ currentShare: 0.55 }).currentShare, 0.65);
+  assert.equal(normalizeEngineConfig({ currentShare: 0.72 }).currentShare, 0.65);
+  assert.equal(normalizeEngineConfig({ currentShare: 1 }).currentShare, 0.65);
+});
+
+test('la fiabilidad mide aciertos reales y no solo tamaño de muestra', () => {
+  assert.equal(FOOTBALL_RELIABILITY_BASELINE, 0.70);
+  assert.ok(footballReliability(93, 151) < 0.02);
+  assert.ok(footballReliability(97, 108) > 0.999);
+  assert.ok(footballReliability(2, 2) < 0.90);
+});
+
+test('probabilidad y fiabilidad se calculan por cada equipo y luego se ponderan', () => {
+  const rows = [
+    ...Array.from({ length: 10 }, (_, index) => ({ team_id: 1, hit: index < 9 ? 1 : 0, _current: true, _weight: 1 })),
+    ...Array.from({ length: 2 }, () => ({ team_id: 2, hit: 0, _current: true, _weight: 1 })),
+  ];
+  const estimate = teamWeightedEmpiricalRate(rows, (row) => row.hit, CURRENT_SEASON_SHARE);
+  assert.equal(estimate.p, 0.45); // (9/10 del Equipo 1 + 0/2 del Equipo 2) / 2
+  assert.equal(estimate.teams.length, 2);
+  assert.ok(teamWeightedReliability(estimate) > 0.45);
+  assert.ok(teamWeightedReliability(estimate) < 0.46);
 });
 
 test('usa cualquier cantidad de partidos sin mínimo de muestra', () => {
@@ -25,7 +50,7 @@ test('usa cualquier cantidad de partidos sin mínimo de muestra', () => {
   const two = empiricalRate([
     { hit: 1, _current: true, _weight: 1 },
     { hit: 0, _current: true, _weight: 1 },
-  ], (row) => row.hit, 0.72);
+  ], (row) => row.hit, CURRENT_SEASON_SHARE);
   assert.equal(two.n, 2);
   assert.equal(two.hits, 1);
   assert.equal(two.p, 0.5);
@@ -60,10 +85,10 @@ test('la actualidad domina al histórico sin borrar ninguno de los dos', () => {
   const result = empiricalRate([
     { hit: 1, _current: true, _weight: 1 },
     { hit: 0, _current: false, _weight: 1 },
-  ], (row) => row.hit, 0.72);
+  ], (row) => row.hit, CURRENT_SEASON_SHARE);
   assert.equal(result.current.n, 1);
   assert.equal(result.historical.n, 1);
-  assert.equal(result.p, 0.72);
+  assert.equal(result.p, 0.65);
 });
 
 test('los pesos de contexto ponderan resultados reales, no añaden puntos', () => {

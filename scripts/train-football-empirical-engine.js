@@ -1,10 +1,11 @@
 /* eslint-disable */
-// Entrenamiento walk-forward del peso de actualidad del motor empírico.
+// Entrenamiento walk-forward de pesos de contexto del motor empírico.
 //
 // No aprende una función opaca ni calibra/sube/baja probabilidades. Reproduce
 // cada predicción con cutoff anterior al partido y aprende los pesos de
-// actualidad, localía, nivel del rival, fase y H2H según Brier + calibración
+// localía, nivel del rival, fase y H2H según Brier + calibración
 // fuera de muestra. El candidato solo se activa si no empeora al campeón.
+// La actualidad es un contrato fijo 65/35 y no participa en la búsqueda.
 
 const pg = require('pg');
 const {
@@ -15,9 +16,8 @@ const {
 } = require('../lib/model-engine.js');
 
 // Rejilla pequeña y explicable. Cada valor es un peso sobre partidos reales;
-// nunca un ajuste directo de puntos porcentuales. Actualidad permanece >50%.
+// nunca un ajuste directo de puntos porcentuales.
 const CONFIG_GRID = Object.freeze({
-  currentShare: [0.55, 0.60, 0.65, 0.70, 0.72, 0.75, 0.80, 0.85, 0.90],
   venueBoost: [1.00, 1.08, 1.18, 1.28, 1.40],
   opponentTierBoost: [1.00, 1.05, 1.10, 1.20, 1.30],
   phaseBoost: [1.00, 1.03, 1.06, 1.12, 1.20],
@@ -65,6 +65,19 @@ const BOOL_ACTUAL = {
 function probabilityForShare(chain, share) {
   const step = Array.isArray(chain) ? chain.find((x) => x.step === 'empirical-weighted') : null;
   if (!step) return null;
+  if (Array.isArray(step.teams) && step.teams.length) {
+    const teamProbabilities = step.teams.map((team) => {
+      const cp = num(team.current?.p), hp = num(team.historical?.p);
+      const cn = Number(team.current?.n || 0), hn = Number(team.historical?.n || 0);
+      if (cn && hn) return share * cp + (1 - share) * hp;
+      if (cn) return cp;
+      if (hn) return hp;
+      return null;
+    }).filter((probability) => probability != null);
+    return teamProbabilities.length
+      ? teamProbabilities.reduce((sum, probability) => sum + probability, 0) / teamProbabilities.length
+      : null;
+  }
   const cp = num(step.current?.p), hp = num(step.historical?.p);
   const cn = Number(step.current?.n || 0), hn = Number(step.historical?.n || 0);
   if (cn && hn) return share * cp + (1 - share) * hp;

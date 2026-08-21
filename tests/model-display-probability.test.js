@@ -129,6 +129,20 @@ test('una sola observación puede producir 100% interno y mostrar 95%', () => {
   assert.equal(scored.total_corners_over0_5.recommended, true);
 });
 
+test('over y under conservan la fiabilidad de su dirección exacta', () => {
+  const scored = modelToScored({
+    corners_total: {
+      kind: 'ou',
+      lines: [{ line: 8.5, prob: 0.1, n: 100, hits: 10, conf: 0.01, underConf: 0.98, level: 'empirical' }],
+    },
+    btts: { kind: 'bool', prob: 0.2, n: 100, hits: 20, conf: 0.02, inverseConf: 0.97, level: 'empirical' },
+  });
+  assert.equal(scored.total_corners_over8_5.confidence, 0.01);
+  assert.equal(scored.total_corners_under8_5.confidence, 0.98);
+  assert.equal(scored.btts.confidence, 0.02);
+  assert.equal(scored.btts_no.confidence, 0.97);
+});
+
 test('la combinada calcula con el valor crudo aunque visualmente muestre 95%', () => {
   const scored = modelToScored({
     goals_total: {
