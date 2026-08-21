@@ -1,7 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const helperPromise = import('../apps/cfanalisis-worker/src/jobs/futbol/live-reconciliation.js');
+
+test('el scheduler live usa 30 segundos y retira la cadencia anterior', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../apps/cfanalisis-worker/src/schedulers.ts'), 'utf8');
+  assert.match(source, /id: 'futbol-live-30s',\s+every: 30_000/);
+  assert.match(source, /STALE_SCHEDULER_IDS = \[[^\]]*'futbol-live-90s'/);
+  assert.doesNotMatch(source, /id: 'futbol-live-90s',\s+every: 90_000/);
+});
 
 test('un partido observado en vivo o final nunca regresa a no iniciado', async () => {
   const { shouldRejectStatusRegression } = await helperPromise;

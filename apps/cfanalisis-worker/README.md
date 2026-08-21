@@ -63,7 +63,7 @@ populated keys regardless of which side wrote them.
 | `futbol-finalize`           | `0 1,2 * * *`                   | Persist results, close prediction rows  |
 | `futbol-cleanup`            | `0 1 * * *`                     | Delete rows older than retention window |
 | `futbol-lineups`            | `*/5 * * * *`                   | Smart: only acts T-45min before kickoff |
-| `futbol-live`               | `*/1 * * * *`                   | Smart: only acts inside game window     |
+| `futbol-live`               | every 30 sec                    | Smart: only acts inside game window     |
 | `futbol-live-corners`       | `*/30 * * * *`                  | Refresh corners for live matches        |
 | `futbol-odds`               | `*/15 * * * *`                  | Vigilancia Bet365/Bwin adaptativa hasta kickoff; vacíos nunca cierran reintentos |
 | `baseball-fixtures`         | `20 10 * * *` Colombia          | Fetch MLB fixtures                      |

@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-20 · Commit base: `2645d87`
+Actualizado: 2026-08-21 · Commit base: `956843c`
 
 ## Identidad y stack
 
@@ -308,9 +308,11 @@ nunca se persiste como una respuesta válida sin cuotas. La operación manual
 `futbol-analyze-all-today` admite `fixtureIds` para reparar únicamente los
 partidos afectados sin recalcular los sanos. Si falta el
 calendario del día actual, el worker live ignora el
-smart-skip histórico y consulta el feed en modo fail-open cada 90 segundos. La
-misma cadencia se usa durante partidos para que jornadas de alta simultaneidad
-quepan dentro del plan Pro de 7.500 llamadas sin retirar ningún evento live.
+smart-skip histórico y consulta el feed en modo fail-open cada 30 segundos. La
+misma cadencia se usa durante partidos; el plan Ultra de 75.000 llamadas diarias
+permite recuperar este refresco sin retirar ningún evento live. Al cambiar la
+cadencia, el ID anterior debe entrar en `STALE_SCHEDULER_IDS` para que BullMQ
+elimine su scheduler y su job delayed, evitando ticks duplicados.
 
 El análisis nocturno puede ejecutarse hasta unas 30 horas antes del kickoff,
 cuando Bet365 todavía no ha publicado toda su oferta en API-Football. El job

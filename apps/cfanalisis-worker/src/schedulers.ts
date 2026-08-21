@@ -16,7 +16,7 @@ const TZ = 'Europe/Madrid';
 const BOGOTA_TZ = 'America/Bogota';
 
 // `pattern` = cron (granularidad mínima 1 min). `every` = intervalo exacto en
-// ms (ej. live cada 90s). Usar uno u otro, no ambos.
+// ms (ej. live cada 30s). Usar uno u otro, no ambos.
 type Sched = { queue: QueueName; id: string; pattern?: string; every?: number; tz?: string; data?: Record<string, unknown> };
 
 // IDs de schedulers viejos a eliminar en cada arranque (evita que sigan
@@ -32,7 +32,7 @@ type Sched = { queue: QueueName; id: string; pattern?: string; every?: number; t
 // 'baseball-coverage'. Su id viejo entra aquí para que BullMQ borre el
 // scheduler Y el job delayed pendiente en la cola 'baseball-analyze' y no
 // queden las dos versiones disparando en paralelo.
-const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-live-20s', 'futbol-odds-15m', 'futbol-raw-backfill-half2', 'baseball-live-5m', 'futbol-live-corners-30m', 'futbol-odds-30m', 'baseball-calibrate-daily', 'baseball-analyze-all-today-daily', 'american-football-live-10m', 'futbol-finalize-daily', 'baseball-analysis-coverage-15m'];
+const STALE_SCHEDULER_IDS = ['futbol-live-1m', 'futbol-live-20s', 'futbol-live-90s', 'futbol-odds-15m', 'futbol-raw-backfill-half2', 'baseball-live-5m', 'futbol-live-corners-30m', 'futbol-odds-30m', 'baseball-calibrate-daily', 'baseball-analyze-all-today-daily', 'american-football-live-10m', 'futbol-finalize-daily', 'baseball-analysis-coverage-15m'];
 
 const SCHEDULES: Sched[] = [
   // ── Fútbol — diarios (hora España) ──
@@ -51,10 +51,10 @@ const SCHEDULES: Sched[] = [
   { queue: 'futbol-watchdog',  id: 'futbol-watchdog-daily',  pattern: '30 7 * * *',  tz: TZ },
   { queue: 'futbol-cleanup',   id: 'futbol-cleanup-daily',   pattern: '0 3 * * *',   tz: TZ },
   // ── Fútbol — periódicos ──
-  // Live cada 90s: el handler hace smart-skip (0 llamadas fuera de partidos).
-  // La cadencia conserva marcador/eventos/córners/detalle por lotes y permite
-  // cubrir jornadas de alta simultaneidad dentro del plan Pro de 7.500/día.
-  { queue: 'futbol-live',         id: 'futbol-live-90s',         every: 90_000 },
+  // Live cada 30s: el handler hace smart-skip (0 llamadas fuera de partidos).
+  // Marcador/eventos/córners/detalle se refrescan por lotes; el plan Ultra de
+  // 75.000 llamadas/día permite recuperar esta cadencia sin retirar cobertura.
+  { queue: 'futbol-live',         id: 'futbol-live-30s',         every: 30_000 },
   { queue: 'futbol-lineups',      id: 'futbol-lineups-5m',       pattern: '*/5 * * * *' },
   // futbol-live-corners ELIMINADO — los córners se traen ahora en el tick live
   // de futbol-live (PARTE 1). Su id viejo está en STALE_SCHEDULER_IDS para que
