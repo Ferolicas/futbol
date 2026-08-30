@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-30 · Commit base: `ae484df`
+Actualizado: 2026-08-30 · Commit base: `11a26b6`
 
 ## Identidad y stack
 
@@ -223,8 +223,11 @@ tarjetas desplegables, filtros y catálogo actual. Fútbol es deliberadamente un
 producto distinto y exclusivo: no muestra goles, tarjetas, hándicaps,
 probabilidades ni otros mercados.
 
-`lib/football-first-half-corners-report.js` carga todos los encuentros de la
-fecha desde `model.matches`; para la fecha actual excluye los que ya comenzaron,
+`lib/football-first-half-corners-report.js` carga todos los encuentros de
+competiciones oficiales de la fecha desde `model.matches` (ligas, copas y
+torneos de selecciones); excluye expresamente `Friendlies`, `Friendlies Clubs`
+y cualquier competición marcada o nombrada como amistosa. Para la fecha actual
+excluye los que ya comenzaron,
 por lo que el enlace siempre enseña únicamente lo que queda del día. Cada
 partido muestra una sola expectativa descriptiva: suma del promedio 2026 de
 `model.team_match_stats.corners_1h` de ambos equipos, usando solo hechos
@@ -232,14 +235,16 @@ anteriores a su kickoff. Debajo aparecen los últimos cinco partidos reales de
 cada lado, o los disponibles si aún no tiene cinco. Si falta una muestra de
 alguno, no fabrica una expectativa.
 
-La misma vista incluye un selector sobre todos los equipos con partidos en 2026.
+La misma vista incluye un selector sobre todos los equipos con partidos
+oficiales en 2026.
 Al elegir uno carga todo su historial del año, rival, competición, localía y
 córners realizados en primera parte. Los huecos del proveedor se enseñan como
 `Sin cobertura` y jamás se convierten en cero. El CSV de fútbol contiene este
 mismo resumen por partido. `scripts/backfill-football-first-half-corners.js`
 rellena de forma idempotente los huecos recuperables mediante el desglose
 autoritativo `/fixtures/statistics?fixture=…&half=true`, persiste además el
-snapshot `fixtures/halfstats` y no toca un dato ya existente.
+snapshot `fixtures/halfstats`, no toca un dato ya existente y aplica el mismo
+filtro de competiciones oficiales para no consultar amistosos.
 
 MLB limita el informe a carreras de partido y equipo (equipo desde 1.5), hits
 de partido/equipo, ponches del lanzador, hándicap y carreras/hits de 1.ª entrada,

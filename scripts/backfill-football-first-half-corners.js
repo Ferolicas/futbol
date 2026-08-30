@@ -120,7 +120,12 @@ async function main() {
   const { rows } = await pgPool.query(
     `SELECT m.fixture_id,m.competition_id,m.season,m.home_team_id,m.away_team_id,m.kickoff
        FROM model.matches m
+       JOIN model.competitions c ON c.competition_id=m.competition_id
       WHERE m.status IN ('FT','AET','PEN') AND m.kickoff >= $1::date
+        AND c.competition_id NOT IN (10,667)
+        AND COALESCE(c.category,'') <> 'friendly_intl'
+        AND COALESCE(LOWER(c.name),'') NOT LIKE '%friendly%'
+        AND COALESCE(LOWER(c.name),'') NOT LIKE '%amistos%'
         AND EXISTS (
           SELECT 1 FROM model.team_match_stats s
            WHERE s.fixture_id=m.fixture_id AND s.corners_1h IS NULL

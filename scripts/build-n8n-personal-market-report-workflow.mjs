@@ -58,7 +58,7 @@ const message = [
   '⚾ INFORME DE BÉISBOL',
   'https://cfanalisis.com/ferney/informes?deporte=baseball&date=' + date,
   '',
-  'Fútbol: expectativa de córners en la primera mitad, últimos 5 e historial 2026 por equipo. Béisbol conserva todos sus mercados.',
+  'Fútbol: expectativa de córners en la primera mitad, últimos 5 e historial 2026 por equipo, solo en competiciones oficiales (sin amistosos). Béisbol conserva todos sus mercados.',
 ].join(String.fromCharCode(10));
 return [{ json: { date, message } }];`,
   },

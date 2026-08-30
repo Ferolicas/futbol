@@ -6,6 +6,17 @@ const path = require('node:path');
 process.env.DATABASE_URL ||= 'postgresql://test:test@127.0.0.1:1/cfanalisis_test';
 process.env.DATABASE_SSL ||= 'false';
 
+test('excluye amistosos y conserva ligas, copas y selecciones en competición oficial', async () => {
+  const { isOfficialFootballCompetition } = await import('../lib/football-first-half-corners-report.js');
+  assert.equal(isOfficialFootballCompetition({ competition_id: 10, name: 'Friendlies' }), false);
+  assert.equal(isOfficialFootballCompetition({ competition_id: 667, name: 'Friendlies Clubs', category: 'domestic_league' }), false);
+  assert.equal(isOfficialFootballCompetition({ competition_id: 999, name: 'Amistosos de clubes' }), false);
+  assert.equal(isOfficialFootballCompetition({ name: 'Competición desconocida' }), false);
+  assert.equal(isOfficialFootballCompetition({ competition_id: 39, name: 'Premier League', category: 'domestic_league' }), true);
+  assert.equal(isOfficialFootballCompetition({ competition_id: 45, name: 'FA Cup', category: 'domestic_league' }), true);
+  assert.equal(isOfficialFootballCompetition({ competition_id: 1, name: 'World Cup', category: 'national_team' }), true);
+});
+
 test('calcula la expectativa con promedios 2026 y conserva solo los últimos cinco reales', async () => {
   const {
     assembleFootballFirstHalfCornerMatches,

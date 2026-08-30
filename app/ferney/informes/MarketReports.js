@@ -185,7 +185,7 @@ function TeamHistory({ report, teamSearch, setTeamSearch, onSelectTeam }) {
     <section className={styles.teamExplorer}>
       <div className={styles.explorerTitle}>
         <span><History size={18} /></span>
-        <div><h2>Historial completo por equipo</h2><p>Todos sus partidos jugados desde el 1 de enero de 2026.</p></div>
+        <div><h2>Historial completo por equipo</h2><p>Todos sus partidos oficiales jugados desde el 1 de enero de 2026. No incluye amistosos.</p></div>
       </div>
       <div className={styles.teamPicker}>
         <label className={styles.search}><Search size={17} /><input value={teamSearch} onChange={(event) => setTeamSearch(event.target.value)} placeholder="Filtrar equipos del sistema" /></label>
