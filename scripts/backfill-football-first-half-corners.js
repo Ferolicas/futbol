@@ -55,10 +55,10 @@ async function persist(row, home, away) {
     await client.query('BEGIN');
     await client.query(
       `UPDATE model.team_match_stats
-          SET corners_1h=COALESCE(corners_1h,CASE WHEN team_id=$2 THEN $4 WHEN team_id=$3 THEN $5 ELSE NULL END),
+          SET corners_1h=COALESCE(corners_1h,CASE WHEN team_id=$2 THEN $4::int WHEN team_id=$3 THEN $5::int ELSE NULL END),
               corners_2h=CASE
-                WHEN team_id=$2 THEN COALESCE(corners_2h,$6)
-                WHEN team_id=$3 THEN COALESCE(corners_2h,$7)
+                WHEN team_id=$2 THEN COALESCE(corners_2h,$6::int)
+                WHEN team_id=$3 THEN COALESCE(corners_2h,$7::int)
                 ELSE corners_2h
               END
         WHERE fixture_id=$1 AND team_id IN ($2,$3)`,
