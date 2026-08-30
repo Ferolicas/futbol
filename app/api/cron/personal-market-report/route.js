@@ -1,4 +1,4 @@
-import { buildFootballPersonalMarketReport } from '../../../../lib/football-market-report';
+import { buildFootballFirstHalfCornersReport } from '../../../../lib/football-first-half-corners-report';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -21,7 +21,7 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const date = searchParams.get('date') || bogotaToday();
   try {
-    const report = await buildFootballPersonalMarketReport(date);
+    const report = await buildFootballFirstHalfCornersReport(date);
     return new Response(report.content, {
       status: 200,
       headers: {
@@ -29,9 +29,8 @@ export async function GET(request) {
         'Content-Disposition': `attachment; filename="${report.filename}"`,
         'Cache-Control': 'no-store',
         'X-CF-Fixtures': String(report.fixtures),
-        'X-CF-Fixtures-With-Data': String(report.fixturesWithData),
-        'X-CF-Market-Rows': String(report.rows),
-        'X-CF-Omitted-Rows': String(report.omittedRows),
+        'X-CF-Teams-With-History': String(report.coveredTeams),
+        'X-CF-First-Half-Rows': String(report.coveredMatches),
       },
     });
   } catch (error) {

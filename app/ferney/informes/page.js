@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../lib/supabase';
-import { buildFootballPersonalMarketReport } from '../../../lib/football-market-report';
+import { buildFootballFirstHalfCornersReport } from '../../../lib/football-first-half-corners-report';
 import { buildBaseballPersonalMarketReport } from '../../../lib/baseball-personal-market-report';
 import { bogotaToday } from '../../../lib/telegram-premium-picks';
 import MarketReports from './MarketReports';
@@ -17,7 +17,11 @@ function validDate(value) {
 export default async function PersonalReportsPage({ searchParams }) {
   const date = validDate(searchParams?.date);
   const initialSport = searchParams?.deporte === 'baseball' ? 'baseball' : 'futbol';
-  const destination = `/ferney/informes?date=${encodeURIComponent(date)}&deporte=${initialSport}`;
+  const selectedTeamId = /^\d+$/.test(String(searchParams?.equipo || ''))
+    ? Number(searchParams.equipo)
+    : null;
+  const teamParam = selectedTeamId ? `&equipo=${selectedTeamId}` : '';
+  const destination = `/ferney/informes?date=${encodeURIComponent(date)}&deporte=${initialSport}${teamParam}`;
   const auth = createSupabaseServerClient();
   const { data: { user } } = await auth.auth.getUser();
   if (!user) redirect(`/sign-in?redirect_url=${encodeURIComponent(destination)}`);
@@ -30,7 +34,7 @@ export default async function PersonalReportsPage({ searchParams }) {
   if (!profile || !['admin', 'owner'].includes(profile.role)) redirect('/dashboard');
 
   const [football, baseball] = await Promise.all([
-    buildFootballPersonalMarketReport(date),
+    buildFootballFirstHalfCornersReport(date, { selectedTeamId }),
     buildBaseballPersonalMarketReport(date),
   ]);
   const serialize = value => JSON.parse(JSON.stringify(value));

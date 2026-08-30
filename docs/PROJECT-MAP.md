@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-21 · Commit base: `32f4972`
+Actualizado: 2026-08-30 · Commit base: `ae484df`
 
 ## Identidad y stack
 
@@ -55,8 +55,8 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `POST /api/payments/cancel` | `app/api/payments/cancel/route.js` | Cuenta | Cancela renovación conservando periodo pagado |
 | `GET/POST /api/cron/payments` | `app/api/cron/payments/route.js` | Cron VPS | Reconcilia operaciones, perfiles y emails |
 | `GET/POST /api/cron/publish-combinada` | `app/api/cron/publish-combinada/route.js` | n8n | Elige y guarda la apuesta Telegram dentro de las reglas comerciales |
-| `GET /api/cron/personal-market-report` | `app/api/cron/personal-market-report/route.js` | Compatibilidad | CSV histórico de fútbol protegido por secreto de cron |
-| `GET /api/admin/personal-market-report` | `app/api/admin/personal-market-report/route.js` | Informe privado | Descarga CSV limpia de fútbol o MLB para la fecha elegida |
+| `GET /api/cron/personal-market-report` | `app/api/cron/personal-market-report/route.js` | Compatibilidad | CSV de córners de 1.ª parte protegido por secreto de cron |
+| `GET /api/admin/personal-market-report` | `app/api/admin/personal-market-report/route.js` | Informe privado | Descarga el CSV de córners 1T de fútbol o el catálogo MLB para la fecha elegida |
 | `GET /api/pick-image` | `app/api/pick-image/route.js` | n8n/Telegram | Renderiza la tarjeta PNG sin IA, con hasta tres selecciones y escudos |
 | `GET /api/telegram-premium/futbol` | `app/api/telegram-premium/futbol/route.js` | n8n | Catálogo Premium de fútbol (hándicap, córners y goles ≥70/90) |
 | `GET /api/telegram-premium/baseball` | `app/api/telegram-premium/baseball/route.js` | n8n | Catálogo Premium completo de béisbol ≥70/90, incluso sin cuota |
@@ -218,20 +218,28 @@ respuesta JSON de error nunca puede pasar por imagen válida.
 
 El workflow n8n `CF MERCADOS PERSONAL` se ejecuta todos los días a las 08:00 de
 `Europe/Madrid` y envía dos enlaces privados con fecha: fútbol y béisbol. Ambos
-abren `/ferney/informes`, que exige sesión admin/owner y presenta cada partido
-como tarjeta desplegable con búsqueda, filtros por familia, Más/Menos y orden
-por hora, probabilidad o fiabilidad. El CSV de cinco columnas permanece como
-descarga secundaria desde la propia vista.
+abren `/ferney/informes`, que exige sesión admin/owner. Béisbol conserva sus
+tarjetas desplegables, filtros y catálogo actual. Fútbol es deliberadamente un
+producto distinto y exclusivo: no muestra goles, tarjetas, hándicaps,
+probabilidades ni otros mercados.
 
-Fútbol limita el catálogo a córners totales 8.5/9.5/10.5, córners por equipo
-en partido/primera/segunda parte, goles 1.5/2.5/3.5/4.5 para partido/equipo y
-ambas mitades, resultados ganador/perdedor/empate, hándicap y tarjetas. El
-motor fuerza el cálculo hasta 10.5 córners, 4.5 goles y 5.5 tarjetas, incluso
-si la línea queda fuera del p95. El informe y su CSV escriben primero todos los
-`Más de` y después todos los `Menos de`; nunca alternan ambas direcciones por
-línea. Los respaldos globales de 730 días quedan capados por debajo de 70% de
-fiabilidad y no inventan mitades de córners que el hecho histórico no permita
-atribuir.
+`lib/football-first-half-corners-report.js` carga todos los encuentros de la
+fecha desde `model.matches`; para la fecha actual excluye los que ya comenzaron,
+por lo que el enlace siempre enseña únicamente lo que queda del día. Cada
+partido muestra una sola expectativa descriptiva: suma del promedio 2026 de
+`model.team_match_stats.corners_1h` de ambos equipos, usando solo hechos
+anteriores a su kickoff. Debajo aparecen los últimos cinco partidos reales de
+cada lado, o los disponibles si aún no tiene cinco. Si falta una muestra de
+alguno, no fabrica una expectativa.
+
+La misma vista incluye un selector sobre todos los equipos con partidos en 2026.
+Al elegir uno carga todo su historial del año, rival, competición, localía y
+córners realizados en primera parte. Los huecos del proveedor se enseñan como
+`Sin cobertura` y jamás se convierten en cero. El CSV de fútbol contiene este
+mismo resumen por partido. `scripts/backfill-football-first-half-corners.js`
+rellena de forma idempotente los huecos recuperables mediante el desglose
+autoritativo `/fixtures/statistics?fixture=…&half=true`, persiste además el
+snapshot `fixtures/halfstats` y no toca un dato ya existente.
 
 MLB limita el informe a carreras de partido y equipo (equipo desde 1.5), hits
 de partido/equipo, ponches del lanzador, hándicap y carreras/hits de 1.ª entrada,

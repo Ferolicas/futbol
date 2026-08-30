@@ -52,13 +52,13 @@ const state = $getWorkflowStaticData('global');
 // explícita del propietario para reenviar el informe del día.
 if ($execution.mode === 'trigger' && state.lastPersonalMarketReportDate === date) return [];
 const message = [
-  '⚽ INFORME DE FÚTBOL',
+  '⚽ INFORME DE FÚTBOL · CÓRNERS 1.ª PARTE',
   'https://cfanalisis.com/ferney/informes?deporte=futbol&date=' + date,
   '',
   '⚾ INFORME DE BÉISBOL',
   'https://cfanalisis.com/ferney/informes?deporte=baseball&date=' + date,
   '',
-  'Abre cada partido para ver sus opciones. Puedes filtrar por mercado, Más/Menos, probabilidad y fiabilidad.',
+  'Fútbol: expectativa de córners en la primera mitad, últimos 5 e historial 2026 por equipo. Béisbol conserva todos sus mercados.',
 ].join(String.fromCharCode(10));
 return [{ json: { date, message } }];`,
   },

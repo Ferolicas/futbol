@@ -10,6 +10,7 @@
     "audit:football-data": "node scripts/audit-football-model-data.js",
     "train:multisport": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/train-multisport-empirical-engine.js --all",
     "backfill:multisport": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/backfill-multisport-history.js",
+    "backfill:football-first-half-corners": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/backfill-football-first-half-corners.js",
     "backfill:mlb-inning-hits": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/backfill-mlb-inning-hits.js"
   },
   "dependencies": {

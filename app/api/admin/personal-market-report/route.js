@@ -1,6 +1,6 @@
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../../lib/supabase';
-import { buildFootballPersonalMarketReport } from '../../../../lib/football-market-report';
+import { buildFootballFirstHalfCornersReport } from '../../../../lib/football-first-half-corners-report';
 import { buildBaseballPersonalMarketReport } from '../../../../lib/baseball-personal-market-report';
 import { bogotaToday } from '../../../../lib/telegram-premium-picks';
 import { jsonError } from '../../../../lib/api-error';
@@ -29,7 +29,7 @@ export async function GET(request) {
   try {
     const report = sport === 'baseball'
       ? await buildBaseballPersonalMarketReport(date)
-      : await buildFootballPersonalMarketReport(date);
+      : await buildFootballFirstHalfCornersReport(date);
     return new Response(report.content, {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
