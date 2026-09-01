@@ -365,7 +365,6 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
   const [timeZone, setTimeZone] = useState('UTC');
   const [timeZoneReady, setTimeZoneReady] = useState(false);
   const [date, setDate] = useState(() => dateInZone('UTC'));
-  const [tab, setTab] = useState('partidos');
   const [statusFilter, setStatusFilter] = useState('all');
   const [leagueFilter, setLeagueFilter] = useState('');
   const [favorites, setFavorites] = useState([]);
@@ -543,7 +542,7 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
   const listRef = useRef(null);
   const [listOffset, setListOffset] = useState(0);
   const virtualizer = useWindowVirtualizer({
-    count: tab === 'partidos' ? rows.length : 0,
+    count: rows.length,
     estimateSize: (index) => rows[index]?.type === 'league' ? 44 : (expandedMatch === rows[index]?.game?.id ? 650 : 210),
     overscan: 6,
     scrollMargin: listOffset,
@@ -552,7 +551,7 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
   });
 
   useEffect(() => {
-    if (tab !== 'partidos' || !listRef.current) return undefined;
+    if (!listRef.current) return undefined;
     const updateOffset = () => {
       if (!listRef.current) return;
       const next = listRef.current.getBoundingClientRect().top + window.scrollY;
@@ -564,7 +563,7 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
       cancelAnimationFrame(frame);
       window.removeEventListener('resize', updateOffset);
     };
-  }, [tab, rows.length, pendingGames, message]);
+  }, [rows.length, pendingGames, message, statusFilter]);
 
   const loading = !currentData && (isLoading || isValidating || !timeZoneReady);
 
@@ -578,19 +577,19 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
           </div>
         </div>
 
-        <div className="tabs">
-          <button className={`tab ${tab === 'partidos' ? 'active' : ''}`} onClick={() => setTab('partidos')}>
-            Partidos
-            {counts.all > 0 && <span className="tab-badge">{counts.all}</span>}
-          </button>
-          <button className={`tab ${tab === 'combinada' ? 'active' : ''}`} onClick={() => setTab('combinada')}>
-            Combinada
-            {totalSelections > 0 && <span className="tab-badge">{totalSelections}</span>}
-          </button>
-        </div>
-
         {message && <div className="batch-banner fade-in" role="status">{message}</div>}
         {error && games.length > 0 && <div className="warn fade-in">No se pudo actualizar la jornada. Se muestran los últimos datos disponibles.</div>}
+
+        {!loading && statusFilter === 'favoritos' && (
+          <section className="favorites-combination-hub fade-in" aria-label="Favoritos y combinada">
+            <div className="favorites-combination-heading">
+              <span><Layers3 size={19} aria-hidden="true" /></span>
+              <span><small>Dentro de Favoritos</small><strong>Tu combinada</strong></span>
+              {totalSelections > 0 && <b>{totalSelections}</b>}
+            </div>
+            <CombinedBet combination={combination} onRemove={removePick} onClear={() => setSelectedMarkets({})} />
+          </section>
+        )}
 
         {loading ? (
           <DashboardBuffer compact />
@@ -601,13 +600,13 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
             <p>Comprueba tu conexión e inténtalo de nuevo.</p>
             <button className="btn-primary" onClick={() => mutate()}>Reintentar</button>
           </div>
-        ) : tab === 'combinada' ? (
-          <CombinedBet combination={combination} onRemove={removePick} onClear={() => setSelectedMarkets({})} />
         ) : visibleGames.length === 0 ? (
           <div className="empty-state fade-in">
             <div className="empty-icon"><CalendarDays size={30} aria-hidden="true" /></div>
-            <h3>Sin partidos</h3>
-            <p>No hay partidos de {title} para esta fecha y filtro.</p>
+            <h3>{statusFilter === 'favoritos' ? 'Sin favoritos para esta fecha' : 'Sin partidos'}</h3>
+            <p>{statusFilter === 'favoritos'
+              ? 'Marca la estrella de un partido para guardarlo aquí junto a tu combinada.'
+              : `No hay partidos de ${title} para esta fecha y filtro.`}</p>
           </div>
         ) : (
           <div
@@ -656,7 +655,7 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
           </div>
         )}
 
-        {tab === 'partidos' && pendingGames > 0 && games.length > 0 && (
+        {statusFilter !== 'favoritos' && pendingGames > 0 && games.length > 0 && (
           <div className="ms-refresh-row">
             <span>{pendingGames} {pendingGames === 1 ? 'partido pendiente' : 'partidos pendientes'} de análisis</span>
             <button type="button" onClick={requestAnalysis} disabled={enqueueing}>
@@ -666,9 +665,9 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
           </div>
         )}
 
-        {tab === 'partidos' && totalSelections > 0 && (
+        {statusFilter !== 'favoritos' && totalSelections > 0 && (
           <div className="float-bar float-bar-combinada slide-up">
-            <button className="btn-comb-float" onClick={() => setTab('combinada')}>
+            <button className="btn-comb-float" onClick={() => setStatusFilter('favoritos')}>
               <span className="float-comb-icon"><Layers3 size={19} aria-hidden="true" /></span>
               <span><small>Tu selección</small><strong>Ver combinada · {totalSelections}</strong></span>
               {combination && <span className="float-odd">{combination.combinedOdd.toFixed(2)}x</span>}
@@ -679,7 +678,7 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
       </div>
       <DashboardStatusDock
         value={statusFilter}
-        onChange={(next) => { setStatusFilter(next); setTab('partidos'); }}
+        onChange={setStatusFilter}
         counts={counts}
         isToday={date === dateInZone(timeZone)}
         onToday={() => changeDate(dateInZone(timeZone))}

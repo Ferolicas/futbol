@@ -12208,3 +12208,473 @@ input:checked + .cb-mark::after {
   .chat-fullscreen,
   .chat-home-actions > button { transition: none !important; }
 }
+
+/* =====================================================================
+   AJUSTES DE NAVEGACIÓN — Spotlight Apple, selección y favoritos
+   ===================================================================== */
+
+/* El logo conserva el 90% de su tamaño anterior (60% → 54%). */
+.dashboard-brand {
+  width: 54% !important;
+  max-width: 603px !important;
+  height: 60px !important;
+}
+
+@media (min-width: 700px) {
+  .dashboard-brand { height: 68px !important; }
+}
+
+@media (max-width: 359px) {
+  .dashboard-brand { width: 54% !important; height: 56px !important; }
+}
+
+/* La jornada activa es la superficie verde. Hoy conserva una referencia
+   verde más discreta cuando el usuario está consultando otra fecha. */
+.dashboard-date-tile.is-today {
+  border-color: rgba(94,230,177,.4);
+  color: #77e8bd;
+  background: rgba(94,230,177,.07);
+  box-shadow: inset 0 0 0 1px rgba(94,230,177,.025);
+}
+
+.dashboard-date-tile.is-today strong { color: #bff4df; }
+
+.dashboard-date-tile.is-selected,
+.dashboard-date-tile.is-selected.is-today {
+  border-color: rgba(94,230,177,.7);
+  color: #06140f;
+  background: linear-gradient(145deg, #7af0c5, #36d99e);
+  box-shadow: 0 7px 18px rgba(16,185,129,.2), inset 0 1px 0 rgba(255,255,255,.25);
+}
+
+.dashboard-date-tile.is-selected strong,
+.dashboard-date-tile.is-selected.is-today strong { color: #06140f; }
+
+/* La selección de ligas y su menú ocupan todo el ancho disponible en móvil y
+   escritorio; no vuelve a reducirse a una columna lateral de 300px. */
+.app .controls-row,
+.baseball-controls {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.app .filters-row .dashboard-picker-menu,
+.baseball-filter-row .dashboard-picker-menu {
+  right: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  max-width: none !important;
+}
+
+@media (min-width: 700px) {
+  .app .controls-row,
+  .baseball-controls {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* Spotlight: réplica funcional del gesto de la referencia Apple. Al abrir se
+   ve una cápsula y cuatro accesos circulares; al enfocar, la propia cápsula se
+   transforma mediante layout spring en la lista de resultados. */
+.spotlight-overlay {
+  place-items: center;
+  padding: max(16px, env(safe-area-inset-top)) 10px max(16px, env(safe-area-inset-bottom));
+  overflow: hidden;
+}
+
+.spotlight-page-close {
+  position: absolute;
+  top: max(13px, env(safe-area-inset-top));
+  right: 13px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 50%;
+  color: #a9babf;
+  background: rgba(255,255,255,.035);
+  font: inherit;
+  cursor: pointer;
+  transition: color .18s ease, border-color .18s ease, background .18s ease, transform .18s ease;
+}
+
+.spotlight-page-close:hover,
+.spotlight-page-close:focus-visible {
+  border-color: rgba(94,230,177,.34);
+  color: #effaf6;
+  background: rgba(94,230,177,.08);
+  outline: none;
+}
+
+.spotlight-page-close:active { transform: scale(.94); }
+
+.spotlight-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: min(720px, 100%);
+  min-width: 0;
+}
+
+.spotlight-stage.is-expanded { align-items: flex-start; }
+
+.spotlight-command {
+  position: relative;
+  display: flex;
+  flex: 1 1 250px;
+  flex-direction: column;
+  width: min(330px, calc(100vw - 196px));
+  min-width: 0;
+  max-width: 360px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 999px;
+  background: rgba(10,22,29,.96);
+  box-shadow: 0 12px 34px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.055);
+}
+
+.spotlight-command.is-expanded {
+  flex-basis: 100%;
+  width: 100%;
+  max-width: 700px;
+  max-height: min(690px, calc(100dvh - 74px));
+  border-color: rgba(94,230,177,.22);
+  border-radius: 22px;
+  box-shadow: 0 32px 90px rgba(0,0,0,.52), 0 0 0 1px rgba(94,230,177,.025), inset 0 1px 0 rgba(255,255,255,.055);
+}
+
+.spotlight-command .spotlight-input-wrap {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 52px;
+  margin: 0;
+  padding: 0 14px;
+  border: 0;
+  border-radius: inherit;
+  color: #a7b8bd;
+  background: transparent;
+  box-shadow: none;
+}
+
+.spotlight-command.is-expanded .spotlight-input-wrap {
+  min-height: 60px;
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  border-radius: 0;
+  color: var(--dash-green);
+}
+
+.spotlight-command .spotlight-input-wrap:focus-within {
+  border-color: rgba(255,255,255,.07);
+  box-shadow: none;
+}
+
+.spotlight-command .spotlight-input-wrap input {
+  height: 50px;
+  color: #edf7f4;
+  font-size: .84rem;
+  font-weight: 690;
+}
+
+.spotlight-command.is-expanded .spotlight-input-wrap input {
+  height: 58px;
+  font-size: clamp(.93rem, 3.5vw, 1.12rem);
+}
+
+.spotlight-command .spotlight-input-wrap input::placeholder { color: #8b9ba1; }
+
+.spotlight-command-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.spotlight-command .spotlight-filter-row {
+  flex: 0 0 auto;
+  padding: 10px 12px 9px;
+}
+
+.spotlight-command .spotlight-results {
+  flex: 1 1 auto;
+  min-height: 220px;
+  max-height: min(480px, calc(100dvh - 260px));
+}
+
+.spotlight-launchers {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.spotlight-launchers > button {
+  display: grid;
+  place-items: center;
+  width: 43px;
+  height: 43px;
+  padding: 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 50%;
+  color: #71858d;
+  background: rgba(255,255,255,.035);
+  cursor: pointer;
+  transition: color .18s ease, border-color .18s ease, background .18s ease, transform .18s ease;
+}
+
+.spotlight-launchers > button:hover,
+.spotlight-launchers > button:focus-visible,
+.spotlight-launchers > button.is-active {
+  border-color: rgba(94,230,177,.36);
+  color: var(--dash-green);
+  background: rgba(94,230,177,.09);
+  outline: none;
+}
+
+.spotlight-launchers > button:active { transform: scale(.92); }
+
+.spotlight-stage-hint {
+  position: absolute;
+  top: calc(100% + 13px);
+  left: 0;
+  width: 100%;
+  margin: 0;
+  color: #647880;
+  font-size: .61rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .spotlight-command {
+    flex-basis: 175px;
+    width: auto;
+  }
+
+  .spotlight-launchers { gap: 5px; }
+  .spotlight-launchers > button { width: 38px; height: 38px; }
+  .spotlight-command .spotlight-input-wrap { min-height: 48px; padding: 0 11px; }
+  .spotlight-command .spotlight-input-wrap input { height: 46px; }
+  .spotlight-command.is-expanded .spotlight-input-wrap { min-height: 57px; }
+  .spotlight-command.is-expanded .spotlight-input-wrap input { height: 55px; }
+  .spotlight-command .spotlight-results { max-height: calc(100dvh - 245px); }
+  .spotlight-footer { display: none; }
+}
+
+@media (max-width: 359px) {
+  .spotlight-stage { gap: 5px; }
+  .spotlight-launchers { gap: 4px; }
+  .spotlight-launchers > button { width: 34px; height: 34px; }
+  .spotlight-launchers > button svg { width: 17px; height: 17px; }
+}
+
+/* Apuesta del día adopta el mismo lenguaje de la tira de fechas: tarjetas
+   pequeñas, snap horizontal y cero contenedor vertical dominante. */
+.daily-pick-rail {
+  min-width: 0;
+  margin: 3px 0 11px;
+  overflow: hidden;
+}
+
+.daily-pick-track {
+  display: flex;
+  gap: 7px;
+  padding: 2px 1px 5px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.daily-pick-track::-webkit-scrollbar { display: none; }
+
+.daily-pick-title-card,
+.daily-pick-card {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-height: 111px;
+  padding: 9px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.075);
+  border-radius: 14px;
+  background: rgba(255,255,255,.025);
+  scroll-snap-align: start;
+  content-visibility: auto;
+  contain-intrinsic-size: 205px 111px;
+}
+
+.daily-pick-title-card {
+  flex-basis: 136px;
+  border-color: rgba(94,230,177,.24);
+  background: linear-gradient(145deg, rgba(94,230,177,.12), rgba(255,255,255,.025));
+}
+
+.daily-pick-title-card > span {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  margin-bottom: 7px;
+  border-radius: 9px;
+  color: var(--dash-green);
+  background: rgba(94,230,177,.1);
+}
+
+.daily-pick-title-card small {
+  color: #729087;
+  font-size: .48rem;
+  font-weight: 850;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+
+.daily-pick-title-card strong { margin-top: 3px; color: #edf8f4; font-size: .7rem; }
+.daily-pick-title-card em { margin-top: auto; color: #8da39c; font-size: .55rem; font-style: normal; }
+.daily-pick-title-card b { margin-top: 2px; color: var(--dash-green); font-size: .62rem; }
+
+.daily-pick-card {
+  flex-basis: min(214px, 67vw);
+  justify-content: flex-start;
+}
+
+.daily-pick-card.is-live { border-color: rgba(251,113,133,.24); }
+
+.daily-pick-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.daily-pick-card-top i {
+  color: #70dbae;
+  font-size: .48rem;
+  font-style: normal;
+  font-weight: 850;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.daily-pick-card.is-live .daily-pick-card-top i { color: #fb7185; }
+.daily-pick-card-top b { color: #60757d; font-size: .51rem; }
+
+.daily-pick-card > small {
+  overflow: hidden;
+  color: #82969e;
+  font-size: .54rem;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daily-pick-card > strong {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  color: #e2eeea;
+  font-size: .65rem;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.daily-pick-card-metrics {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+
+.daily-pick-card-metrics b { color: var(--dash-green); font-size: .68rem; }
+.daily-pick-card-metrics span { color: #8fa29d; font-size: .52rem; font-weight: 750; }
+.daily-pick-card-metrics em {
+  margin-left: auto;
+  padding: 3px 6px;
+  border-radius: 7px;
+  color: #f7cf68;
+  background: rgba(251,191,36,.09);
+  font-size: .61rem;
+  font-style: normal;
+  font-weight: 850;
+}
+
+/* La combinada forma parte de Favoritos y deja de competir por una pestaña. */
+.favorites-combination-hub {
+  margin: 3px 0 11px;
+  padding: 8px;
+  border: 1px solid rgba(94,230,177,.15);
+  border-radius: 17px;
+  background: rgba(7,18,25,.72);
+}
+
+.favorites-combination-heading {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 2px 8px;
+}
+
+.favorites-combination-heading > span:first-child {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: var(--dash-green);
+  background: rgba(94,230,177,.085);
+}
+
+.favorites-combination-heading > span:nth-child(2) { display: flex; flex-direction: column; }
+.favorites-combination-heading small { color: #72868e; font-size: .5rem; font-weight: 800; text-transform: uppercase; }
+.favorites-combination-heading strong { margin-top: 3px; color: #ecf7f3; font-size: .72rem; }
+.favorites-combination-heading > b {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: #06140f;
+  background: var(--dash-green);
+  font-size: .59rem;
+}
+
+.favorites-combination-hub > .comb-builder { margin: 0; }
+.favorites-combination-hub > .empty-state { margin: 0; padding: 24px 12px; }
+
+.combination-inline-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px dashed rgba(94,230,177,.16);
+  border-radius: 12px;
+  background: rgba(94,230,177,.025);
+}
+
+.combination-inline-empty strong { color: #dbeae5; font-size: .69rem; }
+.combination-inline-empty span { color: #71858d; font-size: .59rem; line-height: 1.45; }
+
+/* Abrir el chat ya no rasteriza una miniatura oscura: la pantalla aparece
+   opaca de inmediato y solo su contenido hace una entrada breve. */
+.chat-fullscreen {
+  transform-origin: center !important;
+  will-change: opacity, clip-path;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight-command,
+  .spotlight-launchers > button,
+  .daily-pick-track,
+  .dashboard-date-tile { scroll-behavior: auto !important; transition: none !important; }
+}

@@ -27,38 +27,44 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 
 - Home y planes: escenas fijas controladas por scroll, teclado o swipe. La pantalla no acumula secciones verticales.
 - Header autenticado: muestra `Chat` a la izquierda, el video-logo centrado al
-  60% del ancho y `Buscar` a la derecha. La búsqueda abre un Spotlight de pantalla
-  completa sobre el mismo fondo de la app, admite filtros combinables para los
-  cuatro deportes y, sin ninguno activo, consulta todos.
+  54% del ancho y `Buscar` a la derecha. La búsqueda abre un Spotlight de pantalla
+  completa sobre el mismo fondo de la app. Primero presenta la cápsula compacta y
+  cuatro accesos deportivos circulares de la referencia Apple; al enfocar, la misma
+  superficie crece con física spring y lista los resultados. Admite filtros
+  combinables y, sin ninguno activo, consulta los cuatro deportes.
 - Jornadas: tira horizontal compacta desde mañana hasta diez días atrás. Cada
-  tarjeta muestra abreviatura del día y `número + mes`; hoy conserva siempre la
-  identidad verde y otra fecha seleccionada usa un contorno neutro.
+  tarjeta muestra abreviatura del día y `número + mes`; la jornada seleccionada
+  usa el verde sólido y hoy conserva una referencia verde tenue cuando se consulta
+  otra fecha.
 - Estados: dock inferior de cinco accesos `Hoy → Próximos → En vivo →
   Finalizados → Favoritos`. `En vivo` ocupa el centro, sobresale como círculo
   rojo de transmisión y mantiene un pulso leve; el dock deja espacio seguro a
   las acciones flotantes y al gesto inferior del sistema.
 - Chat: el acceso vive en el header y abre soporte en toda la pantalla. Al
-  minimizar, la superficie se estrecha y contrae hacia el propio botón con una
-  curva tipo ventana de macOS; movimiento reducido reemplaza el gesto por un
-  cambio instantáneo de opacidad.
+  abrir, la pantalla opaca aparece directamente y el contenido entra de forma
+  breve, sin miniaturas oscuras ni capas translúcidas intermedias. Al minimizar,
+  la superficie se contrae hacia el propio botón con una curva tipo ventana de
+  macOS; movimiento reducido reemplaza el gesto por un cambio instantáneo.
 - Identidad instalada: favicon, acceso de Android y acceso de iPhone usan el
   monograma cuadrado CF verde/ámbar sobre negro. Sus rutas PWA son versionadas
   para invalidar la caché del icono anterior; el logo horizontal animado se
   conserva dentro de la interfaz.
-- Controles: jornada y competición comparten siempre una sola fila. El filtro
+- Controles: jornada y competición forman un bloque vertical compacto de ancho
+  completo. El filtro
   de ligas de fútbol conserva el menú abierto, usa checkboxes reales y ofrece
   acciones compactas “Todas”/“Ninguna”; la selección se guarda automáticamente.
   Las opciones mantienen texto claro sobre fondo oscuro.
-- Navegación del dashboard: `Partidos → Combinada` queda en el contenido; los
-  estados viven exclusivamente en el dock inferior compartido.
+- Navegación del dashboard: no existen pestañas redundantes de Partidos/Combinada.
+  Los partidos se gobiernan exclusivamente desde el dock inferior y el constructor
+  de combinadas vive dentro de `Favoritos` en los cuatro deportes.
 - Tabs y chips: estado activo con color, borde y fondo; nunca dependen solo del color.
 - Tarjetas: una sola capa de profundidad, sin `backdrop-filter` ni animaciones de sombra repetidas por tarjeta.
 - Constructor de combinadas: cada selección reserva una fila completa para
   partido/mercado y coloca probabilidad + cuota en una segunda fila estable;
   los títulos largos envuelven y nunca se truncan para hacer sitio a métricas.
-- Apuesta del día: partido y recomendación pueden ocupar tantas líneas como
-  necesiten; probabilidad y cuota viven siempre debajo del texto, nunca encima
-  ni a su derecha.
+- Apuesta del día: carrusel horizontal de tarjetas compactas, con el título como
+  primera tarjeta y una selección por recuadro. Partido, mercado, probabilidad,
+  fiabilidad disponible y cuota individual permanecen legibles al deslizar.
 - Terminología de mercados: la interfaz muestra `Más de` y `Menos de`. Los
   nombres históricos que todavía contengan `Over`, `Under` u `O/U` se traducen
   justo antes de renderizarse, sin alterar claves, cálculos ni datos del motor.
@@ -100,8 +106,9 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - El scroll de Home y planes se desbloquea a los 110 ms para aceptar gestos rápidos.
 - Solo los estados realmente en vivo pueden mantener un pulso continuo.
 - `prefers-reduced-motion` elimina transiciones y animaciones no esenciales.
-- El Spotlight ofrece accesos directos y búsqueda por equipo, liga o partido en
-  Fútbol, Béisbol, Baloncesto y Fútbol americano.
+- El Spotlight replica el gesto cápsula → panel de Apple Spotlight, ofrece accesos
+  circulares y búsqueda por equipo, liga o partido en Fútbol, Béisbol, Baloncesto
+  y Fútbol americano.
 - El modal de análisis no intercepta ni agrupa gestos: conserva la inercia y la
   respuesta nativas de cada navegador.
 

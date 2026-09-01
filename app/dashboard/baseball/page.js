@@ -7,8 +7,8 @@
  *   - SWR llama `/api/baseball/fixtures?date=...&tz=<IANA>` → el backend
  *     devuelve los partidos cuyo kickoff cae en el día LOCAL del usuario.
  *     Esto cubre cross-midnight (game de 23:00 ET sigue vivo a 00:00 UTC).
- *   - Card pricipal y sub-acordeones usan CSS grid 0fr→1fr (compositor,
- *     150ms). Cero framer-motion en hot path (queda solo en ApuestaDelDia).
+ *   - Card principal y sub-acordeones usan CSS grid 0fr→1fr (compositor,
+ *     150ms). Apuesta del día usa un carrusel horizontal nativo.
  *   - Sub-acordeones EXCLUSIVOS: solo uno abierto a la vez (Mercados o
  *     Probabilidades). El padre tiene `openSub` y los hijos lo togglean.
  *   - `toggleSubAndReveal` con scrollIntoView({block:'nearest'}) en doble
@@ -20,7 +20,6 @@
 
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import dynamic from 'next/dynamic';
-import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
 import useSWR from 'swr';
 import {
@@ -28,7 +27,6 @@ import {
   BarChart3,
   ChevronDown,
   Layers3,
-  Sparkles,
   Target,
   Trash2,
   X,
@@ -52,8 +50,6 @@ import BaseballResultStats from './components/BaseballResultStats';
 import { displayBettingText } from '../utils/display-betting-text';
 import {
   BASEBALL_RECOMMENDATION_MIN_PROBABILITY,
-  BASEBALL_DAILY_MIN_PROBABILITY,
-  BASEBALL_DAILY_MIN_RELIABILITY,
 } from '../../../lib/recommendation-policy';
 
 const BaseballAnalysisExperience = dynamic(
@@ -144,7 +140,6 @@ export default function BaseballDashboard() {
   // se quedaba en UTC para siempre → el frontend mostraba todo en horario UTC.
   // Mismo patrón que el dashboard de fútbol.
   const [userTz, setUserTz] = useState('UTC');
-  const [tab, setTab] = useState('partidos');
   const [date, setDate] = useState(() => todayInTz('UTC'));
   useEffect(() => {
     const tz = detectTz();
@@ -155,7 +150,6 @@ export default function BaseballDashboard() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [leagueFilter, setLeagueFilter] = useState('');
   const [expandedMatch, setExpandedMatch] = useState(null);
-  const [showApuesta, setShowApuesta] = useState(true);
   const [error, setError] = useState('');
   const [analysisModalId, setAnalysisModalId] = useState(null);
 
@@ -397,19 +391,8 @@ export default function BaseballDashboard() {
         </div>
       </div>
 
-      <div className="tabs baseball-tabs">
-        <button className={`tab ${tab === 'partidos' ? 'active is-active' : ''}`} onClick={() => setTab('partidos')}>
-          Partidos
-          {allVisibleCount > 0 && <span>{allVisibleCount}</span>}
-        </button>
-        <button className={`tab ${tab === 'combinada' ? 'active is-active' : ''}`} onClick={() => setTab('combinada')}>
-          Combinada
-          {totalSel > 0 && <span>{totalSel}</span>}
-        </button>
-      </div>
-
-      {apuestaDelDia && tab === 'partidos' && (
-        <ApuestaDelDiaBlock apuesta={apuestaDelDia} show={showApuesta} onToggle={() => setShowApuesta(!showApuesta)} />
+      {apuestaDelDia && statusFilter !== 'favoritos' && (
+        <ApuestaDelDiaBlock apuesta={apuestaDelDia} />
       )}
 
       {error && (
@@ -423,54 +406,61 @@ export default function BaseballDashboard() {
         <DashboardBuffer compact />
       ) : (
         <>
-          {tab === 'partidos' && (
-            <div className="bb-list">
-              {sorted.length === 0 ? (
-                <EmptyState />
-              ) : (
-                groupedByLeague.map(group => (
-                  <LeagueGroup
-                    key={group.leagueId}
-                    group={group}
-                    userTz={userTz}
-                    favorites={favorites}
-                    analyzed={analyzed}
-                    expandedMatch={expandedMatch}
-                    onExpand={(id) => setExpandedMatch(expandedMatch === id ? null : id)}
-                    onFavorite={toggleFavorite}
-                    onDismiss={dismissMatch}
-                    onViewFull={setAnalysisModalId}
-                    selectedMarkets={selectedMarkets}
-                    onToggleMarket={toggleMarket}
-                  />
-                ))
-              )}
-            </div>
+          {statusFilter === 'favoritos' && (
+            <section className="favorites-combination-hub fade-in" aria-label="Favoritos y combinada">
+              <div className="favorites-combination-heading">
+                <span><Layers3 size={19} aria-hidden="true" /></span>
+                <span><small>Dentro de Favoritos</small><strong>Tu combinada</strong></span>
+                {totalSel > 0 && <b>{totalSel}</b>}
+              </div>
+              <CombinadaTab
+                customCombinada={customCombinada}
+                onClear={() => setSelectedMarkets({})}
+                onRemove={(fid, key) => {
+                  setSelectedMarkets(prev => {
+                    const next = { ...prev };
+                    if (next[fid]) {
+                      const fixtureSelections = { ...next[fid] };
+                      delete fixtureSelections[key];
+                      if (Object.keys(fixtureSelections).length === 0) delete next[fid];
+                      else next[fid] = fixtureSelections;
+                    }
+                    return next;
+                  });
+                }}
+              />
+            </section>
           )}
 
-          {tab === 'combinada' && (
-            <CombinadaTab
-              customCombinada={customCombinada}
-              onClear={() => setSelectedMarkets({})}
-              onRemove={(fid, key) => {
-                setSelectedMarkets(prev => {
-                  const n = { ...prev };
-                  if (n[fid]) {
-                    delete n[fid][key];
-                    if (Object.keys(n[fid]).length === 0) delete n[fid];
-                  }
-                  return n;
-                });
-              }}
-            />
-          )}
+          <div className="bb-list">
+            {sorted.length === 0 ? (
+              <EmptyState favorites={statusFilter === 'favoritos'} />
+            ) : (
+              groupedByLeague.map(group => (
+                <LeagueGroup
+                  key={group.leagueId}
+                  group={group}
+                  userTz={userTz}
+                  favorites={favorites}
+                  analyzed={analyzed}
+                  expandedMatch={expandedMatch}
+                  onExpand={(id) => setExpandedMatch(expandedMatch === id ? null : id)}
+                  onFavorite={toggleFavorite}
+                  onDismiss={dismissMatch}
+                  onViewFull={setAnalysisModalId}
+                  selectedMarkets={selectedMarkets}
+                  onToggleMarket={toggleMarket}
+                />
+              ))
+            )}
+          </div>
         </>
       )}
 
-      {tab !== 'combinada' && totalSel > 0 && (
+      {statusFilter !== 'favoritos' && totalSel > 0 && (
         <button
           className="baseball-comb-action"
-          onClick={() => setTab('combinada')}
+          onClick={() => setStatusFilter('favoritos')}
         >
           <span><Layers3 size={18} aria-hidden="true" /></span>
           <span><small>Tu selección</small><strong>Mi combinada · {totalSel}</strong></span>
@@ -484,7 +474,7 @@ export default function BaseballDashboard() {
       </div>
       <DashboardStatusDock
         value={statusFilter}
-        onChange={(next) => { setStatusFilter(next); setTab('partidos'); }}
+        onChange={setStatusFilter}
         counts={{
           all: allVisibleCount,
           live: liveCount,
@@ -1042,63 +1032,39 @@ function BaseballProbBlock({ markets }) {
 }
 
 // =====================================================================
-// SUB-COMPONENTES (apuesta del día, combinada tab, empty state)
+// SUB-COMPONENTES (apuesta del día, combinada en Favoritos, empty state)
 // =====================================================================
-function ApuestaDelDiaBlock({ apuesta, show, onToggle }) {
+function ApuestaDelDiaBlock({ apuesta }) {
   return (
-    <motion.div
-      className="baseball-apuesta"
-      initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
-    >
-      <button className="baseball-apuesta-head" onClick={onToggle}>
-        <span className="apuesta-title-block">
-          <span className="apuesta-title-icon"><Target size={19} aria-hidden="true" /></span>
-          <span><small>Selección inteligente</small><strong>Apuesta del día</strong></span>
-        </span>
-        <span className="apuesta-head-metrics">
-          <span><small>Probabilidad</small><strong>{cap(apuesta.combinedProbability)}%</strong></span>
-          {apuesta.combinedOdd && <span><small>Cuota</small><strong>{apuesta.combinedOdd}</strong></span>}
-          <ChevronDown className={show ? 'is-open' : ''} size={17} aria-hidden="true" />
-        </span>
-      </button>
-      <AnimatePresence>
-        {show && (
-          <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} style={{ overflow: 'hidden' }}>
-            <div className="baseball-apuesta-body">
-              <div className="apuesta-summary">
-                <Sparkles size={15} aria-hidden="true" />
-                {apuesta.selections.length} selecciones desde el {apuesta.minProbability ?? BASEBALL_DAILY_MIN_PROBABILITY}% de probabilidad
-                {' '}con fiabilidad mínima del {apuesta.minReliability ?? BASEBALL_DAILY_MIN_RELIABILITY}%
-                {' '}— carreras, hits, entradas, bateadores y lanzadores
-              </div>
-              <div className="apuesta-scroll">
-                {apuesta.selections.map((s, i) => (
-                  <article className="baseball-apuesta-item" key={i}>
-                    <span className="apuesta-index">{String(i + 1).padStart(2, '0')}</span>
-                    <span className="apuesta-item-copy">
-                      <span className="apuesta-match">
-                        <i className={s.priority === 1 ? 'is-live' : ''}>{s.priority === 2 ? 'Próximo' : s.priority === 1 ? 'En vivo' : 'Final'}</i>
-                        {s.matchName}
-                      </span>
-                      <span className="apuesta-mkt">Bet365 · {displayBettingText(s.name || s.market || 'Pick')}</span>
-                    </span>
-                    <span className="apuesta-item-metrics">
-                      <span className="apuesta-prob"><small>Prob.</small>{cap(s.rawProbability ?? s.probability)}%</span>
-                      {Number.isFinite(Number(s.reliability)) && (
-                        <span className="apuesta-prob" title={s.sampleN ? `${s.sampleHits} de ${s.sampleN} partidos comparables` : undefined}>
-                          <small>Fiab.</small>{Math.floor(Number(s.reliability))}%
-                        </span>
-                      )}
-                      {s.odd && <span className="apuesta-odd"><small>Cuota</small>{s.odd}</span>}
-                    </span>
-                  </article>
-                ))}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
+    <section className="daily-pick-rail" aria-label="Apuesta del día">
+      <div className="daily-pick-track">
+        <article className="daily-pick-title-card">
+          <span><Target size={19} aria-hidden="true" /></span>
+          <small>Selección inteligente</small>
+          <strong>Apuesta del día</strong>
+          <em>{apuesta.selections.length} opciones</em>
+          <b>{cap(apuesta.combinedProbability)}% media</b>
+        </article>
+        {apuesta.selections.map((selection, index) => {
+          const probability = cap(selection.rawProbability ?? selection.probability);
+          return (
+            <article className={`daily-pick-card ${selection.priority === 1 ? 'is-live' : ''}`} key={`${selection.fixtureId || 'game'}-${selection.marketKey || index}-${index}`}>
+              <span className="daily-pick-card-top">
+                <i>{selection.priority === 1 ? 'En vivo' : selection.priority === 2 ? 'Próximo' : 'Final'}</i>
+                <b>{String(index + 1).padStart(2, '0')}</b>
+              </span>
+              <small>{selection.matchName}</small>
+              <strong>Bet365 · {displayBettingText(selection.name || selection.market || 'Pick')}</strong>
+              <span className="daily-pick-card-metrics">
+                <b>{probability}%</b>
+                {Number.isFinite(Number(selection.reliability)) && <span>{Math.floor(Number(selection.reliability))}% fiab.</span>}
+                {selection.odd && <em>@{Number(selection.odd).toFixed(2)}</em>}
+              </span>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -1158,11 +1124,11 @@ function CombinadaTab({ customCombinada, onClear, onRemove }) {
   );
 }
 
-function EmptyState() {
+function EmptyState({ favorites = false }) {
   return (
     <div style={{ textAlign: 'center', padding: 48, color: '#94a3b8' }}>
       <div style={{ fontSize: '3rem', opacity: 0.3 }}>⚾</div>
-      <p>No hay partidos para esta fecha.</p>
+      <p>{favorites ? 'Todavía no tienes partidos favoritos para esta fecha.' : 'No hay partidos para esta fecha.'}</p>
     </div>
   );
 }

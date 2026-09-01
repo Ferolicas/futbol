@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-01 · Commit base: `7674a8d`
+Actualizado: 2026-09-01 · Commit base: `5cc664a`
 
 ## Identidad y stack
 
@@ -547,9 +547,10 @@ emite el evento. Sus snapshots viven en claves Redis
 
 ### Rendimiento del dashboard
 
-La lista de partidos y la lista interna de “Apuesta del día” están virtualizadas:
-solo se montan las filas próximas al viewport, independientemente de que existan
-20, 100, 400 o más partidos. Una tarjeta analizada cerrada no monta mercados,
+La lista de partidos está virtualizada: solo se montan las filas próximas al viewport, independientemente de
+que existan 20, 100, 400 o más partidos. “Apuesta del día” usa una tira horizontal
+compacta con `content-visibility`, snap táctil y cuota individual. Una tarjeta
+analizada cerrada no monta mercados,
 probabilidades ni jugadores; al abrirse, `ResizeObserver` mide solo esa fila sin
 compensar el scroll. Las tarjetas están memoizadas y reciben handlers estables.
 El selector de competición de fútbol es multiselección con checkboxes y acciones
@@ -563,9 +564,11 @@ sobre las tarjetas: vive en el header y su pantalla completa respeta movimiento
 reducido.
 
 Baloncesto y fútbol americano usan el mismo armazón visual móvil de fútbol:
-selector de fecha, competición/estado, pestañas Partidos/Combinada, tarjetas
-expandibles y combinada flotante. Béisbol conserva sus mercados especializados,
-pero comparte encabezado, controles, tabs, espaciado, color y comportamiento de
+selector de fecha, competición/estado, tarjetas expandibles y combinada flotante.
+Las pestañas Partidos/Combinada fueron retiradas de los cuatro deportes: el dock
+filtra los partidos y Favoritos reúne los guardados con el constructor de combinada.
+Béisbol conserva sus mercados especializados,
+pero comparte encabezado, controles, espaciado, color y comportamiento de
 tarjetas. Sus endpoints de jornada para clientes leen únicamente cache/DB: los
 workers son dueños de poblar proveedores, de modo que abrir una pestaña vacía o
 fuera de temporada nunca paga esperas externas de varios segundos. Los datos
@@ -597,10 +600,12 @@ del proveedor rompan React.
 - `app/dashboard/chat-widget.js`: soporte y solicitudes de liga en pantalla
   completa, realtime conservado y animación de minimización hacia el header.
 - `app/dashboard/components/AppleSpotlightSearch.js`: overlay de pantalla
-  completa, filtros deportivos, teclado y listado navegable de resultados.
+  completa con cápsula y accesos deportivos circulares que se transforma con
+  física spring, filtros, teclado y listado navegable de resultados.
 - `app/dashboard/components/DashboardFilters.js`: filtro de ligas, tira común de
   doce jornadas y dock inferior de estados; NBA/NCAA/NFL guardan favoritos en
-  el dispositivo hasta disponer de sincronización de cuenta.
+  el dispositivo hasta disponer de sincronización de cuenta. La jornada elegida
+  recibe el verde activo y los menús de liga ocupan todo el ancho del contenido.
 - `lib/dashboard-search.js`: normalización, consultas parametrizadas y rutas de
   resultados DB-only; una visita al buscador nunca llama a proveedores.
 - `app/dashboard/components/AnalysisFullModal.js`: carcasa compartida del análisis completo con scroll vertical nativo.
@@ -810,6 +815,11 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - 2026-09-01: el dashboard comparte un header mínimo, Spotlight DB-only, una
   tira móvil de mañana/hoy/diez días anteriores y un dock inferior de cinco
   estados. El chat conserva realtime/tickets pero vive en el header y se abre a
-  pantalla completa; su cierre tipo macOS se contrae hacia el botón y queda sin
-  transformación cuando el usuario pide movimiento reducido.
+  pantalla completa sin miniatura translúcida de entrada; su cierre tipo macOS se
+  contrae hacia el botón y queda sin transformación cuando el usuario pide
+  movimiento reducido. El Spotlight conserva el fondo de la app y replica la
+  transformación cápsula → resultados de la referencia Apple. La fecha elegida
+  se pinta en verde, los selectores de liga abren a todo el ancho y la combinada
+  queda integrada en Favoritos, sin las antiguas pestañas. Apuesta del día es una
+  tira horizontal compacta en fútbol y béisbol.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.

@@ -15,20 +15,6 @@ import { createPortal } from 'react-dom';
 import { useAuth } from '../../components/providers';
 import { usePusherEvent } from '../../lib/use-pusher';
 
-function animationState(origin, reduceMotion) {
-  if (reduceMotion) return { opacity: 0 };
-  return {
-    opacity: 0,
-    x: origin.x,
-    y: origin.y,
-    scaleX: .055,
-    scaleY: .035,
-    borderRadius: '999px',
-    clipPath: 'polygon(47% 0, 53% 0, 52% 100%, 48% 100%)',
-    filter: 'blur(3px)',
-  };
-}
-
 export default function ChatWidget() {
   const { user } = useAuth();
   const reduceMotion = useReducedMotion();
@@ -38,7 +24,7 @@ export default function ChatWidget() {
   const openRef = useRef(false);
   const [mounted, setMounted] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
-  const [origin, setOrigin] = useState({ x: 0, y: 0 });
+  const [origin, setOrigin] = useState({ x: 24, y: 24 });
   const [view, setView] = useState('menu');
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -94,8 +80,8 @@ export default function ChatWidget() {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (rect) {
       setOrigin({
-        x: rect.left + rect.width / 2 - window.innerWidth / 2,
-        y: rect.top + rect.height / 2 - window.innerHeight / 2,
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
       });
     }
     setIsOpen(false);
@@ -105,8 +91,8 @@ export default function ChatWidget() {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (rect) {
       setOrigin({
-        x: rect.left + rect.width / 2 - window.innerWidth / 2,
-        y: rect.top + rect.height / 2 - window.innerHeight / 2,
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
       });
     }
     setFeedback('');
@@ -192,38 +178,24 @@ export default function ChatWidget() {
           role="dialog"
           aria-modal="true"
           aria-label="Chat y soporte de CF Análisis"
-          initial={animationState(origin, reduceMotion)}
-          animate={reduceMotion ? { opacity: 1 } : {
-            opacity: 1,
-            x: 0,
-            y: 0,
-            scaleX: 1,
-            scaleY: 1,
-            borderRadius: '0px',
-            clipPath: [
-              'polygon(47% 0, 53% 0, 52% 100%, 48% 100%)',
-              'polygon(8% 0, 92% 0, 68% 100%, 32% 100%)',
-              'inset(0% 0% 0% 0% round 0px)',
-            ],
-            filter: 'blur(0px)',
-          }}
+          initial={false}
+          animate={{ opacity: 1, clipPath: 'inset(0% 0% 0% 0% round 0px)' }}
           exit={reduceMotion ? { opacity: 0 } : {
-            opacity: [1, .96, 0],
-            x: [0, origin.x * .48, origin.x],
-            y: [0, origin.y * .42, origin.y],
-            scaleX: [1, .48, .055],
-            scaleY: [1, .72, .035],
-            borderRadius: ['0px', '0 0 44% 44%', '999px'],
+            opacity: [1, 1, 0],
             clipPath: [
               'inset(0% 0% 0% 0% round 0px)',
-              'polygon(5% 0, 95% 0, 61% 100%, 39% 100%)',
-              'polygon(47% 0, 53% 0, 52% 100%, 48% 100%)',
+              `polygon(0 0, 100% 0, ${Math.min(100, Math.max(0, (origin.x / (typeof window === 'undefined' ? 1 : window.innerWidth)) * 100 + 8))}% 100%, ${Math.min(100, Math.max(0, (origin.x / (typeof window === 'undefined' ? 1 : window.innerWidth)) * 100 - 8))}% 100%)`,
+              `circle(0px at ${origin.x}px ${origin.y}px)`,
             ],
-            filter: ['blur(0px)', 'blur(1px)', 'blur(3px)'],
           }}
-          transition={{ duration: reduceMotion ? 0 : .48, times: [0, .58, 1], ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: reduceMotion ? 0 : .4, times: [0, .64, 1], ease: [0.32, 0.72, 0, 1] }}
         >
-          <div className="chat-fullscreen-shell">
+          <motion.div
+            className="chat-fullscreen-shell"
+            initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: reduceMotion ? 0 : .18, ease: [0.22, 1, 0.36, 1] }}
+          >
             <header className="chat-fullscreen-header">
               <div className="chat-header-leading">
                 {view !== 'menu' && (
@@ -330,7 +302,7 @@ export default function ChatWidget() {
                 </section>
               )}
             </main>
-          </div>
+          </motion.div>
         </motion.div>
       )}
     </AnimatePresence>

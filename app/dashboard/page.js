@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import useSWR from 'swr';
-import { useVirtualizer, useWindowVirtualizer } from '@tanstack/react-virtual';
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowRight,
   BarChart3,
@@ -29,7 +29,6 @@ import { marketLabel } from '../../lib/market-labels';
 import { useIsIOS } from '../../lib/is-ios';
 import { isTelegramMarketAllowed as isDailyPickMarketAllowed } from '../../lib/telegram-daily-pick';
 import {
-  FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY,
   isFootballFrontendDailyPickEligible,
   meetsFootballReliability,
 } from '../../lib/recommendation-policy';
@@ -117,7 +116,6 @@ export default function Dashboard() {
   // NO disparamos el fetch de /api/fixtures. Asi evitamos el fetch inicial con
   // tz=UTC (placeholder) que luego se repetia con la tz correcta.
   const [tzReady, setTzReady] = useState(false);
-  const [tab, setTab] = useState('partidos');
   const [date, setDate] = useState(today());
   const [fixtures, setFixtures] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -143,7 +141,6 @@ export default function Dashboard() {
   const [expandedMatch, setExpandedMatch] = useState(null);
   // Custom combinada: shared via context so analisis/[id] page can add to it
   const { selectedMarkets, toggleMarket, setSelectedMarkets } = useSelectedMarkets();
-  const [showApuesta, setShowApuesta] = useState(true);
   // Multiple saved combinadas
   const [savedCombinadas, setSavedCombinadas] = useState([]);
   const [savingComb, setSavingComb] = useState(false);
@@ -1299,7 +1296,7 @@ export default function Dashboard() {
   const matchVirtualizer = useWindowVirtualizer({
     // En iOS la lista va sin ventana JS (ver el render), así que el
     // virtualizador se queda a cero y no mide ni posiciona nada.
-    count: !loading && tab === 'partidos' && !isIOS ? sorted.length : 0,
+    count: !loading && !isIOS ? sorted.length : 0,
     estimateSize: () => 310,
     overscan: 5,
     scrollMargin: matchListOffset,
@@ -1318,7 +1315,7 @@ export default function Dashboard() {
   });
 
   useEffect(() => {
-    if (splash || loading || tab !== 'partidos' || !matchListRef.current) return;
+    if (splash || loading || !matchListRef.current) return;
     const updateOffset = () => {
       if (!matchListRef.current) return;
       const next = matchListRef.current.getBoundingClientRect().top + window.scrollY;
@@ -1333,8 +1330,6 @@ export default function Dashboard() {
   }, [
     splash,
     loading,
-    tab,
-    showApuesta,
     apuestaDelDia?.selections?.length,
     batchRunning,
     error,
@@ -1433,44 +1428,12 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* TABS */}
-        <div className="tabs">
-          <button className={`tab ${tab === 'partidos' ? 'active' : ''}`} onClick={() => setTab('partidos')}>
-            Partidos
-            {allVisibleCount > 0 && <span className="tab-badge">{allVisibleCount}</span>}
-          </button>
-          <button className={`tab ${tab === 'combinada' ? 'active' : ''}`} onClick={() => setTab('combinada')}>
-            Combinada
-            {(totalSel + savedCombinadas.length) > 0 && <span className="tab-badge">{totalSel + savedCombinadas.length}</span>}
-          </button>
-        </div>
-
         {/* APUESTA DEL DIA */}
-        {apuestaDelDia && tab === 'partidos' && (
-          <div className={`apuesta ${showApuesta ? 'open' : ''}`}>
-            <button className="apuesta-head" onClick={() => setShowApuesta(!showApuesta)}>
-              <span className="apuesta-title-block">
-                <span className="apuesta-title-icon"><Target size={19} aria-hidden="true" /></span>
-                <span>
-                  <small>Selección inteligente</small>
-                  <strong>Apuesta del día</strong>
-                </span>
-              </span>
-              <span className="apuesta-head-metrics">
-                <span><small>Prob. media</small><strong>{cap(apuestaDelDia.combinedProbability)}%</strong></span>
-                <ChevronDown className={showApuesta ? 'is-open' : ''} size={17} aria-hidden="true" />
-              </span>
-            </button>
-            {showApuesta && (
-              <div className="apuesta-body">
-                <div className="apuesta-summary">
-                  <Sparkles size={15} aria-hidden="true" />
-                  {apuestaDelDia.selections.length} selecciones desde {FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY}% ordenadas por oportunidad · cuotas individuales
-                </div>
-                <ApuestaSelectionList selections={apuestaDelDia.selections} />
-              </div>
-            )}
-          </div>
+        {apuestaDelDia && statusFilter !== 'favoritos' && (
+          <ApuestaSelectionRail
+            selections={apuestaDelDia.selections}
+            averageProbability={apuestaDelDia.combinedProbability}
+          />
         )}
 
         {/* WARNING */}
@@ -1501,14 +1464,33 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* TAB: PARTIDOS */}
-        {!loading && tab === 'partidos' && (
+        {!loading && statusFilter === 'favoritos' && (
+          <FootballCombinationPanel
+            customCombinada={customCombinada}
+            totalSelections={totalSel}
+            onRemove={toggleMarket}
+            onClear={() => setSelectedMarkets({})}
+            onSave={saveCombinada}
+            saving={savingComb}
+            savedCombinadas={savedCombinadas}
+            onDeleteSaved={deleteSavedCombinada}
+          />
+        )}
+
+        {/* PARTIDOS SEGÚN EL ESTADO DEL DOCK */}
+        {!loading && (
           <>
             {sorted.length === 0 && !error && (
               <div className="empty-state fade-in">
                 <div className="empty-icon">&#9917;</div>
-                <h3>{Array.isArray(leagueFilter) && leagueFilter.length === 0 ? 'Ninguna liga seleccionada' : 'Sin partidos'}</h3>
-                <p>{Array.isArray(leagueFilter) && leagueFilter.length === 0
+                <h3>{statusFilter === 'favoritos'
+                  ? 'Sin favoritos para esta fecha'
+                  : Array.isArray(leagueFilter) && leagueFilter.length === 0
+                    ? 'Ninguna liga seleccionada'
+                    : 'Sin partidos'}</h3>
+                <p>{statusFilter === 'favoritos'
+                  ? 'Marca la estrella de un partido para guardarlo aquí junto a tu combinada.'
+                  : Array.isArray(leagueFilter) && leagueFilter.length === 0
                   ? 'Abre el filtro de competición y marca las ligas que quieras ver.'
                   : 'No hay partidos que coincidan con los filtros de esta fecha.'}</p>
               </div>
@@ -1567,98 +1549,8 @@ export default function Dashboard() {
           </>
         )}
 
-        {/* TAB: COMBINADA */}
-        {!loading && tab === 'combinada' && (
-          <>
-            {!customCombinada ? (
-              <div className="empty-state fade-in">
-                <div className="empty-icon"><Layers3 size={28} aria-hidden="true" /></div>
-                <h3>Combinada vacía</h3>
-                <p>Abre un partido analizado y selecciona los mercados que quieras combinar</p>
-              </div>
-            ) : (
-              <div className="comb-builder fade-in">
-                <div className="comb-hero">
-                  <span className="comb-hero-icon"><Layers3 size={21} aria-hidden="true" /></span>
-                  <span><small>Constructor inteligente</small><strong>Tu combinada</strong></span>
-                  <span className="comb-count">{customCombinada.selections.length} selecciones</span>
-                </div>
-                <div className="comb-list">
-                  {customCombinada.selections.map((sel, i) => (
-                    <article key={`${sel.fixtureId}-${sel.id}`} className="comb-item">
-                      <span className="comb-item-index">{String(i + 1).padStart(2, '0')}</span>
-                      <div className="comb-item-content">
-                        <div className="comb-item-match">{sel.matchName}</div>
-                        <span className="comb-item-name">{displayBettingText(sel.name)}</span>
-                      </div>
-                      <div className="comb-item-metrics">
-                        <span className={`comb-item-prob ${Number(sel.rawProbability ?? sel.probability) >= 75 ? 'high' : Number(sel.rawProbability ?? sel.probability) >= 50 ? 'mid' : 'low'}`}><small>Prob.</small>{cap(sel.rawProbability ?? sel.probability)}%</span>
-                        <span className="comb-item-odd"><small>Cuota</small>{sel.odd ? sel.odd.toFixed(2) : '—'}</span>
-                      </div>
-                      <button className="comb-item-rm" onClick={() => toggleMarket(sel.fixtureId, sel, sel.matchName)} aria-label={`Quitar ${displayBettingText(sel.name)}`}><X size={15} aria-hidden="true" /></button>
-                    </article>
-                  ))}
-                </div>
-                <div className="comb-summary">
-                  <div className="comb-sum-row">
-                    <span>Cuota total (x{customCombinada.selections.length})</span>
-                    <strong className="comb-odd-total">{customCombinada.combinedOdd}</strong>
-                  </div>
-                  <div className="comb-sum-row">
-                    <span>Probabilidad compuesta</span>
-                    <strong className={customCombinada.highRisk ? 'danger' : 'safe'}>{cap(customCombinada.combinedProbability)}%</strong>
-                  </div>
-                  <div className="comb-formula">
-                    {customCombinada.selections.map((s, i) => (
-                      <span key={i}>{i > 0 && ' x '}{cap(s.rawProbability ?? s.probability)}%</span>
-                    ))}
-                    <span> = {cap(customCombinada.combinedProbability)}%</span>
-                  </div>
-                  {customCombinada.highRisk && <div className="comb-warn">Combinada de alto riesgo (&lt;60%)</div>}
-                </div>
-                <div className="comb-actions">
-                  <button className="btn-save-comb" onClick={saveCombinada} disabled={savingComb}>
-                    <Save size={16} aria-hidden="true" /> {savingComb ? 'Guardando...' : 'Guardar combinada'}
-                  </button>
-                  <button className="btn-clear" onClick={() => setSelectedMarkets({})}><Trash2 size={16} aria-hidden="true" /> Limpiar</button>
-                </div>
-
-              </div>
-            )}
-
-            {/* Saved combinadas — visibles siempre que haya guardadas, con o sin combinada en construcción */}
-            {savedCombinadas.length > 0 && (
-              <div className="saved-combs">
-                <h4 className="saved-combs-title">Combinadas guardadas</h4>
-                {savedCombinadas.map(comb => (
-                  <div key={comb.id} className="saved-comb">
-                    <div className="saved-comb-head">
-                      <span className="saved-comb-name">{comb.name}</span>
-                      <button className="saved-comb-del" onClick={() => deleteSavedCombinada(comb.id)}>&#10005;</button>
-                    </div>
-                    <div className="saved-comb-info">
-                      <span>{(comb.selections || []).length} sel.</span>
-                      <span className="saved-comb-odd">{comb.combined_odd ?? comb.combinedOdd}x</span>
-                      <span className={(comb.combined_probability ?? comb.combinedProbability) >= 60 ? 'safe' : 'danger'}>
-                        {cap(comb.combined_probability ?? comb.combinedProbability)}%
-                      </span>
-                    </div>
-                    <div className="saved-comb-sels">
-                      {(comb.selections || []).map((s, i) => (
-                        <span key={i} className="saved-sel-chip">
-                          {displayBettingText(s.name || s.market)} {s.odd ? `(${Number(s.odd).toFixed(2)})` : ''}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-
         {/* FLOATING: Analyze */}
-        {selected.size > 0 && tab === 'partidos' && (
+        {selected.size > 0 && (
           <div className="float-bar float-bar-analyze slide-up">
             <button className="btn-analyze" onClick={analyzeSelected} disabled={analyzing}>
               {analyzing ? 'Analizando...' : `Analizar ${selected.size} partido${selected.size > 1 ? 's' : ''}`}
@@ -1667,9 +1559,9 @@ export default function Dashboard() {
         )}
 
         {/* FLOATING: Combinada counter */}
-        {totalSel > 0 && tab === 'partidos' && (
+        {totalSel > 0 && statusFilter !== 'favoritos' && (
           <div className="float-bar float-bar-combinada slide-up">
-            <button className="btn-comb-float" onClick={() => setTab('combinada')}>
+            <button className="btn-comb-float" onClick={() => setStatusFilter('favoritos')}>
               <span className="float-comb-icon"><Layers3 size={19} aria-hidden="true" /></span>
               <span><small>Tu selección</small><strong>Ver combinada · {totalSel}</strong></span>
               {customCombinada && <span className="float-odd">{customCombinada.combinedOdd}x</span>}
@@ -1695,7 +1587,7 @@ export default function Dashboard() {
 
     <DashboardStatusDock
       value={statusFilter}
-      onChange={(next) => { setStatusFilter(next); setTab('partidos'); }}
+      onChange={setStatusFilter}
       counts={{
         all: allVisibleCount,
         live: liveCount,
@@ -1717,21 +1609,18 @@ export default function Dashboard() {
 
 /* ======================== MATCH CARD ======================== */
 
-function ApuestaSelectionList({ selections }) {
-  const scrollRef = useRef(null);
-  const virtualizer = useVirtualizer({
-    count: selections.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => 96,
-    overscan: 5,
-    getItemKey: index => `${selections[index]?.fixtureId || 'fixture'}-${selections[index]?.id || index}-${index}`,
-  });
-
+function ApuestaSelectionRail({ selections, averageProbability }) {
   return (
-    <div ref={scrollRef} className="apuesta-scroll" style={{ display: 'block' }}>
-      <div style={{ position: 'relative', height: `${virtualizer.getTotalSize()}px` }}>
-        {virtualizer.getVirtualItems().map(row => {
-          const sel = selections[row.index];
+    <section className="daily-pick-rail" aria-label="Apuesta del día">
+      <div className="daily-pick-track">
+        <article className="daily-pick-title-card">
+          <span><Target size={19} aria-hidden="true" /></span>
+          <small>Selección inteligente</small>
+          <strong>Apuesta del día</strong>
+          <em>{selections.length} opciones · cuotas individuales</em>
+          <b>{cap(averageProbability)}% media</b>
+        </article>
+        {selections.map((sel, index) => {
           const pct = cap(sel.rawProbability ?? sel.probability);
           const probColor = pct >= 85 ? '#4ade80' : pct >= 80 ? '#fbbf24' : '#d97706';
           const suffixes = { 'Goles': 'goles', 'Córners': 'córners', 'Tarjetas': 'tarjetas' };
@@ -1741,39 +1630,126 @@ function ApuestaSelectionList({ selections }) {
             : sel.name;
           const displayMarketName = displayBettingText(marketName);
           return (
-            <div
-              key={row.key}
-              ref={virtualizer.measureElement}
-              data-index={row.index}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                paddingBottom: 5,
-                transform: `translateY(${row.start}px)`,
-              }}
+            <article
+              key={`${sel.fixtureId || 'fixture'}-${sel.id || index}-${index}`}
+              className={`daily-pick-card ${sel.priority === 1 ? 'is-live' : ''}`}
             >
-              <article className={`apuesta-item ${sel.priority === 2 ? 'upcoming' : sel.priority === 1 ? 'live' : 'done'}`}>
-                <span className="apuesta-index">{String(row.index + 1).padStart(2, '0')}</span>
-                <span className="apuesta-item-copy">
-                  <span className="apuesta-match">
-                    {sel.priority === 1 && <span className="apuesta-status live">EN VIVO</span>}
-                    {sel.priority === 2 && <span className="apuesta-status ns">Próximo</span>}
-                    {sel.matchName}
-                  </span>
-                  <span className="apuesta-mkt">{displayMarketName}</span>
-                </span>
-                <span className="apuesta-item-metrics">
-                  <span className="apuesta-prob" style={{ color: probColor }}><small>Prob.</small>{pct}%</span>
-                  {sel.odd != null && <span className="apuesta-odd"><small>Cuota</small>{sel.odd.toFixed(2)}</span>}
-                </span>
-              </article>
-            </div>
+              <span className="daily-pick-card-top">
+                <i>{sel.priority === 1 ? 'En vivo' : 'Próximo'}</i>
+                <b>{String(index + 1).padStart(2, '0')}</b>
+              </span>
+              <small>{sel.matchName}</small>
+              <strong>{displayMarketName}</strong>
+              <span className="daily-pick-card-metrics">
+                <b style={{ color: probColor }}>{pct}%</b>
+                {sel.odd != null && <em>@{Number(sel.odd).toFixed(2)}</em>}
+              </span>
+            </article>
           );
         })}
       </div>
-    </div>
+    </section>
+  );
+}
+
+function FootballCombinationPanel({
+  customCombinada,
+  totalSelections,
+  onRemove,
+  onClear,
+  onSave,
+  saving,
+  savedCombinadas,
+  onDeleteSaved,
+}) {
+  return (
+    <section className="favorites-combination-hub fade-in" aria-label="Favoritos y combinada">
+      <div className="favorites-combination-heading">
+        <span><Layers3 size={19} aria-hidden="true" /></span>
+        <span><small>Dentro de Favoritos</small><strong>Tu combinada</strong></span>
+        {totalSelections > 0 && <b>{totalSelections}</b>}
+      </div>
+
+      {!customCombinada ? (
+        <div className="combination-inline-empty">
+          <strong>Combinada vacía</strong>
+          <span>Expande un partido y selecciona los mercados que quieras combinar.</span>
+        </div>
+      ) : (
+        <div className="comb-builder">
+          <div className="comb-hero">
+            <span className="comb-hero-icon"><Layers3 size={21} aria-hidden="true" /></span>
+            <span><small>Constructor inteligente</small><strong>Tu combinada</strong></span>
+            <span className="comb-count">{customCombinada.selections.length} selecciones</span>
+          </div>
+          <div className="comb-list">
+            {customCombinada.selections.map((sel, index) => (
+              <article key={`${sel.fixtureId}-${sel.id}`} className="comb-item">
+                <span className="comb-item-index">{String(index + 1).padStart(2, '0')}</span>
+                <div className="comb-item-content">
+                  <div className="comb-item-match">{sel.matchName}</div>
+                  <span className="comb-item-name">{displayBettingText(sel.name)}</span>
+                </div>
+                <div className="comb-item-metrics">
+                  <span className={`comb-item-prob ${Number(sel.rawProbability ?? sel.probability) >= 75 ? 'high' : Number(sel.rawProbability ?? sel.probability) >= 50 ? 'mid' : 'low'}`}>
+                    <small>Prob.</small>{cap(sel.rawProbability ?? sel.probability)}%
+                  </span>
+                  <span className="comb-item-odd"><small>Cuota</small>{sel.odd ? Number(sel.odd).toFixed(2) : '—'}</span>
+                </div>
+                <button className="comb-item-rm" onClick={() => onRemove(sel.fixtureId, sel, sel.matchName)} aria-label={`Quitar ${displayBettingText(sel.name)}`}>
+                  <X size={15} aria-hidden="true" />
+                </button>
+              </article>
+            ))}
+          </div>
+          <div className="comb-summary">
+            <div className="comb-sum-row">
+              <span>Cuota total (x{customCombinada.selections.length})</span>
+              <strong className="comb-odd-total">{customCombinada.combinedOdd}</strong>
+            </div>
+            <div className="comb-sum-row">
+              <span>Probabilidad compuesta</span>
+              <strong className={customCombinada.highRisk ? 'danger' : 'safe'}>{cap(customCombinada.combinedProbability)}%</strong>
+            </div>
+            {customCombinada.highRisk && <div className="comb-warn">Combinada de alto riesgo (&lt;60%)</div>}
+          </div>
+          <div className="comb-actions">
+            <button className="btn-save-comb" onClick={onSave} disabled={saving}>
+              <Save size={16} aria-hidden="true" /> {saving ? 'Guardando...' : 'Guardar combinada'}
+            </button>
+            <button className="btn-clear" onClick={onClear}><Trash2 size={16} aria-hidden="true" /> Limpiar</button>
+          </div>
+        </div>
+      )}
+
+      {savedCombinadas.length > 0 && (
+        <div className="saved-combs">
+          <h4 className="saved-combs-title">Combinadas guardadas</h4>
+          {savedCombinadas.map((comb) => (
+            <div key={comb.id} className="saved-comb">
+              <div className="saved-comb-head">
+                <span className="saved-comb-name">{comb.name}</span>
+                <button className="saved-comb-del" onClick={() => onDeleteSaved(comb.id)} aria-label={`Eliminar ${comb.name}`}>&#10005;</button>
+              </div>
+              <div className="saved-comb-info">
+                <span>{(comb.selections || []).length} sel.</span>
+                <span className="saved-comb-odd">{comb.combined_odd ?? comb.combinedOdd}x</span>
+                <span className={(comb.combined_probability ?? comb.combinedProbability) >= 60 ? 'safe' : 'danger'}>
+                  {cap(comb.combined_probability ?? comb.combinedProbability)}%
+                </span>
+              </div>
+              <div className="saved-comb-sels">
+                {(comb.selections || []).map((selection, index) => (
+                  <span key={index} className="saved-sel-chip">
+                    {displayBettingText(selection.name || selection.market)} {selection.odd ? `(${Number(selection.odd).toFixed(2)})` : ''}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
