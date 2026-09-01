@@ -46,6 +46,8 @@ import AnalysisFullModal from './components/AnalysisFullModal';
 import { displayBettingText } from './utils/display-betting-text';
 import { buildFootballProbabilityGroups } from './utils/probability-lines';
 import FinalVerdictPanel from './components/FinalVerdictPanel';
+import MarketOutcomeBadge from './components/MarketOutcomeBadge';
+import { marketResultState, settleMarketSelection } from '../../lib/market-settlement';
 import {
   leagueSelectionIncludes,
   normalizeLeagueSelection,
@@ -1201,8 +1203,8 @@ export default function Dashboard() {
     //  - Solo selecciones con probabilidad ≥75%, fiabilidad ≥90% y cuota real ≥1.20
     //  - SIN límite por partido: si un partido tiene 10 opciones que cumplen,
     //    se muestran las 10
-    //  - Solo partidos próximos (NS) o en vivo — los finalizados desaparecen
-    //  - Orden: NS > en vivo, dentro de cada grupo prob desc
+    //  - Próximos se ven en Apuestas; en vivo/finalizados pasan a Resultados
+    //  - Orden: NS > en vivo > final, dentro de cada grupo prob desc
     //  - El ranking usa la probabilidad cruda; la UI muestra máximo 95%
     const all = [];
 
@@ -1212,8 +1214,10 @@ export default function Dashboard() {
       let priority = 0;
       if (status === 'NS') priority = 2;
       else if (isLive(status)) priority = 1;
-      // Filtrar finalizados (priority 0 = FT/AET/PEN/etc o fixture no presente).
-      if (priority === 0) return;
+      // Los finalizados se conservan exclusivamente para la vista Resultados.
+      // La selección original no se recalcula: solo se liquida contra el dato
+      // oficial que ya trae la jornada.
+      if (!fx || isPostponed(status)) return;
       const mn = fx ? `${fx.teams.home.name} vs ${fx.teams.away.name}` : `${data.homeTeam || '?'} vs ${data.awayTeam || '?'}`;
       const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
@@ -1432,6 +1436,8 @@ export default function Dashboard() {
           <ApuestaSelectionRail
             selections={apuestaDelDia.selections}
             averageProbability={apuestaDelDia.combinedProbability}
+            fixtures={fixtures}
+            liveStats={liveStats}
           />
         )}
 
@@ -1608,21 +1614,55 @@ export default function Dashboard() {
 
 /* ======================== MATCH CARD ======================== */
 
-function ApuestaSelectionRail({ selections, averageProbability }) {
+function ApuestaSelectionRail({ selections, averageProbability, fixtures, liveStats }) {
+  const [view, setView] = useState('picks');
+  const fixtureMap = useMemo(() => new Map((fixtures || []).map((fixture) => [String(fixture.fixture?.id), fixture])), [fixtures]);
+  const decorated = useMemo(() => (selections || []).map((selection) => {
+    const game = fixtureMap.get(String(selection.fixtureId));
+    const result = liveStats?.[selection.fixtureId] || liveStats?.[String(selection.fixtureId)] || null;
+    return {
+      ...selection,
+      game,
+      resultState: marketResultState({ sport: 'football', game, liveResult: result }),
+      outcome: settleMarketSelection({ sport: 'football', selection, game, liveResult: result }),
+    };
+  }), [fixtureMap, liveStats, selections]);
+  const picks = decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
+  const results = decorated.filter((selection) => selection.resultState.isLive || selection.resultState.isFinal);
+  const visible = view === 'results' ? results : picks;
+  const visibleProbability = visible.length
+    ? visible.reduce((sum, selection) => sum + Number(selection.rawProbability ?? selection.probability), 0) / visible.length
+    : averageProbability;
+
   return (
     <section className="daily-pick-rail" aria-label="Apuesta del día con cuotas individuales">
       <header className="daily-pick-heading">
         <span className="daily-pick-heading-title">
           <img src="/daily-pick-sticker.webp" alt="" width="38" height="36" aria-hidden="true" />
           <strong>Apuesta del día</strong>
+          <button
+            type="button"
+            className={`daily-results-button ${view === 'results' ? 'is-active' : ''}`}
+            onClick={() => setView((current) => current === 'results' ? 'picks' : 'results')}
+            aria-pressed={view === 'results'}
+          >
+            <span>{view === 'results' ? 'Apuestas' : 'Resultados'}</span>
+            {results.length > 0 && <b>{results.length}</b>}
+          </button>
         </span>
         <span className="daily-pick-heading-summary">
-          <b>{selections.length} opciones</b>
-          <em>{cap(averageProbability)}% probabilidad</em>
+          <b>{visible.length} opciones</b>
+          {visible.length > 0 && <em>{cap(visibleProbability)}% probabilidad</em>}
         </span>
       </header>
       <div className="daily-pick-track">
-        {selections.map((sel, index) => {
+        {visible.length === 0 && (
+          <div className="daily-pick-empty">
+            <strong>{view === 'results' ? 'Aún no hay resultados' : 'Todas las opciones ya comenzaron'}</strong>
+            <span>{view === 'results' ? 'Los partidos en vivo y finalizados aparecerán aquí.' : 'Pulsa Resultados para seguirlas en tiempo real.'}</span>
+          </div>
+        )}
+        {visible.map((sel, index) => {
           const pct = cap(sel.rawProbability ?? sel.probability);
           const probColor = pct >= 85 ? '#4ade80' : pct >= 80 ? '#fbbf24' : '#d97706';
           const suffixes = { 'Goles': 'goles', 'Córners': 'córners', 'Tarjetas': 'tarjetas' };
@@ -1634,14 +1674,21 @@ function ApuestaSelectionRail({ selections, averageProbability }) {
           return (
             <article
               key={`${sel.fixtureId || 'fixture'}-${sel.id || index}-${index}`}
-              className={`daily-pick-card ${sel.priority === 1 ? 'is-live' : ''}`}
+              className={`daily-pick-card ${sel.resultState.isLive ? 'is-live' : ''} ${sel.outcome.status === 'won' ? 'has-won' : sel.outcome.status === 'lost' ? 'has-lost' : ''}`}
             >
               <span className="daily-pick-card-top">
-                <i>{sel.priority === 1 ? 'En vivo' : 'Próximo'}</i>
+                <i>{sel.resultState.isFinal ? 'Finalizado' : sel.resultState.isLive ? 'En vivo' : 'Próximo'}</i>
                 <b>{String(index + 1).padStart(2, '0')}</b>
               </span>
               <small>{sel.matchName}</small>
               <strong>{displayMarketName}</strong>
+              {view === 'results' && (
+                <MarketOutcomeBadge
+                  outcome={sel.outcome}
+                  pendingLabel={sel.resultState.isLive ? 'En juego' : null}
+                  compact
+                />
+              )}
               <span className="daily-pick-card-metrics">
                 <b style={{ color: probColor }}>{pct}%</b>
                 {sel.odd != null && <em>@{Number(sel.odd).toFixed(2)}</em>}
@@ -2056,6 +2103,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
         && s.odd && s.odd >= 1.20
         && Number(s.rawProbability ?? s.probability) >= 70)
       .map((s, i) => ({
+        ...s,
         id: s.id || `mkt-${i}`,
         // Re-traduce la clave con lib/market-labels.js (misma fuente que el servidor y que la
         // "Apuesta del Día", línea ~1074) en vez de usar s.name CACHEADO: así las etiquetas
@@ -2249,6 +2297,9 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                     <div className="markets-grid">
                   {markets.map(mkt => {
                     const checked = !!selMarkets[mkt.id];
+                    const outcome = settleMarketSelection({
+                      sport: 'football', selection: mkt, game: match, liveResult: liveStats,
+                    });
                     // Logo del bookmaker REAL atribuido por el motor (allBookmakerOdds).
                     // Si no hay bookmaker → sin logo (cuota fantasma no debería llegar aquí).
                     const bkLogo = mkt.bookmaker
@@ -2264,6 +2315,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                         <span className={`mkt-validation ${mkt.recommended ? 'is-validated' : 'is-reference'}`}>
                           {mkt.recommended ? 'Recomendación estadística' : 'Dato estadístico'}
                         </span>
+                        <MarketOutcomeBadge outcome={outcome} compact />
                         <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${cap(mkt.rawProbability ?? mkt.probability)}%` }} /></div>
                         <div className="mkt-nums">
                           <span className="mkt-pct">{cap(mkt.rawProbability ?? mkt.probability)}%</span>

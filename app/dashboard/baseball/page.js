@@ -45,11 +45,13 @@ import {
 import DashboardBuffer from '../components/DashboardBuffer';
 import AnalysisFullModal from '../components/AnalysisFullModal';
 import FinalVerdictPanel from '../components/FinalVerdictPanel';
+import MarketOutcomeBadge from '../components/MarketOutcomeBadge';
 import BaseballResultStats from './components/BaseballResultStats';
 import { displayBettingText } from '../utils/display-betting-text';
 import {
   BASEBALL_RECOMMENDATION_MIN_PROBABILITY,
 } from '../../../lib/recommendation-policy';
+import { marketResultState, settleMarketSelection } from '../../../lib/market-settlement';
 
 const BaseballAnalysisExperience = dynamic(
   () => import('./analisis/[id]/page').then((module) => module.BaseballAnalysisExperience),
@@ -391,7 +393,7 @@ export default function BaseballDashboard() {
       </div>
 
       {apuestaDelDia && statusFilter !== 'favoritos' && (
-        <ApuestaDelDiaBlock apuesta={apuestaDelDia} />
+        <ApuestaDelDiaBlock apuesta={apuestaDelDia} games={games} />
       )}
 
       {error && (
@@ -967,6 +969,7 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
                 rawProbability: Number(market.rawProbability ?? market.probability),
                 odd: Number(market.odd),
               };
+              const outcome = settleMarketSelection({ sport: 'baseball', selection: market, game });
               return (
                 <button
                   key={key}
@@ -985,7 +988,10 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
                     color: '#1c1410', fontSize: 10, fontWeight: 800,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}>{selected ? '✓' : ''}</span>
-                  <span style={{ minWidth: 0, fontSize: '.78rem', color: '#e2e8f0', lineHeight: 1.3 }}>{displayBettingText(market.name)}</span>
+                  <span className="market-option-copy" style={{ minWidth: 0, fontSize: '.78rem', color: '#e2e8f0', lineHeight: 1.3 }}>
+                    <span>{displayBettingText(market.name)}</span>
+                    <MarketOutcomeBadge outcome={outcome} compact />
+                  </span>
                   <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
                     <strong style={{ fontSize: '.78rem', color: '#5ee6b1' }}>{cap(market.rawProbability ?? market.probability)}%</strong>
                     <small style={{ fontSize: '.7rem', color: '#f5e400', fontFamily: 'JetBrains Mono, monospace' }}>@{Number(market.odd).toFixed(2)}</small>
@@ -1033,30 +1039,70 @@ function BaseballProbBlock({ markets }) {
 // =====================================================================
 // SUB-COMPONENTES (apuesta del día, combinada en Favoritos, empty state)
 // =====================================================================
-function ApuestaDelDiaBlock({ apuesta }) {
+function ApuestaDelDiaBlock({ apuesta, games }) {
+  const [view, setView] = useState('picks');
+  const gamesById = useMemo(() => new Map((games || []).map((game) => [String(game.id), game])), [games]);
+  const decorated = useMemo(() => (apuesta.selections || []).map((selection) => {
+    const game = gamesById.get(String(selection.fixtureId));
+    return {
+      ...selection,
+      game,
+      resultState: marketResultState({ sport: 'baseball', game }),
+      outcome: settleMarketSelection({ sport: 'baseball', selection, game }),
+    };
+  }), [apuesta.selections, gamesById]);
+  const picks = decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
+  const results = decorated.filter((selection) => selection.resultState.isLive || selection.resultState.isFinal);
+  const visible = view === 'results' ? results : picks;
+  const visibleProbability = visible.length
+    ? visible.reduce((sum, selection) => sum + Number(selection.rawProbability ?? selection.probability), 0) / visible.length
+    : apuesta.combinedProbability;
+
   return (
     <section className="daily-pick-rail" aria-label="Apuesta del día con cuotas individuales">
       <header className="daily-pick-heading">
         <span className="daily-pick-heading-title">
           <img src="/daily-pick-sticker.webp" alt="" width="38" height="36" aria-hidden="true" />
           <strong>Apuesta del día</strong>
+          <button
+            type="button"
+            className={`daily-results-button ${view === 'results' ? 'is-active' : ''}`}
+            onClick={() => setView((current) => current === 'results' ? 'picks' : 'results')}
+            aria-pressed={view === 'results'}
+          >
+            <span>{view === 'results' ? 'Apuestas' : 'Resultados'}</span>
+            {results.length > 0 && <b>{results.length}</b>}
+          </button>
         </span>
         <span className="daily-pick-heading-summary">
-          <b>{apuesta.selections.length} opciones</b>
-          <em>{cap(apuesta.combinedProbability)}% probabilidad</em>
+          <b>{visible.length} opciones</b>
+          {visible.length > 0 && <em>{cap(visibleProbability)}% probabilidad</em>}
         </span>
       </header>
       <div className="daily-pick-track">
-        {apuesta.selections.map((selection, index) => {
+        {visible.length === 0 && (
+          <div className="daily-pick-empty">
+            <strong>{view === 'results' ? 'Aún no hay resultados' : 'Todas las opciones ya comenzaron'}</strong>
+            <span>{view === 'results' ? 'Los partidos en vivo y finalizados aparecerán aquí.' : 'Pulsa Resultados para seguirlas en tiempo real.'}</span>
+          </div>
+        )}
+        {visible.map((selection, index) => {
           const probability = cap(selection.rawProbability ?? selection.probability);
           return (
-            <article className={`daily-pick-card ${selection.priority === 1 ? 'is-live' : ''}`} key={`${selection.fixtureId || 'game'}-${selection.marketKey || index}-${index}`}>
+            <article className={`daily-pick-card ${selection.resultState.isLive ? 'is-live' : ''} ${selection.outcome.status === 'won' ? 'has-won' : selection.outcome.status === 'lost' ? 'has-lost' : ''}`} key={`${selection.fixtureId || 'game'}-${selection.marketKey || index}-${index}`}>
               <span className="daily-pick-card-top">
-                <i>{selection.priority === 1 ? 'En vivo' : selection.priority === 2 ? 'Próximo' : 'Final'}</i>
+                <i>{selection.resultState.isFinal ? 'Finalizado' : selection.resultState.isLive ? 'En vivo' : 'Próximo'}</i>
                 <b>{String(index + 1).padStart(2, '0')}</b>
               </span>
               <small>{selection.matchName}</small>
               <strong>Bet365 · {displayBettingText(selection.name || selection.market || 'Pick')}</strong>
+              {view === 'results' && (
+                <MarketOutcomeBadge
+                  outcome={selection.outcome}
+                  pendingLabel={selection.resultState.isLive ? 'En juego' : null}
+                  compact
+                />
+              )}
               <span className="daily-pick-card-metrics">
                 <b>{probability}%</b>
                 {Number.isFinite(Number(selection.reliability)) && <span>{Math.floor(Number(selection.reliability))}% fiab.</span>}

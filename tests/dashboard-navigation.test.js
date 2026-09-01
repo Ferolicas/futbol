@@ -20,7 +20,7 @@ test('el header queda reducido a chat, logo centrado y búsqueda Spotlight', () 
   assert.match(spotlight, /layout=!\{?reduceMotion|layout=\{!reduceMotion\}/);
   assert.match(spotlight, /SPOTLIGHT_SPRING/);
   const styles = read('app/globals.css');
-  assert.match(styles, /\.dashboard-brand \{[\s\S]*width: 54% !important/);
+  assert.match(styles, /\.dashboard-brand \{[\s\S]*width: 37\.8% !important/);
   const logo = read('components/BrandLogoMedia.js');
   assert.match(logo, /logo-metalizado-alpha\.avif\?v=2/);
   assert.doesNotMatch(logo, /logo-metalizado-fast\.webm|brand-logo-alpha-video/);

@@ -27,6 +27,8 @@ import {
 } from './DashboardFilters';
 import FinalVerdictPanel from './FinalVerdictPanel';
 import { displayBettingText } from '../utils/display-betting-text';
+import MarketOutcomeBadge from './MarketOutcomeBadge';
+import { settleMarketSelection } from '../../../lib/market-settlement';
 
 function detectTimeZone() {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone; }
@@ -136,7 +138,7 @@ function ProbabilityLine({ label, entry, odd }) {
   );
 }
 
-function PickButton({ pick, selected, onToggle }) {
+function PickButton({ pick, selected, onToggle, outcome }) {
   const reliability = Number(pick.reliability);
   return (
     <button
@@ -148,6 +150,7 @@ function PickButton({ pick, selected, onToggle }) {
       <span className="ms-pick-copy">
         <strong>{displayBettingText(pick.name)}</strong>
         <small>{pick.bookmakerSelection ? `Bet365 · ${displayBettingText(pick.bookmakerSelection)}` : 'Línea exacta disponible en Bet365'}</small>
+        <MarketOutcomeBadge outcome={outcome} compact />
       </span>
       <span className="ms-pick-metrics">
         <span><small>Prob.</small><b>{probability(pick)}%</b></span>
@@ -252,6 +255,7 @@ const MatchCard = memo(function MatchCard({ game, timeZone, scoreLabel, slug, ex
                           pick={pick}
                           selected={Boolean(selectedPicks[pick.id])}
                           onToggle={() => onTogglePick(game, pick)}
+                          outcome={settleMarketSelection({ sport: slug, selection: pick, game })}
                         />
                       ))}
                     </div>

@@ -12213,19 +12213,19 @@ input:checked + .cb-mark::after {
    AJUSTES DE NAVEGACIÓN — Spotlight Apple, selección y favoritos
    ===================================================================== */
 
-/* El logo conserva el 90% de su tamaño anterior (60% → 54%). */
+/* Reducción solicitada del 30% respecto al tamaño anterior (54% → 37.8%). */
 .dashboard-brand {
-  width: 54% !important;
-  max-width: 603px !important;
-  height: 60px !important;
+  width: 37.8% !important;
+  max-width: 422px !important;
+  height: 42px !important;
 }
 
 @media (min-width: 700px) {
-  .dashboard-brand { height: 68px !important; }
+  .dashboard-brand { height: 48px !important; }
 }
 
 @media (max-width: 359px) {
-  .dashboard-brand { width: 54% !important; height: 56px !important; }
+  .dashboard-brand { width: 37.8% !important; height: 39px !important; }
 }
 
 /* La jornada activa es la superficie verde. Hoy conserva una referencia
@@ -12806,4 +12806,281 @@ input:checked + .cb-mark::after {
   .daily-pick-heading-title img { width: 33px; height: 32px; }
   .daily-pick-heading-summary { gap: 4px; font-size: .49rem; }
   .daily-pick-heading-summary em { padding: 4px 5px; }
+}
+
+/* =====================================================================
+   RESULTADOS EN TIEMPO REAL — apuesta diaria y mercados de combinada
+   ===================================================================== */
+.daily-results-button {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 29px;
+  padding: 0 9px;
+  overflow: hidden;
+  border: 1px solid rgba(226,232,240,.3);
+  border-radius: 999px;
+  color: #e9f5f1;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.17), rgba(30,45,51,.8) 44%, rgba(94,230,177,.15)),
+    #17242a;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 5px 13px rgba(0,0,0,.28);
+  font: inherit;
+  font-size: .56rem;
+  font-weight: 880;
+  cursor: pointer;
+  isolation: isolate;
+}
+
+.daily-results-button::after {
+  position: absolute;
+  top: -60%;
+  bottom: -60%;
+  left: -45%;
+  z-index: -1;
+  width: 22%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.72), transparent);
+  content: '';
+  transform: skewX(-18deg);
+  animation: dailyResultsShine 2.8s ease-in-out infinite;
+}
+
+.daily-results-button.is-active {
+  border-color: rgba(94,230,177,.45);
+  color: #dffff1;
+  background: linear-gradient(145deg, rgba(94,230,177,.28), rgba(20,70,55,.82) 58%, rgba(255,255,255,.12));
+}
+
+.daily-results-button > b {
+  display: grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  color: #06140f;
+  background: var(--dash-green);
+  font-size: .48rem;
+}
+
+@keyframes dailyResultsShine {
+  0%, 36% { left: -45%; opacity: 0; }
+  45% { opacity: .95; }
+  68%, 100% { left: 125%; opacity: 0; }
+}
+
+.daily-pick-empty {
+  display: flex;
+  flex: 1 0 min(315px, 88vw);
+  flex-direction: column;
+  justify-content: center;
+  min-height: 92px;
+  padding: 12px 14px;
+  border: 1px dashed rgba(94,230,177,.18);
+  border-radius: 14px;
+  background: rgba(94,230,177,.025);
+}
+
+.daily-pick-empty strong { color: #dbeae5; font-size: .68rem; }
+.daily-pick-empty span { margin-top: 4px; color: #72878e; font-size: .57rem; line-height: 1.4; }
+
+.daily-pick-card.has-won { border-color: rgba(74,222,128,.32); }
+.daily-pick-card.has-lost { border-color: rgba(248,113,113,.3); }
+
+.market-outcome-badge {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+  color: #4ade80;
+  font-size: .61rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.market-outcome-badge.is-lost { color: #fb7185; }
+.market-outcome-badge.is-pending { color: #a8bac0; }
+.market-outcome-badge img {
+  width: 24px;
+  height: 23px;
+  object-fit: contain;
+  filter: drop-shadow(0 3px 5px rgba(0,0,0,.38));
+  transform: rotate(-4deg);
+}
+
+.market-outcome-badge.is-lost img { transform: rotate(4deg); }
+.market-outcome-badge.is-pending i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px rgba(168,186,192,.09);
+}
+
+.market-outcome-badge.is-compact { margin-top: 4px; font-size: .56rem; }
+.market-outcome-badge.is-compact img { width: 21px; height: 20px; }
+
+.mkt > .market-outcome-badge {
+  margin: 5px 0 1px;
+}
+
+.market-option-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.ms-pick-copy > .market-outcome-badge { margin-top: 7px; }
+
+@media (max-width: 520px) {
+  .daily-pick-heading { grid-template-columns: minmax(0, 1fr) auto; }
+  .daily-pick-heading-title { gap: 5px; }
+  .daily-pick-heading-title > strong { font-size: .71rem; }
+  .daily-results-button { min-height: 27px; padding: 0 7px; font-size: .51rem; }
+  .daily-pick-heading-summary > b { display: none; }
+  .daily-pick-heading-summary em { font-size: .49rem; }
+}
+
+@media (max-width: 359px) {
+  .daily-pick-heading-title > img { display: none; }
+  .daily-pick-heading-summary em { max-width: 72px; overflow: hidden; text-overflow: ellipsis; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .daily-results-button::after { animation: none; }
+}
+
+/* Panel administrativo: curva y detalle de la apuesta del día. */
+.admin-daily-results { min-height: 55vh; }
+.admin-results-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+.admin-results-heading small { color: var(--t3); font-size: .7rem; }
+.admin-results-heading h2 { margin: 4px 0 0; color: var(--t1); font-size: 1.1rem; }
+.admin-results-heading label { display: flex; flex-direction: column; gap: 5px; color: var(--t3); font-size: .66rem; font-weight: 750; }
+.admin-results-heading input {
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--brd);
+  border-radius: 10px;
+  color: var(--t1);
+  background: var(--bg-2);
+  color-scheme: dark;
+  font: inherit;
+}
+.admin-results-loading,
+.admin-results-empty {
+  padding: 28px 16px;
+  border: 1px dashed var(--brd);
+  border-radius: 14px;
+  color: var(--t3);
+  text-align: center;
+}
+.admin-results-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.admin-results-metrics article {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+  padding: 14px;
+  border: 1px solid var(--brd);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(255,255,255,.045), rgba(255,255,255,.018));
+}
+.admin-results-metrics article.is-won { border-color: rgba(74,222,128,.25); }
+.admin-results-metrics article.is-lost { border-color: rgba(251,113,133,.24); }
+.admin-results-metrics article.is-accuracy { border-color: rgba(94,230,177,.3); background: rgba(94,230,177,.045); }
+.admin-results-metrics small { overflow: hidden; color: var(--t3); font-size: .65rem; text-overflow: ellipsis; white-space: nowrap; }
+.admin-results-metrics strong { color: var(--t1); font-size: 1.45rem; font-variant-numeric: tabular-nums; }
+.admin-results-metrics .is-won strong { color: #4ade80; }
+.admin-results-metrics .is-lost strong { color: #fb7185; }
+.admin-results-metrics .is-accuracy strong { color: var(--green); }
+.admin-results-chart-card {
+  padding: 14px;
+  border: 1px solid rgba(94,230,177,.16);
+  border-radius: 17px;
+  background:
+    radial-gradient(circle at 90% 0, rgba(94,230,177,.075), transparent 34%),
+    var(--bg-2);
+}
+.admin-results-chart-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.admin-results-chart-title > span { display: flex; flex-direction: column; gap: 3px; }
+.admin-results-chart-title small { color: var(--t3); font-size: .62rem; text-transform: uppercase; letter-spacing: .05em; }
+.admin-results-chart-title strong { color: #dff8ef; font-size: .82rem; }
+.admin-results-chart-title em { color: var(--t3); font-size: .63rem; font-style: normal; }
+.admin-hits-chart { width: 100%; height: 230px; margin-top: 8px; overflow: hidden; }
+.admin-hits-chart svg { display: block; width: 100%; height: 100%; }
+.admin-chart-grid { stroke: rgba(255,255,255,.065); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.admin-chart-line { fill: none; stroke: #5ee6b1; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.admin-chart-dot { fill: #06140f; stroke: #8af2cd; stroke-width: 3; vector-effect: non-scaling-stroke; }
+.admin-chart-label,
+.admin-chart-axis { fill: #71868d; font-size: 11px; font-weight: 700; }
+.admin-result-match-list { display: grid; gap: 10px; margin-top: 12px; }
+.admin-result-match {
+  padding: 14px;
+  border: 1px solid var(--brd);
+  border-radius: 15px;
+  background: var(--bg-2);
+}
+.admin-result-match > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.admin-result-match > header > span:first-child { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.admin-result-match > header small { color: var(--t3); font-size: .61rem; }
+.admin-result-match > header strong { overflow: hidden; color: var(--t1); font-size: .8rem; text-overflow: ellipsis; white-space: nowrap; }
+.admin-result-match > header > span:last-child {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: .55rem;
+  font-weight: 900;
+}
+.admin-result-match > header .is-live { color: #fb7185; background: rgba(251,113,133,.1); animation: livePulse 1.7s ease-in-out infinite; }
+.admin-result-match > header .is-final { color: #9fb1b7; background: rgba(255,255,255,.055); }
+.admin-result-match-summary { display: flex; gap: 9px; margin: 10px 0 8px; }
+.admin-result-match-summary b { font-size: .63rem; }
+.admin-result-match-summary .is-won { color: #4ade80; }
+.admin-result-match-summary .is-lost { color: #fb7185; }
+.admin-result-selections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.admin-result-selections > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255,255,255,.055);
+  border-radius: 10px;
+  background: rgba(255,255,255,.018);
+}
+.admin-result-selections > div > span:first-child { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.admin-result-selections > div strong { overflow: hidden; color: #dbe8e4; font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
+.admin-result-selections > div small { color: var(--t3); font-size: .57rem; }
+.admin-result-selections .market-outcome-badge { flex: 0 0 auto; margin-top: 0; }
+
+@media (max-width: 800px) {
+  .admin-tabs { overflow-x: auto; scrollbar-width: none; }
+  .admin-tabs::-webkit-scrollbar { display: none; }
+  .admin-tab { flex: 0 0 auto; padding: 11px 15px; white-space: nowrap; }
+  .admin-results-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-result-selections { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 520px) {
+  .admin-results-heading { align-items: stretch; flex-direction: column; }
+  .admin-results-heading input { width: 100%; }
+  .admin-hits-chart { height: 205px; }
+  .admin-results-chart-title { align-items: flex-start; flex-direction: column; }
+  .admin-result-match > header { align-items: flex-start; }
 }

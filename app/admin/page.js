@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import MarketOutcomeBadge from '../dashboard/components/MarketOutcomeBadge';
 
 export default function AdminPanel() {
   const [tab, setTab] = useState('chat');
@@ -20,13 +21,180 @@ export default function AdminPanel() {
         <button className={`admin-tab ${tab === 'pendientes' ? 'active' : ''}`} onClick={() => setTab('pendientes')}>
           Clientes Pendientes
         </button>
+        <button className={`admin-tab ${tab === 'resultados' ? 'active' : ''}`} onClick={() => setTab('resultados')}>
+          Aciertos del día
+        </button>
       </div>
 
       {tab === 'chat' && <ChatSection />}
       {tab === 'tickets' && <TicketsSection />}
       {tab === 'activos' && <ActiveClientsSection />}
       {tab === 'pendientes' && <PendingClientsSection />}
+      {tab === 'resultados' && <DailyResultsSection />}
     </div>
+  );
+}
+
+/* ── DAILY PICK RESULTS ── */
+function localIsoDate() {
+  try { return new Date().toLocaleDateString('en-CA'); }
+  catch { return new Date().toISOString().slice(0, 10); }
+}
+
+function HitsCurve({ points = [] }) {
+  const width = 760;
+  const height = 230;
+  const padX = 42;
+  const padTop = 24;
+  const padBottom = 42;
+  const usableWidth = width - padX * 2;
+  const usableHeight = height - padTop - padBottom;
+  const safePoints = points.length > 1 ? points : [{ label: 'Inicio', won: 0 }, { label: 'Ahora', won: points[0]?.won || 0 }];
+  const maxWon = Math.max(1, ...safePoints.map((point) => Number(point.won) || 0));
+  const coordinates = safePoints.map((point, index) => ({
+    ...point,
+    x: padX + (usableWidth * index / Math.max(1, safePoints.length - 1)),
+    y: padTop + usableHeight - ((Number(point.won) || 0) / maxWon * usableHeight),
+  }));
+  const line = coordinates.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' ');
+  const area = `${line} L ${coordinates.at(-1).x} ${padTop + usableHeight} L ${coordinates[0].x} ${padTop + usableHeight} Z`;
+  const labelStep = Math.max(1, Math.ceil(coordinates.length / 6));
+
+  return (
+    <div className="admin-hits-chart" role="img" aria-label={`Curva acumulada con ${coordinates.at(-1)?.won || 0} aciertos`}>
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="adminHitsArea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#5ee6b1" stopOpacity=".35" />
+            <stop offset="1" stopColor="#5ee6b1" stopOpacity="0" />
+          </linearGradient>
+          <filter id="adminHitsGlow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="4" result="blur" />
+            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+        </defs>
+        {[0, .25, .5, .75, 1].map((ratio) => (
+          <line key={ratio} x1={padX} x2={width - padX} y1={padTop + usableHeight * ratio} y2={padTop + usableHeight * ratio} className="admin-chart-grid" />
+        ))}
+        <path d={area} fill="url(#adminHitsArea)" />
+        <path d={line} className="admin-chart-line" filter="url(#adminHitsGlow)" />
+        {coordinates.map((point, index) => (
+          <g key={`${point.fixtureId || 'point'}-${index}`}>
+            <circle cx={point.x} cy={point.y} r="4.5" className="admin-chart-dot" />
+            {(index === 0 || index === coordinates.length - 1 || index % labelStep === 0) && (
+              <text x={point.x} y={height - 14} textAnchor="middle" className="admin-chart-label">{point.label}</text>
+            )}
+          </g>
+        ))}
+        <text x="12" y={padTop + 5} className="admin-chart-axis">{maxWon}</text>
+        <text x="18" y={padTop + usableHeight + 4} className="admin-chart-axis">0</text>
+      </svg>
+    </div>
+  );
+}
+
+function DailyResultsSection() {
+  const [date, setDate] = useState(localIsoDate);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    let running = false;
+    const timeZone = (() => {
+      try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Madrid'; }
+      catch { return 'Europe/Madrid'; }
+    })();
+    const load = async () => {
+      if (running) return;
+      running = true;
+      try {
+        const response = await fetch(`/api/admin/daily-pick-results?date=${date}&tz=${encodeURIComponent(timeZone)}`, { cache: 'no-store' });
+        const json = await response.json();
+        if (!response.ok) throw new Error(json.error || 'No se pudieron cargar los resultados');
+        if (!cancelled) { setData(json); setError(''); }
+      } catch (requestError) {
+        if (!cancelled) setError(requestError.message || 'No se pudieron cargar los resultados');
+      } finally {
+        running = false;
+        if (!cancelled) setLoading(false);
+      }
+    };
+    setLoading(true);
+    load();
+    const interval = setInterval(load, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [date]);
+
+  const totals = data?.totals || { won: 0, lost: 0, pending: 0, total: 0, accuracy: 0 };
+  return (
+    <section className="admin-daily-results">
+      <header className="admin-results-heading">
+        <div>
+          <small>Seguimiento oficial · actualización cada 30 segundos</small>
+          <h2>Aciertos de la apuesta del día</h2>
+        </div>
+        <label>
+          <span>Jornada</span>
+          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+        </label>
+      </header>
+
+      {error && <div className="warn" role="alert">{error}</div>}
+      {loading && !data ? <p className="admin-results-loading">Cargando resultados oficiales…</p> : (
+        <>
+          <div className="admin-results-metrics">
+            <article className="is-won"><small>Ganadas</small><strong>{totals.won}</strong></article>
+            <article className="is-lost"><small>Perdidas</small><strong>{totals.lost}</strong></article>
+            <article><small>En juego / pendientes</small><strong>{totals.pending}</strong></article>
+            <article className="is-accuracy"><small>Porcentaje de acierto</small><strong>{totals.accuracy}%</strong></article>
+          </div>
+
+          <div className="admin-results-chart-card">
+            <div className="admin-results-chart-title">
+              <span><small>Curva acumulada</small><strong>{totals.won} aciertos confirmados</strong></span>
+              <em>{data?.updatedAt ? `Actualizado ${fmtTime(data.updatedAt)}` : ''}</em>
+            </div>
+            <HitsCurve points={data?.curve || []} />
+          </div>
+
+          <div className="admin-result-match-list">
+            {(data?.matches || []).length === 0 && (
+              <div className="admin-results-empty">Todavía no hay partidos en vivo o finalizados con opciones de la apuesta del día.</div>
+            )}
+            {(data?.matches || []).map((match) => {
+              const matchWon = match.selections.filter((selection) => selection.outcome.status === 'won').length;
+              const matchLost = match.selections.filter((selection) => selection.outcome.status === 'lost').length;
+              return (
+                <article className="admin-result-match" key={`${match.sport}-${match.fixtureId}`}>
+                  <header>
+                    <span><small>{match.sport} · {match.league || 'Competición'}</small><strong>{match.matchName}</strong></span>
+                    <span className={match.isLive ? 'is-live' : 'is-final'}>{match.isLive ? 'EN VIVO' : 'FINALIZADO'}</span>
+                  </header>
+                  <div className="admin-result-match-summary">
+                    <b className="is-won">{matchWon} ganadas</b>
+                    <b className="is-lost">{matchLost} perdidas</b>
+                  </div>
+                  <div className="admin-result-selections">
+                    {match.selections.map((selection, index) => (
+                      <div key={`${selection.id || 'selection'}-${index}`}>
+                        <span><strong>{selection.name}</strong><small>{selection.probability}% · @{Number(selection.odd).toFixed(2)}</small></span>
+                        <MarketOutcomeBadge
+                          outcome={selection.outcome}
+                          pendingLabel={match.isLive ? 'En juego' : null}
+                          compact
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
