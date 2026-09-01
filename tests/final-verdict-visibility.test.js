@@ -23,7 +23,16 @@ test('el resumen de fútbol transporta el veredicto hasta la tarjeta', () => {
 
 test('cada opción del veredicto identifica su porcentaje de probabilidad', () => {
   const panel = read('app/dashboard/components/FinalVerdictPanel.js');
+  assert.match(panel, /<details className=\{`final-verdict-panel/);
+  assert.match(panel, /<summary className="final-verdict-heading">/);
   assert.match(panel, /<small>Probabilidad<\/small>/);
   assert.match(panel, /rawProbability \?\? pick\.probability/);
   assert.match(panel, /El Veredicto final se está preparando/);
+});
+
+test('la tarjeta de béisbol conserva el veredicto y sus porcentajes', () => {
+  const route = read('app/api/baseball/fixtures/route.js');
+  const dashboard = read('app/dashboard/baseball/page.js');
+  assert.match(route, /finalVerdict: analysis\.analysis\?\.finalVerdict \|\| null/);
+  assert.match(dashboard, /verdict=\{game\.analysis\?\.analysis\?\.finalVerdict\}/);
 });

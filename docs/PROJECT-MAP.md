@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-01 · Commit base: `bcc17e4`
+Actualizado: 2026-09-01 · Commit base: `ba6b990`
 
 ## Identidad y stack
 
@@ -697,6 +697,10 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   transportar `finalVerdict`; si falta durante la migración, la tarjeta conserva
   el análisis actual y muestra el bloque como "en preparación". Cada opción
   etiqueta expresamente su porcentaje como `Probabilidad`.
+  `FinalVerdictPanel` es un acordeón compartido y cerrado inicialmente en los
+  cuatro deportes. El contrato compacto de `/api/baseball/fixtures` debe
+  conservar `analysis.finalVerdict`; omitirlo deja la tarjeta MLB sin los
+  porcentajes que sí existen en `baseball_match_analysis`.
 - 2026-08-21: `FOOTBALL_CACHE_VERSION=23` fija el reparto temporada
   actual/histórico en 65/35 y reemplaza la antigua confianza `n/(n+12)` de los
   mercados over/under y booleanos por fiabilidad beta-binomial basada en

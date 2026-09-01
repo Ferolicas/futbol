@@ -120,7 +120,13 @@ export async function GET(request) {
       data_quality: analysis.data_quality,
       cache_version: analysis.cache_version,
       best_odds: { moneyline: analysis.best_odds?.moneyline || {} },
-      analysis: { pitcherMatchup: analysis.analysis?.pitcherMatchup || null },
+      // El listado usa un contrato compacto, pero Veredicto final es parte de
+      // la tarjeta. Antes se descartaba aquí y el componente recibía `null`,
+      // aunque PostgreSQL sí tenía picks y porcentajes calculados.
+      analysis: {
+        pitcherMatchup: analysis.analysis?.pitcherMatchup || null,
+        finalVerdict: analysis.analysis?.finalVerdict || null,
+      },
     });
     const analysisMap = new Map((analysesRes.data || [])
       .filter(a => Number(a.cache_version || 0) >= MULTISPORT_CACHE_VERSION)

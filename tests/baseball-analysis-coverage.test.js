@@ -164,7 +164,9 @@ test('la lista de partidos no transporta el análisis pesado de jugadores y entr
   const route = fs.readFileSync(path.join(__dirname, '../app/api/baseball/fixtures/route.js'), 'utf8');
   assert.doesNotMatch(route, /select\('fixture_id, probabilities,/);
   assert.match(route, /best_odds: \{ moneyline:/);
-  assert.match(route, /analysis: \{ pitcherMatchup:/);
+  assert.match(route, /analysis:\s*\{\s*\n\s*pitcherMatchup:/);
+  assert.match(route, /finalVerdict: analysis\.analysis\?\.finalVerdict \|\| null/);
+  assert.doesNotMatch(route, /playerMarkets: analysis\.analysis/);
   assert.match(route, /innings, home_stats, away_stats, finished_at/);
 });
 
