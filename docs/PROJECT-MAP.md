@@ -32,6 +32,8 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `/dashboard/baseball` | `app/dashboard/baseball/page.js` | Plan activo | MLB con mercados Bet365 exactos |
 | `/dashboard/baloncesto` | `app/dashboard/baloncesto/page.js` | Plan activo | Partidos NBA y NCAA |
 | `/dashboard/futbol-americano` | `app/dashboard/futbol-americano/page.js` | Plan activo | NFL, NCAA FBS y NCAA FCS |
+| `/dashboard/baloncesto/analisis/[id]` | `app/dashboard/baloncesto/analisis/[id]/page.js` | Plan activo | Análisis completo por mitades/cuartos, mercados Bet365 y veredicto |
+| `/dashboard/futbol-americano/analisis/[id]` | `app/dashboard/futbol-americano/analisis/[id]/page.js` | Plan activo | Análisis completo por mitades/cuartos, mercados Bet365 y veredicto |
 | `/admin` | `app/admin/` | Admin/owner | Operación y clientes |
 | `/ferney` | `app/ferney/` | Privada | Auditoría del propietario |
 | `/ferney/informes` | `app/ferney/informes/` | Admin/owner | Informes interactivos móviles de fútbol y MLB |
@@ -459,12 +461,37 @@ Las fuentes y namespaces de identificadores también están separados:
   calendario, logos, marcador, boxscore y jugadores.
 
 Baloncesto y fútbol americano usan el mismo motor empírico de fútbol/MLB sobre
-sus tablas aisladas. Solo publican una selección si la línea exacta existe en
-Bet365, su frecuencia cruda es estrictamente mayor que 60% y la fiabilidad de
-que la tasa real supere 60% es al menos 90%. El normalizador conserva ganador,
-total, total por equipo y hándicap de partido, mitades y cuartos con nombre e ID
-originales de mercado/selección. Una línea de otra casa, reconstruida o sin
-evidencia permanece fuera aunque el porcentaje sea alto.
+sus tablas aisladas. Su catálogo público aplica exactamente la política de
+Baseball: solo publica una selección desde 65% de frecuencia cruda cuando la
+línea exacta existe en Bet365 y la cuota es al menos 1,20; la fiabilidad queda
+visible como evidencia, pero no añade un veto propio. El normalizador conserva
+ganador, total, total por equipo y hándicap de partido, mitades y cuartos con
+nombre e ID originales de mercado/selección. Una línea de otra casa,
+reconstruida o sin evidencia permanece fuera aunque el porcentaje sea alto.
+`MultisportDashboard` muestra siempre el acordeón **Arma tu combinada** (también
+cuando Bet365 no deja ninguna opción elegible) y enlaza a los detalles completos
+de NBA/NCAA y NFL/NCAA. Esos detalles muestran todas las frecuencias, esperanzas,
+totales por equipo, hándicaps, estadísticas y periodos reglamentarios aunque no
+exista cuota; solo el catálogo apostable se cruza con Bet365.
+
+### Veredicto final aislado
+
+`lib/final-verdict.js` construye **Veredicto final** para fútbol, Baseball,
+baloncesto y fútbol americano sin modificar sus motores ni sus recomendaciones
+vigentes. Por equipo usa exclusivamente partidos oficiales de la competición y
+temporada actuales; excluye amistosos, pretemporada, exhibición y spring
+training. Si no existe ningún partido oficial de esa temporada, toma solo los
+primeros cinco y los últimos cinco de la temporada anterior de esa competición.
+
+Cada veredicto busca hasta dos H2H oficiales con prioridad estricta: primero los
+más recientes de la competición exacta del partido, sin importar el año; solo
+los huecos se completan con los H2H oficiales más recientes de otra
+competición. La evidencia persistida marca `sameCompetition` o `complemento`
+para auditar el origen. Las cifras esperadas permanecen descriptivas. Las
+opciones del veredicto son independientes: Bet365 exacta, cuota ≥1,50 y, para
+mercados O/U, únicamente **Más de**. Por familia se conserva la opción de mayor
+probabilidad y la cuota decide solo empates. El refresco de cuotas de fútbol
+reconstruye también el veredicto para no conservar mercados retirados.
 
 `scripts/train-multisport-empirical-engine.js` realiza selección cronológica
 70/30 por deporte y guarda diagnósticos fuera de muestra sin recalibrar ni
@@ -658,6 +685,12 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   gratuito y coordinan un máximo de diez solicitudes/minuto entre web y workers;
   un 429 temporal pausa el host, pero nunca abre el circuito de cuota diaria.
   Las cuotas deportivas nunca se usan como probabilidad del modelo.
+- 2026-09-01: `FOOTBALL_CACHE_VERSION=24` y `MULTISPORT_CACHE_VERSION=20`
+  incorporan el Veredicto final aislado, los detalles completos de baloncesto y
+  fútbol americano y la política Baseball 65%/Bet365/≥1,20 en ambos deportes.
+  El arranque heavy encola de forma idempotente la regeneración de fútbol para
+  hoy/mañana y de NBA/NCAA/NFL para los tres días anteriores, hoy y mañana,
+  por versión y fecha.
 - 2026-08-21: `FOOTBALL_CACHE_VERSION=23` fija el reparto temporada
   actual/histórico en 65/35 y reemplaza la antigua confianza `n/(n+12)` de los
   mercados over/under y booleanos por fiabilidad beta-binomial basada en
@@ -748,8 +781,9 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   antiguos en memoria.
 - 2026-08-02: nunca elevar `MULTISPORT_CACHE_VERSION` sin la guardia automática
   de cobertura. La API solo considera analizada una fila de la versión vigente;
-  bootstrap + reconciliación de 15 minutos reparan versiones antiguas, juegos
-  añadidos tarde y días adyacentes de cualquier zona horaria. La ruta manual de
+  Baseball conserva bootstrap + reconciliación de 15 minutos, y el arranque
+  heavy encola los tres días anteriores, hoy y mañana para baloncesto y fútbol americano. Así se reparan
+  versiones antiguas y días adyacentes sin una visita del cliente. La ruta manual de
   compatibilidad admite hasta 500 IDs y rechaza el exceso explícitamente: jamás
   truncar lotes de forma silenciosa.
 - 2026-06: los nombres `supabaseAdmin`/`createSupabaseServerClient` son shims PG, no Supabase activo.

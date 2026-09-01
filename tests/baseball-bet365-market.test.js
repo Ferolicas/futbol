@@ -10,6 +10,7 @@ process.env.DATABASE_SSL ||= 'false';
 const { normalizeApiSportsOdds } = require('../lib/api-sports-multisport.js');
 const { buildMultisportCombinada } = require('../lib/multisport-analysis.js');
 const { buildBaseballApuestaDelDia, buildCustomBaseballCombinada } = require('../lib/baseball-combinada.js');
+const { buildMultisportFinalVerdict, selectCompetitionAwareH2H, selectVerdictTeamHistory } = require('../lib/final-verdict.js');
 
 function probability(value) {
   return { probability: Math.min(95, value * 100), rawProbability: value, evidence: { n: 10, hits: value * 10 } };
@@ -168,7 +169,7 @@ test('Baseball publica solo selecciones cruzadas con Bet365 y cuota mínima 1.20
   )));
 });
 
-test('NBA y NFL publican todas las líneas Bet365 con más de 60% y fiabilidad mínima 90%', () => {
+test('NBA y NFL aplican la misma política pública de Baseball', () => {
   const price = (odd, selectionName) => ({ odd, bookmaker: 'Bet365', selectionName, marketName: 'Mercado real' });
   const prediction = {
     sport: 'american_football',
@@ -210,15 +211,94 @@ test('NBA y NFL publican todas las líneas Bet365 con más de 60% y fiabilidad m
   };
 
   const result = buildMultisportCombinada(prediction, odds, fixture);
-  assert.equal(result.selectableThreshold, 60);
-  assert.equal(result.minimumReliability, 90);
-  assert.ok(result.selectable.every(selection => selection.rawProbability > 60));
-  assert.ok(result.selectable.every(selection => selection.reliability >= 90));
+  assert.equal(result.selectableThreshold, 65);
+  assert.equal(result.highlightThreshold, 65);
+  assert.equal(result.dailyThreshold, 70);
+  assert.equal(result.minimumReliability, null);
+  assert.ok(result.selectable.every(selection => selection.rawProbability >= 65));
   assert.ok(result.selectable.every(selection => selection.bookmaker === 'Bet365'));
   assert.ok(result.selectable.some(selection => selection.id === 'handicap-home-m3_5'));
   assert.ok(result.selectable.some(selection => selection.id === 'team-total-home-21.5-over'));
   assert.ok(result.selectable.some(selection => selection.id === 'firstHalf-total-20.5-over'));
   assert.ok(result.selectable.every(selection => selection.id !== 'total-48.5-over'));
+});
+
+test('el veredicto prioriza dos H2H de la competición y solo completa huecos con otra', () => {
+  const rows = [
+    { fixture_id: 'liga-nuevo', competition_id: 'LIGA', kickoff: '2026-08-20T00:00:00Z' },
+    { fixture_id: 'copa-unico', competition_id: 'COPA', kickoff: '2025-02-01T00:00:00Z' },
+    { fixture_id: 'liga-viejo', competition_id: 'LIGA', kickoff: '2024-08-20T00:00:00Z' },
+  ];
+  assert.deepEqual(
+    selectCompetitionAwareH2H(rows, 'COPA').map((row) => row.fixture_id),
+    ['copa-unico', 'liga-nuevo'],
+  );
+  const withSecondCup = [...rows, { fixture_id: 'copa-dos', competition_id: 'COPA', kickoff: '2023-02-01T00:00:00Z' }];
+  assert.deepEqual(
+    selectCompetitionAwareH2H(withSecondCup, 'COPA').map((row) => row.fixture_id),
+    ['copa-unico', 'copa-dos'],
+  );
+});
+
+test('el veredicto usa la temporada actual oficial o primeros y últimos cinco de la anterior', () => {
+  const current = selectVerdictTeamHistory([
+    { fixture_id: 'actual', competition_id: 'NBA', season: '2026', kickoff: '2026-08-01', _official: true },
+    { fixture_id: 'pre', competition_id: 'NBA', season: '2026', kickoff: '2026-07-01', _official: false },
+  ], { competitionId: 'NBA', season: '2026' });
+  assert.equal(current.source, 'current-season');
+  assert.deepEqual(current.rows.map((row) => row.fixture_id), ['actual']);
+
+  const previousRows = Array.from({ length: 14 }, (_, index) => ({
+    fixture_id: `p${index + 1}`, competition_id: 'NBA', season: '2025',
+    kickoff: `2025-${String(index + 1).padStart(2, '0')}-01`, _official: true,
+  }));
+  const previous = selectVerdictTeamHistory(previousRows, { competitionId: 'NBA', season: '2026' });
+  assert.equal(previous.source, 'previous-season-first-last-5');
+  assert.equal(previous.rows.length, 10);
+  assert.deepEqual(new Set(previous.rows.map((row) => row.fixture_id)), new Set(['p1', 'p2', 'p3', 'p4', 'p5', 'p10', 'p11', 'p12', 'p13', 'p14']));
+});
+
+test('el veredicto multi-deporte publica solo Más de Bet365 con cuota 1.50 y elige la mayor frecuencia', async () => {
+  const makeRow = (fixtureId, teamId, opponentId, scoreFor, scoreAgainst, kickoff) => ({
+    fixture_id: fixtureId, team_id: teamId, opponent_id: opponentId,
+    competition_id: '1', season: '2026', kickoff, is_home: teamId === '1',
+    score_for: scoreFor, score_against: scoreAgainst,
+    period_scores: [10, 10, 10, scoreFor - 30],
+    period_scores_against: [10, 10, 10, scoreAgainst - 30],
+    stats: {}, match_raw: { season: { type: 2 } }, match_status: 'FT',
+    home_team: 'Local', away_team: 'Visitante',
+    home_score: teamId === '1' ? scoreFor : scoreAgainst,
+    away_score: teamId === '1' ? scoreAgainst : scoreFor,
+  });
+  const rows = [
+    makeRow('a', '1', '2', 28, 14, '2026-08-20T00:00:00Z'),
+    makeRow('a', '2', '1', 14, 28, '2026-08-20T00:00:00Z'),
+    makeRow('b', '1', '2', 35, 21, '2026-08-10T00:00:00Z'),
+    makeRow('b', '2', '1', 21, 35, '2026-08-10T00:00:00Z'),
+  ];
+  const pool = { query: async () => ({ rows }) };
+  const price = (odd) => ({ odd, bookmaker: 'Bet365' });
+  const verdict = await buildMultisportFinalVerdict(pool, {
+    sport: 'american_football',
+    fixture: {
+      date: '2026-09-01T00:00:00Z', season: '2026', league: { id: '1' },
+      teams: { home: { id: '1', name: 'Local' }, away: { id: '2', name: 'Visitante' } },
+    },
+    odds: {
+      moneyline: {}, spreads: {}, periods: {}, teamTotals: { home: {}, away: {} }, statistics: {},
+      totals: {
+        40.5: { over: price(1.49), under: price(2.2) },
+        50.5: { over: price(1.6), under: price(2.1) },
+        60.5: { over: price(3.2), under: price(1.7) },
+      },
+    },
+  });
+  assert.equal(verdict.h2h.length, 2);
+  assert.equal(verdict.picks.length, 1);
+  assert.equal(verdict.picks[0].line, 50.5);
+  assert.equal(verdict.picks[0].side, 'over');
+  assert.equal(verdict.picks[0].bookmaker, 'Bet365');
+  assert.ok(verdict.picks[0].odd >= 1.5);
 });
 
 test('Baseball conserva todas las líneas exactas y cruza props por nombre de jugador', () => {

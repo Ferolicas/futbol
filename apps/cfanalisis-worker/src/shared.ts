@@ -52,6 +52,7 @@ const [
   _multisportAnalysis,
   _multisportProviders,
   _trainMultisport,
+  _finalVerdict,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
@@ -77,13 +78,14 @@ const [
   import(LIB + 'model-player-markets.js'),
   import(LIB + 'model-probabilities.js'),
   import(SCRIPTS + 'train-football-empirical-engine.js'),
-  // Deploy marker: multisport v18 (Bet365 exacto NBA/NFL, catálogo >60/90,
-  // períodos completos y hits MLB por 1/3/5 entradas) + football report v2.
+  // Deploy marker: multisport v20 (política Baseball y veredicto oficial)
+  // + football cache v24. Estos módulos viven fuera del árbol TypeScript.
   // These runtime imports live outside the TypeScript tree, so this file must
   // trigger a worker reload when their contract changes.
   import(LIB + 'multisport-analysis.js'),
   import(LIB + 'multisport-providers.js'),
   import(SCRIPTS + 'train-multisport-empirical-engine.js'),
+  import(LIB + 'final-verdict.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -99,6 +101,7 @@ export const redisListPush = _redis.redisListPush;
 export const redisListRange = _redis.redisListRange;
 export const KEYS = _redis.KEYS;
 export const TTL = _redis.TTL;
+export const FOOTBALL_CACHE_VERSION = _sanityCache.FOOTBALL_CACHE_VERSION;
 
 // lib/api-football.js
 export const getFixtures = _apiFootball.getFixtures;
@@ -186,6 +189,7 @@ export const MULTISPORT_CACHE_VERSION = _multisportAnalysis.MULTISPORT_CACHE_VER
 export const getSportGamesByDate = _multisportProviders.getSportGamesByDate;
 export const getSportGameDetails = _multisportProviders.getSportGameDetails;
 export const trainMultisportEmpiricalEngine = _trainMultisport.trainMultisportEmpiricalEngine;
+export const buildFootballFinalVerdict = _finalVerdict.buildFootballFinalVerdict;
 
 // lib/combinada.js
 export const buildCombinada = _combinada.buildCombinada;

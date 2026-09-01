@@ -2,10 +2,12 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import useSWR from 'swr';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import {
   BarChart3,
+  ArrowRight,
   CalendarDays,
   ChevronDown,
   ChevronLeft,
@@ -13,13 +15,13 @@ import {
   Layers3,
   RefreshCw,
   ShieldCheck,
-  Sparkles,
   X,
 } from 'lucide-react';
 import { fetcher } from '../../../lib/fetcher';
 import { usePusherEvent } from '../../../lib/use-pusher';
 import DashboardBuffer from './DashboardBuffer';
 import { DateCaption, LeaguePicker, StatusPicker } from './DashboardFilters';
+import FinalVerdictPanel from './FinalVerdictPanel';
 import { displayBettingText } from '../utils/display-betting-text';
 
 function detectTimeZone() {
@@ -145,6 +147,7 @@ function ProbabilityLine({ label, entry, odd }) {
 }
 
 function PickButton({ pick, selected, onToggle }) {
+  const reliability = Number(pick.reliability);
   return (
     <button
       type="button"
@@ -158,7 +161,7 @@ function PickButton({ pick, selected, onToggle }) {
       </span>
       <span className="ms-pick-metrics">
         <span><small>Prob.</small><b>{probability(pick)}%</b></span>
-        <span><small>Fiab.</small><b>{Number(pick.reliability).toFixed(1)}%</b></span>
+        {Number.isFinite(reliability) && <span><small>Fiab.</small><b>{reliability.toFixed(1)}%</b></span>}
         <span><small>Cuota</small><b>{oddValue(pick.odd)?.toFixed(2) || '—'}</b></span>
       </span>
     </button>
@@ -167,7 +170,7 @@ function PickButton({ pick, selected, onToggle }) {
 
 const EMPTY_SELECTED_PICKS = Object.freeze({});
 
-const MatchCard = memo(function MatchCard({ game, timeZone, scoreLabel, expanded, onToggle, selectedPicks, onTogglePick }) {
+const MatchCard = memo(function MatchCard({ game, timeZone, scoreLabel, slug, expanded, onToggle, selectedPicks, onTogglePick }) {
   const analysis = game.analysis;
   const probabilities = analysis?.probabilities;
   const moneyline = probabilities?.moneyline;
@@ -239,48 +242,69 @@ const MatchCard = memo(function MatchCard({ game, timeZone, scoreLabel, expanded
             </div>
           ) : (
             <>
-              <section className="ms-analysis-section">
-                <h3>Probabilidad de resultado</h3>
-                <ProbabilityLine label={`${game.teams.home.name} gana`} entry={moneyline?.home} odd={bestOdds?.moneyline?.home} />
-                <ProbabilityLine label={`${game.teams.away.name} gana`} entry={moneyline?.away} odd={bestOdds?.moneyline?.away} />
-                {moneyline?.draw && <ProbabilityLine label="Empate" entry={moneyline.draw} odd={bestOdds?.moneyline?.draw} />}
-              </section>
-
-              {total && (
-                <section className="ms-analysis-section">
-                  <h3>Mejor frecuencia de anotación</h3>
-                  <ProbabilityLine
-                    label={`${total.side} ${total.line} ${scoreLabel}`}
-                    entry={{ probability: total.probability, evidence: total.evidence }}
-                    odd={bestOdds?.totals?.[total.line]?.[total.side === 'Más de' ? 'over' : 'under']}
-                  />
-                </section>
-              )}
-
-              <section className="ms-analysis-section compact">
-                <h3><ShieldCheck size={15} aria-hidden="true" /> Cómo llega a estos porcentajes</h3>
-                <p>Se cuentan resultados reales y la temporada actual tiene más peso que el historial anterior. Rival, localía y jugadores disponibles solo ponderan partidos registrados semejantes.</p>
-                <div className="ms-evidence-summary">
-                  <span>{game.teams.home.name}: {homeSamples} partidos</span>
-                  <span>{game.teams.away.name}: {awaySamples} partidos</span>
-                </div>
-              </section>
-
-              {picks.length > 0 && (
+              <details className="ms-sub-accordion" open>
+                <summary><Layers3 size={16} aria-hidden="true" /><span>Arma tu combinada</span><small>{picks.length} opciones</small></summary>
                 <section className="ms-analysis-section picks">
-                  <h3><Sparkles size={15} aria-hidden="true" /> Selecciona para tu combinada</h3>
-                  <div className="ms-pick-list">
-                    {picks.map((pick) => (
-                      <PickButton
-                        key={pick.id}
-                        pick={pick}
-                        selected={Boolean(selectedPicks[pick.id])}
-                        onToggle={() => onTogglePick(game, pick)}
-                      />
-                    ))}
+                  {picks.length > 0 ? (
+                    <div className="ms-pick-list">
+                      {picks.map((pick) => (
+                        <PickButton
+                          key={pick.id}
+                          pick={pick}
+                          selected={Boolean(selectedPicks[pick.id])}
+                          onToggle={() => onTogglePick(game, pick)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="ms-empty-market">
+                      Bet365 no tiene ahora una línea exacta compatible con el cálculo, probabilidad mínima del 65% y cuota mínima de 1,20.
+                    </div>
+                  )}
+                </section>
+              </details>
+
+              <details className="ms-sub-accordion">
+                <summary><BarChart3 size={16} aria-hidden="true" /><span>Frecuencias calculadas</span></summary>
+                <section className="ms-analysis-section">
+                  <h3>Probabilidad de resultado</h3>
+                  <ProbabilityLine label={`${game.teams.home.name} gana`} entry={moneyline?.home} odd={bestOdds?.moneyline?.home} />
+                  <ProbabilityLine label={`${game.teams.away.name} gana`} entry={moneyline?.away} odd={bestOdds?.moneyline?.away} />
+                  {moneyline?.draw && <ProbabilityLine label="Empate" entry={moneyline.draw} odd={bestOdds?.moneyline?.draw} />}
+                </section>
+
+                {total && (
+                  <section className="ms-analysis-section">
+                    <h3>Mejor frecuencia de anotación</h3>
+                    <ProbabilityLine
+                      label={`${total.side} ${total.line} ${scoreLabel}`}
+                      entry={{ probability: total.probability, evidence: total.evidence }}
+                      odd={bestOdds?.totals?.[total.line]?.[total.side === 'Más de' ? 'over' : 'under']}
+                    />
+                  </section>
+                )}
+
+                <section className="ms-analysis-section compact">
+                  <h3><ShieldCheck size={15} aria-hidden="true" /> Cómo llega a estos porcentajes</h3>
+                  <p>Se cuentan resultados reales y la temporada actual tiene más peso que el historial anterior. Rival, localía y jugadores disponibles solo ponderan partidos registrados semejantes.</p>
+                  <div className="ms-evidence-summary">
+                    <span>{game.teams.home.name}: {homeSamples} partidos</span>
+                    <span>{game.teams.away.name}: {awaySamples} partidos</span>
                   </div>
                 </section>
-              )}
+              </details>
+
+              <FinalVerdictPanel
+                verdict={analysis?.analysis?.finalVerdict}
+                homeName={game.teams.home.name}
+                awayName={game.teams.away.name}
+                compact
+              />
+
+              <Link className="ms-view-full" href={`/dashboard/${slug}/analisis/${encodeURIComponent(game.id)}`}>
+                <span><small>Explora cada mercado y periodo</small><strong>Ver análisis completo</strong></span>
+                <ArrowRight size={18} aria-hidden="true" />
+              </Link>
             </>
           )}
         </div>
@@ -620,6 +644,7 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
                       game={row.game}
                       timeZone={timeZone}
                       scoreLabel={scoreLabel}
+                      slug={slug}
                       expanded={expandedMatch === row.game.id}
                       onToggle={toggleExpanded}
                       selectedPicks={selectedMarkets[String(row.game.id)] || EMPTY_SELECTED_PICKS}

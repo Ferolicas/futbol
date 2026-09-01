@@ -16,7 +16,8 @@
 import {
   redisGet, redisSet, bogotaToday, getCachedFixturesRaw,
   getCachedAnalysis, cacheAnalysis, incrementApiCallCount,
-  footballApiRequest, extractOdds, buildModelCombinada, triggerEvent,
+  footballApiRequest, extractOdds, buildModelCombinada, buildFootballFinalVerdict,
+  pgPool, triggerEvent,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
@@ -38,7 +39,7 @@ function refreshStateKey(date, fixtureId) {
   return `football-odds-refresh-v2:${date}:${fixtureId}`;
 }
 
-function rebuildWithOdds(existing, odds) {
+async function rebuildWithOdds(existing, odds, fixture) {
   if (!existing?._scored || typeof existing._scored !== 'object') return null;
   const teamNames = {
     home: existing.homeTeam,
@@ -54,10 +55,26 @@ function rebuildWithOdds(existing, odds) {
     existing.calculatedProbabilities || {},
     existing.cornerCardData || null,
   );
+  let finalVerdict = existing.finalVerdict;
+  try {
+    finalVerdict = await buildFootballFinalVerdict(pgPool, {
+      fixture: {
+        id: Number(fixture.fixture?.id),
+        date: fixture.fixture?.date,
+        season: fixture.league?.season,
+        league: { id: fixture.league?.id, name: fixture.league?.name, season: fixture.league?.season },
+        teams: fixture.teams,
+      },
+      odds,
+    });
+  } catch (error) {
+    console.error(`[futbol-odds] finalVerdict ${fixture.fixture?.id}: ${error.message}`);
+  }
   return {
     ...existing,
     odds,
     combinada,
+    finalVerdict,
     oddsUpdatedAt: new Date().toISOString(),
   };
 }
@@ -166,7 +183,7 @@ export async function runOdds(payload = {}) {
       return { fixtureId, status: 'no-odds' };
     }
 
-    const rebuilt = rebuildWithOdds(existing, odds);
+    const rebuilt = await rebuildWithOdds(existing, odds, fixture);
     if (!rebuilt) {
       noAnalysis += 1;
       // No marcar complete: cuando el análisis aparezca, el siguiente tick

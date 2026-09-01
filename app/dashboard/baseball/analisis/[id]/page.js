@@ -8,6 +8,7 @@ import DashboardBuffer from '../../../components/DashboardBuffer';
 import BaseballResultStats from '../../components/BaseballResultStats';
 import { displayBettingText } from '../../../utils/display-betting-text';
 import { BASEBALL_RECOMMENDATION_MIN_PROBABILITY } from '../../../../../lib/recommendation-policy';
+import FinalVerdictPanel from '../../../components/FinalVerdictPanel';
 
 const cap = (v) => {
   const value = Math.max(0, Math.min(100, Number(v) || 0));
@@ -216,6 +217,12 @@ export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClos
           awayName={a?.away_team || 'Visitante'}
         />
       )}
+
+      <FinalVerdictPanel
+        verdict={a?.analysis?.finalVerdict}
+        homeName={a?.home_team || 'Local'}
+        awayName={a?.away_team || 'Visitante'}
+      />
 
       {/* H2H */}
       {a?.analysis?.h2h?.length > 0 && (

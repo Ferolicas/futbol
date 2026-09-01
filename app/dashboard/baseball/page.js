@@ -46,6 +46,7 @@ import { usePusherEvent } from '../../../lib/use-pusher';
 import { DateCaption, LeaguePicker, StatusPicker } from '../components/DashboardFilters';
 import DashboardBuffer from '../components/DashboardBuffer';
 import AnalysisFullModal from '../components/AnalysisFullModal';
+import FinalVerdictPanel from '../components/FinalVerdictPanel';
 import BaseballResultStats from './components/BaseballResultStats';
 import { displayBettingText } from '../utils/display-betting-text';
 import {
@@ -889,6 +890,13 @@ function GameCard({ game, userTz, isFavorite, isAnalyzed, isExpanded,
                     markets={availableMarkets}
                   />
                 </SubAccordion>
+
+                <FinalVerdictPanel
+                  verdict={game.analysis?.analysis?.finalVerdict}
+                  homeName={home?.name || 'Local'}
+                  awayName={away?.name || 'Visitante'}
+                  compact
+                />
 
                 <button className="baseball-view-full" onClick={onViewFull}>
                   <span><small>Explora cada indicador</small><strong>Ver análisis completo</strong></span>

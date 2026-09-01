@@ -44,6 +44,7 @@ import DashboardBuffer from './components/DashboardBuffer';
 import AnalysisFullModal from './components/AnalysisFullModal';
 import { displayBettingText } from './utils/display-betting-text';
 import { buildFootballProbabilityGroups } from './utils/probability-lines';
+import FinalVerdictPanel from './components/FinalVerdictPanel';
 import {
   leagueSelectionIncludes,
   normalizeLeagueSelection,
@@ -2411,6 +2412,13 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                 odds={data.odds}
                 homeTeam={match.teams.home.name}
                 awayTeam={match.teams.away.name}
+              />
+
+              <FinalVerdictPanel
+                verdict={data.finalVerdict}
+                homeName={match.teams.home.name}
+                awayName={match.teams.away.name}
+                compact
               />
 
               {/* ── Jugadores destacados ── */}

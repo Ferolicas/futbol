@@ -17,6 +17,7 @@ import { useWorkerSocketState } from '../../../../hooks/useWorkerSocket';
 import DashboardBuffer from '../../components/DashboardBuffer';
 import { displayBettingText } from '../../utils/display-betting-text';
 import { buildFootballProbabilityGroups } from '../../utils/probability-lines';
+import FinalVerdictPanel from '../../components/FinalVerdictPanel';
 
 function detectCountry() {
   try {
@@ -1056,6 +1057,8 @@ export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false,
               </GlassSection>
             );
           })()}
+
+          <FinalVerdictPanel verdict={a.finalVerdict} homeName={a.homeTeam} awayName={a.awayTeam} />
 
           {/* ══════════════════════════════════════════
               SECCIÓN 9 — COMBINADA AUTOMÁTICA

@@ -159,6 +159,41 @@ test('baseball calcula las nueve entradas, tramos e hits sin depender de cuotas'
   assert.equal(visual.statistics.hits.home[8.5].over, 50);
 });
 
+test('NCAA Basketball calcula dos mitades y NBA conserva sus cuatro cuartos', async () => {
+  const run = async (leagueId, periodScores, periodScoresAgainst) => {
+    const fixture = {
+      id: 'future', date: '2026-02-01T12:00:00Z', season: '2026', league: { id: leagueId },
+      teams: { home: { id: '1', name: 'A' }, away: { id: '2', name: 'B' } }, context: { home: {}, away: {} },
+    };
+    const row = {
+      kickoff: '2026-01-01T12:00:00Z', season: '2026', competition_id: leagueId,
+      score_for: periodScores.reduce((sum, value) => sum + value, 0),
+      score_against: periodScoresAgainst.reduce((sum, value) => sum + value, 0),
+      period_scores: periodScores, period_scores_against: periodScoresAgainst, stats: {},
+    };
+    return computeMultisportEmpiricalPrediction({ query: async () => ({ rows: [] }) }, {
+      sport: 'basketball', fixture,
+      teamRows: {
+        home: [{ ...row, fixture_id: 'h', team_id: '1', opponent_id: '8', is_home: true }],
+        away: [{ ...row, fixture_id: 'a', team_id: '2', opponent_id: '9', is_home: false }],
+      },
+      odds: {},
+      config: { venueBoost: 1, opponentBoost: 1, competitionBoost: 1, starterBoost: 1, lineupBoost: 1 },
+    });
+  };
+
+  const ncaa = await run('116', [40, 35], [38, 32]);
+  assert.deepEqual(Object.keys(ncaa.periods), ['firstHalf', 'secondHalf']);
+  assert.equal(ncaa.periods.firstHalf.expected.home, 39);
+  assert.equal(ncaa.periods.secondHalf.expected.home, 33.5);
+
+  const nba = await run('NBA', [20, 21, 22, 23], [18, 19, 20, 21]);
+  assert.ok(nba.periods.quarter1);
+  assert.ok(nba.periods.quarter4);
+  assert.equal(nba.periods.firstHalf.expected.home, 39);
+  assert.equal(nba.periods.quarter4.expected.home, 22);
+});
+
 test('props de jugador son frecuencias directas y conservan evidencia', () => {
   const result = buildEmpiricalPlayerProbabilities({ hits: [{ id: 7, name: 'Bateador', history: [1, 0] }] });
   assert.equal(result.hits[0].lineProbs[0.5], 50);

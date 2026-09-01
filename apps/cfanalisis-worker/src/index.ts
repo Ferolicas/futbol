@@ -11,7 +11,7 @@ import { logger } from './logger.js';
 import { notifyError } from './notifier.js';
 import { buildServer } from './server.js';
 import { startWorkers } from './workers.js';
-import { enqueueBaseballCoverageBootstrap, registerSchedulers } from './schedulers.js';
+import { enqueueBaseballCoverageBootstrap, enqueueMultisportAnalysisBootstrap, registerSchedulers } from './schedulers.js';
 import { bullConnection } from './redis.js';
 import { queues } from './queues.js';
 
@@ -50,6 +50,7 @@ async function main() {
   }
   if (ROLE === 'heavy' || ROLE === 'all') {
     await enqueueBaseballCoverageBootstrap();
+    await enqueueMultisportAnalysisBootstrap();
   }
 
   // Graceful shutdown

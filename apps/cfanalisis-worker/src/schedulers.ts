@@ -1,6 +1,6 @@
 import { queues, type QueueName } from './queues.js';
 import { logger } from './logger.js';
-import { MULTISPORT_CACHE_VERSION, bogotaToday } from './shared.js';
+import { FOOTBALL_CACHE_VERSION, MULTISPORT_CACHE_VERSION, bogotaToday } from './shared.js';
 
 // Schedulers nativos del worker (BullMQ Job Schedulers). Reemplazan a
 // cron-job.org: el worker se auto-dispara usando el Redis local del VPS.
@@ -168,4 +168,35 @@ export async function enqueueBaseballCoverageBootstrap(): Promise<void> {
     { jobId },
   );
   logger.info({ queue: 'baseball-coverage', jobId: job.id, date, cacheVersion: MULTISPORT_CACHE_VERSION }, 'baseball coverage bootstrap listo');
+}
+
+// Igual que la guardia de Baseball: al subir el contrato no esperamos al cron
+// nocturno. Regenera los tres días anteriores, hoy y mañana para NBA/NCAA y
+// NFL/NCAA, de modo que las
+// tarjetas v20 (acordeón + veredicto) aparezcan durante el mismo despliegue.
+export async function enqueueMultisportAnalysisBootstrap(): Promise<void> {
+  const today = bogotaToday();
+  const shift = (amount: number) => {
+    const value = new Date(`${today}T12:00:00Z`);
+    value.setUTCDate(value.getUTCDate() + amount);
+    return value.toISOString().slice(0, 10);
+  };
+  const dates = [-3, -2, -1, 0, 1].map(shift);
+  // Fútbol también elevó su contrato: fuerza hoy y mañana. `futbol-daily`
+  // reutiliza el batch normal, con sus límites y persistencia habituales.
+  for (const date of [shift(0), shift(1)]) {
+    const jobId = `futbol-daily-v${FOOTBALL_CACHE_VERSION}-${date}`;
+    await queues['futbol-daily'].add('futbol-daily', { date, force: true, bootstrap: true }, { jobId });
+    logger.info({ queue: 'futbol-daily', jobId, date, cacheVersion: FOOTBALL_CACHE_VERSION }, 'football verdict bootstrap listo');
+  }
+  for (const [sport, queueName] of [
+    ['basketball', 'basketball-analyze'],
+    ['american-football', 'american-football-analyze'],
+  ] as const) {
+    for (const date of dates) {
+      const jobId = `${sport}-analysis-v${MULTISPORT_CACHE_VERSION}-${date}`;
+      await queues[queueName].add(queueName, { date, bootstrap: true }, { jobId });
+      logger.info({ queue: queueName, jobId, date, cacheVersion: MULTISPORT_CACHE_VERSION }, 'multisport analysis bootstrap listo');
+    }
+  }
 }
