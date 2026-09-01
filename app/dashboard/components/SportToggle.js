@@ -12,9 +12,9 @@ import {
 
 const SPORTS = [
   { key: 'futbol', label: 'Fútbol', detail: 'Partidos y combinadas', path: '/dashboard', icon: FutbolIcon },
-  { key: 'baseball', label: 'Baseball', detail: 'MLB y ligas menores', path: '/dashboard/baseball', icon: BaseballIcon },
-  { key: 'basketball', label: 'Baloncesto', detail: 'NBA y NCAA', path: '/dashboard/baloncesto', icon: BaloncestoIcon },
-  { key: 'american_football', label: 'Fútbol americano', detail: 'NFL y NCAA', path: '/dashboard/futbol-americano', icon: FutbolAmericanoIcon },
+  { key: 'baseball', label: 'Béisbol', detail: 'MLB', path: '/dashboard?sport=baseball', icon: BaseballIcon },
+  { key: 'basketball', label: 'Baloncesto', detail: 'NBA y NCAA', path: '/dashboard?sport=basketball', icon: BaloncestoIcon },
+  { key: 'american_football', label: 'Fútbol americano', detail: 'NFL y NCAA', path: '/dashboard?sport=american_football', icon: FutbolAmericanoIcon },
   { key: 'tennis', label: 'Tenis', detail: 'Próximamente', path: null, icon: TenisIcon, disabled: true },
 ];
 

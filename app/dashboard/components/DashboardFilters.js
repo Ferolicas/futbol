@@ -19,6 +19,19 @@ import {
   normalizeLeagueSelection,
   toggleLeagueSelection,
 } from '../../../lib/league-view-filter';
+import {
+  BaloncestoIcon,
+  BaseballIcon,
+  FutbolAmericanoIcon,
+  FutbolIcon,
+} from './SportIcons';
+
+export const DASHBOARD_SPORTS = Object.freeze([
+  { value: 'football', label: 'Fútbol', meta: 'Ligas y copas', icon: FutbolIcon },
+  { value: 'baseball', label: 'Béisbol', meta: 'MLB', icon: BaseballIcon },
+  { value: 'basketball', label: 'Baloncesto', meta: 'NBA y NCAA', icon: BaloncestoIcon },
+  { value: 'american_football', label: 'Fútbol americano', meta: 'NFL y NCAA', icon: FutbolAmericanoIcon },
+]);
 
 function Picker({ value, onChange, options, label, placeholder, variant = 'green' }) {
   const [open, setOpen] = useState(false);
@@ -154,6 +167,27 @@ export function LeaguePicker({
       allLeagueIds={allLeagueIds}
       disabled={disabled}
       saving={saving}
+    />
+  );
+}
+
+export function SportPicker({ value, onChange, variant = 'green' }) {
+  const changeSport = (nextSport) => {
+    if (onChange) {
+      onChange(nextSport);
+      return;
+    }
+    const destination = nextSport === 'football' ? '/dashboard' : `/dashboard?sport=${nextSport}`;
+    window.location.assign(destination);
+  };
+  return (
+    <Picker
+      value={value}
+      onChange={changeSport}
+      options={DASHBOARD_SPORTS}
+      label="Deporte"
+      placeholder="Fútbol"
+      variant={variant}
     />
   );
 }

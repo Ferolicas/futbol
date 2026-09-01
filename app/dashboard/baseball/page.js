@@ -21,6 +21,7 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
+import { redirect } from 'next/navigation';
 import useSWR from 'swr';
 import {
   ArrowRight,
@@ -41,6 +42,7 @@ import {
   DashboardDateStrip,
   DashboardStatusDock,
   LeaguePicker,
+  SportPicker,
 } from '../components/DashboardFilters';
 import DashboardBuffer from '../components/DashboardBuffer';
 import AnalysisFullModal from '../components/AnalysisFullModal';
@@ -135,7 +137,13 @@ function toggleSubAndReveal(e, isOpen, id, setOpenSub) {
 // =====================================================================
 // DASHBOARD
 // =====================================================================
-export default function BaseballDashboard() {
+export function BaseballDashboard({
+  activeSport = 'baseball',
+  onSportChange,
+  sharedDate = null,
+  onSharedDateChange,
+  unifiedDashboard = false,
+} = {}) {
   // userTz/date arrancan en UTC (SSR) y se corrigen a la TZ REAL del navegador
   // en el cliente (useEffect). Sin esto, el initializer corría en SSR → UTC y
   // se quedaba en UTC para siempre → el frontend mostraba todo en horario UTC.
@@ -145,8 +153,13 @@ export default function BaseballDashboard() {
   useEffect(() => {
     const tz = detectTz();
     setUserTz(tz);
-    setDate(todayInTz(tz));
+    const initialDate = sharedDate || todayInTz(tz);
+    setDate(initialDate);
+    onSharedDateChange?.(initialDate);
   }, []);
+  useEffect(() => {
+    if (sharedDate && sharedDate !== date) setDate(sharedDate);
+  }, [date, sharedDate]);
   const [sortBy] = useState('time');
   const [statusFilter, setStatusFilter] = useState('all');
   const [leagueFilter, setLeagueFilter] = useState('');
@@ -229,6 +242,7 @@ export default function BaseballDashboard() {
   const selectDate = (nextDate) => {
     if (!nextDate || nextDate === date) return;
     setDate(nextDate);
+    onSharedDateChange?.(nextDate);
     setSelectedMarkets({});
     setExpandedMatch(null);
   };
@@ -378,7 +392,7 @@ export default function BaseballDashboard() {
 
   // ─── RENDER ─────────────────────────────────────────────────────────
   return (
-    <div className="app app-fade-in">
+    <div className={`app${unifiedDashboard ? '' : ' app-fade-in'}`}>
       <div className="container app-baseball">
       <div className="controls-row baseball-controls">
         <DashboardDateStrip today={todayInTz(userTz)} value={date} onChange={selectDate} />
@@ -389,11 +403,15 @@ export default function BaseballDashboard() {
             value={leagueFilter}
             onChange={setLeagueFilter}
           />
+          <SportPicker value={activeSport} onChange={onSportChange} />
         </div>
       </div>
 
-      {apuestaDelDia && statusFilter !== 'favoritos' && (
-        <ApuestaDelDiaBlock apuesta={apuestaDelDia} games={games} />
+      {statusFilter !== 'favoritos' && (
+        <ApuestaDelDiaBlock
+          apuesta={apuestaDelDia || { selections: [], combinedProbability: 0 }}
+          games={games}
+        />
       )}
 
       {error && (
@@ -488,6 +506,10 @@ export default function BaseballDashboard() {
       />
     </div>
   );
+}
+
+export default function BaseballRoutePage() {
+  redirect('/dashboard?sport=baseball');
 }
 
 function BaseballAnalysisModal({ id, onClose }) {
@@ -969,6 +991,7 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
                 rawProbability: Number(market.rawProbability ?? market.probability),
                 odd: Number(market.odd),
               };
+              const resultState = marketResultState({ sport: 'baseball', game });
               const outcome = settleMarketSelection({ sport: 'baseball', selection: market, game });
               return (
                 <button
@@ -990,7 +1013,11 @@ function BaseballMarketsBlock({ game, selectedMarkets, onToggleMarket }) {
                   }}>{selected ? '✓' : ''}</span>
                   <span className="market-option-copy" style={{ minWidth: 0, fontSize: '.78rem', color: '#e2e8f0', lineHeight: 1.3 }}>
                     <span>{displayBettingText(market.name)}</span>
-                    <MarketOutcomeBadge outcome={outcome} compact />
+                    <MarketOutcomeBadge
+                      outcome={outcome}
+                      pendingLabel={resultState.isLive ? 'En juego' : resultState.isFinal ? 'Pendiente oficial' : null}
+                      compact
+                    />
                   </span>
                   <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
                     <strong style={{ fontSize: '.78rem', color: '#5ee6b1' }}>{cap(market.rawProbability ?? market.probability)}%</strong>
@@ -1082,8 +1109,10 @@ function ApuestaDelDiaBlock({ apuesta, games }) {
       <div className="daily-pick-track">
         {visible.length === 0 && (
           <div className="daily-pick-empty">
-            <strong>{view === 'results' ? 'Aún no hay resultados' : 'Todas las opciones ya comenzaron'}</strong>
-            <span>{view === 'results' ? 'Los partidos en vivo y finalizados aparecerán aquí.' : 'Pulsa Resultados para seguirlas en tiempo real.'}</span>
+            <strong>{view === 'results' ? 'Aún no hay resultados' : 'Aún no hay recomendaciones'}</strong>
+            <span>{view === 'results'
+              ? 'Los partidos en vivo y finalizados aparecerán aquí.'
+              : 'Las opciones aparecerán cuando Bet365 publique líneas que cumplan los criterios.'}</span>
           </div>
         )}
         {visible.map((selection, index) => {
@@ -1099,7 +1128,7 @@ function ApuestaDelDiaBlock({ apuesta, games }) {
               {view === 'results' && (
                 <MarketOutcomeBadge
                   outcome={selection.outcome}
-                  pendingLabel={selection.resultState.isLive ? 'En juego' : null}
+                  pendingLabel={selection.resultState.isLive ? 'En juego' : selection.resultState.isFinal ? 'Pendiente oficial' : null}
                   compact
                 />
               )}

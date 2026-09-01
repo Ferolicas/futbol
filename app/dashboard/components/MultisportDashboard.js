@@ -19,16 +19,18 @@ import {
 } from 'lucide-react';
 import { fetcher } from '../../../lib/fetcher';
 import { usePusherEvent } from '../../../lib/use-pusher';
+import { buildBaseballApuestaDelDia } from '../../../lib/baseball-combinada';
 import DashboardBuffer from './DashboardBuffer';
 import {
   DashboardDateStrip,
   DashboardStatusDock,
   LeaguePicker,
+  SportPicker,
 } from './DashboardFilters';
 import FinalVerdictPanel from './FinalVerdictPanel';
 import { displayBettingText } from '../utils/display-betting-text';
 import MarketOutcomeBadge from './MarketOutcomeBadge';
-import { settleMarketSelection } from '../../../lib/market-settlement';
+import { marketResultState, settleMarketSelection } from '../../../lib/market-settlement';
 
 function detectTimeZone() {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone; }
@@ -138,7 +140,7 @@ function ProbabilityLine({ label, entry, odd }) {
   );
 }
 
-function PickButton({ pick, selected, onToggle, outcome }) {
+function PickButton({ pick, selected, onToggle, outcome, resultState }) {
   const reliability = Number(pick.reliability);
   return (
     <button
@@ -150,7 +152,11 @@ function PickButton({ pick, selected, onToggle, outcome }) {
       <span className="ms-pick-copy">
         <strong>{displayBettingText(pick.name)}</strong>
         <small>{pick.bookmakerSelection ? `Bet365 · ${displayBettingText(pick.bookmakerSelection)}` : 'Línea exacta disponible en Bet365'}</small>
-        <MarketOutcomeBadge outcome={outcome} compact />
+        <MarketOutcomeBadge
+          outcome={outcome}
+          pendingLabel={resultState?.isLive ? 'En juego' : resultState?.isFinal ? 'Pendiente oficial' : null}
+          compact
+        />
       </span>
       <span className="ms-pick-metrics">
         <span><small>Prob.</small><b>{probability(pick)}%</b></span>
@@ -158,6 +164,87 @@ function PickButton({ pick, selected, onToggle, outcome }) {
         <span><small>Cuota</small><b>{oddValue(pick.odd)?.toFixed(2) || '—'}</b></span>
       </span>
     </button>
+  );
+}
+
+function MultisportDailyPickRail({ apuesta, games, slug }) {
+  const [view, setView] = useState('picks');
+  const gamesById = useMemo(
+    () => new Map((games || []).map((game) => [String(game.id), game])),
+    [games],
+  );
+  const decorated = useMemo(() => (apuesta?.selections || []).map((selection) => {
+    const game = gamesById.get(String(selection.fixtureId));
+    return {
+      ...selection,
+      game,
+      resultState: marketResultState({ sport: slug, game }),
+      outcome: settleMarketSelection({ sport: slug, selection, game }),
+    };
+  }), [apuesta?.selections, gamesById, slug]);
+  const picks = decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
+  const results = decorated.filter((selection) => selection.resultState.isLive || selection.resultState.isFinal);
+  const visible = view === 'results' ? results : picks;
+  const average = visible.length
+    ? visible.reduce((sum, selection) => sum + Number(selection.rawProbability ?? selection.probability), 0) / visible.length
+    : Number(apuesta?.combinedProbability || 0);
+
+  return (
+    <section className="daily-pick-rail" aria-label="Apuesta del día con cuotas individuales">
+      <header className="daily-pick-heading">
+        <span className="daily-pick-heading-title">
+          <img src="/daily-pick-sticker.webp" alt="" width="38" height="36" aria-hidden="true" />
+          <strong>Apuesta del día</strong>
+          <button
+            type="button"
+            className={`daily-results-button ${view === 'results' ? 'is-active' : ''}`}
+            onClick={() => setView((current) => current === 'results' ? 'picks' : 'results')}
+            aria-pressed={view === 'results'}
+          >
+            <span>{view === 'results' ? 'Apuestas' : 'Resultados'}</span>
+            {results.length > 0 && <b>{results.length}</b>}
+          </button>
+        </span>
+        <span className="daily-pick-heading-summary">
+          <b>{visible.length} opciones</b>
+          {visible.length > 0 && <em>{displayProbability(average)}% probabilidad</em>}
+        </span>
+      </header>
+      <div className="daily-pick-track">
+        {visible.length === 0 && (
+          <div className="daily-pick-empty">
+            <strong>{view === 'results' ? 'Aún no hay resultados' : 'Aún no hay recomendaciones'}</strong>
+            <span>{view === 'results'
+              ? 'Los partidos en vivo y finalizados aparecerán aquí.'
+              : 'Las opciones aparecerán cuando Bet365 publique líneas que cumplan los criterios.'}</span>
+          </div>
+        )}
+        {visible.map((selection, index) => (
+          <article
+            className={`daily-pick-card ${selection.resultState.isLive ? 'is-live' : ''} ${selection.outcome.status === 'won' ? 'has-won' : selection.outcome.status === 'lost' ? 'has-lost' : ''}`}
+            key={`${selection.fixtureId || 'game'}-${selection.marketKey || selection.id || index}-${index}`}
+          >
+            <span className="daily-pick-card-top">
+              <i>{selection.resultState.isFinal ? 'Finalizado' : selection.resultState.isLive ? 'En vivo' : 'Próximo'}</i>
+              <b>{String(index + 1).padStart(2, '0')}</b>
+            </span>
+            <small>{selection.matchName}</small>
+            <strong>Bet365 · {displayBettingText(selection.name || selection.market || 'Pick')}</strong>
+            {view === 'results' && (
+              <MarketOutcomeBadge
+                outcome={selection.outcome}
+                pendingLabel={selection.resultState.isLive ? 'En juego' : selection.resultState.isFinal ? 'Pendiente oficial' : null}
+                compact
+              />
+            )}
+            <span className="daily-pick-card-metrics">
+              <b>{displayProbability(selection.rawProbability ?? selection.probability)}%</b>
+              {oddValue(selection.odd) && <em>@{oddValue(selection.odd).toFixed(2)}</em>}
+            </span>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -256,6 +343,7 @@ const MatchCard = memo(function MatchCard({ game, timeZone, scoreLabel, slug, ex
                           selected={Boolean(selectedPicks[pick.id])}
                           onToggle={() => onTogglePick(game, pick)}
                           outcome={settleMarketSelection({ sport: slug, selection: pick, game })}
+                          resultState={marketResultState({ sport: slug, game })}
                         />
                       ))}
                     </div>
@@ -365,7 +453,17 @@ function CombinedBet({ combination, onRemove, onClear }) {
   );
 }
 
-export default function MultisportDashboard({ sport, slug, title, scoreLabel }) {
+export default function MultisportDashboard({
+  sport,
+  slug,
+  title,
+  scoreLabel,
+  activeSport = sport,
+  onSportChange,
+  sharedDate = null,
+  onSharedDateChange,
+  unifiedDashboard = false,
+}) {
   const [timeZone, setTimeZone] = useState('UTC');
   const [timeZoneReady, setTimeZoneReady] = useState(false);
   const [date, setDate] = useState(() => dateInZone('UTC'));
@@ -380,9 +478,15 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
   useEffect(() => {
     const detected = detectTimeZone();
     setTimeZone(detected);
-    setDate(dateInZone(detected));
+    const initialDate = sharedDate || dateInZone(detected);
+    setDate(initialDate);
+    onSharedDateChange?.(initialDate);
     setTimeZoneReady(true);
   }, []);
+
+  useEffect(() => {
+    if (sharedDate && sharedDate !== date) setDate(sharedDate);
+  }, [date, sharedDate]);
 
   useEffect(() => {
     try {
@@ -409,10 +513,11 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
   const changeDate = useCallback((nextDate) => {
     if (!nextDate || nextDate === date) return;
     setDate(nextDate);
+    onSharedDateChange?.(nextDate);
     setExpandedMatch(null);
     setSelectedMarkets({});
     setMessage('');
-  }, [date]);
+  }, [date, onSharedDateChange]);
 
   const toggleFavorite = useCallback((gameId) => {
     setFavorites((current) => {
@@ -487,6 +592,11 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
 
   const totalSelections = combination?.selections.length || 0;
   const pendingGames = useMemo(() => games.filter((game) => !game.isAnalyzed).length, [games]);
+  const apuestaDelDia = useMemo(
+    () => buildBaseballApuestaDelDia(games.filter((game) => game.isAnalyzed && game.analysis))
+      || { selections: [], combinedProbability: 0 },
+    [games],
+  );
 
   const toggleExpanded = useCallback((gameId) => {
     setExpandedMatch((current) => current === gameId ? null : gameId);
@@ -572,14 +682,19 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
   const loading = !currentData && (isLoading || isValidating || !timeZoneReady);
 
   return (
-    <div className="app app-fade-in ms-sport-app">
+    <div className={`app ms-sport-app${unifiedDashboard ? '' : ' app-fade-in'}`}>
       <div className="container">
         <div className="controls-row">
           <DashboardDateStrip today={dateInZone(timeZone)} value={date} onChange={changeDate} />
           <div className="filters-row">
             <LeaguePicker leagues={leagues} value={leagueFilter} onChange={setLeagueFilter} />
+            <SportPicker value={activeSport} onChange={onSportChange} />
           </div>
         </div>
+
+        {statusFilter !== 'favoritos' && (
+          <MultisportDailyPickRail apuesta={apuestaDelDia} games={games} slug={slug} />
+        )}
 
         {message && <div className="batch-banner fade-in" role="status">{message}</div>}
         {error && games.length > 0 && <div className="warn fade-in">No se pudo actualizar la jornada. Se muestran los últimos datos disponibles.</div>}

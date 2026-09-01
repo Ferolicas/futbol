@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-01 · Commit base: `74a6680`
+Actualizado: 2026-09-01 · Commit base: `3803081`
 
 ## Identidad y stack
 
@@ -27,11 +27,11 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `/reset-password` | `app/reset-password/page.js` | No | Cambio de contraseña con token |
 | `/planes` | `app/planes/page.js` | Sí | Selección y apertura de checkout |
 | `/pago/estado` | `app/pago/estado/` | Sí | Confirmación durable y recuperación del pago |
-| `/dashboard` | `app/dashboard/layout.js`, `page.js` | Plan activo | Partidos, análisis y combinadas |
+| `/dashboard` | `app/dashboard/layout.js`, `page.js` | Plan activo | Panel único de fútbol, béisbol, baloncesto y fútbol americano |
 | `/dashboard/analisis/[id]` | `app/dashboard/analisis/[id]/page.js` | Plan activo | Análisis de fútbol |
-| `/dashboard/baseball` | `app/dashboard/baseball/page.js` | Plan activo | MLB con mercados Bet365 exactos |
-| `/dashboard/baloncesto` | `app/dashboard/baloncesto/page.js` | Plan activo | Partidos NBA y NCAA |
-| `/dashboard/futbol-americano` | `app/dashboard/futbol-americano/page.js` | Plan activo | NFL, NCAA FBS y NCAA FCS |
+| `/dashboard/baseball` | `app/dashboard/baseball/page.js` | Plan activo | Alias que redirige al panel único con béisbol activo |
+| `/dashboard/baloncesto` | `app/dashboard/baloncesto/page.js` | Plan activo | Alias que redirige al panel único con baloncesto activo |
+| `/dashboard/futbol-americano` | `app/dashboard/futbol-americano/page.js` | Plan activo | Alias que redirige al panel único con fútbol americano activo |
 | `/dashboard/baloncesto/analisis/[id]` | `app/dashboard/baloncesto/analisis/[id]/page.js` | Plan activo | Análisis completo por mitades/cuartos, mercados Bet365 y veredicto |
 | `/dashboard/futbol-americano/analisis/[id]` | `app/dashboard/futbol-americano/analisis/[id]/page.js` | Plan activo | Análisis completo por mitades/cuartos, mercados Bet365 y veredicto |
 | `/api/dashboard-search` | `app/api/dashboard-search/route.js` | Plan activo | Búsqueda DB-only de equipos, ligas y partidos en los cuatro deportes |
@@ -563,6 +563,13 @@ aparece después de 520 px y vuelve al inicio de inmediato. El chat ya no flota
 sobre las tarjetas: vive en el header y su pantalla completa respeta movimiento
 reducido.
 
+`/dashboard` es el panel deportivo único. El selector Deporte cambia en estado
+local entre fútbol, béisbol, baloncesto y fútbol americano, conserva la jornada
+seleccionada y actualiza la URL con `history.replaceState`, sin navegación ni
+animación de cambio de pantalla. La tira de fechas ocupa el ancho completo;
+competición y deporte comparten debajo dos mitades iguales. Los aliases antiguos
+redirigen a este panel para no mantener entradas visuales separadas.
+
 Baloncesto y fútbol americano usan el mismo armazón visual móvil de fútbol:
 selector de fecha, competición/estado, tarjetas expandibles y combinada flotante.
 Las pestañas Partidos/Combinada fueron retiradas de los cuatro deportes: el dock
@@ -573,9 +580,17 @@ tarjetas. Sus endpoints de jornada para clientes leen únicamente cache/DB: los
 workers son dueños de poblar proveedores, de modo que abrir una pestaña vacía o
 fuera de temporada nunca paga esperas externas de varios segundos. Los datos
 operativos de proveedor/cuota no aparecen en la experiencia del cliente.
-La jornada de Baseball transporta solo combinada, moneyline, calidad y pitchers;
-el documento pesado con nueve entradas e historiales de jugadores se solicita
-únicamente al abrir “Ver análisis completo”, evitando inflar cada tarjeta.
+La jornada de Baseball transporta combinada, moneyline, calidad y pitchers;
+para liquidar props históricos agrega únicamente los boxscores oficiales de los
+jugadores que figuran en mercados Bet365 de esa jornada, nunca el roster entero.
+`lib/market-settlement.js` cubre hándicaps asiáticos/europeos de fútbol, tramos
+first3/first4.5/first5/first7 y props de béisbol, mitades NCAA y cuartos NBA/NFL.
+Todo mercado final sin dato oficial visible muestra `Pendiente oficial` en vez de
+desaparecer; los mercados liquidables usan los stickers Ganada/Perdida y un push
+se presenta como Nula. Los mercados ordinarios de fútbol con AET/PEN se comparan
+contra el `score.fulltime` de 90 minutos. El documento pesado con las nueve
+entradas y los historiales completos se solicita únicamente al abrir “Ver
+análisis completo”, evitando inflar cada tarjeta.
 
 `GET /api/fixtures` usa `MGET` para documentos Redis y consultas PostgreSQL por
 lote. Cruza siempre los IDs visibles con `match_results`: el resultado durable
@@ -605,7 +620,7 @@ del proveedor rompan React.
 - `app/dashboard/components/DashboardFilters.js`: filtro de ligas, tira común de
   doce jornadas y dock inferior de estados; NBA/NCAA/NFL guardan favoritos en
   el dispositivo hasta disponer de sincronización de cuenta. La jornada elegida
-  recibe el verde activo y los menús de liga ocupan todo el ancho del contenido.
+  recibe el verde activo; liga y deporte ocupan cada uno la mitad del contenido.
 - `lib/dashboard-search.js`: normalización, consultas parametrizadas y rutas de
   resultados DB-only; una visita al buscador nunca llama a proveedores.
 - `app/dashboard/components/AnalysisFullModal.js`: carcasa compartida del análisis completo con scroll vertical nativo.
@@ -829,4 +844,11 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   `BrandLogoMedia` deja de servir los WebM históricos porque `ffprobe` confirma
   que están codificados como `yuv420p`, sin plano alfa; usa el AVIF animado
   transparente y mantiene el WebP estático como fallback.
+- 2026-09-01: los cuatro deportes se integran en `/dashboard`; el selector de
+  deporte no navega, mantiene la fecha y solo sustituye el contenido deportivo
+  inferior. Apuesta del día y Mercados para tu combinada liquidan también días
+  históricos con estadísticas oficiales: se añadieron AH/EH, parciales y props
+  MLB, periodos NCAA/NBA/NFL y un estado explícito para cobertura pendiente. El
+  cron de cierre acepta una reparación autenticada y acotada a IDs concretos;
+  su ejecución ordinaria conserva el deduplicado sin llamadas adicionales.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.

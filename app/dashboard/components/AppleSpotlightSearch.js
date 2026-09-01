@@ -14,9 +14,9 @@ import {
 
 const SPORTS = [
   { key: 'football', label: 'Fútbol', path: '/dashboard', Icon: FutbolIcon },
-  { key: 'baseball', label: 'Béisbol', path: '/dashboard/baseball', Icon: BaseballIcon },
-  { key: 'basketball', label: 'Baloncesto', path: '/dashboard/baloncesto', Icon: BaloncestoIcon },
-  { key: 'american_football', label: 'Fútbol americano', path: '/dashboard/futbol-americano', Icon: FutbolAmericanoIcon },
+  { key: 'baseball', label: 'Béisbol', path: '/dashboard?sport=baseball', Icon: BaseballIcon },
+  { key: 'basketball', label: 'Baloncesto', path: '/dashboard?sport=basketball', Icon: BaloncestoIcon },
+  { key: 'american_football', label: 'Fútbol americano', path: '/dashboard?sport=american_football', Icon: FutbolAmericanoIcon },
 ];
 
 const STATUS_LABELS = {

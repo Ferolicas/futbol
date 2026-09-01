@@ -132,6 +132,46 @@ export async function GET(request) {
       .filter(a => Number(a.cache_version || 0) >= MULTISPORT_CACHE_VERSION)
       .map(a => [toNum(a.fixture_id), compactAnalysis(a)]));
     const resultsMap = new Map((resultsRes.data || []).map(r => [toNum(r.fixture_id), r]));
+
+    // Los props de jugador también deben poder liquidarse al volver a una
+    // jornada finalizada. Cargamos solo los IDs que aparecen en el catálogo
+    // Bet365 de esa jornada; no enviamos el boxscore completo de cada roster.
+    const requestedPlayersByFixture = new Map();
+    for (const analysis of analysisMap.values()) {
+      const fixtureId = toNum(analysis.fixture_id);
+      const markets = Array.isArray(analysis.combinada?.selectable)
+        ? analysis.combinada.selectable
+        : [];
+      for (const market of markets) {
+        const playerId = String(market?.id || '').match(/^player-[a-zA-Z]+-(\d+)-/)?.[1];
+        if (!playerId) continue;
+        if (!requestedPlayersByFixture.has(fixtureId)) requestedPlayersByFixture.set(fixtureId, new Set());
+        requestedPlayersByFixture.get(fixtureId).add(playerId);
+      }
+    }
+
+    const requestedPlayerIds = [...new Set(
+      [...requestedPlayersByFixture.values()].flatMap((ids) => [...ids]),
+    )];
+    const playerStatsByFixture = new Map();
+    if (requestedPlayersByFixture.size && requestedPlayerIds.length) {
+      const { data: playerRows, error: playerRowsError } = await supabaseAdmin
+        .from('baseball_engine_player_stats')
+        .select('fixture_id,player_id,player_name,team_id,stats')
+        .in('fixture_id', [...requestedPlayersByFixture.keys()].map(String))
+        .in('player_id', requestedPlayerIds);
+      if (playerRowsError) throw playerRowsError;
+      for (const row of (playerRows || [])) {
+        const fixtureId = toNum(row.fixture_id);
+        if (!requestedPlayersByFixture.get(fixtureId)?.has(String(row.player_id))) continue;
+        if (!playerStatsByFixture.has(fixtureId)) playerStatsByFixture.set(fixtureId, {});
+        playerStatsByFixture.get(fixtureId)[String(row.player_id)] = {
+          playerName: row.player_name,
+          teamId: row.team_id,
+          stats: row.stats || {},
+        };
+      }
+    }
     const hiddenSet = new Set((hiddenRes.data || []).map(h => toNum(h.fixture_id)));
     const favoritesSet = new Set((favoritesRes.data || []).map(f => toNum(f.fixture_id)));
 
@@ -155,10 +195,12 @@ export async function GET(request) {
     const enriched = fixtures.map(f => {
       const fid = toNum(f.id);
       const isAnalyzed = analysisMap.has(fid);
+      const result = resultsMap.get(fid) || null;
+      const playerStats = playerStatsByFixture.get(fid);
       return {
         ...f,
         analysis: analysisMap.get(fid) || null,
-        liveResult: resultsMap.get(fid) || null,
+        liveResult: result && playerStats ? { ...result, player_stats: playerStats } : result,
         isAnalyzed,
         analysisPending: !isAnalyzed,
         isHidden: hiddenSet.has(fid),

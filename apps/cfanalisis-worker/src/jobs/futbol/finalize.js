@@ -390,6 +390,10 @@ export async function runFinalize(payload = {}) {
       .map(Number)
       .filter(Number.isFinite),
   );
+  // Reparación explícita de resultados históricos. El cron ordinario sigue
+  // deduplicando sin gastar llamadas; solo una orden autenticada con IDs
+  // concretos puede volver a consultar al proveedor y completar estadísticas.
+  const refreshExisting = payload.refreshStats === true && forcedFixtureIds.size > 0;
 
   let candidates = 0, finalized = 0, notFinal = 0, noMatch = 0, apiCalls = 0;
   let terminalSkipped = 0, deferred = 0, recoveredFromFixtureCache = 0;
@@ -465,11 +469,12 @@ export async function runFinalize(payload = {}) {
     candidates += fids.length;
     if (fids.length === 0) continue;
 
-    // Dedup: no re-finalizar ni gastar API en lo ya guardado en match_results.
+    // Dedup: no re-finalizar ni gastar API en lo ya guardado en match_results,
+    // excepto cuando se solicitó una reparación puntual autenticada.
     const { data: existing } = await supabaseAdmin
       .from('match_results').select('fixture_id').in('fixture_id', fids);
     const existingIds = new Set((existing || []).map((row) => row.fixture_id));
-    const pending = fids.filter((fid) => !existingIds.has(fid));
+    const pending = fids.filter((fid) => refreshExisting || !existingIds.has(fid));
     const toCheck = [];
     await Promise.all(pending.map(async (fid) => {
       const cachedStatus = eligibleByFid.get(fid)?.cachedStatus || null;
@@ -653,6 +658,7 @@ export async function runFinalize(payload = {}) {
     terminalSkipped,
     deferred,
     recoveredFromFixtureCache,
+    refreshExisting,
     apiCalls,
     rawCaptured,
     modelBacklog,

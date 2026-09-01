@@ -13084,3 +13084,32 @@ input:checked + .cb-mark::after {
   .admin-results-chart-title { align-items: flex-start; flex-direction: column; }
   .admin-result-match > header { align-items: flex-start; }
 }
+
+/* Panel deportivo único: liga y deporte comparten exactamente la fila. La
+   jornada conserva todo el ancho y el contenido de partidos cambia debajo. */
+.app .filters-row,
+.baseball-filter-row {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 7px !important;
+  width: 100% !important;
+}
+
+.app .filters-row > .dashboard-picker,
+.baseball-filter-row > .dashboard-picker {
+  min-width: 0;
+  width: 100% !important;
+}
+
+.app .filters-row .dashboard-picker-trigger,
+.baseball-filter-row .dashboard-picker-trigger {
+  width: 100%;
+}
+
+@media (max-width: 359px) {
+  .app .filters-row,
+  .baseball-filter-row { gap: 5px !important; }
+
+  .app .filters-row .dashboard-picker-trigger,
+  .baseball-filter-row .dashboard-picker-trigger { padding-inline: 8px; }
+}

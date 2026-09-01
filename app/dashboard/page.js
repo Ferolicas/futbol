@@ -40,6 +40,7 @@ import {
   DashboardDateStrip,
   DashboardStatusDock,
   LeaguePicker,
+  SportPicker,
 } from './components/DashboardFilters';
 import DashboardBuffer from './components/DashboardBuffer';
 import AnalysisFullModal from './components/AnalysisFullModal';
@@ -48,6 +49,8 @@ import { buildFootballProbabilityGroups } from './utils/probability-lines';
 import FinalVerdictPanel from './components/FinalVerdictPanel';
 import MarketOutcomeBadge from './components/MarketOutcomeBadge';
 import { marketResultState, settleMarketSelection } from '../../lib/market-settlement';
+import { BaseballDashboard } from './baseball/page';
+import MultisportDashboard from './components/MultisportDashboard';
 import {
   leagueSelectionIncludes,
   normalizeLeagueSelection,
@@ -100,13 +103,58 @@ const cap = (v) => {
 // detalle, cambio de fecha) lo saltan.
 let _splashDone = false;
 const EMPTY_MARKETS = Object.freeze({});
+const DASHBOARD_SPORT_KEYS = new Set(['football', 'baseball', 'basketball', 'american_football']);
 
 // _dashCache fue eliminado en favor de SWR. SWR mantiene su propia cache
 // global por key — al volver desde /dashboard/analisis/[id] el cache hit
 // instantaneo + revalidacion en background es lo mismo que daba _dashCache,
 // sin tener que sincronizar a mano hidden/favorites/fixtures cada vez.
 
-export default function Dashboard() {
+export default function Dashboard({ searchParams } = {}) {
+  const requestedSport = DASHBOARD_SPORT_KEYS.has(searchParams?.sport)
+    ? searchParams.sport
+    : 'football';
+  const [activeSport, setActiveSport] = useState(requestedSport);
+  const [sharedDate, setSharedDate] = useState(null);
+
+  useEffect(() => {
+    setActiveSport(requestedSport);
+  }, [requestedSport]);
+
+  const changeSport = useCallback((sport) => {
+    if (!DASHBOARD_SPORT_KEYS.has(sport)) return;
+    setActiveSport(sport);
+    try {
+      const nextUrl = sport === 'football' ? '/dashboard' : `/dashboard?sport=${sport}`;
+      window.history.replaceState(window.history.state, '', nextUrl);
+    } catch {}
+  }, []);
+
+  const sharedProps = {
+    activeSport,
+    onSportChange: changeSport,
+    sharedDate,
+    onSharedDateChange: setSharedDate,
+    unifiedDashboard: true,
+  };
+
+  if (activeSport === 'baseball') return <BaseballDashboard {...sharedProps} />;
+  if (activeSport === 'basketball') {
+    return <MultisportDashboard {...sharedProps} sport="basketball" slug="baloncesto" title="baloncesto" scoreLabel="puntos" />;
+  }
+  if (activeSport === 'american_football') {
+    return <MultisportDashboard {...sharedProps} sport="american_football" slug="futbol-americano" title="fútbol americano" scoreLabel="puntos" />;
+  }
+  return <FootballDashboard {...sharedProps} />;
+}
+
+export function FootballDashboard({
+  activeSport = 'football',
+  onSportChange,
+  sharedDate = null,
+  onSharedDateChange,
+  unifiedDashboard = false,
+} = {}) {
   const router = useRouter();
   const [splash, setSplash] = useState(!_splashDone);
   const [splashFade, setSplashFade] = useState(false);
@@ -570,12 +618,18 @@ export default function Dashboard() {
     const tz = getUserTz();
     setUserTz(tz);
     const localDate = todayInTz(tz);
-    setDate(localDate);
+    const initialDate = sharedDate || localDate;
+    setDate(initialDate);
+    onSharedDateChange?.(initialDate);
     // Habilitar inmediatamente la carga principal. El worker y /api/fixtures ya
     // entregan el snapshot live; no bloquear el primer render con otra petición.
     setTzReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (sharedDate && sharedDate !== date) setDate(sharedDate);
+  }, [date, sharedDate]);
 
   // F2 (Fase 2 — watchdog de frescura): mientras haya partidos en vivo, cada 20s
   // comprobamos cuánto hace del último evento WS recibido (pusherLastUpdate). Se
@@ -894,6 +948,7 @@ export default function Dashboard() {
   const selectDate = (nd) => {
     if (!nd || nd === date) return;
     setDate(nd);
+    onSharedDateChange?.(nd);
     setSelected(new Set());
     setSelectedMarkets({});
     setExpandedMatch(null);
@@ -1394,7 +1449,7 @@ export default function Dashboard() {
 
   return (
     <>
-    <div className="app app-fade-in">
+    <div className={`app${unifiedDashboard ? '' : ' app-fade-in'}`}>
       <div className="container">
         {/* WELCOME tras checkout exitoso — reutiliza el banner verde .batch-banner */}
         {welcome && (
@@ -1428,14 +1483,15 @@ export default function Dashboard() {
               disabled={!leagueFilterReady}
               saving={leagueFilterSaving}
             />
+            <SportPicker value={activeSport} onChange={onSportChange} />
           </div>
         </div>
 
         {/* APUESTA DEL DIA */}
-        {apuestaDelDia && statusFilter !== 'favoritos' && (
+        {statusFilter !== 'favoritos' && (
           <ApuestaSelectionRail
-            selections={apuestaDelDia.selections}
-            averageProbability={apuestaDelDia.combinedProbability}
+            selections={apuestaDelDia?.selections || []}
+            averageProbability={apuestaDelDia?.combinedProbability || 0}
             fixtures={fixtures}
             liveStats={liveStats}
           />
@@ -1658,8 +1714,10 @@ function ApuestaSelectionRail({ selections, averageProbability, fixtures, liveSt
       <div className="daily-pick-track">
         {visible.length === 0 && (
           <div className="daily-pick-empty">
-            <strong>{view === 'results' ? 'Aún no hay resultados' : 'Todas las opciones ya comenzaron'}</strong>
-            <span>{view === 'results' ? 'Los partidos en vivo y finalizados aparecerán aquí.' : 'Pulsa Resultados para seguirlas en tiempo real.'}</span>
+            <strong>{view === 'results' ? 'Aún no hay resultados' : 'Aún no hay recomendaciones'}</strong>
+            <span>{view === 'results'
+              ? 'Los partidos en vivo y finalizados aparecerán aquí.'
+              : 'Las opciones aparecerán cuando la casa publique líneas que cumplan los criterios.'}</span>
           </div>
         )}
         {visible.map((sel, index) => {
@@ -1685,7 +1743,7 @@ function ApuestaSelectionRail({ selections, averageProbability, fixtures, liveSt
               {view === 'results' && (
                 <MarketOutcomeBadge
                   outcome={sel.outcome}
-                  pendingLabel={sel.resultState.isLive ? 'En juego' : null}
+                  pendingLabel={sel.resultState.isLive ? 'En juego' : sel.resultState.isFinal ? 'Pendiente oficial' : null}
                   compact
                 />
               )}
@@ -2297,6 +2355,9 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                     <div className="markets-grid">
                   {markets.map(mkt => {
                     const checked = !!selMarkets[mkt.id];
+                    const resultState = marketResultState({
+                      sport: 'football', game: match, liveResult: liveStats,
+                    });
                     const outcome = settleMarketSelection({
                       sport: 'football', selection: mkt, game: match, liveResult: liveStats,
                     });
@@ -2315,7 +2376,11 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                         <span className={`mkt-validation ${mkt.recommended ? 'is-validated' : 'is-reference'}`}>
                           {mkt.recommended ? 'Recomendación estadística' : 'Dato estadístico'}
                         </span>
-                        <MarketOutcomeBadge outcome={outcome} compact />
+                        <MarketOutcomeBadge
+                          outcome={outcome}
+                          pendingLabel={resultState.isLive ? 'En juego' : resultState.isFinal ? 'Pendiente oficial' : null}
+                          compact
+                        />
                         <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${cap(mkt.rawProbability ?? mkt.probability)}%` }} /></div>
                         <div className="mkt-nums">
                           <span className="mkt-pct">{cap(mkt.rawProbability ?? mkt.probability)}%</span>
