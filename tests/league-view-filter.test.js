@@ -42,9 +42,11 @@ test('el dashboard aplica estado y multiselección solo como filtros de vista', 
   assert.match(source, /leagueIds: normalized === null \? null : normalized\.map\(Number\)/);
 });
 
-test('el layout mantiene el botón Arriba junto al soporte en todas las vistas', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../app/dashboard/layout.js'), 'utf8');
-  assert.match(source, /<ScrollToTopButton \/>\s*<ChatWidget \/>/);
+test('el layout mantiene Arriba y el header monta soporte en todas las vistas', () => {
+  const layout = fs.readFileSync(path.join(__dirname, '../app/dashboard/layout.js'), 'utf8');
+  const header = fs.readFileSync(path.join(__dirname, '../app/dashboard/components/DashboardHeader.js'), 'utf8');
+  assert.match(layout, /<ScrollToTopButton \/>/);
+  assert.match(header, /<ChatWidget \/>/);
 });
 
 test('el botón Arriba salta al inicio sin animarse contra la lista virtual', () => {

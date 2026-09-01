@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-01 · Commit base: `005fb93`
+Actualizado: 2026-09-01 · Commit base: `7674a8d`
 
 ## Identidad y stack
 
@@ -558,8 +558,9 @@ usuario, pero nunca limita fixtures, workers, análisis ni cuotas: el filtro se
 aplica únicamente al arreglo renderizado y se combina con Estado (`Próximos`,
 `En vivo`, etc.). Las escrituras del cliente se serializan para que varios clics
 rápidos no dejen una versión anterior en PostgreSQL. Un botón flotante “Arriba”
-acompaña al chat después de 520 px y vuelve al inicio con movimiento reducido
-respetado.
+aparece después de 520 px y vuelve al inicio de inmediato. El chat ya no flota
+sobre las tarjetas: vive en el header y su pantalla completa respeta movimiento
+reducido.
 
 Baloncesto y fútbol americano usan el mismo armazón visual móvil de fútbol:
 selector de fecha, competición/estado, pestañas Partidos/Combinada, tarjetas
@@ -592,7 +593,9 @@ del proveedor rompan React.
 
 - `app/globals.css`: sistema visual de Home, auth, planes, checkout y dashboard.
 - `app/dashboard/components/DashboardHeader.js`: encabezado autenticado mínimo
-  con logo centrado y acceso a búsqueda.
+  con chat, logo centrado y acceso a búsqueda.
+- `app/dashboard/chat-widget.js`: soporte y solicitudes de liga en pantalla
+  completa, realtime conservado y animación de minimización hacia el header.
 - `app/dashboard/components/AppleSpotlightSearch.js`: overlay de pantalla
   completa, filtros deportivos, teclado y listado navegable de resultados.
 - `app/dashboard/components/DashboardFilters.js`: filtro de ligas, tira común de
@@ -804,4 +807,9 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   compatibilidad admite hasta 500 IDs y rechaza el exceso explícitamente: jamás
   truncar lotes de forma silenciosa.
 - 2026-06: los nombres `supabaseAdmin`/`createSupabaseServerClient` son shims PG, no Supabase activo.
+- 2026-09-01: el dashboard comparte un header mínimo, Spotlight DB-only, una
+  tira móvil de mañana/hoy/diez días anteriores y un dock inferior de cinco
+  estados. El chat conserva realtime/tickets pero vive en el header y se abre a
+  pantalla completa; su cierre tipo macOS se contrae hacia el botón y queda sin
+  transformación cuando el usuario pide movimiento reducido.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.

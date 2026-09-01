@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '../../lib/supabase-auth';
 import { supabaseAdmin } from '../../lib/supabase';
-import ChatWidget from './chat-widget';
 import LiveStatsProvider from './live-stats-context';
 import SelectedMarketsProvider from './selected-markets-context';
 import DashboardHeader from './components/DashboardHeader';
@@ -38,7 +37,6 @@ export default async function DashboardLayout({ children }) {
         </LiveStatsProvider>
       </SelectedMarketsProvider>
       <ScrollToTopButton />
-      <ChatWidget />
     </div>
   );
 }

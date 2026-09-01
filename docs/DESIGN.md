@@ -26,8 +26,8 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 ## Componentes
 
 - Home y planes: escenas fijas controladas por scroll, teclado o swipe. La pantalla no acumula secciones verticales.
-- Header autenticado: solo muestra el video-logo centrado al 60% del ancho y el
-  acceso `Buscar`. La búsqueda abre un Spotlight de pantalla
+- Header autenticado: muestra `Chat` a la izquierda, el video-logo centrado al
+  60% del ancho y `Buscar` a la derecha. La búsqueda abre un Spotlight de pantalla
   completa sobre el mismo fondo de la app, admite filtros combinables para los
   cuatro deportes y, sin ninguno activo, consulta todos.
 - Jornadas: tira horizontal compacta desde mañana hasta diez días atrás. Cada
@@ -37,6 +37,10 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   Finalizados → Favoritos`. `En vivo` ocupa el centro, sobresale como círculo
   rojo de transmisión y mantiene un pulso leve; el dock deja espacio seguro a
   las acciones flotantes y al gesto inferior del sistema.
+- Chat: el acceso vive en el header y abre soporte en toda la pantalla. Al
+  minimizar, la superficie se estrecha y contrae hacia el propio botón con una
+  curva tipo ventana de macOS; movimiento reducido reemplaza el gesto por un
+  cambio instantáneo de opacidad.
 - Identidad instalada: favicon, acceso de Android y acceso de iPhone usan el
   monograma cuadrado CF verde/ámbar sobre negro. Sus rutas PWA son versionadas
   para invalidar la caché del icono anterior; el logo horizontal animado se
