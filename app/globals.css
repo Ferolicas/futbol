@@ -13089,9 +13089,11 @@ input:checked + .cb-mark::after {
    jornada conserva todo el ancho y el contenido de partidos cambia debajo. */
 .app .filters-row,
 .baseball-filter-row {
+  --dashboard-filter-gap: 7px;
+  --dashboard-filter-half-gap: 3.5px;
   display: grid !important;
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  gap: 7px !important;
+  gap: var(--dashboard-filter-gap) !important;
   width: 100% !important;
 }
 
@@ -13106,9 +13108,30 @@ input:checked + .cb-mark::after {
   width: 100%;
 }
 
+/* Los disparadores siguen a media fila. Solo sus superficies desplegadas
+   ganan espacio: ligas usa toda la fila y deportes un 75% alineado a la derecha. */
+.app .filters-row > .dashboard-picker:first-child .dashboard-picker-menu,
+.baseball-filter-row > .dashboard-picker:first-child .dashboard-picker-menu {
+  right: auto !important;
+  left: 0 !important;
+  width: calc(200% + var(--dashboard-filter-gap)) !important;
+  max-width: none !important;
+}
+
+.app .filters-row > .dashboard-picker:last-child .dashboard-picker-menu,
+.baseball-filter-row > .dashboard-picker:last-child .dashboard-picker-menu {
+  right: 0 !important;
+  left: auto !important;
+  width: calc(150% + var(--dashboard-filter-half-gap)) !important;
+  max-width: none !important;
+}
+
 @media (max-width: 359px) {
   .app .filters-row,
-  .baseball-filter-row { gap: 5px !important; }
+  .baseball-filter-row {
+    --dashboard-filter-gap: 5px;
+    --dashboard-filter-half-gap: 2.5px;
+  }
 
   .app .filters-row .dashboard-picker-trigger,
   .baseball-filter-row .dashboard-picker-trigger { padding-inline: 8px; }

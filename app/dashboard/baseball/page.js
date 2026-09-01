@@ -54,6 +54,7 @@ import {
   BASEBALL_RECOMMENDATION_MIN_PROBABILITY,
 } from '../../../lib/recommendation-policy';
 import { marketResultState, settleMarketSelection } from '../../../lib/market-settlement';
+import { resolveDailyPickView } from '../../../lib/daily-pick-view';
 
 const BaseballAnalysisExperience = dynamic(
   () => import('./analisis/[id]/page').then((module) => module.BaseballAnalysisExperience),
@@ -1067,7 +1068,7 @@ function BaseballProbBlock({ markets }) {
 // SUB-COMPONENTES (apuesta del día, combinada en Favoritos, empty state)
 // =====================================================================
 function ApuestaDelDiaBlock({ apuesta, games }) {
-  const [view, setView] = useState('picks');
+  const [preferredView, setPreferredView] = useState('picks');
   const gamesById = useMemo(() => new Map((games || []).map((game) => [String(game.id), game])), [games]);
   const decorated = useMemo(() => (apuesta.selections || []).map((selection) => {
     const game = gamesById.get(String(selection.fixtureId));
@@ -1080,6 +1081,7 @@ function ApuestaDelDiaBlock({ apuesta, games }) {
   }), [apuesta.selections, gamesById]);
   const picks = decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
   const results = decorated.filter((selection) => selection.resultState.isLive || selection.resultState.isFinal);
+  const view = resolveDailyPickView(preferredView, picks.length, results.length);
   const visible = view === 'results' ? results : picks;
   const visibleProbability = visible.length
     ? visible.reduce((sum, selection) => sum + Number(selection.rawProbability ?? selection.probability), 0) / visible.length
@@ -1094,10 +1096,14 @@ function ApuestaDelDiaBlock({ apuesta, games }) {
           <button
             type="button"
             className={`daily-results-button ${view === 'results' ? 'is-active' : ''}`}
-            onClick={() => setView((current) => current === 'results' ? 'picks' : 'results')}
+            onClick={() => {
+              if (view === 'results' && picks.length > 0) setPreferredView('picks');
+              else if (view === 'picks' && results.length > 0) setPreferredView('results');
+            }}
             aria-pressed={view === 'results'}
+            aria-label={view === 'results' ? 'Resultados seleccionados' : 'Mostrar resultados'}
           >
-            <span>{view === 'results' ? 'Apuestas' : 'Resultados'}</span>
+            <span>Resultados</span>
             {results.length > 0 && <b>{results.length}</b>}
           </button>
         </span>

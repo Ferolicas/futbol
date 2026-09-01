@@ -53,7 +53,9 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   completo. El filtro
   de ligas de fútbol conserva el menú abierto, usa checkboxes reales y ofrece
   acciones compactas “Todas”/“Ninguna”; la selección se guarda automáticamente.
-  Las opciones mantienen texto claro sobre fondo oscuro.
+  Los disparadores de Liga y Deporte comparten la fila al 50%; únicamente sus
+  menús crecen al abrirse. Liga usa el ancho completo de la fila y Deporte un
+  75% alineado a la derecha. Las opciones mantienen texto claro sobre fondo oscuro.
 - Navegación del dashboard: no existen pestañas redundantes de Partidos/Combinada.
   Los partidos se gobiernan exclusivamente desde el dock inferior y el constructor
   de combinadas vive dentro de `Favoritos` en los cuatro deportes.
@@ -65,7 +67,10 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - Apuesta del día: encabezado compacto inmóvil sobre el carrusel, con sticker
   metálico propio, nombre, cantidad de opciones y probabilidad media. Debajo se
   desplaza una tarjeta por selección; partido, mercado, probabilidad, fiabilidad
-  disponible y cuota individual permanecen legibles al deslizar.
+  disponible y cuota individual permanecen legibles al deslizar. `Resultados`
+  conserva siempre su nombre y aspecto presionado cuando está activo. Si ya no
+  queda ninguna selección próxima y existe al menos una en vivo o finalizada,
+  esa vista se activa automáticamente para evitar una tira vacía.
 - Terminología de mercados: la interfaz muestra `Más de` y `Menos de`. Los
   nombres históricos que todavía contengan `Over`, `Under` u `O/U` se traducen
   justo antes de renderizarse, sin alterar claves, cálculos ni datos del motor.

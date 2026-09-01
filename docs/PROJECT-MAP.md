@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-01 · Commit base: `3803081`
+Actualizado: 2026-09-01 · Commit base: `e7f1f6c`
 
 ## Identidad y stack
 
@@ -569,6 +569,11 @@ seleccionada y actualiza la URL con `history.replaceState`, sin navegación ni
 animación de cambio de pantalla. La tira de fechas ocupa el ancho completo;
 competición y deporte comparten debajo dos mitades iguales. Los aliases antiguos
 redirigen a este panel para no mantener entradas visuales separadas.
+Los disparadores permanecen al 50%, pero el menú de ligas se extiende a toda la
+fila y el de deportes al 75%, alineado al borde derecho. En Apuesta del día, si
+no queda ninguna selección próxima y sí existen selecciones en vivo o cerradas,
+la vista efectiva cambia automáticamente a `Resultados`; con ambas listas
+disponibles respeta la elección manual del usuario.
 
 Baloncesto y fútbol americano usan el mismo armazón visual móvil de fútbol:
 selector de fecha, competición/estado, tarjetas expandibles y combinada flotante.
@@ -851,4 +856,8 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   MLB, periodos NCAA/NBA/NFL y un estado explícito para cobertura pendiente. El
   cron de cierre acepta una reparación autenticada y acotada a IDs concretos;
   su ejecución ordinaria conserva el deduplicado sin llamadas adicionales.
+- 2026-09-01: Apuesta del día evita el estado vacío al terminar la última opción
+  próxima: los cuatro deportes activan `Resultados` automáticamente si solo
+  quedan partidos en vivo/finalizados. Los botones de Liga y Deporte mantienen
+  su mitad de fila; solo los desplegables crecen a 100% y 75% respectivamente.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.

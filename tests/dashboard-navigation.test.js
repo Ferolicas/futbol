@@ -92,6 +92,7 @@ test('la combinada se integra en Favoritos y desaparecen las pestañas duplicada
 test('Apuesta del día usa cabecera fija y tarjetas compactas con desplazamiento horizontal', () => {
   const football = read('app/dashboard/page.js');
   const baseball = read('app/dashboard/baseball/page.js');
+  const multisport = read('app/dashboard/components/MultisportDashboard.js');
   const styles = read('app/globals.css');
   assert.match(football, /className="daily-pick-rail"/);
   assert.match(baseball, /className="daily-pick-rail"/);
@@ -99,6 +100,10 @@ test('Apuesta del día usa cabecera fija y tarjetas compactas con desplazamiento
   assert.match(baseball, /className="daily-pick-heading"/);
   assert.match(football, /daily-pick-sticker\.webp/);
   assert.match(baseball, /daily-pick-sticker\.webp/);
+  for (const source of [football, baseball, multisport]) {
+    assert.match(source, /resolveDailyPickView\(preferredView, picks\.length, results\.length\)/);
+    assert.match(source, /<span>Resultados<\/span>/);
+  }
   assert.doesNotMatch(football, /className="daily-pick-title-card"/);
   assert.doesNotMatch(baseball, /className="daily-pick-title-card"/);
   assert.match(styles, /\.daily-pick-track[\s\S]*overflow-x: auto/);
@@ -112,8 +117,10 @@ test('el dock inferior llega al borde y el header tapa el contenido al hacer scr
   assert.match(styles, /\.dashboard-topbar \{[\s\S]*#040e14 !important/);
 });
 
-test('el selector de ligas abre a todo el ancho disponible', () => {
+test('liga y deporte conservan media fila pero sus listas se abren más anchas', () => {
   const styles = read('app/globals.css');
-  assert.match(styles, /\.app \.filters-row \.dashboard-picker-menu,[\s\S]*width: 100% !important/);
+  assert.match(styles, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\) !important/);
+  assert.match(styles, /dashboard-picker:first-child \.dashboard-picker-menu,[\s\S]*width: calc\(200% \+ var\(--dashboard-filter-gap\)\) !important/);
+  assert.match(styles, /dashboard-picker:last-child \.dashboard-picker-menu,[\s\S]*width: calc\(150% \+ var\(--dashboard-filter-half-gap\)\) !important/);
   assert.match(styles, /\.app \.controls-row,[\s\S]*grid-template-columns: minmax\(0, 1fr\) !important/);
 });
