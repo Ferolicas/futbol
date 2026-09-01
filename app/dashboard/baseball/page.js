@@ -27,7 +27,6 @@ import {
   BarChart3,
   ChevronDown,
   Layers3,
-  Target,
   Trash2,
   X,
 } from 'lucide-react';
@@ -1036,15 +1035,18 @@ function BaseballProbBlock({ markets }) {
 // =====================================================================
 function ApuestaDelDiaBlock({ apuesta }) {
   return (
-    <section className="daily-pick-rail" aria-label="Apuesta del día">
-      <div className="daily-pick-track">
-        <article className="daily-pick-title-card">
-          <span><Target size={19} aria-hidden="true" /></span>
-          <small>Selección inteligente</small>
+    <section className="daily-pick-rail" aria-label="Apuesta del día con cuotas individuales">
+      <header className="daily-pick-heading">
+        <span className="daily-pick-heading-title">
+          <img src="/daily-pick-sticker.webp" alt="" width="38" height="36" aria-hidden="true" />
           <strong>Apuesta del día</strong>
-          <em>{apuesta.selections.length} opciones</em>
-          <b>{cap(apuesta.combinedProbability)}% media</b>
-        </article>
+        </span>
+        <span className="daily-pick-heading-summary">
+          <b>{apuesta.selections.length} opciones</b>
+          <em>{cap(apuesta.combinedProbability)}% probabilidad</em>
+        </span>
+      </header>
+      <div className="daily-pick-track">
         {apuesta.selections.map((selection, index) => {
           const probability = cap(selection.rawProbability ?? selection.probability);
           return (

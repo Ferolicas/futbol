@@ -338,6 +338,7 @@ export function DashboardDateStrip({ today, value, onChange }) {
               key={date}
               type="button"
               className={`dashboard-date-tile ${isToday ? 'is-today' : ''} ${isSelected ? 'is-selected' : ''}`}
+              data-selected={isSelected ? 'true' : 'false'}
               onClick={() => onChange(date)}
               aria-current={isSelected ? 'date' : undefined}
               aria-label={`${isToday ? 'Hoy, ' : ''}${label.weekday} ${label.calendar}`}

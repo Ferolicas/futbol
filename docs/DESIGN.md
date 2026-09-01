@@ -33,9 +33,9 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   superficie crece con física spring y lista los resultados. Admite filtros
   combinables y, sin ninguno activo, consulta los cuatro deportes.
 - Jornadas: tira horizontal compacta desde mañana hasta diez días atrás. Cada
-  tarjeta muestra abreviatura del día y `número + mes`; la jornada seleccionada
-  usa el verde sólido y hoy conserva una referencia verde tenue cuando se consulta
-  otra fecha.
+  tarjeta muestra abreviatura del día y `número + mes`. El verde sólido pertenece
+  exclusivamente a la jornada seleccionada; hoy no conserva un segundo indicador
+  cuando el usuario consulta otra fecha.
 - Estados: dock inferior de cinco accesos `Hoy → Próximos → En vivo →
   Finalizados → Favoritos`. `En vivo` ocupa el centro, sobresale como círculo
   rojo de transmisión y mantiene un pulso leve; el dock deja espacio seguro a
@@ -62,9 +62,10 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - Constructor de combinadas: cada selección reserva una fila completa para
   partido/mercado y coloca probabilidad + cuota en una segunda fila estable;
   los títulos largos envuelven y nunca se truncan para hacer sitio a métricas.
-- Apuesta del día: carrusel horizontal de tarjetas compactas, con el título como
-  primera tarjeta y una selección por recuadro. Partido, mercado, probabilidad,
-  fiabilidad disponible y cuota individual permanecen legibles al deslizar.
+- Apuesta del día: encabezado compacto inmóvil sobre el carrusel, con sticker
+  metálico propio, nombre, cantidad de opciones y probabilidad media. Debajo se
+  desplaza una tarjeta por selección; partido, mercado, probabilidad, fiabilidad
+  disponible y cuota individual permanecen legibles al deslizar.
 - Terminología de mercados: la interfaz muestra `Más de` y `Menos de`. Los
   nombres históricos que todavía contengan `Over`, `Under` u `O/U` se traducen
   justo antes de renderizarse, sin alterar claves, cálculos ni datos del motor.
@@ -73,9 +74,10 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   revelado progresivo. Fútbol y Baseball mantienen todas sus secciones en el
   flujo normal del DOM y una sola superficie desplazable usa el scroll nativo
   del navegador para rueda, trackpad, teclado y gestos táctiles.
-- Cargas: skeleton de superficie. `BrandLogoMedia` utiliza un VP9 optimizado
-  con alfa real en Chromium y una imagen WebP estática transparente en
-  WebKit/iOS o movimiento reducido.
+- Cargas: skeleton de superficie. `BrandLogoMedia` utiliza el AVIF animado con
+  transparencia real en todos los navegadores compatibles y una imagen WebP
+  estática transparente mientras carga, si falla o con movimiento reducido. Los
+  WebM históricos no se sirven porque fueron codificados sin plano alfa.
 - Notificaciones en vivo: título `minuto · local marcador visitante` y una línea
   compacta por evento, con etiqueta española, jugador y equipo. El badge móvil
   es un CF monocromo; goles, anulaciones, penaltis, tarjetas, córners, remates y
@@ -106,6 +108,8 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - El scroll de Home y planes se desbloquea a los 110 ms para aceptar gestos rápidos.
 - Solo los estados realmente en vivo pueden mantener un pulso continuo.
 - `prefers-reduced-motion` elimina transiciones y animaciones no esenciales.
+- El header del dashboard es completamente opaco y el dock inferior llega a
+  `bottom: 0`; el safe-area del dispositivo se absorbe dentro de la superficie.
 - El Spotlight replica el gesto cápsula → panel de Apple Spotlight, ofrece accesos
   circulares y búsqueda por equipo, liga o partido en Fútbol, Béisbol, Baloncesto
   y Fútbol americano.

@@ -821,5 +821,12 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   transformación cápsula → resultados de la referencia Apple. La fecha elegida
   se pinta en verde, los selectores de liga abren a todo el ancho y la combinada
   queda integrada en Favoritos, sin las antiguas pestañas. Apuesta del día es una
-  tira horizontal compacta en fútbol y béisbol.
+  tira horizontal compacta en fútbol y béisbol. El verde de jornada queda
+  reservado exclusivamente a la fecha seleccionada. La cabecera de esa tira de
+  apuestas permanece fuera del scroll, usa `/daily-pick-sticker.webp` y resume
+  opciones + probabilidad. El dock inferior llega a `bottom: 0` con el safe-area
+  dentro de su propia superficie y el header es opaco durante el desplazamiento.
+  `BrandLogoMedia` deja de servir los WebM históricos porque `ffprobe` confirma
+  que están codificados como `yuv420p`, sin plano alfa; usa el AVIF animado
+  transparente y mantiene el WebP estático como fallback.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.

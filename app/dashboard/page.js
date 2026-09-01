@@ -16,7 +16,6 @@ import {
   Save,
   Scale,
   Sparkles,
-  Target,
   Trash2,
   X,
 } from 'lucide-react';
@@ -1611,15 +1610,18 @@ export default function Dashboard() {
 
 function ApuestaSelectionRail({ selections, averageProbability }) {
   return (
-    <section className="daily-pick-rail" aria-label="Apuesta del día">
-      <div className="daily-pick-track">
-        <article className="daily-pick-title-card">
-          <span><Target size={19} aria-hidden="true" /></span>
-          <small>Selección inteligente</small>
+    <section className="daily-pick-rail" aria-label="Apuesta del día con cuotas individuales">
+      <header className="daily-pick-heading">
+        <span className="daily-pick-heading-title">
+          <img src="/daily-pick-sticker.webp" alt="" width="38" height="36" aria-hidden="true" />
           <strong>Apuesta del día</strong>
-          <em>{selections.length} opciones · cuotas individuales</em>
-          <b>{cap(averageProbability)}% media</b>
-        </article>
+        </span>
+        <span className="daily-pick-heading-summary">
+          <b>{selections.length} opciones</b>
+          <em>{cap(averageProbability)}% probabilidad</em>
+        </span>
+      </header>
+      <div className="daily-pick-track">
         {selections.map((sel, index) => {
           const pct = cap(sel.rawProbability ?? sel.probability);
           const probColor = pct >= 85 ? '#4ade80' : pct >= 80 ? '#fbbf24' : '#d97706';
