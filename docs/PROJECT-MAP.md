@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-01 · Commit base: `e7f1f6c`
+Actualizado: 2026-09-01 · Commit base: `39ca933`
 
 ## Identidad y stack
 
@@ -860,4 +860,8 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   próxima: los cuatro deportes activan `Resultados` automáticamente si solo
   quedan partidos en vivo/finalizados. Los botones de Liga y Deporte mantienen
   su mitad de fila; solo los desplegables crecen a 100% y 75% respectivamente.
+- 2026-09-01: las combinadas guardadas agrupan sus selecciones por `fixtureId`
+  y conservan `matchName` como cabecera visible de cada partido. Los registros
+  anteriores siguen siendo compatibles y usan el identificador del encuentro
+  como contexto si su nombre histórico estuviera incompleto.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.

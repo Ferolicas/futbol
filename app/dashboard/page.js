@@ -50,6 +50,7 @@ import FinalVerdictPanel from './components/FinalVerdictPanel';
 import MarketOutcomeBadge from './components/MarketOutcomeBadge';
 import { marketResultState, settleMarketSelection } from '../../lib/market-settlement';
 import { resolveDailyPickView } from '../../lib/daily-pick-view';
+import { groupSavedCombinadaSelections } from '../../lib/saved-combinada';
 import { BaseballDashboard } from './baseball/page';
 import MultisportDashboard from './components/MultisportDashboard';
 import {
@@ -1851,11 +1852,21 @@ function FootballCombinationPanel({
                   {cap(comb.combined_probability ?? comb.combinedProbability)}%
                 </span>
               </div>
-              <div className="saved-comb-sels">
-                {(comb.selections || []).map((selection, index) => (
-                  <span key={index} className="saved-sel-chip">
-                    {displayBettingText(selection.name || selection.market)} {selection.odd ? `(${Number(selection.odd).toFixed(2)})` : ''}
-                  </span>
+              <div className="saved-comb-matches">
+                {groupSavedCombinadaSelections(comb.selections).map((match) => (
+                  <section key={match.key} className="saved-comb-match" aria-label={`Partido ${match.matchName}`}>
+                    <div className="saved-comb-match-head">
+                      <span>Partido</span>
+                      <strong>{match.matchName}</strong>
+                    </div>
+                    <div className="saved-comb-sels">
+                      {match.selections.map((selection, index) => (
+                        <span key={`${selection.id || selection.market || 'seleccion'}-${index}`} className="saved-sel-chip">
+                          {displayBettingText(selection.name || selection.market)} {selection.odd ? `(${Number(selection.odd).toFixed(2)})` : ''}
+                        </span>
+                      ))}
+                    </div>
+                  </section>
                 ))}
               </div>
             </div>

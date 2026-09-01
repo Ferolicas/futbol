@@ -64,6 +64,9 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - Constructor de combinadas: cada selección reserva una fila completa para
   partido/mercado y coloca probabilidad + cuota en una segunda fila estable;
   los títulos largos envuelven y nunca se truncan para hacer sitio a métricas.
+  Al guardar una combinada, sus mercados se agrupan por partido y cada grupo
+  conserva una cabecera visible con los dos equipos; nunca se muestran apuestas
+  guardadas sin el contexto del encuentro al que pertenecen.
 - Apuesta del día: encabezado compacto inmóvil sobre el carrusel, con sticker
   metálico propio, nombre, cantidad de opciones y probabilidad media. Debajo se
   desplaza una tarjeta por selección; partido, mercado, probabilidad, fiabilidad

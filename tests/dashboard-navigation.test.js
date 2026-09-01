@@ -89,6 +89,16 @@ test('la combinada se integra en Favoritos y desaparecen las pestañas duplicada
   }
 });
 
+test('cada combinada guardada conserva el encabezado de los equipos por partido', () => {
+  const football = read('app/dashboard/page.js');
+  const styles = read('app/globals.css');
+
+  assert.match(football, /groupSavedCombinadaSelections\(comb\.selections\)/);
+  assert.match(football, /className="saved-comb-match-head"/);
+  assert.match(football, /<strong>\{match\.matchName\}<\/strong>/);
+  assert.match(styles, /\.saved-comb-match-head \{/);
+});
+
 test('Apuesta del día usa cabecera fija y tarjetas compactas con desplazamiento horizontal', () => {
   const football = read('app/dashboard/page.js');
   const baseball = read('app/dashboard/baseball/page.js');
