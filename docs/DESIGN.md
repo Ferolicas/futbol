@@ -1,6 +1,6 @@
 # CF Análisis — sistema visual
 
-Actualizado: 2026-08-20
+Actualizado: 2026-09-01
 
 ## Dirección
 
@@ -26,7 +26,17 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 ## Componentes
 
 - Home y planes: escenas fijas controladas por scroll, teclado o swipe. La pantalla no acumula secciones verticales.
-- Header autenticado: video-logo, selector desplegable de deporte y menú de avatar. Se adapta desde 320 px y permanece visible.
+- Header autenticado: solo muestra el video-logo centrado al 60% del ancho y el
+  acceso `Buscar`. La búsqueda abre un Spotlight de pantalla
+  completa sobre el mismo fondo de la app, admite filtros combinables para los
+  cuatro deportes y, sin ninguno activo, consulta todos.
+- Jornadas: tira horizontal compacta desde mañana hasta diez días atrás. Cada
+  tarjeta muestra abreviatura del día y `número + mes`; hoy conserva siempre la
+  identidad verde y otra fecha seleccionada usa un contorno neutro.
+- Estados: dock inferior de cinco accesos `Hoy → Próximos → En vivo →
+  Finalizados → Favoritos`. `En vivo` ocupa el centro, sobresale como círculo
+  rojo de transmisión y mantiene un pulso leve; el dock deja espacio seguro a
+  las acciones flotantes y al gesto inferior del sistema.
 - Identidad instalada: favicon, acceso de Android y acceso de iPhone usan el
   monograma cuadrado CF verde/ámbar sobre negro. Sus rutas PWA son versionadas
   para invalidar la caché del icono anterior; el logo horizontal animado se
@@ -35,7 +45,8 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   de ligas de fútbol conserva el menú abierto, usa checkboxes reales y ofrece
   acciones compactas “Todas”/“Ninguna”; la selección se guarda automáticamente.
   Las opciones mantienen texto claro sobre fondo oscuro.
-- Navegación del dashboard: orden fijo `Partidos → Combinada → Estado`.
+- Navegación del dashboard: `Partidos → Combinada` queda en el contenido; los
+  estados viven exclusivamente en el dock inferior compartido.
 - Tabs y chips: estado activo con color, borde y fondo; nunca dependen solo del color.
 - Tarjetas: una sola capa de profundidad, sin `backdrop-filter` ni animaciones de sombra repetidas por tarjeta.
 - Constructor de combinadas: cada selección reserva una fila completa para
@@ -85,7 +96,8 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - El scroll de Home y planes se desbloquea a los 110 ms para aceptar gestos rápidos.
 - Solo los estados realmente en vivo pueden mantener un pulso continuo.
 - `prefers-reduced-motion` elimina transiciones y animaciones no esenciales.
-- Las rutas `/dashboard` y `/dashboard/baseball` se precargan desde el selector deportivo.
+- El Spotlight ofrece accesos directos y búsqueda por equipo, liga o partido en
+  Fútbol, Béisbol, Baloncesto y Fútbol americano.
 - El modal de análisis no intercepta ni agrupa gestos: conserva la inercia y la
   respuesta nativas de cada navegador.
 

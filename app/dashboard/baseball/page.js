@@ -26,10 +26,7 @@ import useSWR from 'swr';
 import {
   ArrowRight,
   BarChart3,
-  CalendarDays,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Layers3,
   Sparkles,
   Target,
@@ -43,7 +40,11 @@ import {
 } from '../../../lib/baseball-combinada';
 import { fetcher } from '../../../lib/fetcher';
 import { usePusherEvent } from '../../../lib/use-pusher';
-import { DateCaption, LeaguePicker, StatusPicker } from '../components/DashboardFilters';
+import {
+  DashboardDateStrip,
+  DashboardStatusDock,
+  LeaguePicker,
+} from '../components/DashboardFilters';
 import DashboardBuffer from '../components/DashboardBuffer';
 import AnalysisFullModal from '../components/AnalysisFullModal';
 import FinalVerdictPanel from '../components/FinalVerdictPanel';
@@ -104,17 +105,6 @@ const fmtTimeInTz = (iso, tz = 'UTC') => {
     return new Date(iso).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', timeZone: tz });
   } catch {
     return new Date(iso).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-  }
-};
-const fmtDateLabel = (date) => {
-  try {
-    return new Date(`${date}T12:00:00`).toLocaleDateString('es-ES', {
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-    });
-  } catch {
-    return date;
   }
 };
 const statusText = (g) => {
@@ -241,11 +231,9 @@ export default function BaseballDashboard() {
   const loading = loadingFixtures && games.length === 0;
 
   // ─── ACTIONS ────────────────────────────────────────────────────────
-  const changeDate = (offset) => {
-    const [y, m, d] = date.split('-').map(Number);
-    const nd = new Date(y, m - 1, d + offset);
-    const dStr = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}-${String(nd.getDate()).padStart(2, '0')}`;
-    setDate(dStr);
+  const selectDate = (nextDate) => {
+    if (!nextDate || nextDate === date) return;
+    setDate(nextDate);
     setSelectedMarkets({});
     setExpandedMatch(null);
   };
@@ -398,21 +386,7 @@ export default function BaseballDashboard() {
     <div className="app app-fade-in">
       <div className="container app-baseball">
       <div className="controls-row baseball-controls">
-        <div className="date-nav baseball-date-nav">
-        <button className="baseball-control-btn" onClick={() => changeDate(-1)} aria-label="Día anterior"><ChevronLeft size={17} aria-hidden="true" /></button>
-        <label className="date-picker-label">
-          <DateCaption isToday={date === todayInTz(userTz)} label={fmtDateLabel(date)} />
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => { setDate(e.target.value); setSelectedMarkets({}); }}
-          />
-        </label>
-        <button className="baseball-control-btn" onClick={() => changeDate(1)} aria-label="Día siguiente"><ChevronRight size={17} aria-hidden="true" /></button>
-        {date !== todayInTz(userTz) && (
-          <button className="baseball-today-btn" onClick={() => setDate(todayInTz(userTz))}><CalendarDays size={14} aria-hidden="true" /> Hoy</button>
-        )}
-        </div>
+        <DashboardDateStrip today={todayInTz(userTz)} value={date} onChange={selectDate} />
 
         <div className="filters-row baseball-filter-row">
           <LeaguePicker
@@ -432,17 +406,6 @@ export default function BaseballDashboard() {
           Combinada
           {totalSel > 0 && <span>{totalSel}</span>}
         </button>
-        <StatusPicker
-          value={statusFilter}
-          onChange={setStatusFilter}
-          counts={{
-            all: allVisibleCount,
-            live: liveCount,
-            upcoming: upcomingCount,
-            finished: finishedCount,
-            favorites: favoriteCount,
-          }}
-        />
       </div>
 
       {apuestaDelDia && tab === 'partidos' && (
@@ -519,6 +482,19 @@ export default function BaseballDashboard() {
         <BaseballAnalysisModal id={analysisModalId} onClose={() => setAnalysisModalId(null)} />
       )}
       </div>
+      <DashboardStatusDock
+        value={statusFilter}
+        onChange={(next) => { setStatusFilter(next); setTab('partidos'); }}
+        counts={{
+          all: allVisibleCount,
+          live: liveCount,
+          upcoming: upcomingCount,
+          finished: finishedCount,
+          favorites: favoriteCount,
+        }}
+        isToday={date === todayInTz(userTz)}
+        onToday={() => selectDate(todayInTz(userTz))}
+      />
     </div>
   );
 }

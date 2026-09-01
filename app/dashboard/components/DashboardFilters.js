@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  CalendarDays,
   CalendarClock,
   Check,
   ChevronDown,
@@ -9,6 +10,7 @@ import {
   Clock3,
   ListFilter,
   Radio,
+  RadioTower,
   Star,
   Trophy,
 } from 'lucide-react';
@@ -296,5 +298,101 @@ export function DateCaption({ isToday, label }) {
         <strong className={isToday ? 'is-today' : ''}>{isToday ? 'Hoy' : label}</strong>
       </span>
     </span>
+  );
+}
+
+const WEEKDAYS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+function shiftIsoDay(date, amount) {
+  const [year, month, day] = String(date).split('-').map(Number);
+  const shifted = new Date(year, month - 1, day + amount, 12);
+  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, '0')}-${String(shifted.getDate()).padStart(2, '0')}`;
+}
+
+function compactDay(date) {
+  const [year, month, day] = String(date).split('-').map(Number);
+  const value = new Date(year, month - 1, day, 12);
+  return {
+    weekday: WEEKDAYS[value.getDay()],
+    calendar: `${value.getDate()} ${MONTHS[value.getMonth()]}`,
+  };
+}
+
+/** Mañana, hoy y los diez días anteriores, en ese orden. */
+export function DashboardDateStrip({ today, value, onChange }) {
+  const dates = useMemo(
+    () => Array.from({ length: 12 }, (_, index) => shiftIsoDay(today, 1 - index)),
+    [today],
+  );
+
+  return (
+    <nav className="dashboard-date-strip" aria-label="Elegir jornada">
+      <div className="dashboard-date-track">
+        {dates.map((date) => {
+          const label = compactDay(date);
+          const isToday = date === today;
+          const isSelected = date === value;
+          return (
+            <button
+              key={date}
+              type="button"
+              className={`dashboard-date-tile ${isToday ? 'is-today' : ''} ${isSelected ? 'is-selected' : ''}`}
+              onClick={() => onChange(date)}
+              aria-current={isSelected ? 'date' : undefined}
+              aria-label={`${isToday ? 'Hoy, ' : ''}${label.weekday} ${label.calendar}`}
+            >
+              <span>{label.weekday}</span>
+              <strong>{label.calendar}</strong>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+export function DashboardStatusDock({ value, onChange, counts = {}, isToday, onToday }) {
+  const items = [
+    { key: 'today', label: 'Hoy', icon: CalendarDays, count: counts.all },
+    { key: 'upcoming', label: 'Próximos', icon: Clock3, count: counts.upcoming },
+    { key: 'live', label: 'En vivo', icon: RadioTower, count: counts.live, live: true },
+    { key: 'finished', label: 'Finalizados', icon: CircleCheck, count: counts.finished },
+    { key: 'favoritos', label: 'Favoritos', icon: Star, count: counts.favorites },
+  ];
+
+  const select = (key) => {
+    if (key === 'today') {
+      onToday();
+      onChange('all');
+      return;
+    }
+    onChange(key);
+  };
+
+  return (
+    <nav className="dashboard-status-dock" aria-label="Filtrar partidos por estado">
+      <span className="dashboard-status-live-bulge" aria-hidden="true" />
+      {items.map((item) => {
+        const Icon = item.icon;
+        const active = item.key === 'today' ? (isToday && value === 'all') : value === item.key;
+        return (
+          <button
+            key={item.key}
+            type="button"
+            className={`dashboard-status-item ${item.live ? 'is-live' : ''} ${active ? 'is-active' : ''}`}
+            onClick={() => select(item.key)}
+            aria-pressed={active}
+          >
+            <span className="dashboard-status-icon">
+              {item.live && <i className="dashboard-live-pulse" aria-hidden="true" />}
+              <Icon size={item.live ? 25 : 21} aria-hidden="true" />
+              {Number(item.count) > 0 && <b>{item.count > 99 ? '99+' : item.count}</b>}
+            </span>
+            <span>{item.label}</span>
+          </button>
+        );
+      })}
+    </nav>
   );
 }

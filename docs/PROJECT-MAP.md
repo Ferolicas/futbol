@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-01 · Commit base: `ba6b990`
+Actualizado: 2026-09-01 · Commit base: `005fb93`
 
 ## Identidad y stack
 
@@ -34,6 +34,7 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | `/dashboard/futbol-americano` | `app/dashboard/futbol-americano/page.js` | Plan activo | NFL, NCAA FBS y NCAA FCS |
 | `/dashboard/baloncesto/analisis/[id]` | `app/dashboard/baloncesto/analisis/[id]/page.js` | Plan activo | Análisis completo por mitades/cuartos, mercados Bet365 y veredicto |
 | `/dashboard/futbol-americano/analisis/[id]` | `app/dashboard/futbol-americano/analisis/[id]/page.js` | Plan activo | Análisis completo por mitades/cuartos, mercados Bet365 y veredicto |
+| `/api/dashboard-search` | `app/api/dashboard-search/route.js` | Plan activo | Búsqueda DB-only de equipos, ligas y partidos en los cuatro deportes |
 | `/admin` | `app/admin/` | Admin/owner | Operación y clientes |
 | `/ferney` | `app/ferney/` | Privada | Auditoría del propietario |
 | `/ferney/informes` | `app/ferney/informes/` | Admin/owner | Informes interactivos móviles de fútbol y MLB |
@@ -140,7 +141,7 @@ El Brick recoge el método → `subscribe` valida sesión/plan/geografía y reca
 
 `lib/auth-pg.js` crea/verifica usuarios y sesiones. `lib/auth-session.js` firma `cf_session`. `middleware.js` valida firma/expiración; layouts y endpoints vuelven a comprobar la sesión contra PostgreSQL.
 
-Tras login o registro, las pantallas cliente llaman `refreshSession()` antes de navegar. El layout autenticado también entrega nombre y email iniciales a `DashboardHeader`, por lo que avatar y menú de salida no dependen de una recarga posterior.
+Tras login o registro, las pantallas cliente llaman `refreshSession()` antes de navegar. El layout autenticado resuelve sesión y acceso en servidor antes de montar el encabezado mínimo compartido.
 
 ### Apuesta diaria en Telegram
 
@@ -590,9 +591,15 @@ del proveedor rompan React.
 ## Dependencias compartidas
 
 - `app/globals.css`: sistema visual de Home, auth, planes, checkout y dashboard.
-- `app/dashboard/components/DashboardHeader.js`: encabezado autenticado compartido.
-- `app/dashboard/components/SportToggle.js`: selector y precarga de fútbol,
-  MLB, NBA y NFL; tenis figura deshabilitado como pendiente.
+- `app/dashboard/components/DashboardHeader.js`: encabezado autenticado mínimo
+  con logo centrado y acceso a búsqueda.
+- `app/dashboard/components/AppleSpotlightSearch.js`: overlay de pantalla
+  completa, filtros deportivos, teclado y listado navegable de resultados.
+- `app/dashboard/components/DashboardFilters.js`: filtro de ligas, tira común de
+  doce jornadas y dock inferior de estados; NBA/NCAA/NFL guardan favoritos en
+  el dispositivo hasta disponer de sincronización de cuenta.
+- `lib/dashboard-search.js`: normalización, consultas parametrizadas y rutas de
+  resultados DB-only; una visita al buscador nunca llama a proveedores.
 - `app/dashboard/components/AnalysisFullModal.js`: carcasa compartida del análisis completo con scroll vertical nativo.
 - `app/dashboard/utils/display-betting-text.js`: traducción exclusivamente
   visual de términos de mercados heredados; no modifica IDs ni payloads.

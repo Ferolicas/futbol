@@ -10,7 +10,6 @@ import {
   BarChart3,
   CalendarDays,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   Flag,
   Layers3,
@@ -25,7 +24,7 @@ import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
 import { useWorkerSocketState } from '../../hooks/useWorkerSocket';
 import { BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
-import { todayInTz, getUserTz, fmtTimeInTz, fmtDateDisplay } from '../../lib/timezone';
+import { todayInTz, getUserTz, fmtTimeInTz } from '../../lib/timezone';
 import { marketLabel } from '../../lib/market-labels';
 import { useIsIOS } from '../../lib/is-ios';
 import { isTelegramMarketAllowed as isDailyPickMarketAllowed } from '../../lib/telegram-daily-pick';
@@ -39,7 +38,11 @@ import { fetcher } from '../../lib/fetcher';
 import BrandLogoMedia from '../../components/BrandLogoMedia';
 import { useLiveStats } from './live-stats-context';
 import { useSelectedMarkets } from './selected-markets-context';
-import { DateCaption, LeaguePicker, StatusPicker } from './components/DashboardFilters';
+import {
+  DashboardDateStrip,
+  DashboardStatusDock,
+  LeaguePicker,
+} from './components/DashboardFilters';
 import DashboardBuffer from './components/DashboardBuffer';
 import AnalysisFullModal from './components/AnalysisFullModal';
 import { displayBettingText } from './utils/display-betting-text';
@@ -890,13 +893,8 @@ export default function Dashboard() {
     return () => clearTimeout(timer);
   }, []);
 
-  const changeDate = (offset) => {
-    // Parse components directly to avoid UTC-vs-local timezone shift:
-    // new Date("2025-03-25") parses as UTC midnight, so getDate() returns the
-    // LOCAL day which is 1 behind in UTC+X and causes the stuck/double-jump bug.
-    const [y, m, day] = date.split('-').map(Number);
-    const d = new Date(y, m - 1, day + offset); // local constructor, no UTC offset
-    const nd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const selectDate = (nd) => {
+    if (!nd || nd === date) return;
     setDate(nd);
     setSelected(new Set());
     setSelectedMarkets({});
@@ -1419,63 +1417,9 @@ export default function Dashboard() {
           <div className="warn fade-in" role="alert">{pushError}</div>
         )}
 
-        {/* CONTROLS: Date + Filters */}
+        {/* CONTROLS: compact date rail + league filter */}
         <div className="controls-row">
-          <div className="date-nav">
-            <button
-              className="date-arrow"
-              onClick={() => changeDate(-1)}
-              aria-label="Día anterior"
-            ><ChevronLeft size={17} aria-hidden="true" /></button>
-
-            <label className="date-picker-label">
-              <DateCaption
-                isToday={date === today(userTz)}
-                label={fmtDateDisplay(date, userTz)}
-              />
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => {
-                  const nd = e.target.value;
-                  if (!nd || nd === date) return;
-                  setDate(nd);
-                  setSelected(new Set());
-                  setSelectedMarkets({});
-                  setExpandedMatch(null);
-                  pusherLastUpdate.current = 0;
-                  clearLiveOnNextLoadRef.current = true;
-                  // setDate(nd) ya cambio la key de SWR → un unico fetch.
-                }}
-                style={{
-                  position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer',
-                  width: '100%', height: '100%',
-                }}
-              />
-            </label>
-
-            <button
-              className="date-arrow"
-              onClick={() => changeDate(1)}
-              aria-label="Día siguiente"
-            ><ChevronRight size={17} aria-hidden="true" /></button>
-
-            {date !== today(userTz) && (
-              <button
-                className="date-today"
-                onClick={() => {
-                  const nd = today(userTz);
-                  setDate(nd);
-                  setSelected(new Set());
-                  setSelectedMarkets({});
-                  setExpandedMatch(null);
-                  pusherLastUpdate.current = 0;
-                  clearLiveOnNextLoadRef.current = true;
-                  // setDate(nd) ya cambio la key de SWR → un unico fetch.
-                }}
-              ><CalendarDays size={14} aria-hidden="true" /> Hoy</button>
-            )}
-          </div>
+          <DashboardDateStrip today={today(userTz)} value={date} onChange={selectDate} />
           <div className="filters-row">
             <LeaguePicker
               leagues={Object.values(leagues).sort((a, b) => a.name.localeCompare(b.name))}
@@ -1499,17 +1443,6 @@ export default function Dashboard() {
             Combinada
             {(totalSel + savedCombinadas.length) > 0 && <span className="tab-badge">{totalSel + savedCombinadas.length}</span>}
           </button>
-          <StatusPicker
-            value={statusFilter}
-            onChange={setStatusFilter}
-            counts={{
-              all: allVisibleCount,
-              live: liveCount,
-              upcoming: upcomingCount,
-              finished: finishedCount,
-              favorites: favoriteCount,
-            }}
-          />
         </div>
 
         {/* APUESTA DEL DIA */}
@@ -1759,6 +1692,20 @@ export default function Dashboard() {
 
       </div>
     </div>
+
+    <DashboardStatusDock
+      value={statusFilter}
+      onChange={(next) => { setStatusFilter(next); setTab('partidos'); }}
+      counts={{
+        all: allVisibleCount,
+        live: liveCount,
+        upcoming: upcomingCount,
+        finished: finishedCount,
+        favorites: favoriteCount,
+      }}
+      isToday={date === today(userTz)}
+      onToday={() => selectDate(today(userTz))}
+    />
 
     {/* MODAL: Análisis completo */}
     {analysisModalId && (

@@ -10,17 +10,21 @@ import {
   ArrowRight,
   CalendarDays,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   Layers3,
   RefreshCw,
   ShieldCheck,
+  Star,
   X,
 } from 'lucide-react';
 import { fetcher } from '../../../lib/fetcher';
 import { usePusherEvent } from '../../../lib/use-pusher';
 import DashboardBuffer from './DashboardBuffer';
-import { DateCaption, LeaguePicker, StatusPicker } from './DashboardFilters';
+import {
+  DashboardDateStrip,
+  DashboardStatusDock,
+  LeaguePicker,
+} from './DashboardFilters';
 import FinalVerdictPanel from './FinalVerdictPanel';
 import { displayBettingText } from '../utils/display-betting-text';
 
@@ -34,23 +38,9 @@ function dateInZone(timeZone) {
   catch { return new Date().toISOString().slice(0, 10); }
 }
 
-function shiftDay(date, amount) {
-  const value = new Date(`${date}T12:00:00`);
-  value.setDate(value.getDate() + amount);
-  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
-}
-
 function gameTime(value, timeZone) {
   try { return new Date(value).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', timeZone }); }
   catch { return '--:--'; }
-}
-
-function dayLabel(date) {
-  try {
-    return new Date(`${date}T12:00:00`).toLocaleDateString('es-ES', {
-      weekday: 'short', day: 'numeric', month: 'short',
-    });
-  } catch { return date; }
 }
 
 function cardDate(value, timeZone) {
@@ -170,7 +160,7 @@ function PickButton({ pick, selected, onToggle }) {
 
 const EMPTY_SELECTED_PICKS = Object.freeze({});
 
-const MatchCard = memo(function MatchCard({ game, timeZone, scoreLabel, slug, expanded, onToggle, selectedPicks, onTogglePick }) {
+const MatchCard = memo(function MatchCard({ game, timeZone, scoreLabel, slug, expanded, onToggle, selectedPicks, onTogglePick, favorite, onFavorite }) {
   const analysis = game.analysis;
   const probabilities = analysis?.probabilities;
   const moneyline = probabilities?.moneyline;
@@ -189,6 +179,15 @@ const MatchCard = memo(function MatchCard({ game, timeZone, scoreLabel, slug, ex
 
   return (
     <article className={`mcard ms-match-card ${expanded ? 'open done' : 'done'} ${live ? 'live' : ''} ${final ? 'fin' : ''}`}>
+      <button
+        type="button"
+        className={`ms-favorite-button ${favorite ? 'is-active' : ''}`}
+        onClick={() => onFavorite(game.id)}
+        aria-label={favorite ? 'Quitar de favoritos' : 'Guardar en favoritos'}
+        aria-pressed={favorite}
+      >
+        <Star size={16} fill={favorite ? 'currentColor' : 'none'} aria-hidden="true" />
+      </button>
       <button type="button" className="ms-match-head" onClick={() => onToggle(game.id)} aria-expanded={expanded}>
         <div className="ms-match-meta">
           <span>{game.league?.name || 'Competición'}</span>
@@ -369,6 +368,7 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
   const [tab, setTab] = useState('partidos');
   const [statusFilter, setStatusFilter] = useState('all');
   const [leagueFilter, setLeagueFilter] = useState('');
+  const [favorites, setFavorites] = useState([]);
   const [expandedMatch, setExpandedMatch] = useState(null);
   const [selectedMarkets, setSelectedMarkets] = useState({});
   const [enqueueing, setEnqueueing] = useState(false);
@@ -380,6 +380,15 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
     setDate(dateInZone(detected));
     setTimeZoneReady(true);
   }, []);
+
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(`cf:${sport}:favorites`) || '[]');
+      setFavorites(Array.isArray(stored) ? stored.map(String) : []);
+    } catch {
+      setFavorites([]);
+    }
+  }, [sport]);
 
   const key = timeZoneReady ? `/api/sports/${slug}/fixtures?date=${date}&tz=${encodeURIComponent(timeZone)}` : null;
   const { data, error, isLoading, isValidating, mutate } = useSWR(key, fetcher, {
@@ -402,6 +411,15 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
     setMessage('');
   }, [date]);
 
+  const toggleFavorite = useCallback((gameId) => {
+    setFavorites((current) => {
+      const id = String(gameId);
+      const next = current.includes(id) ? current.filter((value) => value !== id) : [...current, id];
+      try { window.localStorage.setItem(`cf:${sport}:favorites`, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, [sport]);
+
   const leagues = useMemo(() => competitions.map((competition) => ({
     id: competition.id,
     name: competition.name,
@@ -417,14 +435,16 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
     live: leagueGames.filter(isGameLive).length,
     upcoming: leagueGames.filter((game) => !isGameLive(game) && !isGameFinal(game)).length,
     finished: leagueGames.filter(isGameFinal).length,
-  }), [leagueGames]);
+    favorites: leagueGames.filter((game) => favorites.includes(String(game.id))).length,
+  }), [favorites, leagueGames]);
 
   const visibleGames = useMemo(() => leagueGames.filter((game) => {
     if (statusFilter === 'live') return isGameLive(game);
     if (statusFilter === 'upcoming') return !isGameLive(game) && !isGameFinal(game);
     if (statusFilter === 'finished') return isGameFinal(game);
+    if (statusFilter === 'favoritos') return favorites.includes(String(game.id));
     return true;
-  }), [leagueGames, statusFilter]);
+  }), [favorites, leagueGames, statusFilter]);
 
   const rows = useMemo(() => {
     const output = [];
@@ -552,29 +572,7 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
     <div className="app app-fade-in ms-sport-app">
       <div className="container">
         <div className="controls-row">
-          <div className="date-nav">
-            <button className="date-arrow" onClick={() => changeDate(shiftDay(date, -1))} aria-label="Día anterior">
-              <ChevronLeft size={17} aria-hidden="true" />
-            </button>
-            <label className="date-picker-label">
-              <DateCaption isToday={date === dateInZone(timeZone)} label={dayLabel(date)} />
-              <input
-                type="date"
-                value={date}
-                onChange={(event) => changeDate(event.target.value)}
-                aria-label="Elegir fecha"
-                style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }}
-              />
-            </label>
-            <button className="date-arrow" onClick={() => changeDate(shiftDay(date, 1))} aria-label="Día siguiente">
-              <ChevronRight size={17} aria-hidden="true" />
-            </button>
-            {date !== dateInZone(timeZone) && (
-              <button className="date-today" onClick={() => changeDate(dateInZone(timeZone))}>
-                <CalendarDays size={14} aria-hidden="true" /> Hoy
-              </button>
-            )}
-          </div>
+          <DashboardDateStrip today={dateInZone(timeZone)} value={date} onChange={changeDate} />
           <div className="filters-row">
             <LeaguePicker leagues={leagues} value={leagueFilter} onChange={setLeagueFilter} />
           </div>
@@ -589,7 +587,6 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
             Combinada
             {totalSelections > 0 && <span className="tab-badge">{totalSelections}</span>}
           </button>
-          <StatusPicker value={statusFilter} onChange={setStatusFilter} counts={counts} includeFavorites={false} />
         </div>
 
         {message && <div className="batch-banner fade-in" role="status">{message}</div>}
@@ -649,6 +646,8 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
                       onToggle={toggleExpanded}
                       selectedPicks={selectedMarkets[String(row.game.id)] || EMPTY_SELECTED_PICKS}
                       onTogglePick={togglePick}
+                      favorite={favorites.includes(String(row.game.id))}
+                      onFavorite={toggleFavorite}
                     />
                   )}
                 </div>
@@ -678,6 +677,13 @@ export default function MultisportDashboard({ sport, slug, title, scoreLabel }) 
           </div>
         )}
       </div>
+      <DashboardStatusDock
+        value={statusFilter}
+        onChange={(next) => { setStatusFilter(next); setTab('partidos'); }}
+        counts={counts}
+        isToday={date === dateInZone(timeZone)}
+        onToday={() => changeDate(dateInZone(timeZone))}
+      />
     </div>
   );
 }
