@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CF Análisis · Ruta a App Store y Google Play</title>
+  <link rel="stylesheet" href="flashcards.css">
+</head>
+<body>
+  <main class="flashcard">
+    <header class="topline">
+      <img class="logo" src="../../public/logo-metalizado-alpha-fast.webp" alt="CF Análisis">
+      <span class="edition">Estado · 1 sep 2026</span>
+    </header>
+
+    <h1>De plataforma web a app en App Store y Google Play</h1>
+    <p class="lead">Radiografía real de lo que CF Análisis ya tiene y de lo que debe completarse antes de solicitar la publicación.</p>
+
+    <section class="summary-band" aria-label="Resumen de preparación">
+      <div class="ready"><span>Base del producto</span><strong>Muy avanzada</strong></div>
+      <div class="missing"><span>App nativa</span><strong>Pendiente</strong></div>
+      <div class="missing"><span>Cumplimiento de tiendas</span><strong>Bloque crítico</strong></div>
+    </section>
+
+    <div class="grid">
+      <section class="panel ready">
+        <div class="panel-title"><span class="number">✓</span><h2>Lo que ya está listo</h2></div>
+        <ul>
+          <li>Experiencia móvil, rápida e instalable como PWA.</li>
+          <li>Registro, acceso, recuperación de contraseña y planes.</li>
+          <li>Pagos web confirmados, tiempo real, alertas, búsqueda y soporte.</li>
+          <li>Iconos, manifiesto, dominio HTTPS y operación en producción.</li>
+          <li>Contenido diario para cuatro deportes y análisis completos.</li>
+        </ul>
+      </section>
+
+      <section class="panel critical">
+        <div class="panel-title"><span class="number">1</span><h2>Identidad y cuentas</h2></div>
+        <ul>
+          <li>Publicar mediante una <strong>entidad legal</strong>; Apple puede exigirla por el contexto regulado.</li>
+          <li>Apple Developer: <strong>US$99 al año</strong> y D‑U‑N‑S para organización.</li>
+          <li>Google Play: <strong>US$25 una vez</strong>, identidad verificada y cuenta organizacional recomendada.</li>
+          <li>Definir nombre, identificadores únicos, titular, territorios y contacto de soporte.</li>
+        </ul>
+      </section>
+
+      <section class="panel critical">
+        <div class="panel-title"><span class="number">2</span><h2>Convertirla en una app real</h2></div>
+        <ul>
+          <li>Crear proyectos iOS y Android firmados; no presentar solo una web dentro de un contenedor.</li>
+          <li>Añadir valor móvil: notificaciones nativas, enlaces directos, compartir, reconexión y pantalla sin conexión.</li>
+          <li>Compilar iOS con <strong>Xcode 26 + SDK iOS 26</strong>.</li>
+          <li>Enviar Android como AAB dirigido a <strong>Android 16 / API 36</strong>.</li>
+        </ul>
+      </section>
+
+      <section class="panel critical">
+        <div class="panel-title"><span class="number">3</span><h2>Suscripciones dentro de tiendas</h2></div>
+        <ul>
+          <li>Integrar Apple In‑App Purchase y Google Play Billing para planes digitales.</li>
+          <li>Sincronizar compra, renovación, cancelación y restauración con el acceso del usuario.</li>
+          <li>Alternativa: versión de solo consumo, sin compra ni enlace al checkout web dentro de la app.</li>
+          <li>Stripe y Mercado Pago pueden seguir en la web; no deben desbloquear contenido desde la app sin encajar en una excepción o programa regional.</li>
+        </ul>
+      </section>
+
+      <section class="panel critical">
+        <div class="panel-title"><span class="number">4</span><h2>Privacidad y control del usuario</h2></div>
+        <ul>
+          <li>Política de privacidad pública y completa.</li>
+          <li>Eliminación de cuenta desde la app y también mediante una página web.</li>
+          <li>Declarar datos y terceros en App Privacy y Data Safety.</li>
+          <li>Definir conservación, exportación y eliminación de datos; revisar permisos mínimos.</li>
+        </ul>
+      </section>
+
+      <section class="panel critical">
+        <div class="panel-title"><span class="number">5</span><h2>Contenido deportivo regulado</h2></div>
+        <ul>
+          <li>Clasificación adulta, aviso <strong>18+</strong> y uso responsable visibles.</li>
+          <li>Mantener la app informativa: sin aceptar apuestas, depósitos ni retiros.</li>
+          <li>Revisión jurídica y de políticas por país; limitar territorios si una tienda lo exige.</li>
+          <li>Acreditar derechos de datos, escudos, ligas, marcas y cualquier contenido de terceros.</li>
+        </ul>
+      </section>
+
+      <section class="panel critical">
+        <div class="panel-title"><span class="number">6</span><h2>Ficha y revisión</h2></div>
+        <ul>
+          <li>Icono 1024, capturas reales, textos, categoría, edad, soporte y privacidad.</li>
+          <li>Google: feature graphic 1024×500 y hasta 8 capturas por dispositivo.</li>
+          <li>Cuenta demo activa para que ambos equipos de revisión vean todo.</li>
+          <li>TestFlight y pruebas reales; en cuentas personales nuevas de Google: 12 testers durante 14 días.</li>
+        </ul>
+      </section>
+    </div>
+
+    <aside class="callout">
+      <b>Decisión inicial</b>
+      <p>Antes de construir los pagos nativos, conviene solicitar una revisión especializada de clasificación: CF Análisis no recibe apuestas, pero muestra cuotas y recomendaciones. Apple, Google y cada país pueden tratar ese contenido de forma distinta.</p>
+    </aside>
+
+    <footer class="sources">
+      Fuentes oficiales consultadas: <a href="https://developer.apple.com/app-store/review/guidelines/">Apple App Review Guidelines</a> ·
+      <a href="https://developer.apple.com/news/upcoming-requirements/">Apple Upcoming Requirements</a> ·
+      <a href="https://support.google.com/googleplay/android-developer/answer/11926878">Google Target API</a> ·
+      <a href="https://support.google.com/googleplay/android-developer/answer/10281818">Google Payments</a> ·
+      <a href="https://support.google.com/googleplay/android-developer/answer/13327111">Google Account Deletion</a> ·
+      <a href="https://support.google.com/googleplay/android-developer/answer/9877032">Google Gambling Policy</a>.
+    </footer>
+  </main>
+</body>
+</html>

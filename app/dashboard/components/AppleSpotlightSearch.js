@@ -5,6 +5,7 @@ import { ArrowRight, Search, SlidersHorizontal, X } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { toggleSpotlightSport } from '../../../lib/spotlight-sports';
 import {
   BaloncestoIcon,
   BaseballIcon,
@@ -25,8 +26,6 @@ const STATUS_LABELS = {
   LIVE: 'En vivo', IN: 'En vivo', '1H': 'En vivo', '2H': 'En vivo', HT: 'Descanso',
   POST: 'Aplazado', PST: 'Aplazado', CANC: 'Cancelado', SUSP: 'Suspendido',
 };
-
-const SPOTLIGHT_SPRING = { type: 'spring', stiffness: 360, damping: 34, mass: .8 };
 
 function resultDate(value) {
   if (!value) return '';
@@ -52,7 +51,6 @@ export default function AppleSpotlightSearch() {
   const requestRef = useRef(null);
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState('');
   const [selectedSports, setSelectedSports] = useState([]);
   const [results, setResults] = useState([]);
@@ -64,13 +62,11 @@ export default function AppleSpotlightSearch() {
 
   const close = useCallback(() => {
     setOpen(false);
-    setExpanded(false);
     setActiveIndex(0);
   }, []);
 
-  const openCompact = useCallback(() => {
+  const openSearch = useCallback(() => {
     setOpen(true);
-    setExpanded(false);
     setError('');
   }, []);
 
@@ -79,15 +75,12 @@ export default function AppleSpotlightSearch() {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         if (open) close();
-        else {
-          setOpen(true);
-          setExpanded(true);
-        }
+        else openSearch();
       }
     };
     document.addEventListener('keydown', onShortcut);
     return () => document.removeEventListener('keydown', onShortcut);
-  }, [close, open]);
+  }, [close, open, openSearch]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -104,10 +97,10 @@ export default function AppleSpotlightSearch() {
   }, [close, open]);
 
   useEffect(() => {
-    if (!open || !expanded) return undefined;
+    if (!open) return undefined;
     const focusTimer = window.setTimeout(() => inputRef.current?.focus(), reduceMotion ? 0 : 160);
     return () => window.clearTimeout(focusTimer);
-  }, [expanded, open, reduceMotion]);
+  }, [open, reduceMotion]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -158,9 +151,7 @@ export default function AppleSpotlightSearch() {
   const sportMap = useMemo(() => new Map(SPORTS.map((sport) => [sport.key, sport])), []);
 
   const toggleSport = (key) => {
-    setSelectedSports((current) => (
-      current.includes(key) ? current.filter((sport) => sport !== key) : [...current, key]
-    ));
+    setSelectedSports((current) => toggleSpotlightSport(current, key));
   };
 
   const goTo = useCallback((href) => {
@@ -262,26 +253,20 @@ export default function AppleSpotlightSearch() {
           </button>
 
           <motion.div
-            className={`spotlight-stage ${expanded ? 'is-expanded' : ''}`}
+            className="spotlight-stage is-expanded"
             initial={reduceMotion ? false : { opacity: 0, y: -8, scale: .96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -5, scale: .98 }}
             transition={{ duration: reduceMotion ? 0 : .2, ease: [0.22, 1, 0.36, 1] }}
           >
-            <motion.section
-              layout={!reduceMotion}
-              className={`spotlight-command ${expanded ? 'is-expanded' : ''}`}
-              transition={reduceMotion ? { duration: 0 } : SPOTLIGHT_SPRING}
-            >
+            <motion.section className="spotlight-command is-expanded">
               <label className="spotlight-input-wrap">
-                <Search size={expanded ? 22 : 19} aria-hidden="true" />
+                <Search size={22} aria-hidden="true" />
                 <input
                   ref={inputRef}
                   type="search"
                   value={query}
-                  onFocus={() => setExpanded(true)}
-                  onClick={() => setExpanded(true)}
-                  onChange={(event) => { setQuery(event.target.value); setExpanded(true); }}
+                  onChange={(event) => setQuery(event.target.value)}
                   onKeyDown={onInputKeyDown}
                   placeholder="Buscar"
                   aria-label="Buscar equipo, liga o partido"
@@ -297,95 +282,47 @@ export default function AppleSpotlightSearch() {
                 )}
               </label>
 
-              <AnimatePresence initial={false}>
-                {expanded && (
-                  <motion.div
-                    key="spotlight-content"
-                    className="spotlight-command-content"
-                    initial={reduceMotion ? false : { height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: reduceMotion ? 0 : .28, ease: [0.22, 1, 0.36, 1] }}
-                  >
-                    <div className="spotlight-filter-row" aria-label="Filtrar por deporte">
-                      <span className="spotlight-filter-label"><SlidersHorizontal size={14} aria-hidden="true" /> Deportes</span>
-                      <div className="spotlight-sports">
+              <div className="spotlight-command-content">
+                <div className="spotlight-filter-row" aria-label="Filtrar por deporte">
+                  <span className="spotlight-filter-label"><SlidersHorizontal size={14} aria-hidden="true" /> Deportes</span>
+                  <div className="spotlight-sports">
+                    <button
+                      type="button"
+                      className={`spotlight-sport-chip ${selectedSports.length === 0 ? 'is-active' : ''}`}
+                      onClick={() => setSelectedSports([])}
+                      aria-pressed={selectedSports.length === 0}
+                    >
+                      Todos
+                    </button>
+                    {SPORTS.map(({ key, label, Icon }) => {
+                      const active = selectedSports.includes(key);
+                      return (
                         <button
+                          key={key}
                           type="button"
-                          className={`spotlight-sport-chip ${selectedSports.length === 0 ? 'is-active' : ''}`}
-                          onClick={() => setSelectedSports([])}
-                          aria-pressed={selectedSports.length === 0}
+                          className={`spotlight-sport-chip ${active ? 'is-active' : ''}`}
+                          onClick={() => toggleSport(key)}
+                          aria-pressed={active}
                         >
-                          Todos
+                          <Icon size={16} />
+                          {label}
                         </button>
-                        {SPORTS.map(({ key, label, Icon }) => {
-                          const active = selectedSports.includes(key);
-                          return (
-                            <button
-                              key={key}
-                              type="button"
-                              className={`spotlight-sport-chip ${active ? 'is-active' : ''}`}
-                              onClick={() => toggleSport(key)}
-                              aria-pressed={active}
-                            >
-                              <Icon size={16} />
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                    <div className="spotlight-results" id="spotlight-results" role="listbox" aria-label="Resultados de búsqueda">
-                      {resultContent}
-                    </div>
+                <div className="spotlight-results" id="spotlight-results" role="listbox" aria-label="Resultados de búsqueda">
+                  {resultContent}
+                </div>
 
-                    <footer className="spotlight-footer">
-                      <span><kbd>↑</kbd><kbd>↓</kbd> navegar</span>
-                      <span><kbd>↵</kbd> abrir</span>
-                      <span><kbd>esc</kbd> cerrar</span>
-                    </footer>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                <footer className="spotlight-footer">
+                  <span><kbd>↑</kbd><kbd>↓</kbd> navegar</span>
+                  <span><kbd>↵</kbd> abrir</span>
+                  <span><kbd>esc</kbd> cerrar</span>
+                </footer>
+              </div>
             </motion.section>
-
-            <AnimatePresence initial={false}>
-              {!expanded && (
-                <motion.nav className="spotlight-launchers" aria-label="Elegir deportes">
-                  {SPORTS.map(({ key, label, Icon }, index) => {
-                    const active = selectedSports.includes(key);
-                    return (
-                      <motion.button
-                        key={key}
-                        type="button"
-                        className={active ? 'is-active' : ''}
-                        onClick={() => toggleSport(key)}
-                        aria-label={`${active ? 'Quitar' : 'Buscar en'} ${label}`}
-                        aria-pressed={active}
-                        title={label}
-                        initial={reduceMotion ? false : { opacity: 0, scale: .75, x: -12 }}
-                        animate={{ opacity: 1, scale: 1, x: 0 }}
-                        exit={{ opacity: 0, scale: .7, x: -18 }}
-                        transition={{
-                          duration: reduceMotion ? 0 : .2,
-                          delay: reduceMotion ? 0 : index * .045,
-                          ease: [0.22, 1, 0.36, 1],
-                        }}
-                      >
-                        <Icon size={20} />
-                      </motion.button>
-                    );
-                  })}
-                </motion.nav>
-              )}
-            </AnimatePresence>
-
-            {!expanded && (
-              <motion.p className="spotlight-stage-hint" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: .2 }}>
-                {selectedSports.length === 0 ? 'Busca en todos los deportes' : `${selectedSports.length} deportes seleccionados`}
-              </motion.p>
-            )}
           </motion.div>
         </motion.div>
       )}
@@ -394,7 +331,7 @@ export default function AppleSpotlightSearch() {
 
   return (
     <>
-      <button type="button" className="dashboard-search-trigger" onClick={openCompact} aria-label="Buscar en todos los deportes">
+      <button type="button" className="dashboard-search-trigger" onClick={openSearch} aria-label="Buscar en todos los deportes">
         <Search size={19} aria-hidden="true" />
         <span>Buscar</span>
       </button>

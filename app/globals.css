@@ -3952,10 +3952,17 @@ body {
   cursor: pointer;
 }
 
-.spotlight-sport-chip.is-active {
+.spotlight-sport-chip.is-active,
+.spotlight-sport-chip[aria-pressed="true"] {
   border-color: rgba(94,230,177,.42);
   color: #cffff0;
   background: rgba(94,230,177,.105);
+}
+
+.spotlight-sport-chip[aria-pressed="false"] {
+  border-color: rgba(255,255,255,.075);
+  color: #91a4ab;
+  background: rgba(255,255,255,.025);
 }
 
 .spotlight-results {
@@ -12436,58 +12443,12 @@ input:checked + .cb-mark::after {
   max-height: min(480px, calc(100dvh - 260px));
 }
 
-.spotlight-launchers {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 7px;
-}
-
-.spotlight-launchers > button {
-  display: grid;
-  place-items: center;
-  width: 43px;
-  height: 43px;
-  padding: 0;
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: 50%;
-  color: #71858d;
-  background: rgba(255,255,255,.035);
-  cursor: pointer;
-  transition: color .18s ease, border-color .18s ease, background .18s ease, transform .18s ease;
-}
-
-.spotlight-launchers > button:hover,
-.spotlight-launchers > button:focus-visible,
-.spotlight-launchers > button.is-active {
-  border-color: rgba(94,230,177,.36);
-  color: var(--dash-green);
-  background: rgba(94,230,177,.09);
-  outline: none;
-}
-
-.spotlight-launchers > button:active { transform: scale(.92); }
-
-.spotlight-stage-hint {
-  position: absolute;
-  top: calc(100% + 13px);
-  left: 0;
-  width: 100%;
-  margin: 0;
-  color: #647880;
-  font-size: .61rem;
-  font-weight: 700;
-  text-align: center;
-}
-
 @media (max-width: 520px) {
   .spotlight-command {
     flex-basis: 175px;
     width: auto;
   }
 
-  .spotlight-launchers { gap: 5px; }
-  .spotlight-launchers > button { width: 38px; height: 38px; }
   .spotlight-command .spotlight-input-wrap { min-height: 48px; padding: 0 11px; }
   .spotlight-command .spotlight-input-wrap input { height: 46px; }
   .spotlight-command.is-expanded .spotlight-input-wrap { min-height: 57px; }
@@ -12498,9 +12459,6 @@ input:checked + .cb-mark::after {
 
 @media (max-width: 359px) {
   .spotlight-stage { gap: 5px; }
-  .spotlight-launchers { gap: 4px; }
-  .spotlight-launchers > button { width: 34px; height: 34px; }
-  .spotlight-launchers > button svg { width: 17px; height: 17px; }
 }
 
 /* Apuesta del día adopta el mismo lenguaje de la tira de fechas: tarjetas
@@ -12703,7 +12661,6 @@ input:checked + .cb-mark::after {
 
 @media (prefers-reduced-motion: reduce) {
   .spotlight-command,
-  .spotlight-launchers > button,
   .daily-pick-track,
   .dashboard-date-tile { scroll-behavior: auto !important; transition: none !important; }
 }

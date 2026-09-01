@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-01 · Commit base: `39ca933`
+Actualizado: 2026-09-01 · Commit base: `895abed`
 
 ## Identidad y stack
 
@@ -15,6 +15,10 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | Pagos | Stripe mundial; Mercado Pago en Colombia |
 | Email | Resend/ZeptoMail según plantilla |
 | Deploy | GitHub Actions → `/apps/futbol` → build standalone → PM2 |
+
+Los entregables de producto no ejecutables viven en `docs/flashcards/`: allí
+están las fichas de preparación para tiendas y de funcionamiento, en HTML y PNG.
+Las creatividades listas para campañas se guardan en `public/marketing/`.
 
 ## Mapa de rutas
 
@@ -864,4 +868,8 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   y conservan `matchName` como cabecera visible de cada partido. Los registros
   anteriores siguen siendo compatibles y usan el identificador del encuentro
   como contexto si su nombre histórico estuviera incompleto.
+- 2026-09-01: el Spotlight del header abre directamente su única superficie de
+  búsqueda; ya no encadena una cápsula y un segundo panel. Los filtros deportivos
+  se pueden seleccionar y deseleccionar con un segundo toque; su color depende
+  directamente del estado `aria-pressed`, sin un `hover` táctil persistente.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.

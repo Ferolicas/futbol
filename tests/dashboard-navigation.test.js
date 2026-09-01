@@ -16,9 +16,9 @@ test('el header queda reducido a chat, logo centrado y búsqueda Spotlight', () 
   assert.match(spotlight, /createPortal\(overlay, document\.body\)/);
   assert.match(spotlight, /selectedSports\.length\) params\.set\('sports'/);
   assert.match(spotlight, /Sin ningún deporte seleccionado, buscaremos en toda la app/);
-  assert.match(spotlight, /className="spotlight-launchers"/);
-  assert.match(spotlight, /layout=!\{?reduceMotion|layout=\{!reduceMotion\}/);
-  assert.match(spotlight, /SPOTLIGHT_SPRING/);
+  assert.match(spotlight, /className="spotlight-stage is-expanded"/);
+  assert.match(spotlight, /className="spotlight-command is-expanded"/);
+  assert.doesNotMatch(spotlight, /spotlight-launchers|SPOTLIGHT_SPRING|setExpanded/);
   const styles = read('app/globals.css');
   assert.match(styles, /\.dashboard-brand \{[\s\S]*width: 37\.8% !important/);
   const logo = read('components/BrandLogoMedia.js');

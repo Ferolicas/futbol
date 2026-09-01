@@ -28,9 +28,9 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - Home y planes: escenas fijas controladas por scroll, teclado o swipe. La pantalla no acumula secciones verticales.
 - Header autenticado: muestra `Chat` a la izquierda, el video-logo centrado al
   54% del ancho y `Buscar` a la derecha. La búsqueda abre un Spotlight de pantalla
-  completa sobre el mismo fondo de la app. Primero presenta la cápsula compacta y
-  cuatro accesos deportivos circulares de la referencia Apple; al enfocar, la misma
-  superficie crece con física spring y lista los resultados. Admite filtros
+  completa sobre el mismo fondo de la app. Abre directamente una única superficie
+  con el campo, los cuatro filtros deportivos y la lista de resultados, sin montar
+  un segundo panel al tocar el campo. Admite filtros
   combinables y, sin ninguno activo, consulta los cuatro deportes.
 - Jornadas: tira horizontal compacta desde mañana hasta diez días atrás. Cada
   tarjeta muestra abreviatura del día y `número + mes`. El verde sólido pertenece
@@ -118,9 +118,9 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - `prefers-reduced-motion` elimina transiciones y animaciones no esenciales.
 - El header del dashboard es completamente opaco y el dock inferior llega a
   `bottom: 0`; el safe-area del dispositivo se absorbe dentro de la superficie.
-- El Spotlight replica el gesto cápsula → panel de Apple Spotlight, ofrece accesos
-  circulares y búsqueda por equipo, liga o partido en Fútbol, Béisbol, Baloncesto
-  y Fútbol americano.
+- El Spotlight entra como un único panel animado y busca por equipo, liga o partido
+  en Fútbol, Béisbol, Baloncesto y Fútbol americano. En pantallas táctiles el
+  estado visual depende de la selección real, no de un `hover` persistente.
 - El modal de análisis no intercepta ni agrupa gestos: conserva la inercia y la
   respuesta nativas de cada navegador.
 
