@@ -38,9 +38,8 @@ function ExpectedRows({ verdict, homeName, awayName }) {
 }
 
 export default function FinalVerdictPanel({ verdict, homeName = 'Local', awayName = 'Visitante', compact = false }) {
-  if (!verdict) return null;
-  const picks = Array.isArray(verdict.picks) ? verdict.picks : [];
-  const h2h = Array.isArray(verdict.h2h) ? verdict.h2h.slice(0, 2) : [];
+  const picks = Array.isArray(verdict?.picks) ? verdict.picks : [];
+  const h2h = Array.isArray(verdict?.h2h) ? verdict.h2h.slice(0, 2) : [];
   return (
     <section className={`final-verdict-panel ${compact ? 'is-compact' : ''}`}>
       <div className="final-verdict-heading">
@@ -50,19 +49,26 @@ export default function FinalVerdictPanel({ verdict, homeName = 'Local', awayNam
       <p className="final-verdict-method">
         Solo partidos oficiales de la competición y temporada indicadas. Si la temporada aún no tiene partidos, usa los primeros 5 y los últimos 5 de la anterior. H2H: misma competición primero y otras solo para completar dos.
       </p>
-      <div className="final-verdict-samples">
-        <span>{homeName}: {verdict.samples?.home?.count ?? 0} oficiales</span>
-        <span>{awayName}: {verdict.samples?.away?.count ?? 0} oficiales</span>
-        <span>H2H: {h2h.length}/2</span>
-      </div>
+      {verdict && (
+        <div className="final-verdict-samples">
+          <span>{homeName}: {verdict.samples?.home?.count ?? 0} oficiales</span>
+          <span>{awayName}: {verdict.samples?.away?.count ?? 0} oficiales</span>
+          <span>H2H: {h2h.length}/2</span>
+        </div>
+      )}
 
       {!compact && <ExpectedRows verdict={verdict} homeName={homeName} awayName={awayName} />}
 
       <div className="final-verdict-picks">
-        {picks.length ? picks.map((pick) => (
+        {!verdict ? (
+          <div className="final-verdict-empty">El Veredicto final se está preparando con los partidos oficiales y las líneas reales de Bet365. El análisis actual permanece disponible.</div>
+        ) : picks.length ? picks.map((pick) => (
           <article key={pick.id}>
             <span><small>{pick.market}</small><strong>{pick.name}</strong></span>
-            <span className="final-verdict-numbers"><b>{pct(pick.rawProbability ?? pick.probability)}</b><em>@{Number(pick.odd).toFixed(2)}</em></span>
+            <span className="final-verdict-numbers">
+              <span><small>Probabilidad</small><b>{pct(pick.rawProbability ?? pick.probability)}</b></span>
+              <span><small>Cuota</small><em>@{Number(pick.odd).toFixed(2)}</em></span>
+            </span>
           </article>
         )) : (
           <div className="final-verdict-empty">No existe ahora una opción Bet365 que coincida con el cálculo, sea “Más de” cuando aplica y tenga cuota mínima de 1,50.</div>

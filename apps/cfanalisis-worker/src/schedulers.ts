@@ -171,9 +171,8 @@ export async function enqueueBaseballCoverageBootstrap(): Promise<void> {
 }
 
 // Igual que la guardia de Baseball: al subir el contrato no esperamos al cron
-// nocturno. Regenera los tres días anteriores, hoy y mañana para NBA/NCAA y
-// NFL/NCAA, de modo que las
-// tarjetas v20 (acordeón + veredicto) aparezcan durante el mismo despliegue.
+// nocturno. Repara los tres días anteriores, hoy y mañana para todos los
+// deportes, de modo que las tarjetas y el veredicto aparezcan en el despliegue.
 export async function enqueueMultisportAnalysisBootstrap(): Promise<void> {
   const today = bogotaToday();
   const shift = (amount: number) => {
@@ -182,12 +181,16 @@ export async function enqueueMultisportAnalysisBootstrap(): Promise<void> {
     return value.toISOString().slice(0, 10);
   };
   const dates = [-3, -2, -1, 0, 1].map(shift);
-  // Fútbol también elevó su contrato: fuerza hoy y mañana. `futbol-daily`
-  // reutiliza el batch normal, con sus límites y persistencia habituales.
-  for (const date of [shift(0), shift(1)]) {
-    const jobId = `futbol-daily-v${FOOTBALL_CACHE_VERSION}-${date}`;
-    await queues['futbol-daily'].add('futbol-daily', { date, force: true, bootstrap: true }, { jobId });
-    logger.info({ queue: 'futbol-daily', jobId, date, cacheVersion: FOOTBALL_CACHE_VERSION }, 'football verdict bootstrap listo');
+  // El pase de fútbol es deliberadamente `verdictOnly`: conserva intacto el
+  // motor v23, completa el bloque aislado y reconstruye el resumen de tarjetas.
+  for (const date of dates) {
+    const jobId = `futbol-verdict-summary-v2-${date}`;
+    await queues['futbol-analyze-batch'].add(
+      'verdict-repair',
+      { date, verdictOnly: true, bootstrap: true },
+      { jobId },
+    );
+    logger.info({ queue: 'futbol-analyze-batch', jobId, date, cacheVersion: FOOTBALL_CACHE_VERSION }, 'football verdict repair bootstrap listo');
   }
   for (const [sport, queueName] of [
     ['basketball', 'basketball-analyze'],

@@ -19,7 +19,18 @@
  * Payload: { date: 'YYYY-MM-DD' }
  */
 import { UnrecoverableError } from 'bullmq';
-import { analysisDateKey, analyzeMatch, getCachedFixturesRaw, redisGet, redisSet, triggerEvent } from '../../shared.js';
+import {
+  analysisDateKey,
+  analyzeMatch,
+  buildFootballFinalVerdict,
+  cacheAnalysis,
+  getCachedAnalysis,
+  getCachedFixturesRaw,
+  pgPool,
+  redisGet,
+  redisSet,
+  triggerEvent,
+} from '../../shared.js';
 import { mapPool } from '../../pool.js';
 import { logError } from '../../errors-log.js';
 
@@ -54,10 +65,109 @@ function buildSummary(a) {
     homePosition: a.homePosition, awayPosition: a.awayPosition,
     homeLastFive: compactLastFive(a.homeLastFive),
     awayLastFive: compactLastFive(a.awayLastFive),
+    finalVerdict: a.finalVerdict || null,
     playerHighlights: a.playerHighlights || null,
     referee: a.referee || null,
     refereeStats: a.refereeStats || null,
   };
+}
+
+// Reparación aislada del nuevo producto. Lee el análisis v23/v24 existente,
+// calcula solo `finalVerdict` cuando falta y reconstruye el resumen diario. No
+// llama `analyzeMatch`, no modifica probabilidades, combinada ni motor.
+async function runVerdictRepair(allFixtures, date, job) {
+  const aggregateKey = analysisDateKey(date);
+  const existing = (await redisGet(aggregateKey)) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };
+  const analyzedIds = new Set((existing.globallyAnalyzed || []).map(Number));
+  const analyzedOdds = { ...(existing.analyzedOdds || {}) };
+  const analyzedData = { ...(existing.analyzedData || {}) };
+  let generated = 0;
+  let reused = 0;
+  let withoutAnalysis = 0;
+
+  const results = await mapPool(allFixtures, ANALYZE_CONCURRENCY, async (fixture) => {
+    const fixtureId = Number(fixture.fixture.id);
+    const cached = await getCachedAnalysis(fixtureId, date);
+    if (!cached) {
+      withoutAnalysis++;
+      return { fixtureId, skipped: true };
+    }
+
+    let analysis = cached;
+    if (!analysis.finalVerdict) {
+      const finalVerdict = await buildFootballFinalVerdict(pgPool, {
+        fixture: {
+          id: fixtureId,
+          date: fixture.fixture?.date,
+          season: fixture.league?.season,
+          league: {
+            id: fixture.league?.id,
+            name: fixture.league?.name,
+            season: fixture.league?.season,
+          },
+          teams: fixture.teams,
+        },
+        odds: analysis.odds,
+      });
+      analysis = { ...analysis, finalVerdict };
+      const persist = await cacheAnalysis(fixtureId, analysis);
+      if (!persist?.db) {
+        throw new Error(`no se pudo persistir el veredicto: ${persist?.error || 'error desconocido'}`);
+      }
+      generated++;
+    } else {
+      reused++;
+    }
+
+    analyzedIds.add(fixtureId);
+    if (analysis.odds?.matchWinner) analyzedOdds[fixtureId] = analysis.odds.matchWinner;
+    const summary = buildSummary(analysis);
+    if (summary) analyzedData[fixtureId] = summary;
+    return { fixtureId, skipped: false };
+  });
+
+  const failures = results
+    .map((result, index) => result.ok ? null : ({
+      fixtureId: Number(allFixtures[index]?.fixture?.id),
+      error: result.error.message,
+    }))
+    .filter(Boolean);
+
+  await redisSet(aggregateKey, {
+    globallyAnalyzed: [...analyzedIds],
+    analyzedOdds,
+    analyzedData,
+  }, 12 * 3600);
+
+  try {
+    await job?.updateProgress?.({
+      phase: failures.length ? 'failed' : 'complete',
+      total: allFixtures.length,
+      generated,
+      reused,
+      withoutAnalysis,
+      failed: failures.length,
+    });
+  } catch {}
+
+  if (failures.length) {
+    throw new Error(
+      `verdict repair incomplete: ${failures.length}/${allFixtures.length} (${failures.slice(0, 10).map(item => item.fixtureId).join(',')})`,
+    );
+  }
+
+  await triggerEvent('analysis', 'verdict-ready', {
+    date,
+    generated,
+    reused,
+    timestamp: new Date().toISOString(),
+  }).catch(() => {});
+
+  console.log(
+    `[job:futbol-analyze-batch] veredicto reparado date=${date} ` +
+    `generados=${generated} reutilizados=${reused} sinAnalisis=${withoutAnalysis}`,
+  );
+  return { ok: true, verdictOnly: true, date, generated, reused, withoutAnalysis };
 }
 
 async function markComplete(date, fixtureCount) {
@@ -78,7 +188,7 @@ async function markComplete(date, fixtureCount) {
 
 /** @param {any} payload @param {any} [job] */
 export async function runAnalyzeBatch(payload = {}, job = null) {
-  const { date, force = false } = payload;
+  const { date, force = false, verdictOnly = false } = payload;
   // UnrecoverableError → BullMQ marca el job como failed inmediatamente sin
   // consumir los 5 attempts configurados en analyzeJobOpts. Reintentar un
   // payload invalido nunca lo arregla: es bug del caller, no fallo transitorio.
@@ -93,6 +203,7 @@ export async function runAnalyzeBatch(payload = {}, job = null) {
   if (!allFixtures || allFixtures.length === 0) {
     return { ok: true, message: 'no fixtures in cache', date };
   }
+  if (verdictOnly) return runVerdictRepair(allFixtures, date, job);
 
   const aggregateKey = analysisDateKey(date);
   const existing     = (await redisGet(aggregateKey)) || { globallyAnalyzed: [], analyzedOdds: {}, analyzedData: {} };

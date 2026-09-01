@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-08-30 · Commit base: `11a26b6`
+Actualizado: 2026-09-01 · Commit base: `bcc17e4`
 
 ## Identidad y stack
 
@@ -688,9 +688,15 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - 2026-09-01: `FOOTBALL_CACHE_VERSION=24` y `MULTISPORT_CACHE_VERSION=20`
   incorporan el Veredicto final aislado, los detalles completos de baloncesto y
   fútbol americano y la política Baseball 65%/Bet365/≥1,20 en ambos deportes.
-  El arranque heavy encola de forma idempotente la regeneración de fútbol para
-  hoy/mañana y de NBA/NCAA/NFL para los tres días anteriores, hoy y mañana,
-  por versión y fecha.
+  Fútbol mantiene lectura compatible de v23 porque v24 no cambia su motor: el
+  arranque heavy encola una reparación `verdictOnly` para los tres días
+  anteriores, hoy y mañana. Esa reparación solo completa `finalVerdict` y
+  reconstruye el resumen diario; nunca recalcula probabilidades ni combinadas.
+  El mismo arranque regenera NBA/NCAA/NFL para esa ventana, por versión y fecha.
+  Tanto el resumen persistido por el worker como el fallback de PostgreSQL deben
+  transportar `finalVerdict`; si falta durante la migración, la tarjeta conserva
+  el análisis actual y muestra el bloque como "en preparación". Cada opción
+  etiqueta expresamente su porcentaje como `Probabilidad`.
 - 2026-08-21: `FOOTBALL_CACHE_VERSION=23` fija el reparto temporada
   actual/histórico en 65/35 y reemplaza la antigua confianza `n/(n+12)` de los
   mercados over/under y booleanos por fiabilidad beta-binomial basada en
