@@ -37,19 +37,17 @@ function ExpectedRows({ verdict, homeName, awayName }) {
   );
 }
 
-export default function FinalVerdictPanel({ verdict, homeName = 'Local', awayName = 'Visitante', compact = false }) {
+export default function FinalVerdictPanel({ verdict, homeName = 'Local', awayName = 'Visitante', compact = false, embedded = false }) {
   const picks = Array.isArray(verdict?.picks) ? verdict.picks : [];
   const h2h = Array.isArray(verdict?.h2h) ? verdict.h2h.slice(0, 2) : [];
-  return (
-    <details className={`final-verdict-panel ${compact ? 'is-compact' : ''}`}>
-      <summary className="final-verdict-heading">
-        <span><small>PRONÓSTICO AISLADO</small><strong>Veredicto final</strong></span>
-        <span className="final-verdict-summary-meta">
-          <em>Bet365 · cuota ≥ 1,50</em>
-          <span className="final-verdict-chevron" aria-hidden="true">⌄</span>
-        </span>
-      </summary>
-      <div className="final-verdict-body">
+  const body = (
+    <div className="final-verdict-body">
+      {embedded && (
+        <div className="final-verdict-context">
+          <small>PRONÓSTICO AISLADO</small>
+          <strong>Bet365 · cuota ≥ 1,50</strong>
+        </div>
+      )}
         <p className="final-verdict-method">
           Solo partidos oficiales de la competición y temporada indicadas. Si la temporada aún no tiene partidos, usa los primeros 5 y los últimos 5 de la anterior. H2H: misma competición primero y otras solo para completar dos.
         </p>
@@ -90,7 +88,27 @@ export default function FinalVerdictPanel({ verdict, homeName = 'Local', awayNam
             ))}
           </details>
         )}
-      </div>
+    </div>
+  );
+
+  if (embedded) {
+    return (
+      <section className={`final-verdict-panel is-embedded ${compact ? 'is-compact' : ''}`}>
+        {body}
+      </section>
+    );
+  }
+
+  return (
+    <details className={`final-verdict-panel ${compact ? 'is-compact' : ''}`}>
+      <summary className="final-verdict-heading">
+        <span><small>PRONÓSTICO AISLADO</small><strong>Veredicto final</strong></span>
+        <span className="final-verdict-summary-meta">
+          <em>Bet365 · cuota ≥ 1,50</em>
+          <span className="final-verdict-chevron" aria-hidden="true">⌄</span>
+        </span>
+      </summary>
+      {body}
     </details>
   );
 }

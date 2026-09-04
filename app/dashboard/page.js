@@ -9,7 +9,6 @@ import {
   ArrowRight,
   BarChart3,
   CalendarDays,
-  ChevronDown,
   ChevronRight,
   Flag,
   Layers3,
@@ -2091,56 +2090,74 @@ function AnalysisModal({ id, onClose }) {
   );
 }
 
-/* ======================== ACCORDION CARD ======================== */
+/* ======================== ANALYSIS CARD TABS ======================== */
 
-// Toggle de sub-acordeón + revelado del header.
-//
-// POR QUÉ el scrollIntoView: al abrir un sub-acordeón el contenido crece hacia
-// abajo y el header recién pulsado puede quedar fuera del viewport. Tras abrir
-// (doble rAF = esperar a que el layout se asiente) lo traemos de vuelta con
-// block:'nearest', que NO mueve la vista si ya está visible; solo lo reencuadra
-// si quedó fuera. Mismo helper que el dashboard de baseball.
-function toggleSubAndReveal(e, open, id, setOpenSub) {
-  e.stopPropagation();
-  const header = e.currentTarget; // capturar antes del async (luego puede ser null)
-  setOpenSub(open ? null : id);
-  if (!open && header) {
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      try { header.scrollIntoView({ block: 'nearest' }); } catch {}
-    }));
-  }
+function revealHorizontalChoice(element) {
+  if (!element) return;
+  requestAnimationFrame(() => {
+    try { element.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' }); } catch {}
+  });
 }
 
-// SubAccordion CONTROLADO + exclusivo. El estado de "cuál está abierto" vive
-// en el AccordionCard padre (openSub/setOpenSub), así solo uno está abierto a
-// la vez. children SIEMPRE montados (grid 0fr→1fr), el toggle solo cambia CSS
-// → apertura instantánea garantizada incluso la 1ª vez. Transición 150ms.
-function SubAccordion({ id, title, color, icon: Icon = BarChart3, openSub, setOpenSub, children }) {
-  const open = openSub === id;
+function HorizontalChoiceBar({ items, active, onChange, label, variant = 'tabs', idPrefix }) {
+  const isTabs = variant === 'tabs';
+  const select = (event, key) => {
+    event.stopPropagation();
+    onChange(key);
+    revealHorizontalChoice(event.currentTarget);
+  };
+  const onKeyDown = (event, index) => {
+    if (!isTabs || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? items.length - 1
+        : (index + (event.key === 'ArrowRight' ? 1 : -1) + items.length) % items.length;
+    const next = items[nextIndex];
+    if (!next) return;
+    onChange(next.key);
+    const nextButton = event.currentTarget.parentElement?.querySelector(`[data-choice-key="${next.key}"]`);
+    nextButton?.focus();
+    revealHorizontalChoice(nextButton);
+  };
+
   return (
-    <section className="subacc-section" style={{ '--subacc-accent': color || 'var(--dash-green)' }}>
-      <button
-        type="button"
-        className="subacc-trigger"
-        onClick={(e) => toggleSubAndReveal(e, open, id, setOpenSub)}
-        aria-expanded={open}
-      >
-        <span><i><Icon size={17} aria-hidden="true" /></i><strong>{title}</strong></span>
-        <ChevronDown className={open ? 'is-open' : ''} size={17} aria-hidden="true" />
-      </button>
-      <div className="subacc-grid" data-open={open ? '1' : '0'}>
-        <div className="subacc-overflow">
-          <div className="subacc-body">{children}</div>
-        </div>
+    <div className={`analysis-choice-scroll is-${variant}`}>
+      <div className="analysis-choice-list" role={isTabs ? 'tablist' : 'group'} aria-label={label}>
+        {items.map((item, index) => {
+          const Icon = item.icon;
+          const selected = active === item.key;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              role={isTabs ? 'tab' : undefined}
+              id={isTabs ? `${idPrefix}-tab-${item.key}` : undefined}
+              aria-controls={isTabs ? `${idPrefix}-panel-${item.key}` : undefined}
+              aria-selected={isTabs ? selected : undefined}
+              aria-pressed={!isTabs ? selected : undefined}
+              tabIndex={isTabs ? (selected ? 0 : -1) : undefined}
+              data-choice-key={item.key}
+              className={`analysis-choice${selected ? ' is-active' : ''}`}
+              style={{ '--choice-accent': item.color || 'var(--dash-green)' }}
+              onClick={(event) => select(event, item.key)}
+              onKeyDown={(event) => onKeyDown(event, index)}
+            >
+              {Icon && <Icon size={15} aria-hidden="true" />}
+              <span>{item.label}</span>
+              {item.count != null && <small>{item.count}</small>}
+            </button>
+          );
+        })}
       </div>
-    </section>
+    </div>
   );
 }
 
 const AccordionCard = memo(function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, onRemove, isFavorite, onFavorite, userTz }) {
-  // Estado de sub-acordeón EXCLUSIVO (solo uno abierto a la vez). Los 3 bloques
-  // (Estadísticas / Probabilidades / Jugadores) leen openSub y lo togglean.
-  const [openSub, setOpenSub] = useState('markets');
+  const [activeAnalysisTab, setActiveAnalysisTab] = useState('markets');
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
   const hasScore = live || finished;
@@ -2164,7 +2181,6 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
   // creado por el motor. No se reconstruyen opciones desde porcentajes porque
   // esa ruta perdería el dato de fiabilidad exigido por la política pública.
   const markets = useMemo(() => {
-    if (!isExpanded) return [];
     // "Selecciona para tu combinada": usa data.combinada.SELECTABLE — TODA línea con
     // prob≥70% y cuota real ≥1.20 (bet365/bwin, con equivalencia de línea entera). NO
     // el gate ≥80% de recomendaciones generales (eso es `selections`).
@@ -2198,7 +2214,30 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
            : s.category || 'Otros',
       }))
       .sort((a, b) => Number(b.rawProbability ?? b.probability) - Number(a.rawProbability ?? a.probability));
-  }, [isExpanded, data, match]);
+  }, [data, match]);
+
+  const analysisTabs = useMemo(() => {
+    const highlights = data?.playerHighlights;
+    const hasPlayers = ['scorers', 'shooters', 'shotsTotalists', 'assisters', 'foulers', 'bookers']
+      .some((key) => Array.isArray(highlights?.[key]) && highlights[key].length > 0);
+    return [
+      markets.length > 0 && { key: 'markets', label: 'Mercados para tu combinada', count: markets.length, icon: Layers3, color: '#5ee6b1' },
+      data?.calculatedProbabilities && { key: 'stats', label: 'Estadísticas calculadas', icon: Scale, color: '#f97316' },
+      data?.calculatedProbabilities && { key: 'probs', label: 'Frecuencias calculadas', icon: BarChart3, color: '#2dd4bf' },
+      hasPlayers && { key: 'players', label: 'Jugadores destacados', icon: Sparkles, color: '#fbbf24' },
+      { key: 'verdict', label: 'Veredicto final', icon: Flag, color: '#f5e400' },
+    ].filter(Boolean);
+  }, [data, markets.length]);
+  const resolvedAnalysisTab = analysisTabs.some((tab) => tab.key === activeAnalysisTab)
+    ? activeAnalysisTab
+    : analysisTabs[0]?.key;
+  const analysisTabPrefix = `fixture-${fixtureId}-analysis`;
+
+  useEffect(() => {
+    if (resolvedAnalysisTab && resolvedAnalysisTab !== activeAnalysisTab) {
+      setActiveAnalysisTab(resolvedAnalysisTab);
+    }
+  }, [activeAnalysisTab, resolvedAnalysisTab]);
 
   return (
     <div className={`acc-card ${isExpanded ? 'open' : ''}`}>
@@ -2358,15 +2397,20 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
               {/* LiveMatchDetails ELIMINADO entero: goleadores+minutos+marcador
                   ya los muestra el score box de la tarjeta. Era 100% redundante. */}
 
-              {/* Selectable markets — BEFORE auto combinada */}
-              {markets.length > 0 && (
-                <SubAccordion
-                  id="markets"
-                  openSub={openSub}
-                  setOpenSub={setOpenSub}
-                  title={`Mercados para tu combinada · ${markets.length}`}
-                  icon={Layers3}
-                  color="#5ee6b1"
+              <HorizontalChoiceBar
+                items={analysisTabs}
+                active={resolvedAnalysisTab}
+                onChange={setActiveAnalysisTab}
+                label="Secciones del análisis"
+                idPrefix={analysisTabPrefix}
+              />
+
+              {resolvedAnalysisTab === 'markets' && markets.length > 0 && (
+                <section
+                  id={`${analysisTabPrefix}-panel-markets`}
+                  role="tabpanel"
+                  aria-labelledby={`${analysisTabPrefix}-tab-markets`}
+                  className="analysis-tab-panel"
                 >
                   <div className="markets">
                     <div className="markets-grid">
@@ -2410,78 +2454,68 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                   })}
                     </div>
                   </div>
-                </SubAccordion>
+                </section>
               )}
 
-              {/* ── Estadísticas calculadas (extraído del análisis completo) ── */}
-              {data.calculatedProbabilities && (() => {
-                const p = data.calculatedProbabilities;
-                const ccd = p.cornerCardData || {};
-                const hn = match.teams.home.name;
-                const an = match.teams.away.name;
-                const fmt = (v) => (v == null || Number.isNaN(v) ? '—' : (typeof v === 'number' ? v.toFixed(2) : v));
-                const Cell = ({ label, value, color }) => (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                    <span style={{ fontSize: '.72rem', color: 'var(--t3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8 }}>{label}</span>
-                    <span style={{ fontSize: '.85rem', fontWeight: 700, color: color || 'var(--t1)', fontFamily: 'JetBrains Mono, monospace', fontVariantNumeric: 'tabular-nums' }}>{fmt(value)}</span>
-                  </div>
-                );
-                const StatCard = ({ title, accent, children }) => (
-                  <div style={{ background: 'var(--bg-2)', border: `1px solid ${accent || 'var(--brd)'}`, borderRadius: 10, padding: '10px 12px', flex: '1 1 220px', minWidth: 0 }}>
-                    <div style={{ fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--t2)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
-                    {children}
-                  </div>
-                );
-                return (
-                  <SubAccordion id="stats" openSub={openSub} setOpenSub={setOpenSub} title="Estadísticas calculadas" color="#f97316">
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                      <StatCard title={`Goles — ${hn}`} accent="rgba(0,212,255,.25)">
-                        <Cell label="Prom. anotados"      value={p.homeGoals?.avgScored}   color="#4ade80" />
-                        <Cell label="Prom. recibidos"     value={p.homeGoals?.avgConceded} color="#f87171" />
-                        <Cell label="Prom. vs rival H2H"  value={p.h2hGoals?.homeAvg}      color="#67e8f9" />
-                      </StatCard>
-                      <StatCard title={`Goles — ${an}`} accent="rgba(236,72,153,.25)">
-                        <Cell label="Prom. anotados"      value={p.awayGoals?.avgScored}   color="#4ade80" />
-                        <Cell label="Prom. recibidos"     value={p.awayGoals?.avgConceded} color="#f87171" />
-                        <Cell label="Prom. vs rival H2H"  value={p.h2hGoals?.awayAvg}      color="#f472b6" />
-                      </StatCard>
-                      <StatCard title="Córners (últimos 5)" accent="rgba(34,197,94,.25)">
-                        <Cell label={`${hn} a favor`}    value={ccd.homeCornersAvg} />
-                        <Cell label={`${hn} en contra`}  value={ccd.homeCornersAgainstAvg} />
-                        <Cell label={`${an} a favor`}    value={ccd.awayCornersAvg} />
-                        <Cell label={`${an} en contra`}  value={ccd.awayCornersAgainstAvg} />
-                        <Cell label="Total combinado"    value={p.cornerAvg} color="#4ade80" />
-                      </StatCard>
-                      <StatCard title="Tarjetas (últimos 5)" accent="rgba(245,158,11,.25)">
-                        <Cell label={`${hn} amarillas`} value={ccd.homeYellowsAvg} />
-                        <Cell label={`${hn} rojas`}     value={ccd.homeRedsAvg} />
-                        <Cell label={`${an} amarillas`} value={ccd.awayYellowsAvg} />
-                        <Cell label={`${an} rojas`}     value={ccd.awayRedsAvg} />
-                        <Cell label="Total amarillas prom." value={p.cardAvg} color="#fbbf24" />
-                      </StatCard>
-                    </div>
-                  </SubAccordion>
-                );
-              })()}
+              {resolvedAnalysisTab === 'stats' && data.calculatedProbabilities && (
+                <section
+                  id={`${analysisTabPrefix}-panel-stats`}
+                  role="tabpanel"
+                  aria-labelledby={`${analysisTabPrefix}-tab-stats`}
+                  className="analysis-tab-panel"
+                >
+                  <AccordionStatsBlock
+                    probabilities={data.calculatedProbabilities}
+                    homeTeam={match.teams.home.name}
+                    awayTeam={match.teams.away.name}
+                  />
+                </section>
+              )}
 
               {/* ── % Frecuencias calculadas (independientes de la publicación de cuota) ── */}
-              <AccordionProbBlock
-                id="probs" openSub={openSub} setOpenSub={setOpenSub}
-                probabilities={data.calculatedProbabilities}
-                odds={data.odds}
-                homeTeam={match.teams.home.name}
-                awayTeam={match.teams.away.name}
-              />
+              {resolvedAnalysisTab === 'probs' && (
+                <section
+                  id={`${analysisTabPrefix}-panel-probs`}
+                  role="tabpanel"
+                  aria-labelledby={`${analysisTabPrefix}-tab-probs`}
+                  className="analysis-tab-panel"
+                >
+                  <AccordionProbBlock
+                    probabilities={data.calculatedProbabilities}
+                    odds={data.odds}
+                    homeTeam={match.teams.home.name}
+                    awayTeam={match.teams.away.name}
+                  />
+                </section>
+              )}
 
-              <FinalVerdictPanel
-                verdict={data.finalVerdict}
-                homeName={match.teams.home.name}
-                awayName={match.teams.away.name}
-                compact
-              />
+              {resolvedAnalysisTab === 'players' && (
+                <section
+                  id={`${analysisTabPrefix}-panel-players`}
+                  role="tabpanel"
+                  aria-labelledby={`${analysisTabPrefix}-tab-players`}
+                  className="analysis-tab-panel"
+                >
+                  <AccordionPlayersBlock highlights={data.playerHighlights} />
+                </section>
+              )}
 
-              {/* ── Jugadores destacados ── */}
-              <AccordionPlayersBlock id="players" openSub={openSub} setOpenSub={setOpenSub} highlights={data.playerHighlights} />
+              {resolvedAnalysisTab === 'verdict' && (
+                <section
+                  id={`${analysisTabPrefix}-panel-verdict`}
+                  role="tabpanel"
+                  aria-labelledby={`${analysisTabPrefix}-tab-verdict`}
+                  className="analysis-tab-panel"
+                >
+                  <FinalVerdictPanel
+                    verdict={data.finalVerdict}
+                    homeName={match.teams.home.name}
+                    awayName={match.teams.away.name}
+                    compact
+                    embedded
+                  />
+                </section>
+              )}
 
               {/* Last5Block y StatsBlock se quitaron del acordeon: son datos
                   base de input al modelo, no recomendaciones accionables. El
@@ -2679,14 +2713,84 @@ function LiveStatsBar({ stats }) {
   );
 }
 
-// ===================== ACCORDION PROBABILITIES BLOCK =====================
-// Replica el bloque "% Probabilidades calculadas" del analisis completo
-// (app/dashboard/analisis/[id]/page.js → SECCION 8). Misma data, render
-// compacto sin animaciones pesadas — el acordeon es vista resumida.
+// ===================== CALCULATED STATS TAB =====================
 
-function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, openSub, setOpenSub }) {
-  // catOpen exclusivo (key de categoría abierta o null) — una categoría a la vez.
-  const [catOpen, setCatOpen] = useState(null);
+function AccordionStatsBlock({ probabilities: p, homeTeam, awayTeam }) {
+  const [activeGroup, setActiveGroup] = useState('goals');
+  const ccd = p?.cornerCardData || {};
+  const fmt = (value) => (value == null || Number.isNaN(value)
+    ? '—'
+    : (typeof value === 'number' ? value.toFixed(2) : value));
+  const groups = [
+    { key: 'goals', label: 'Goles', color: '#4ade80' },
+    { key: 'corners', label: 'Córners', color: '#22d3ee' },
+    { key: 'cards', label: 'Tarjetas', color: '#fbbf24' },
+  ];
+
+  const Cell = ({ label, value, color }) => (
+    <div className="analysis-stat-row">
+      <span>{label}</span>
+      <strong style={{ color: color || 'var(--t1)' }}>{fmt(value)}</strong>
+    </div>
+  );
+  const StatCard = ({ title, accent, children }) => (
+    <article className="analysis-stat-card" style={{ '--stat-accent': accent }}>
+      <h4>{title}</h4>
+      {children}
+    </article>
+  );
+
+  return (
+    <div className="analysis-tab-stack">
+      <HorizontalChoiceBar
+        items={groups}
+        active={activeGroup}
+        onChange={setActiveGroup}
+        label="Filtrar estadísticas calculadas"
+        variant="filters"
+      />
+      <div className="subacc-data-grid">
+        {activeGroup === 'goals' && (
+          <>
+            <StatCard title={`Goles — ${homeTeam}`} accent="#22d3ee">
+              <Cell label="Prom. anotados" value={p.homeGoals?.avgScored} color="#4ade80" />
+              <Cell label="Prom. recibidos" value={p.homeGoals?.avgConceded} color="#f87171" />
+              <Cell label="Prom. vs rival H2H" value={p.h2hGoals?.homeAvg} color="#67e8f9" />
+            </StatCard>
+            <StatCard title={`Goles — ${awayTeam}`} accent="#f472b6">
+              <Cell label="Prom. anotados" value={p.awayGoals?.avgScored} color="#4ade80" />
+              <Cell label="Prom. recibidos" value={p.awayGoals?.avgConceded} color="#f87171" />
+              <Cell label="Prom. vs rival H2H" value={p.h2hGoals?.awayAvg} color="#f472b6" />
+            </StatCard>
+          </>
+        )}
+        {activeGroup === 'corners' && (
+          <StatCard title="Córners (últimos 5)" accent="#22d3ee">
+            <Cell label={`${homeTeam} a favor`} value={ccd.homeCornersAvg} />
+            <Cell label={`${homeTeam} en contra`} value={ccd.homeCornersAgainstAvg} />
+            <Cell label={`${awayTeam} a favor`} value={ccd.awayCornersAvg} />
+            <Cell label={`${awayTeam} en contra`} value={ccd.awayCornersAgainstAvg} />
+            <Cell label="Total combinado" value={p.cornerAvg} color="#4ade80" />
+          </StatCard>
+        )}
+        {activeGroup === 'cards' && (
+          <StatCard title="Tarjetas (últimos 5)" accent="#fbbf24">
+            <Cell label={`${homeTeam} amarillas`} value={ccd.homeYellowsAvg} />
+            <Cell label={`${homeTeam} rojas`} value={ccd.homeRedsAvg} />
+            <Cell label={`${awayTeam} amarillas`} value={ccd.awayYellowsAvg} />
+            <Cell label={`${awayTeam} rojas`} value={ccd.awayRedsAvg} />
+            <Cell label="Total amarillas prom." value={p.cardAvg} color="#fbbf24" />
+          </StatCard>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ===================== CALCULATED FREQUENCIES TAB =====================
+
+function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
+  const [activeGroup, setActiveGroup] = useState('goles');
 
   // TODO el cálculo de categorías se memoiza:
   // antes corría en CADA toggle (setState re-renderiza) → era lo que trababa
@@ -2707,7 +2811,7 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
   }, [p, odds, homeTeam, awayTeam]);
 
   if (!p || groupDefs.length === 0) return null;
-  const open = openSub === id;
+  const selectedGroup = groupDefs.find((group) => group.key === activeGroup) || groupDefs[0];
 
   const ProbItem = ({ it }) => {
     const v = cap(it.value);
@@ -2722,77 +2826,52 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam, id, op
   };
 
   return (
-    <section className="subacc-section" style={{ '--subacc-accent': '#2dd4bf' }}>
-      <button
-        type="button"
-        className="subacc-trigger"
-        onClick={(e) => toggleSubAndReveal(e, open, id, setOpenSub)}
-        aria-expanded={open}
-      >
-        <span><i><BarChart3 size={17} aria-hidden="true" /></i><strong>Frecuencias calculadas</strong></span>
-        <ChevronDown className={open ? 'is-open' : ''} size={17} aria-hidden="true" />
-      </button>
-      <div className="subacc-grid" data-open={open ? '1' : '0'}>
-        <div className="subacc-overflow">
-          <div className="subacc-body">
-            <p className="probability-explainer">La media resume cuántos eventos hubo por partido; cada porcentaje cuenta en cuántos antecedentes se superó esa línea. Son medidas distintas.</p>
-            {groupDefs.map(g => (
-              <section key={g.key} className="subacc-group" style={{ '--subacc-group-accent': g.color }}>
-                <button
-                  type="button"
-                  className="subacc-group-trigger"
-                  onClick={(e) => { e.stopPropagation(); setCatOpen(prev => (prev === g.key ? null : g.key)); }}
-                  aria-expanded={catOpen === g.key}
-                >
-                  <span>{g.label}<small>{g.cats.length} bloques</small></span>
-                  <ChevronDown className={catOpen === g.key ? 'is-open' : ''} size={16} aria-hidden="true" />
-                </button>
-                <div className="subacc-grid" data-open={catOpen === g.key ? '1' : '0'}>
-                  <div className="subacc-overflow">
-                    <div className="subacc-data-grid">
-                      {g.cats.map((cat, ci) => (
-                        <div key={ci} className="subacc-data-card">
-                          <div style={{ fontSize: '.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--t2)', marginBottom: cat.subtitle ? 2 : 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.title}</div>
-                          {cat.subtitle && <div style={{ fontSize: '.65rem', color: 'var(--t3)', marginBottom: 6 }}>{cat.subtitle}</div>}
-                          {cat.items.map((it, i) => <ProbItem key={i} it={it} />)}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </section>
-            ))}
+    <div className="analysis-tab-stack">
+      <HorizontalChoiceBar
+        items={groupDefs.map((group) => ({ ...group, count: group.cats.length }))}
+        active={selectedGroup.key}
+        onChange={setActiveGroup}
+        label="Filtrar frecuencias calculadas"
+        variant="filters"
+      />
+      <p className="probability-explainer">La media resume cuántos eventos hubo por partido; cada porcentaje cuenta en cuántos antecedentes se superó esa línea. Son medidas distintas.</p>
+      <div className="subacc-data-grid">
+        {selectedGroup.cats.map((cat, ci) => (
+          <div key={ci} className="subacc-data-card">
+            <div style={{ fontSize: '.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--t2)', marginBottom: cat.subtitle ? 2 : 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.title}</div>
+            {cat.subtitle && <div style={{ fontSize: '.65rem', color: 'var(--t3)', marginBottom: 6 }}>{cat.subtitle}</div>}
+            {cat.items.map((it, i) => <ProbItem key={i} it={it} />)}
           </div>
-        </div>
+        ))}
       </div>
-    </section>
+    </div>
   );
 }
 
-// ===================== ACCORDION PLAYERS BLOCK =====================
+// ===================== HIGHLIGHTED PLAYERS TAB =====================
 // Version compacta de PlayerHighlights del analisis completo. Muestra
 // scorers/shooters/assisters/foulers/bookers con su histograma (10 dots,
 // uno por partido). Sin las animaciones motion del analisis — el acordeon
 // se abre/cierra muchas veces durante la sesion, animar todo seria pesado.
 
-function AccordionPlayersBlock({ highlights, id, openSub, setOpenSub }) {
-  const [grpOpen, setGrpOpen] = useState(null); // grupo exclusivo o null
+function AccordionPlayersBlock({ highlights }) {
+  const [activeGroup, setActiveGroup] = useState('scorers');
 
   const groups = useMemo(() => {
     if (!highlights) return [];
     const { scorers, shooters, shotsTotalists, assisters, foulers, bookers } = highlights;
     return [
-      { key: 'scorers',        data: scorers,        label: 'Goleadores en racha',  hint: '(gol en 5+ de últimos 10)',                               emoji: '⚽',  dotColor: '#22c55e', metric: 'goals',       unit: 'goles' },
-      { key: 'shooters',       data: shooters,       label: 'Tiros a puerta',        hint: '(remate al arco — 5+ de últimos 10)',                      emoji: '🎯',  dotColor: '#3b82f6', metric: 'shotsOnGoal', unit: 'a puerta' },
-      { key: 'shotsTotalists', data: shotsTotalists, label: 'Tiros totales',         hint: '(≥2 en 5+ de últimos 10)',                                 emoji: '💥', dotColor: '#60a5fa', metric: 'shotsTotal',  unit: 'tiros totales' },
-      { key: 'assisters',      data: assisters,      label: 'Asistentes',            hint: '(asistencia en 5+ de últimos 10)',                          emoji: '🅰️',  dotColor: '#a78bfa', metric: 'assists',     unit: 'asistencias' },
-      { key: 'foulers',        data: foulers,        label: 'Faltas frecuentes',     hint: '(falta cometida en 5+ de últimos 10)',                      emoji: '⚠️',  dotColor: '#f59e0b', metric: 'fouls',       unit: 'faltas' },
-      { key: 'bookers',        data: bookers,        label: 'Tarjetas frecuentes',   hint: '(amarilla en 5+ de últimos 10)',                            emoji: '🟨',  dotColor: '#facc15', metric: 'yellows',     unit: 'amarillas' },
+      { key: 'scorers',        data: scorers,        label: 'Goleadores', hint: 'Gol en 5+ de los últimos 10', dotColor: '#22c55e', metric: 'goals', unit: 'goles' },
+      { key: 'shooters',       data: shooters,       label: 'A puerta', hint: 'Remate al arco en 5+ de los últimos 10', dotColor: '#3b82f6', metric: 'shotsOnGoal', unit: 'a puerta' },
+      { key: 'shotsTotalists', data: shotsTotalists, label: 'Tiros totales', hint: '2+ tiros en 5+ de los últimos 10', dotColor: '#60a5fa', metric: 'shotsTotal', unit: 'tiros totales' },
+      { key: 'assisters',      data: assisters,      label: 'Asistentes', hint: 'Asistencia en 5+ de los últimos 10', dotColor: '#a78bfa', metric: 'assists', unit: 'asistencias' },
+      { key: 'foulers',        data: foulers,        label: 'Faltas', hint: 'Falta en 5+ de los últimos 10', dotColor: '#f59e0b', metric: 'fouls', unit: 'faltas' },
+      { key: 'bookers',        data: bookers,        label: 'Tarjetas', hint: 'Amarilla en 5+ de los últimos 10', dotColor: '#facc15', metric: 'yellows', unit: 'amarillas' },
     ].filter(g => Array.isArray(g.data) && g.data.length > 0);
   }, [highlights]);
 
   if (!highlights || groups.length === 0) return null;
-  const open = openSub === id;
+  const selectedGroup = groups.find((group) => group.key === activeGroup) || groups[0];
 
   const PlayerRow = ({ pl, g }) => {
     const hist = pl[g.metric] || [];
@@ -2803,12 +2882,12 @@ function AccordionPlayersBlock({ highlights, id, openSub, setOpenSub }) {
                 : g.metric === 'fouls' ? pl.totalFouls
                 : pl.totalYellows;
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', background: 'var(--bg-1)', border: '1px solid var(--brd)', borderRadius: 8, marginBottom: 4 }}>
-        <div style={{ minWidth: 0, flex: 1 }}>
+      <div className="analysis-player-row">
+        <div className="analysis-player-name">
           <div style={{ fontSize: '.82rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t1)' }}>{pl.name}</div>
           <div style={{ fontSize: '.65rem', color: 'var(--t3)' }}>{pl.teamName}</div>
         </div>
-        <div style={{ display: 'flex', gap: 2 }}>
+        <div className="analysis-player-history">
           {hist.slice(0, 10).map((n, j) => (
             <span key={j} style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -2819,7 +2898,7 @@ function AccordionPlayersBlock({ highlights, id, openSub, setOpenSub }) {
             }}>{n > 0 ? n : '—'}</span>
           ))}
         </div>
-        <div style={{ fontSize: '.7rem', color: g.dotColor, fontWeight: 700, whiteSpace: 'nowrap', minWidth: 60, textAlign: 'right' }}>
+        <div className="analysis-player-total" style={{ color: g.dotColor }}>
           {total} {g.unit}
         </div>
       </div>
@@ -2827,43 +2906,21 @@ function AccordionPlayersBlock({ highlights, id, openSub, setOpenSub }) {
   };
 
   return (
-    <section className="subacc-section" style={{ '--subacc-accent': '#fbbf24' }}>
-      <button
-        type="button"
-        className="subacc-trigger"
-        onClick={(e) => toggleSubAndReveal(e, open, id, setOpenSub)}
-        aria-expanded={open}
-      >
-        <span><i><Sparkles size={17} aria-hidden="true" /></i><strong>Jugadores destacados</strong></span>
-        <ChevronDown className={open ? 'is-open' : ''} size={17} aria-hidden="true" />
-      </button>
-      <div className="subacc-grid" data-open={open ? '1' : '0'}>
-        <div className="subacc-overflow">
-          <div className="subacc-body">
-            {groups.map(g => (
-              <section key={g.key} className="subacc-group" style={{ '--subacc-group-accent': g.dotColor }}>
-                <button
-                  type="button"
-                  className="subacc-group-trigger"
-                  onClick={(e) => { e.stopPropagation(); setGrpOpen(prev => (prev === g.key ? null : g.key)); }}
-                  aria-expanded={grpOpen === g.key}
-                >
-                  <span>{g.label}<small>{g.hint}</small></span>
-                  <ChevronDown className={grpOpen === g.key ? 'is-open' : ''} size={16} aria-hidden="true" />
-                </button>
-                <div className="subacc-grid" data-open={grpOpen === g.key ? '1' : '0'}>
-                  <div className="subacc-overflow">
-                    <div className="subacc-player-list">
-                      {g.data.slice(0, 5).map((pl, i) => <PlayerRow key={i} pl={pl} g={g} />)}
-                    </div>
-                  </div>
-                </div>
-              </section>
-            ))}
-          </div>
-        </div>
+    <div className="analysis-tab-stack">
+      <HorizontalChoiceBar
+        items={groups.map((group) => ({ key: group.key, label: group.label, color: group.dotColor }))}
+        active={selectedGroup.key}
+        onChange={setActiveGroup}
+        label="Filtrar jugadores destacados"
+        variant="filters"
+      />
+      <p className="analysis-filter-hint">{selectedGroup.hint}</p>
+      <div className="subacc-player-list">
+        {selectedGroup.data.slice(0, 5).map((player, index) => (
+          <PlayerRow key={index} pl={player} g={selectedGroup} />
+        ))}
       </div>
-    </section>
+    </div>
   );
 }
 

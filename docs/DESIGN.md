@@ -60,6 +60,12 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   Los partidos se gobiernan exclusivamente desde el dock inferior y el constructor
   de combinadas vive dentro de `Favoritos` en los cuatro deportes.
 - Tabs y chips: estado activo con color, borde y fondo; nunca dependen solo del color.
+  El resumen expandido de fútbol navega Mercados, Estadísticas, Frecuencias,
+  Jugadores y Veredicto final mediante una sola barra horizontal deslizable.
+  Estadísticas, Frecuencias y Jugadores usan una segunda barra compacta de
+  filtros; Goles es la vista inicial cuando existe y ninguna categoría vuelve
+  a apilarse como acordeón. Ambas barras aceptan gesto táctil y la barra
+  principal también flechas, Inicio y Fin mediante semántica ARIA de pestañas.
 - Tarjetas: una sola capa de profundidad, sin `backdrop-filter` ni animaciones de sombra repetidas por tarjeta.
 - Constructor de combinadas: cada selección reserva una fila completa para
   partido/mercado y coloca probabilidad + cuota en una segunda fila estable;
