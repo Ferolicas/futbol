@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-04 · Commit: `efb5a4c`
+Actualizado: 2026-09-04 · Commit: `56fdcca`
 
 ## Identidad y stack
 
@@ -737,9 +737,18 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   el análisis actual y muestra el bloque como "en preparación". Cada opción
   etiqueta expresamente su porcentaje como `Probabilidad`.
   `FinalVerdictPanel` es un acordeón compartido y cerrado inicialmente en los
-  cuatro deportes. El contrato compacto de `/api/baseball/fixtures` debe
+  detalles completos y los resúmenes de los otros deportes; el resumen de
+  fútbol lo incrusta abierto dentro de su pestaña Veredicto final. El contrato
+  compacto de `/api/baseball/fixtures` debe
   conservar `analysis.finalVerdict`; omitirlo deja la tarjeta MLB sin los
   porcentajes que sí existen en `baseball_match_analysis`.
+- 2026-09-04: el resumen expandido de fútbol ya no apila Mercados,
+  Estadísticas, Frecuencias, Jugadores y Veredicto final como acordeones. Una
+  barra de pestañas horizontal gobierna un solo panel visible y las familias de
+  Estadísticas, Frecuencias y Jugadores usan filtros horizontales internos.
+  Goles queda seleccionado inicialmente en las dos vistas estadísticas. La
+  barra principal implementa `tablist`/`tab`/`tabpanel`, flechas, Inicio y Fin;
+  ambas barras admiten desplazamiento táctil sin ensanchar la tarjeta.
 - 2026-08-21: `FOOTBALL_CACHE_VERSION=23` fija el reparto temporada
   actual/histórico en 65/35 y reemplaza la antigua confianza `n/(n+12)` de los
   mercados over/under y booleanos por fiabilidad beta-binomial basada en
