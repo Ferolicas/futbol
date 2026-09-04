@@ -2335,10 +2335,14 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
 
           <MatchHeadCard match={match} odds={odds} data={data} standings={standings} liveStats={liveStats} userTz={userTz} isFavorite={isFavorite} onFavorite={onFavorite} onDismiss={onRemove} />
           {/* ── Indicador: selCount / chevron ── */}
-          <div className="acc-indicator">
-            {selCount > 0 && <span className="acc-sel-count">{selCount} sel.</span>}
-            <span className={`chev-ico ${isExpanded ? 'up' : ''}`}>&#9662;</span>
-          </div>
+          {/* Desplegada, el chevron sobra —la tarjeta ya está abierta— y se
+              quedaba solo como un punto suelto entre la tarjeta y las pestañas. */}
+          {(selCount > 0 || !isExpanded) && (
+            <div className="acc-indicator">
+              {selCount > 0 && <span className="acc-sel-count">{selCount} sel.</span>}
+              {!isExpanded && <span className="chev-ico">&#9662;</span>}
+            </div>
+          )}
 
         </div>
     </div>

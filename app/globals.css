@@ -893,12 +893,10 @@ body {
 }
 .acc-sel-count { color: var(--green); font-weight: 700; }
 .chev-ico {
-  font-size: .7rem;
-  color: var(--t2);
-  transition: transform .3s var(--ease);
   display: inline-block;
+  color: var(--t2);
+  font-size: .7rem;
 }
-.chev-ico.up { transform: rotate(180deg); }
 
 /* Accordion animation with grid */
 /* ===================== PARTIDO DESPLEGADO A PANTALLA COMPLETA =====================
