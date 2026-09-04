@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-01 · Commit base: `895abed`
+Actualizado: 2026-09-04 · Commit: `efb5a4c`
 
 ## Identidad y stack
 
