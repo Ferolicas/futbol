@@ -2161,6 +2161,7 @@ const STEP_SWIPE_THRESHOLD = 48;
 
 function MatchFullscreen({ head, body, onStep }) {
   const [mounted, setMounted] = useState(false);
+  const [topOffset, setTopOffset] = useState(null);
   const wheelAccum = useRef(0);
   const wheelLock = useRef(false);
   const touchStart = useRef(null);
@@ -2183,13 +2184,12 @@ function MatchFullscreen({ head, body, onStep }) {
     const observer = new ResizeObserver(sync);
     observer.observe(tabs);
     return () => observer.disconnect();
-  });
+  }, [mounted]);
 
   useEffect(() => {
     setMounted(true);
     const topbar = document.querySelector('.dashboard-topbar');
-    const height = topbar ? Math.round(topbar.getBoundingClientRect().height) : 72;
-    document.documentElement.style.setProperty('--match-fs-top', `${height}px`);
+    setTopOffset(topbar ? Math.round(topbar.getBoundingClientRect().height) : 72);
     document.body.classList.add('match-fs-open');
     window.dispatchEvent(new CustomEvent('dashboard:card-expanded'));
     return () => {
@@ -2235,7 +2235,11 @@ function MatchFullscreen({ head, body, onStep }) {
   if (!mounted) return null;
 
   return createPortal(
-    <div className="match-fs" ref={layerRef}>
+    <div
+      className="match-fs"
+      ref={layerRef}
+      style={topOffset != null ? { '--match-fs-top': `${topOffset}px` } : undefined}
+    >
       <div
         className="match-fs-head"
         onWheel={onWheel}
@@ -2348,7 +2352,10 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
     </div>
   );
 
-  const body = (
+  // Sin el ternario, este árbol entero (mercados, frecuencias, jugadores,
+  // veredicto) se construía en cada render aunque la tarjeta estuviera plegada:
+  // antes vivía detrás de un `&&` y no llegaba a evaluarse.
+  const body = !isExpanded ? null : (
     <div className="acc-content open">
         <div className="acc-inner">
           {data ? (
@@ -2493,13 +2500,14 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
     </div>
   );
 
-  if (!isExpanded) return <div className="acc-card">{head}</div>;
-
+  // Un fragmento siempre, con o sin desplegado: si el elemento raíz cambia de
+  // tipo, React desmonta y vuelve a montar la tarjeta de la lista en cada
+  // apertura y cierre, y el virtualizador remide la fila entera. Sin la clase
+  // `open`, que solo servía para un glow infinito detrás de la capa.
   return (
     <>
-      {/* La copia en la lista mantiene el alto de la fila virtualizada */}
-      <div className="acc-card open">{head}</div>
-      <MatchFullscreen head={head} body={body} onStep={onStep} />
+      <div className="acc-card">{head}</div>
+      {isExpanded && <MatchFullscreen head={head} body={body} onStep={onStep} />}
     </>
   );
 });
