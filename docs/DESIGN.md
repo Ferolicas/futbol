@@ -34,6 +34,10 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   un brillo la recorre de derecha a izquierda, recortado a las siluetas por
   `lineup-mask.webp`. La secuencia se reproduce una vez cada vez que se entra en
   la escena inicial; con movimiento reducido se muestra la composición terminada.
+  Los objetos no se montan hasta que la página ha cargado y sus imágenes están
+  descodificadas: si entran antes, en red lenta la animación arranca sin ellas y
+  lo primero que se ve no es el primer objeto sino el que toque en ese momento.
+  Sus imágenes tampoco compiten entonces con la carga de la portada.
   Va separada de las métricas por dos saltos de línea (40 px en móvil, 58 px en
   escritorio) y en pantallas bajas encoge —`min(520px, 94vw, 44vh)`— antes que
   comerse ese hueco, porque el hero de escritorio ya va justo por debajo de los

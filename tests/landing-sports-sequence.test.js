@@ -76,9 +76,18 @@ test('los cuatro recortes comparten lienzo y la máscara cubre la fila completa'
   assert.equal(mask.width, reference.width * SPORTS.length, 'la máscara no cubre los cuatro huecos');
   assert.equal(mask.height, reference.height, 'la máscara no comparte alto con los recortes');
 
-  // La caja del hero declara esa misma proporción; si divergen, la máscara se desalinea.
+  // La caja del hero declara esa misma proporción; si divergen, la máscara se
+  // desalinea. Se compara la razón, no los números: los assets pueden
+  // reescalarse sin tocar el CSS mientras la proporción se mantenga.
   const styles = read('app/globals.css');
-  assert.match(styles, new RegExp(`aspect-ratio: ${mask.width} / ${mask.height}`));
+  const rule = styles.slice(styles.indexOf('.apple-sports-sequence {'));
+  const declared = rule.slice(0, rule.indexOf('}')).match(/aspect-ratio:\s*(\d+)\s*\/\s*(\d+)/);
+  assert.ok(declared, 'la caja de la fila no declara proporción');
+  assert.equal(
+    (Number(declared[1]) / Number(declared[2])).toFixed(4),
+    (mask.width / mask.height).toFixed(4),
+    `CSS ${declared[1]}/${declared[2]} frente a máscara ${mask.width}x${mask.height}`,
+  );
 });
 
 // Geometría del recorte, en unidades del alto de la fila.
@@ -202,8 +211,27 @@ test('movimiento reducido muestra la fila final sin animación', () => {
   assert.match(reduced, /\.apple-sports-shine \{ display: none; \}/);
 });
 
+test('la secuencia no se monta hasta que la página ha cargado', () => {
+  const landing = read('app/page.js');
+  const start = landing.indexOf('function SportsSequence()');
+  const component = landing.slice(start, landing.indexOf('export default function LandingPage'));
+
+  assert.ok(start >= 0, 'falta el componente de la secuencia');
+  // Espera al evento load y a que las imágenes estén descodificadas: si se
+  // montan antes, en red lenta la animación arranca sin ellas y lo primero que
+  // se ve no es el primer objeto.
+  assert.match(component, /window\.addEventListener\('load'/);
+  assert.match(component, /\.decode\(\)/);
+  assert.match(component, /\{ready && SPORTS_SEQUENCE\.map/);
+  assert.match(component, /\{ready && <span className="apple-sports-shine"/);
+  // Y una red de seguridad por si `load` no llegara a dispararse.
+  assert.match(component, /setTimeout\(preload, SEQUENCE_FALLBACK_MS\)/);
+});
+
 test('los recursos del hero quedan optimizados para la carga inicial', () => {
   const files = [...SPORTS.map((sport) => `${sport}.webp`), 'lineup-mask.webp'];
   const totalBytes = files.reduce((total, file) => total + fs.statSync(path.join(root, 'public/sports-sequence', file)).size, 0);
-  assert.ok(totalBytes < 250 * 1024, `Los recursos pesan ${Math.round(totalBytes / 1024)} KB`);
+  // Con alfa sin comprimir estos cinco archivos pesaban 223 KB y competían con
+  // la carga de la portada.
+  assert.ok(totalBytes < 80 * 1024, `Los recursos pesan ${Math.round(totalBytes / 1024)} KB`);
 });

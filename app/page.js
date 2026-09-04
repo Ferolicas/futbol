@@ -75,7 +75,46 @@ const SPORTS_SEQUENCE = [
   { key: 'helmet', src: '/sports-sequence/helmet.webp' },
 ];
 
+// Red lenta con la secuencia en el HTML: sus imágenes compiten con la carga de
+// la portada y la animación arranca antes de que lleguen, así que lo primero que
+// se ve no es el balón de fútbol sino el que toque en ese momento. Los objetos
+// se montan cuando la página ya ha cargado y sus imágenes están descodificadas;
+// al montarse, la animación empieza desde el primer fotograma.
+const SEQUENCE_FALLBACK_MS = 5000;
+
 function SportsSequence() {
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let fallback;
+
+    const preload = () => {
+      window.clearTimeout(fallback);
+      Promise.all(SPORTS_SEQUENCE.map(({ src }) => {
+        const image = new Image();
+        image.src = src;
+        return image.decode().catch(() => undefined);
+      })).then(() => {
+        if (!cancelled) setReady(true);
+      });
+    };
+
+    if (document.readyState === 'complete') {
+      preload();
+    } else {
+      window.addEventListener('load', preload, { once: true });
+      // Si `load` no llegara a dispararse, la fila no puede quedarse vacía.
+      fallback = window.setTimeout(preload, SEQUENCE_FALLBACK_MS);
+    }
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(fallback);
+      window.removeEventListener('load', preload);
+    };
+  }, []);
+
   return (
     <div
       className="apple-sports-sequence"
@@ -83,17 +122,16 @@ function SportsSequence() {
       aria-label="Balones de fútbol, béisbol y baloncesto junto a un casco de fútbol americano"
     >
       <div className="apple-sports-stage" aria-hidden="true">
-        {SPORTS_SEQUENCE.map((sport) => (
+        {ready && SPORTS_SEQUENCE.map((sport) => (
           <img
             key={sport.key}
             className={`apple-sport-object is-${sport.key}`}
             src={sport.src}
             alt=""
-            loading="eager"
             decoding="async"
           />
         ))}
-        <span className="apple-sports-shine" />
+        {ready && <span className="apple-sports-shine" />}
       </div>
     </div>
   );
