@@ -81,6 +81,44 @@ test('los cuatro recortes comparten lienzo y la máscara cubre la fila completa'
   assert.match(styles, new RegExp(`aspect-ratio: ${mask.width} / ${mask.height}`));
 });
 
+// Geometría del recorte, en unidades del alto de la fila.
+const BALL_TOP_IN_CANVAS = 76 / 440;   // primera fila con balón dentro del lienzo
+const ORIGIN = 0.76;                   // transform-origin: 50% 76%
+const ROW_RATIO = 440 / 1536;          // alto de la fila / ancho de la caja
+
+test('el hueco de caída deja entrar los balones sin cortarlos por arriba', () => {
+  const styles = read('app/globals.css');
+
+  const dropFactor = Number.parseFloat(
+    styles.match(/--sports-drop:\s*calc\(var\(--sports-width\)\s*\*\s*(\.?[\d.]+)\)/)[1],
+  );
+  // El escenario recorta a esta altura por encima del borde superior de la fila.
+  const headroom = dropFactor / ROW_RATIO;
+
+  // Los objetos se anclan abajo: translateY 0 es la posición final.
+  assert.match(styles, /\.apple-sport-object \{[\s\S]*?bottom: 0;/);
+  assert.match(styles, /\.apple-sports-sequence \{[\s\S]*?box-sizing: content-box;/);
+
+  let worst = { above: -Infinity };
+  for (const sport of ['Football', 'Baseball', 'Basketball', 'Helmet']) {
+    const block = keyframesOf(styles, `appleSport${sport}`);
+    for (const [, percent, y, scale] of block.matchAll(
+      /^\s*([\d.%,\s]+)\{[^}]*translate3d\(-50%,(-?[\d.]+)%,0\)\s*scale\((\.?[\d.]+)\)/gm,
+    )) {
+      const ty = Number.parseFloat(y) / 100;
+      const s = Number.parseFloat(scale);
+      // Borde superior del balón respecto al borde superior de la fila.
+      const above = -(ty + ORIGIN - s * (ORIGIN - BALL_TOP_IN_CANVAS));
+      if (above > worst.above) worst = { above, sport, percent: percent.trim() };
+    }
+  }
+
+  assert.ok(
+    worst.above < headroom,
+    `${worst.sport} sube ${worst.above.toFixed(3)} filas en ${worst.percent} y el recorte está a ${headroom.toFixed(3)}`,
+  );
+});
+
 test('la secuencia termina en fila, desplaza los balones desde el casco y barre un brillo', () => {
   const styles = read('app/globals.css');
   assert.match(styles, /@keyframes appleSportFootball[\s\S]*left: 87\.5%[\s\S]*left: 12\.5%/);

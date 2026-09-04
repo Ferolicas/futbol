@@ -2648,16 +2648,24 @@ body {
 }
 
 .apple-sports-sequence {
-  position: relative;
   /* En pantallas bajas la fila encoge antes que comerse el hueco */
-  width: min(520px, 94vw, 44vh);
+  --sports-width: min(520px, 94vw, 44vh);
+  /* Hueco de caída: sin él, el recorte del escenario corta los balones por
+     arriba justo cuando aparecen. Es padding, así que no ocupa la fila. */
+  --sports-drop: calc(var(--sports-width) * .132);
+  --sports-gap: clamp(24px, 6.4vh, 58px);
+  position: relative;
+  box-sizing: content-box;
+  width: var(--sports-width);
   aspect-ratio: 1536 / 440;
+  padding-top: var(--sports-drop);
   /* Dos saltos de línea respecto al texto del hero (line-height 29px) */
-  margin: clamp(24px, 6.4vh, 58px) auto 0;
+  margin: calc(var(--sports-gap) - var(--sports-drop)) auto 0;
   isolation: isolate;
   pointer-events: none;
 }
 
+/* inset:0 sobre la caja de padding: el escenario abarca hueco de caída + fila */
 .apple-sports-stage {
   position: absolute;
   inset: 0;
@@ -2667,14 +2675,14 @@ body {
 .apple-sport-object {
   position: absolute;
   z-index: 1;
-  top: 50%;
+  bottom: 0;
   left: 50%;
   width: 25%;
   height: auto;
   opacity: 0;
   object-fit: contain;
   filter: drop-shadow(0 12px 14px rgba(0,0,0,.34));
-  transform: translate3d(-50%, -50%, 0) scale(.82);
+  transform: translate3d(-50%, 0, 0) scale(.82);
   transform-origin: 50% 76%;
   will-change: left, opacity, transform;
 }
@@ -2697,57 +2705,60 @@ body {
 }
 
 @keyframes appleSportFootball {
-  0% { left: 50%; opacity: 0; transform: translate3d(-50%,-118%,0) scale(.68) rotate(-7deg); }
+  0% { left: 50%; opacity: 0; transform: translate3d(-50%,-68%,0) scale(.68) rotate(-7deg); }
   2% { opacity: 1; }
-  5% { transform: translate3d(-50%,-42%,0) scale(1.48) rotate(2deg); }
-  7% { transform: translate3d(-50%,-54%,0) scale(1.36) rotate(-1deg); }
-  9%, 13% { left: 50%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1.4); animation-timing-function: linear; }
-  19% { left: 50%; opacity: 0; transform: translate3d(-50%,-34%,0) scale(1.06); }
-  19.01%, 75% { left: 50%; opacity: 0; transform: translate3d(-50%,-50%,0) scale(.82); }
-  76% { left: 87.5%; opacity: 0; transform: translate3d(-50%,-50%,0) scale(.84); }
-  79% { left: 87.5%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(.84); }
-  88%, 100% { left: 12.5%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1); }
+  5% { transform: translate3d(-50%,8%,0) scale(1.48) rotate(2deg); }
+  7% { transform: translate3d(-50%,-4%,0) scale(1.36) rotate(-1deg); }
+  9%, 13% { left: 50%; opacity: 1; transform: translate3d(-50%,0%,0) scale(1.4); animation-timing-function: linear; }
+  19% { left: 50%; opacity: 0; transform: translate3d(-50%,16%,0) scale(1.06); }
+  19.01%, 75% { left: 50%; opacity: 0; transform: translate3d(-50%,0%,0) scale(.82); }
+  76% { left: 87.5%; opacity: 0; transform: translate3d(-50%,0%,0) scale(.84); }
+  79% { left: 87.5%; opacity: 1; transform: translate3d(-50%,0%,0) scale(.84); }
+  88%, 100% { left: 12.5%; opacity: 1; transform: translate3d(-50%,0%,0) scale(1); }
 }
 
 @keyframes appleSportBaseball {
-  0%, 16% { left: 50%; opacity: 0; transform: translate3d(-50%,-118%,0) scale(.68) rotate(7deg); }
+  0%, 16% { left: 50%; opacity: 0; transform: translate3d(-50%,-68%,0) scale(.68) rotate(7deg); }
   18% { opacity: 1; }
-  21% { transform: translate3d(-50%,-42%,0) scale(1.48) rotate(-2deg); }
-  23% { transform: translate3d(-50%,-54%,0) scale(1.36) rotate(1deg); }
-  25%, 32% { left: 50%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1.4); animation-timing-function: linear; }
-  38% { left: 50%; opacity: 0; transform: translate3d(-50%,-34%,0) scale(1.06); }
-  38.01%, 78% { left: 50%; opacity: 0; transform: translate3d(-50%,-50%,0) scale(.82); }
-  79% { left: 87.5%; opacity: 0; transform: translate3d(-50%,-50%,0) scale(.84); }
-  82% { left: 87.5%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(.84); }
-  90%, 100% { left: 37.5%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1); }
+  21% { transform: translate3d(-50%,8%,0) scale(1.48) rotate(-2deg); }
+  23% { transform: translate3d(-50%,-4%,0) scale(1.36) rotate(1deg); }
+  25%, 32% { left: 50%; opacity: 1; transform: translate3d(-50%,0%,0) scale(1.4); animation-timing-function: linear; }
+  38% { left: 50%; opacity: 0; transform: translate3d(-50%,16%,0) scale(1.06); }
+  38.01%, 78% { left: 50%; opacity: 0; transform: translate3d(-50%,0%,0) scale(.82); }
+  79% { left: 87.5%; opacity: 0; transform: translate3d(-50%,0%,0) scale(.84); }
+  82% { left: 87.5%; opacity: 1; transform: translate3d(-50%,0%,0) scale(.84); }
+  90%, 100% { left: 37.5%; opacity: 1; transform: translate3d(-50%,0%,0) scale(1); }
 }
 
 @keyframes appleSportBasketball {
-  0%, 35% { left: 50%; opacity: 0; transform: translate3d(-50%,-118%,0) scale(.68) rotate(-6deg); }
+  0%, 35% { left: 50%; opacity: 0; transform: translate3d(-50%,-68%,0) scale(.68) rotate(-6deg); }
   37% { opacity: 1; }
-  40% { transform: translate3d(-50%,-42%,0) scale(1.48) rotate(2deg); }
-  42% { transform: translate3d(-50%,-54%,0) scale(1.36) rotate(-1deg); }
-  44%, 51% { left: 50%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1.4); animation-timing-function: linear; }
-  57% { left: 50%; opacity: 0; transform: translate3d(-50%,-34%,0) scale(1.06); }
-  57.01%, 81% { left: 50%; opacity: 0; transform: translate3d(-50%,-50%,0) scale(.82); }
-  82% { left: 87.5%; opacity: 0; transform: translate3d(-50%,-50%,0) scale(.84); }
-  85% { left: 87.5%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(.84); }
-  92%, 100% { left: 62.5%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1); }
+  40% { transform: translate3d(-50%,8%,0) scale(1.48) rotate(2deg); }
+  42% { transform: translate3d(-50%,-4%,0) scale(1.36) rotate(-1deg); }
+  44%, 51% { left: 50%; opacity: 1; transform: translate3d(-50%,0%,0) scale(1.4); animation-timing-function: linear; }
+  57% { left: 50%; opacity: 0; transform: translate3d(-50%,16%,0) scale(1.06); }
+  57.01%, 81% { left: 50%; opacity: 0; transform: translate3d(-50%,0%,0) scale(.82); }
+  82% { left: 87.5%; opacity: 0; transform: translate3d(-50%,0%,0) scale(.84); }
+  85% { left: 87.5%; opacity: 1; transform: translate3d(-50%,0%,0) scale(.84); }
+  92%, 100% { left: 62.5%; opacity: 1; transform: translate3d(-50%,0%,0) scale(1); }
 }
 
 @keyframes appleSportHelmet {
-  0%, 54% { left: 50%; opacity: 0; transform: translate3d(-50%,-118%,0) scale(.68); }
+  0%, 54% { left: 50%; opacity: 0; transform: translate3d(-50%,-68%,0) scale(.68); }
   56% { opacity: 1; }
-  59% { transform: translate3d(-50%,-42%,0) scale(1.48); }
-  61% { transform: translate3d(-50%,-54%,0) scale(1.36); }
-  63%, 70% { left: 50%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1.4); }
-  77%, 100% { left: 87.5%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1); }
+  59% { transform: translate3d(-50%,8%,0) scale(1.48); }
+  61% { transform: translate3d(-50%,-4%,0) scale(1.36); }
+  63%, 70% { left: 50%; opacity: 1; transform: translate3d(-50%,0%,0) scale(1.4); }
+  77%, 100% { left: 87.5%; opacity: 1; transform: translate3d(-50%,0%,0) scale(1); }
 }
 
 .apple-sports-shine {
   position: absolute;
   z-index: 3;
-  inset: 0;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  aspect-ratio: 1536 / 440;
   opacity: 0;
   background: linear-gradient(112deg, transparent 30%, rgba(255,255,255,.1) 41%, rgba(255,255,255,.95) 50%, rgba(94,230,177,.38) 57%, transparent 70%);
   background-position: 165% 0;
@@ -2767,6 +2778,92 @@ body {
   91% { opacity: 1; background-position: 165% 0; }
   98.5% { opacity: 1; background-position: -70% 0; }
   100% { opacity: 0; background-position: -70% 0; }
+}
+
+/* ===== Hero en pantallas grandes =====
+   El hero está compuesto para ~900 px de alto y todos sus tamaños tienen tope
+   en px, así que a partir de ahí deja de crecer y en 1080p, 1440p o 4K el
+   contenido queda arriba con un vacío enorme debajo. Aquí se reexpresan en vh
+   tomando 900 px como referencia (24vh = los 216 px de hoy, 9.6vh = los 86,4 px
+   del titular, etc.), con tope en vw para que no desborde a lo ancho. Por
+   debajo de 901 px de alto no cambia nada. */
+@media (min-width: 1100px) and (min-height: 901px) {
+  /* El margen superior de la escena también escala: si no, el bloque queda
+     pegado arriba y todo el sobrante se acumula debajo. */
+  .apple-hero-scene {
+    padding-top: max(42px, 4.667vh, env(safe-area-inset-top));
+  }
+
+  /* Solo el estado del hero: escalar `is-finale` monta el logo sobre su texto */
+  .apple-brand-video.is-hero {
+    top: -4.667vh;
+    width: min(62vh, 84.6vw);
+  }
+
+  .apple-hero-copy {
+    width: min(84.444vh, 100%);
+    padding-top: 24vh;
+  }
+
+  .apple-kicker {
+    gap: 1vh;
+    font-size: 1.28vh;
+  }
+
+  .apple-kicker > span {
+    width: .778vh;
+    height: .778vh;
+  }
+
+  .apple-hero-title {
+    margin: 1.333vh 0 1.556vh;
+    font-size: min(9.6vh, 6vw);
+  }
+
+  .apple-hero-sub {
+    max-width: 68.889vh;
+    font-size: min(1.991vh, 1.45vw);
+  }
+
+  .apple-hero-actions {
+    gap: 1.333vh;
+    margin-top: 2.667vh;
+  }
+
+  .landing-apple .btn-hero,
+  .landing-apple .btn-hero-sec {
+    gap: 1vh;
+    border-radius: 1.556vh;
+  }
+
+  .landing-apple .btn-hero {
+    padding: 1.556vh 3.111vh;
+    font-size: 1.707vh;
+  }
+
+  .landing-apple .btn-hero-sec {
+    padding: 1.556vh 2.667vh;
+    font-size: 1.636vh;
+  }
+
+  .apple-hero-stats {
+    gap: min(7.111vh, 6vw);
+    margin-top: 2.778vh;
+  }
+
+  .apple-hero-stats strong {
+    font-size: min(3.111vh, 2.2vw);
+  }
+
+  .apple-hero-stats span {
+    font-size: 1.28vh;
+  }
+
+  .apple-sports-sequence {
+    /* Sin tope en px: la fila sigue creciendo con la ventana */
+    --sports-width: min(94vw, 44vh);
+    --sports-gap: 6.4vh;
+  }
 }
 
 .apple-features-grid {
@@ -6873,9 +6970,9 @@ body {
   .apple-hero-stats span { font-size: .62rem; }
 
   .apple-sports-sequence {
-    width: min(358px, 100%);
+    --sports-width: min(358px, 100%);
     /* Dos saltos de línea (line-height 20px en móvil) */
-    margin-top: 40px;
+    --sports-gap: 40px;
   }
 
   .apple-scene-header {
@@ -7107,8 +7204,8 @@ body {
 
   .apple-hero-stats { margin-top: 14px; }
   .apple-sports-sequence {
-    width: min(306px, 88vw);
-    margin-top: 40px;
+    --sports-width: min(306px, 88vw);
+    --sports-gap: 40px;
   }
 
   .apple-feature-card {
@@ -7230,10 +7327,10 @@ body {
   }
 
   .apple-sports-sequence {
+    --sports-width: min(43vw, 420px);
     position: absolute;
     bottom: max(28px, calc(env(safe-area-inset-bottom) + 20px));
     left: 3vw;
-    width: min(43vw, 420px);
     margin: 0;
   }
 
@@ -7461,7 +7558,7 @@ body {
 
   .apple-sport-object {
     opacity: 1;
-    transform: translate3d(-50%, -50%, 0) scale(1);
+    transform: translate3d(-50%, 0, 0) scale(1);
   }
 
   .apple-sport-object.is-football { left: 12.5%; }

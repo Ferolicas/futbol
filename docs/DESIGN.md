@@ -37,7 +37,19 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   Va separada de las métricas por dos saltos de línea (40 px en móvil, 58 px en
   escritorio) y en pantallas bajas encoge —`min(520px, 94vw, 44vh)`— antes que
   comerse ese hueco, porque el hero de escritorio ya va justo por debajo de los
-  800 px de alto.
+  800 px de alto. La caja lleva un `padding-top` (`--sports-drop`) que da altura
+  de caída al escenario: sin él, su `overflow: hidden` corta los balones por
+  arriba justo al aparecer. Los objetos se anclan a `bottom: 0`, así que ese
+  padding no mueve la fila; el margen superior le resta el mismo valor para que
+  el hueco visible no cambie.
+- Hero en pantallas grandes: el hero está compuesto para ~900 px de alto y todos
+  sus tamaños tenían tope en px, así que en 1080p, 1440p o 4K se quedaba arriba
+  con un vacío enorme debajo. A partir de 1100×901 los tamaños del hero se
+  expresan en `vh` con esos 900 px como referencia (24vh = los 216 px del
+  `padding-top`, 9.6vh = los 86,4 px del titular…) y con tope en `vw` para que no
+  desborde a lo ancho. El logo solo escala en su estado `is-hero`: hacerlo
+  también en `is-finale` lo monta sobre el texto de la última escena. Las escenas
+  2 a 9 siguen sin escalar.
 - Recortes deportivos (`public/sports-sequence/`): salen de una sola imagen
   cortada por las franjas transparentes que separan los objetos, no por cuartos
   exactos —el casco cae a caballo del cuarto y se partía—. Los cuatro comparten
