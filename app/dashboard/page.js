@@ -192,6 +192,8 @@ export function FootballDashboard({
   const [batchRunning, setBatchRunning] = useState(false);
   // Accordion for Analizados
   const [expandedMatch, setExpandedMatch] = useState(null);
+  const lastExpandedRef = useRef(null);
+  const skipExpandedScrollRef = useRef(false);
   // Custom combinada: shared via context so analisis/[id] page can add to it
   const { selectedMarkets, toggleMarket, setSelectedMarkets } = useSelectedMarkets();
   // Multiple saved combinadas
@@ -1029,7 +1031,10 @@ export function FootballDashboard({
   }, [sorted, analyzedSet]);
 
   useEffect(() => {
-    const collapse = () => setExpandedMatch(null);
+    const collapse = () => {
+      skipExpandedScrollRef.current = true;
+      setExpandedMatch(null);
+    };
     window.addEventListener('dashboard:collapse-cards', collapse);
     return () => window.removeEventListener('dashboard:collapse-cards', collapse);
   }, []);
@@ -1394,6 +1399,28 @@ export function FootballDashboard({
     shouldAdjustScrollPositionOnItemSizeChange: () => false,
   });
 
+  // Al cerrar la tarjeta hay que dejar la lista en el partido donde se cerró,
+  // no donde se abrió el primero: con las flechas se puede haber avanzado
+  // varios y la lista de debajo no se ha movido.
+  useEffect(() => {
+    const previous = lastExpandedRef.current;
+    lastExpandedRef.current = expandedMatch;
+    if (expandedMatch !== null || previous == null) return;
+    // El botón "Arriba" cierra la tarjeta para subir: ahí no se reposiciona.
+    if (skipExpandedScrollRef.current) {
+      skipExpandedScrollRef.current = false;
+      return;
+    }
+    const index = sorted.findIndex(m => m.fixture.id === previous);
+    if (index < 0) return;
+    if (isIOS) {
+      document.querySelector(`[data-fixture-id="${previous}"]`)
+        ?.scrollIntoView({ block: 'center' });
+      return;
+    }
+    matchVirtualizer.scrollToIndex(index, { align: 'center' });
+  }, [expandedMatch, sorted, isIOS, matchVirtualizer]);
+
   useEffect(() => {
     if (splash || loading || !matchListRef.current) return;
     const updateOffset = () => {
@@ -1590,7 +1617,7 @@ export function FootballDashboard({
               // ya se salta el render fuera de pantalla y recuerda el alto real.
               <div className="match-list">
                 {sorted.map(m => (
-                  <div key={m.fixture.id} className="virtual-match-row" style={{ paddingBottom: 8 }}>
+                  <div key={m.fixture.id} data-fixture-id={m.fixture.id} className="virtual-match-row" style={{ paddingBottom: 8 }}>
                     {renderMatchCard(m)}
                   </div>
                 ))}
@@ -1613,6 +1640,7 @@ export function FootballDashboard({
                       key={m.fixture.id}
                       ref={matchVirtualizer.measureElement}
                       data-index={virtualRow.index}
+                      data-fixture-id={m.fixture.id}
                       className="virtual-match-row"
                       style={{
                         position: 'absolute',

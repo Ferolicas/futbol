@@ -75,7 +75,9 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   al hacer scroll. La zona termina sobre el dock de Hoy/Próximos para que "Ver
   análisis completo" no quede debajo. Se cambia de partido con las flechas de la
   derecha o deslizando sobre la cabecera. El botón "Arriba" va pegado abajo a la
-  derecha y cierra la tarjeta antes de subir. El dashboard tampoco muestra ya el
+  derecha y cierra la tarjeta antes de subir. Al cerrar, la lista queda en el
+  partido donde se cerró, no en el que se abrió primero —con las flechas se
+  puede haber avanzado varios—; salvo si el cierre viene del botón "Arriba". El dashboard tampoco muestra ya el
   indicador de barra de scroll de la ventana.
   La capa se monta con un portal dentro de `.app`, no en `body`: buena parte de
   la hoja de estilos del dashboard cuelga de `.app …` y fuera de ahí la tarjeta
