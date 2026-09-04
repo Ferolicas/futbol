@@ -26,6 +26,19 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 ## Componentes
 
 - Home y planes: escenas fijas controladas por scroll, teclado o swipe. La pantalla no acumula secciones verticales.
+- Hero de Home: debajo de las métricas aparece una secuencia de los cuatro
+  deportes. Fútbol, béisbol y baloncesto caen con rebote en el centro y se
+  relevan solapados —el siguiente entra mientras el anterior aún se desvanece—;
+  después el casco se queda y se desplaza a la última posición, los tres balones
+  salen escalonados desde detrás de él hacia la izquierda hasta formar la fila y
+  un brillo la recorre de derecha a izquierda, recortado a las siluetas por
+  `lineup-mask.webp`. La secuencia se reproduce una vez cada vez que se entra en
+  la escena inicial; con movimiento reducido se muestra la composición terminada.
+- Recortes deportivos (`public/sports-sequence/`): salen de una sola imagen
+  cortada por las franjas transparentes que separan los objetos, no por cuartos
+  exactos —el casco cae a caballo del cuarto y se partía—. Los cuatro comparten
+  lienzo de 384×440 con el objeto centrado y sin escalar, y la máscara del brillo
+  mide justo cuatro veces ese ancho, que es lo que mantiene alineada la fila.
 - Header autenticado: muestra `Chat` a la izquierda, el video-logo centrado al
   54% del ancho y `Buscar` a la derecha. La búsqueda abre un Spotlight de pantalla
   completa sobre el mismo fondo de la app. Abre directamente una única superficie

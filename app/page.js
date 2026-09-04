@@ -68,6 +68,37 @@ const releaseCard = (event) => {
   event.currentTarget.classList.remove('is-pressed');
 };
 
+const SPORTS_SEQUENCE = [
+  { key: 'football', src: '/sports-sequence/football.webp' },
+  { key: 'baseball', src: '/sports-sequence/baseball.webp' },
+  { key: 'basketball', src: '/sports-sequence/basketball.webp' },
+  { key: 'helmet', src: '/sports-sequence/helmet.webp' },
+];
+
+function SportsSequence() {
+  return (
+    <div
+      className="apple-sports-sequence"
+      role="img"
+      aria-label="Balones de fútbol, béisbol y baloncesto junto a un casco de fútbol americano"
+    >
+      <div className="apple-sports-stage" aria-hidden="true">
+        {SPORTS_SEQUENCE.map((sport) => (
+          <img
+            key={sport.key}
+            className={`apple-sport-object is-${sport.key}`}
+            src={sport.src}
+            alt=""
+            loading="eager"
+            decoding="async"
+          />
+        ))}
+        <span className="apple-sports-shine" />
+      </div>
+    </div>
+  );
+}
+
 export default function LandingPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
@@ -294,6 +325,7 @@ export default function LandingPage() {
               <div><strong>500+</strong><span>Partidos al día</span></div>
               <div><strong>12+</strong><span>Mercados</span></div>
             </div>
+            {activeScene === 0 && <SportsSequence />}
           </div>
         </section>
 

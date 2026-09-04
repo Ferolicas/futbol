@@ -2647,6 +2647,126 @@ body {
   font-size: .72rem;
 }
 
+.apple-sports-sequence {
+  position: relative;
+  width: min(520px, 94vw);
+  aspect-ratio: 1536 / 440;
+  margin: 7px auto 0;
+  isolation: isolate;
+  pointer-events: none;
+}
+
+.apple-sports-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.apple-sport-object {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  width: 25%;
+  height: auto;
+  opacity: 0;
+  object-fit: contain;
+  filter: drop-shadow(0 12px 14px rgba(0,0,0,.34));
+  transform: translate3d(-50%, -50%, 0) scale(.82);
+  transform-origin: 50% 76%;
+  will-change: left, opacity, transform;
+}
+
+.apple-hero-scene.is-active .apple-sport-object.is-football {
+  animation: appleSportFootball 9.6s cubic-bezier(.22,1,.36,1) both;
+}
+
+.apple-hero-scene.is-active .apple-sport-object.is-baseball {
+  animation: appleSportBaseball 9.6s cubic-bezier(.22,1,.36,1) both;
+}
+
+.apple-hero-scene.is-active .apple-sport-object.is-basketball {
+  animation: appleSportBasketball 9.6s cubic-bezier(.22,1,.36,1) both;
+}
+
+.apple-hero-scene.is-active .apple-sport-object.is-helmet {
+  z-index: 2;
+  animation: appleSportHelmet 9.6s cubic-bezier(.22,1,.36,1) both;
+}
+
+@keyframes appleSportFootball {
+  0% { left: 50%; opacity: 0; transform: translate3d(-50%,-118%,0) scale(.68) rotate(-7deg); }
+  2% { opacity: 1; }
+  5% { transform: translate3d(-50%,-42%,0) scale(1.48) rotate(2deg); }
+  7% { transform: translate3d(-50%,-54%,0) scale(1.36) rotate(-1deg); }
+  9%, 13% { left: 50%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1.4); animation-timing-function: linear; }
+  19% { left: 50%; opacity: 0; transform: translate3d(-50%,-34%,0) scale(1.06); }
+  19.01%, 75% { left: 50%; opacity: 0; transform: translate3d(-50%,-50%,0) scale(.82); }
+  76% { left: 87.5%; opacity: 0; transform: translate3d(-50%,-50%,0) scale(.84); }
+  79% { left: 87.5%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(.84); }
+  88%, 100% { left: 12.5%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1); }
+}
+
+@keyframes appleSportBaseball {
+  0%, 16% { left: 50%; opacity: 0; transform: translate3d(-50%,-118%,0) scale(.68) rotate(7deg); }
+  18% { opacity: 1; }
+  21% { transform: translate3d(-50%,-42%,0) scale(1.48) rotate(-2deg); }
+  23% { transform: translate3d(-50%,-54%,0) scale(1.36) rotate(1deg); }
+  25%, 32% { left: 50%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1.4); animation-timing-function: linear; }
+  38% { left: 50%; opacity: 0; transform: translate3d(-50%,-34%,0) scale(1.06); }
+  38.01%, 78% { left: 50%; opacity: 0; transform: translate3d(-50%,-50%,0) scale(.82); }
+  79% { left: 87.5%; opacity: 0; transform: translate3d(-50%,-50%,0) scale(.84); }
+  82% { left: 87.5%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(.84); }
+  90%, 100% { left: 37.5%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1); }
+}
+
+@keyframes appleSportBasketball {
+  0%, 35% { left: 50%; opacity: 0; transform: translate3d(-50%,-118%,0) scale(.68) rotate(-6deg); }
+  37% { opacity: 1; }
+  40% { transform: translate3d(-50%,-42%,0) scale(1.48) rotate(2deg); }
+  42% { transform: translate3d(-50%,-54%,0) scale(1.36) rotate(-1deg); }
+  44%, 51% { left: 50%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1.4); animation-timing-function: linear; }
+  57% { left: 50%; opacity: 0; transform: translate3d(-50%,-34%,0) scale(1.06); }
+  57.01%, 81% { left: 50%; opacity: 0; transform: translate3d(-50%,-50%,0) scale(.82); }
+  82% { left: 87.5%; opacity: 0; transform: translate3d(-50%,-50%,0) scale(.84); }
+  85% { left: 87.5%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(.84); }
+  92%, 100% { left: 62.5%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1); }
+}
+
+@keyframes appleSportHelmet {
+  0%, 54% { left: 50%; opacity: 0; transform: translate3d(-50%,-118%,0) scale(.68); }
+  56% { opacity: 1; }
+  59% { transform: translate3d(-50%,-42%,0) scale(1.48); }
+  61% { transform: translate3d(-50%,-54%,0) scale(1.36); }
+  63%, 70% { left: 50%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1.4); }
+  77%, 100% { left: 87.5%; opacity: 1; transform: translate3d(-50%,-50%,0) scale(1); }
+}
+
+.apple-sports-shine {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  opacity: 0;
+  background: linear-gradient(112deg, transparent 30%, rgba(255,255,255,.1) 41%, rgba(255,255,255,.95) 50%, rgba(94,230,177,.38) 57%, transparent 70%);
+  background-position: 165% 0;
+  background-size: 52% 100%;
+  background-repeat: no-repeat;
+  mix-blend-mode: screen;
+  -webkit-mask: url('/sports-sequence/lineup-mask.webp') center / 100% 100% no-repeat;
+          mask: url('/sports-sequence/lineup-mask.webp') center / 100% 100% no-repeat;
+}
+
+.apple-hero-scene.is-active .apple-sports-shine {
+  animation: appleSportsShine 9.6s linear both;
+}
+
+@keyframes appleSportsShine {
+  0%, 90.5% { opacity: 0; background-position: 165% 0; }
+  91% { opacity: 1; background-position: 165% 0; }
+  98.5% { opacity: 1; background-position: -70% 0; }
+  100% { opacity: 0; background-position: -70% 0; }
+}
+
 .apple-features-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -6750,6 +6870,11 @@ body {
   .apple-hero-stats strong { font-size: 1.22rem; }
   .apple-hero-stats span { font-size: .62rem; }
 
+  .apple-sports-sequence {
+    width: min(358px, 100%);
+    margin-top: 6px;
+  }
+
   .apple-scene-header {
     margin-bottom: 14px;
   }
@@ -6977,6 +7102,12 @@ body {
     padding-top: 112px;
   }
 
+  .apple-hero-stats { margin-top: 14px; }
+  .apple-sports-sequence {
+    width: min(306px, 88vw);
+    margin-top: 1px;
+  }
+
   .apple-feature-card {
     min-height: 72px;
     padding: 7px;
@@ -7093,6 +7224,14 @@ body {
 
   .apple-hero-stats span {
     font-size: .56rem;
+  }
+
+  .apple-sports-sequence {
+    position: absolute;
+    bottom: max(28px, calc(env(safe-area-inset-bottom) + 20px));
+    left: 3vw;
+    width: min(43vw, 420px);
+    margin: 0;
   }
 
   .apple-scene-header {
@@ -7304,9 +7443,29 @@ body {
   .apple-glow,
   .apple-scroll-cue,
   .apple-scene.is-active .apple-feature-card,
-  .apple-plan-card {
+  .apple-plan-card,
+  .apple-hero-scene.is-active .apple-sports-shine {
     animation: none;
   }
+
+  /* Misma especificidad que las reglas por deporte, si no, no las apaga */
+  .apple-hero-scene.is-active .apple-sport-object.is-football,
+  .apple-hero-scene.is-active .apple-sport-object.is-baseball,
+  .apple-hero-scene.is-active .apple-sport-object.is-basketball,
+  .apple-hero-scene.is-active .apple-sport-object.is-helmet {
+    animation: none;
+  }
+
+  .apple-sport-object {
+    opacity: 1;
+    transform: translate3d(-50%, -50%, 0) scale(1);
+  }
+
+  .apple-sport-object.is-football { left: 12.5%; }
+  .apple-sport-object.is-baseball { left: 37.5%; }
+  .apple-sport-object.is-basketball { left: 62.5%; }
+  .apple-sport-object.is-helmet { left: 87.5%; }
+  .apple-sports-shine { display: none; }
 
   .apple-scene,
   .apple-brand-video {
