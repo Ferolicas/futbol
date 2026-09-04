@@ -59,19 +59,25 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   exactos —el casco cae a caballo del cuarto y se partía—. Los cuatro comparten
   lienzo de 384×440 con el objeto centrado y sin escalar, y la máscara del brillo
   mide justo cuatro veces ese ancho, que es lo que mantiene alineada la fila.
-- Tarjeta de partido (dashboard de fútbol): una sola tarjeta con liga y fecha,
-  escudos, nombre y posición de cada equipo, marcador o hora, córners y tarjetas,
-  goleadores, y entre los dos escudos las cuotas con la mini tarjeta del árbitro
-  (nombre y promedio de amarillas y rojas) justo debajo. Antes eran tres bloques
-  apilados y el logo del bookmaker; el logo se retiró y los tres bloques se
-  fundieron para que el desplegable no quede tan abajo. Por debajo de 360 px la
-  tarjeta del árbitro pasa a fila completa y los nombres largos reparten en hasta
-  tres líneas en vez de recortarse.
+- Tarjeta de partido (dashboard de fútbol): una sola tarjeta con liga, fecha,
+  favorito y descartar en la primera línea; escudo, nombre, posición y cuota de
+  ese equipo a cada lado; estado y marcador u hora en el centro; y una fila con
+  córners, cuota del empate y tarjetas. Sin logo de bookmaker y sin datos del
+  árbitro. La cuota del ganador va pegada a la posición y la del empate entre
+  córners y tarjetas: así el centro queda libre y la tarjeta ocupa tres líneas en
+  vez de las siete de antes. Los nombres largos reparten en hasta tres líneas en
+  vez de recortarse.
 - Partido desplegado: ocupa la pantalla completa. La tarjeta queda fija justo
-  debajo del nav y solo scrollea el bloque de datos, sin indicador de barra. El
-  scroll o el deslizamiento sobre la cabecera —fuera de la zona de datos— salta
-  al partido analizado anterior o siguiente. El dashboard tampoco muestra ya el
+  debajo del nav y solo scrollea el bloque de datos, sin indicador de barra, con
+  las pestañas del análisis y los filtros de cada categoría fijos en la parte
+  alta de esa zona. La zona termina sobre el dock de Hoy/Próximos para que "Ver
+  análisis completo" no quede debajo. Se cambia de partido con las flechas de la
+  derecha o deslizando sobre la cabecera. El botón "Arriba" va pegado abajo a la
+  derecha y cierra la tarjeta antes de subir. El dashboard tampoco muestra ya el
   indicador de barra de scroll de la ventana.
+  La capa se monta con un portal dentro de `.app`, no en `body`: buena parte de
+  la hoja de estilos del dashboard cuelga de `.app …` y fuera de ahí la tarjeta
+  perdería esos estilos.
 - Header autenticado: muestra `Chat` a la izquierda, el video-logo centrado al
   54% del ancho y `Buscar` a la derecha. La búsqueda abre un Spotlight de pantalla
   completa sobre el mismo fondo de la app. Abre directamente una única superficie

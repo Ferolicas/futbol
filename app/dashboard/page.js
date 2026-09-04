@@ -9,7 +9,9 @@ import {
   ArrowRight,
   BarChart3,
   CalendarDays,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Flag,
   Layers3,
   Save,
@@ -1026,6 +1028,12 @@ export function FootballDashboard({
     });
   }, [sorted, analyzedSet]);
 
+  useEffect(() => {
+    const collapse = () => setExpandedMatch(null);
+    window.addEventListener('dashboard:collapse-cards', collapse);
+    return () => window.removeEventListener('dashboard:collapse-cards', collapse);
+  }, []);
+
   const toggleAccordionMarket = useCallback((fixtureId, market, matchName) => {
     toggleMarket(fixtureId, market, matchName);
   }, [toggleMarket]);
@@ -1890,7 +1898,7 @@ function FootballCombinationPanel({
   );
 }
 
-function ScoreStatsSummary({ stats }) {
+function ScoreStatsSummary({ stats, drawOdd }) {
   const cornersCovered = isCoveredCounter(stats?.corners);
   const yellowCovered = isCoveredCounter(stats?.yellowCards);
   const redCovered = isCoveredCounter(stats?.redCards);
@@ -1902,6 +1910,12 @@ function ScoreStatsSummary({ stats }) {
         <span className="score-stat-label"><Flag size={11} aria-hidden="true" /> Córners</span>
         <strong>{cornersCovered ? `${stats.corners.home}-${stats.corners.away}` : '—'}</strong>
       </span>
+      {drawOdd != null && (
+        <span className="score-stat-chip is-draw-odd" title="Cuota del empate">
+          <span className="score-stat-label">Empate</span>
+          <strong>{drawOdd.toFixed(2)}</strong>
+        </span>
+      )}
       <span className={`score-stat-chip cards${yellowCovered || redCovered ? '' : ' unavailable'}`} title={yellowCovered || redCovered ? 'Tarjetas' : unavailableTitle}>
         <span className="score-stat-label"><i className="yellow-card-sm" /> Tarjetas</span>
         <strong>
@@ -1913,11 +1927,23 @@ function ScoreStatsSummary({ stats }) {
   );
 }
 
+// Posición en la tabla y cuota de ese equipo en la misma línea: antes la cuota
+// vivía en una fila propia en el centro, que sobraba.
+function MatchTeamMeta({ position, odd, side }) {
+  if (position == null && odd == null) return null;
+  return (
+    <small className="mhead-meta">
+      {position != null && <span className="mhead-pos">{position}°</span>}
+      {odd != null && <span className={`mhead-odd is-${side}`}>{odd.toFixed(2)}</span>}
+    </small>
+  );
+}
+
 // Tarjeta única de cabecera: liga, escudos, posición, marcador, córners y
 // tarjetas, cuotas y árbitro en un solo bloque. Antes eran tres filas sueltas
 // (liga+fecha, equipos+cuotas, caja de marcador) que ocupaban el triple de
 // alto. Compartida por MatchCard y AccordionCard.
-function MatchHeadCard({ match, odds, data, standings, liveStats, userTz }) {
+function MatchHeadCard({ match, odds, data, standings, liveStats, userTz, isFavorite, onFavorite, onDismiss }) {
   const status = match.fixture.status;
   const live = isLive(status.short);
   const finished = isFinished(status.short);
@@ -1943,13 +1969,29 @@ function MatchHeadCard({ match, odds, data, standings, liveStats, userTz }) {
           : <span aria-hidden="true">{flag}</span>}
         <span className="mhead-league-name">{match.league.name}</span>
         <span className="mhead-date">{cardDate}</span>
+        {onFavorite && (
+          <button
+            type="button"
+            className={`btn-fav${isFavorite ? ' active' : ''}`}
+            onClick={(event) => { event.stopPropagation(); onFavorite(event, match.fixture.id); }}
+            title={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+          >&#9733;</button>
+        )}
+        {onDismiss && (
+          <button
+            type="button"
+            className="btn-x"
+            onClick={(event) => { event.stopPropagation(); onDismiss(event, match.fixture.id); }}
+            title="Descartar partido"
+          >&#10005;</button>
+        )}
       </div>
 
       <div className="mhead-body">
         <div className="mhead-team">
           <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} size={40} />
           <strong>{match.teams.home.name}</strong>
-          {homePos && <small>{homePos}°</small>}
+          <MatchTeamMeta position={homePos} odd={odds?.home} side="home" />
         </div>
 
         <div className="mhead-center">
@@ -1979,37 +2021,18 @@ function MatchHeadCard({ match, odds, data, standings, liveStats, userTz }) {
             <div className="mhead-kickoff">{fmtTime(match.fixture.date, userTz)}</div>
           )}
 
-          {odds && (
-            <div className="card-odds-row">
-              {odds.home != null && <div className="card-odd is-home">{odds.home.toFixed(2)}</div>}
-              {odds.draw != null && <div className="card-odd is-draw">X {odds.draw.toFixed(2)}</div>}
-              {odds.away != null && <div className="card-odd is-away">{odds.away.toFixed(2)}</div>}
-            </div>
-          )}
 
         </div>
 
         <div className="mhead-team is-away">
           <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} size={40} />
           <strong>{match.teams.away.name}</strong>
-          {awayPos && <small>{awayPos}°</small>}
+          <MatchTeamMeta position={awayPos} odd={odds?.away} side="away" />
         </div>
 
-        {data?.referee && (
-          <div className="card-referee">
-            <Scale size={13} aria-hidden="true" />
-            <span><small>Árbitro</small><strong>{data.referee}</strong></span>
-            {data.refereeStats?.avgYellows != null && (
-              <i className="is-yellow">{Number(data.refereeStats.avgYellows).toFixed(1)}</i>
-            )}
-            {data.refereeStats?.avgReds != null && (
-              <i className="is-red">{Number(data.refereeStats.avgReds).toFixed(2)}</i>
-            )}
-          </div>
-        )}
       </div>
 
-      {hasScore && <ScoreStatsSummary stats={liveStats} />}
+      {(hasScore || odds?.draw != null) && <ScoreStatsSummary stats={liveStats} drawOdd={odds?.draw ?? null} />}
 
       <GoalScorersGrid liveStats={liveStats} homeId={match.teams.home.id} />
     </div>
@@ -2033,7 +2056,7 @@ const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFav
           el main thread JS, así no compiten con la apertura del acordeón. */}
       <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-        <MatchHeadCard match={match} odds={odds} data={matchData} standings={standings} liveStats={liveStats} userTz={userTz} />
+        <MatchHeadCard match={match} odds={odds} data={matchData} standings={standings} liveStats={liveStats} userTz={userTz} isFavorite={isFavorite} onFavorite={onFavorite} onDismiss={onHide} />
         {/* ── Footer: selección / favorito / ocultar ── */}
         <div className="mcard-foot">
           {isAnalyzed ? (
@@ -2044,14 +2067,6 @@ const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFav
               <span className="cb-mark" />
             </label>
           )}
-          {onFavorite && (
-            <button
-              className={`btn-fav${isFavorite ? ' active' : ''}`}
-              onClick={(e) => onFavorite(e, match.fixture.id)}
-              title={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
-            >&#9733;</button>
-          )}
-          <button className="btn-x" onClick={(e) => { e.stopPropagation(); onHide(e, match.fixture.id); }}>&#10005;</button>
         </div>
 
       </div>
@@ -2157,7 +2172,11 @@ function MatchFullscreen({ head, body, onStep }) {
     const height = topbar ? Math.round(topbar.getBoundingClientRect().height) : 72;
     document.documentElement.style.setProperty('--match-fs-top', `${height}px`);
     document.body.classList.add('match-fs-open');
-    return () => document.body.classList.remove('match-fs-open');
+    window.dispatchEvent(new CustomEvent('dashboard:card-expanded'));
+    return () => {
+      document.body.classList.remove('match-fs-open');
+      window.dispatchEvent(new CustomEvent('dashboard:card-expanded'));
+    };
   }, []);
 
   const step = (direction) => {
@@ -2208,8 +2227,18 @@ function MatchFullscreen({ head, body, onStep }) {
         {head}
       </div>
       <div className="match-fs-body">{body}</div>
+      <nav className="match-fs-nav" aria-label="Cambiar de partido">
+        <button type="button" onClick={() => step(-1)} aria-label="Partido anterior">
+          <ChevronUp size={20} aria-hidden="true" />
+        </button>
+        <button type="button" onClick={() => step(1)} aria-label="Partido siguiente">
+          <ChevronDown size={20} aria-hidden="true" />
+        </button>
+      </nav>
     </div>,
-    document.body,
+    // Dentro de .app, no en body: media hoja de estilos del dashboard cuelga de
+    // `.app ...` y en body la tarjeta desplegada perdería todo eso.
+    document.querySelector('.app') || document.body,
   );
 }
 
@@ -2285,19 +2314,9 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
     <div className="acc-head" onClick={() => onToggle(fixtureId)}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          <MatchHeadCard match={match} odds={odds} data={data} standings={standings} liveStats={liveStats} userTz={userTz} />
+          <MatchHeadCard match={match} odds={odds} data={data} standings={standings} liveStats={liveStats} userTz={userTz} isFavorite={isFavorite} onFavorite={onFavorite} onDismiss={onRemove} />
           {/* ── Indicador: remove / fav / selCount / prob / chevron ── */}
           <div className="acc-indicator">
-            {onRemove && (
-              <button className="btn-x acc-rm" onClick={e => onRemove(e, fixtureId)} title="Eliminar de analizados">&#10005;</button>
-            )}
-            {onFavorite && (
-              <button
-                className={`btn-fav${isFavorite ? ' active' : ''}`}
-                onClick={e => onFavorite(e, fixtureId)}
-                title={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
-              >&#9733;</button>
-            )}
             {selCount > 0 && <span className="acc-sel-count">{selCount} sel.</span>}
             {data?.combinada && (data.combinada.selections || []).length > 0 && (
               <span className="acc-mini">

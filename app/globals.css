@@ -913,7 +913,9 @@ body.match-fs-open { overflow: hidden; }
   z-index: 400;
   top: var(--match-fs-top, 72px);
   right: 0;
-  bottom: 0;
+  /* Termina sobre el dock de Hoy/Próximos: si no, "Ver análisis completo" queda
+     detrás de esos botones y no se puede pulsar. */
+  bottom: calc(75px + env(safe-area-inset-bottom));
   left: 0;
   display: flex;
   flex-direction: column;
@@ -944,9 +946,69 @@ body.match-fs-open { overflow: hidden; }
 
 .match-fs-body::-webkit-scrollbar { display: none; }
 
+/* Sin esto el sticky de las cabeceras se ancla a .acc-inner, que no scrollea */
+.match-fs-body .acc-inner,
+.app .match-fs-body .acc-inner { overflow: visible; }
+
+/* Pestañas del análisis y filtros de cada categoría: fijos al hacer scroll */
+.match-fs-body .analysis-choice-scroll {
+  position: sticky;
+  z-index: 6;
+  margin: 0 -6px;
+  padding: 6px;
+  background: #061512;
+  /* El degradado de los bordes dejaba ver el contenido pasando por detrás */
+  -webkit-mask-image: none;
+          mask-image: none;
+}
+
+.match-fs-body .analysis-choice-scroll.is-filters {
+  box-shadow: 0 8px 12px -8px rgba(0,0,0,.75);
+}
+
+.match-fs-body .analysis-choice-scroll.is-tabs { top: 0; }
+.match-fs-body .analysis-choice-scroll.is-filters { top: 46px; z-index: 5; }
+
+/* Flechas para moverse entre partidos con la tarjeta desplegada */
+.match-fs-nav {
+  position: absolute;
+  z-index: 7;
+  top: 50%;
+  right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transform: translateY(-50%);
+}
+
+.match-fs-nav button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(94,230,177,.26);
+  border-radius: 12px;
+  color: #bff3e0;
+  background: rgba(5,18,23,.9);
+  box-shadow: 0 8px 22px rgba(0,0,0,.4);
+  cursor: pointer;
+  transition: background .2s, color .2s, transform .15s;
+}
+
+.match-fs-nav button:hover { color: #eafff7; background: rgba(16,73,58,.95); }
+.match-fs-nav button:active { transform: scale(.94); }
+
 /* Dentro de la capa el contenido ya no anima el desplegado: se muestra entero */
-.match-fs-body .acc-content { display: block; }
-.match-fs-body .acc-content.open .acc-inner { padding: 0 4px 24px; border-top: 0; }
+/* `.app .acc-content` pone overflow:hidden, que convertía el bloque en
+   contenedor de scroll y dejaba las cabeceras sticky sin fijarse. Hace falta
+   ganarle en especificidad. */
+.match-fs-body .acc-content,
+.app .match-fs-body .acc-content { display: block; overflow: visible; }
+
+.match-fs-body .acc-content.open .acc-inner,
+.app .match-fs-body .acc-content.open .acc-inner { padding: 0 4px 24px; border-top: 0; }
 
 /* Sin indicador de barra de scroll en el dashboard */
 html:has(.dashboard-layout) { scrollbar-width: none; }
@@ -3955,8 +4017,9 @@ html:has(.dashboard-layout)::-webkit-scrollbar { display: none; }
 /* Compañero fijo del botón de soporte para jornadas muy largas. */
 .scroll-top-trigger {
   position: fixed;
-  right: 88px;
-  bottom: max(24px, calc(env(safe-area-inset-bottom) + 16px));
+  right: max(10px, env(safe-area-inset-right));
+  /* Pegado abajo a la derecha, justo por encima del dock de Hoy/Próximos */
+  bottom: calc(75px + env(safe-area-inset-bottom));
   z-index: 7999;
   display: inline-flex;
   align-items: center;
@@ -4002,7 +4065,7 @@ html:has(.dashboard-layout)::-webkit-scrollbar { display: none; }
 
 @media (max-width: 359px) {
   .scroll-top-trigger {
-    right: 82px;
+    right: max(10px, env(safe-area-inset-right));
     min-width: 48px;
     padding: 0 10px;
   }
@@ -5360,11 +5423,44 @@ html:has(.dashboard-layout)::-webkit-scrollbar { display: none; }
   hyphens: auto;
 }
 
-.mhead-team small {
+.mhead-team small,
+.mhead-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: rgba(255,255,255,.5);
   font-size: .63rem;
   font-weight: 750;
 }
+
+/* La cuota del ganador va pegada a la posición: antes ocupaba una fila entera
+   en el centro de la tarjeta. */
+.mhead-odd {
+  padding: 2px 6px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 7px;
+  background: rgba(255,255,255,.05);
+  font-weight: 900;
+}
+
+.mhead-odd.is-home { color: #66e4b3; background: rgba(16,185,129,.09); }
+.mhead-odd.is-away { color: #f39ba5; background: rgba(244,63,94,.07); }
+
+/* La del empate, entre córners y tarjetas */
+.score-stat-chip.is-draw-odd strong { color: #f4c867; }
+
+/* Estrella y X viven ya dentro de la tarjeta, en la fila de la liga */
+.mhead-league .btn-fav,
+.mhead-league .btn-x {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: .8rem;
+  line-height: 1;
+}
+
+.mhead-league .btn-fav { margin-left: 4px; }
 
 /* Columna central: es el hueco entre los dos escudos, y ahí van marcador,
    cuotas y árbitro. */
@@ -5405,30 +5501,6 @@ html:has(.dashboard-layout)::-webkit-scrollbar { display: none; }
   font-weight: 700;
 }
 
-.mhead-center .card-odds-row {
-  order: 0;
-  flex-wrap: wrap;
-  width: auto;
-  gap: 4px;
-}
-
-.mhead-center .card-odd {
-  min-width: 40px;
-  padding: 5px 6px;
-  font-size: .66rem;
-}
-
-/* Hijo del grid, no de la columna central: cae justo debajo de las cuotas y
-   entre los dos escudos, y en pantallas estrechas pasa a la fila entera. */
-.mhead-body .card-referee {
-  grid-column: 2;
-  order: 0;
-  width: auto;
-  margin-top: 0;
-  padding: 5px 8px;
-  gap: 6px;
-}
-
 .mhead .score-stats-summary {
   flex-direction: row;
   align-self: center;
@@ -5442,7 +5514,6 @@ html:has(.dashboard-layout)::-webkit-scrollbar { display: none; }
   .mhead { padding: 10px 11px; gap: 8px; }
   .mhead-body { --mhead-center: 120px; --mhead-crest: 36px; gap: 8px; }
   .mhead-team strong { font-size: .76rem; }
-  .mhead-center .card-odd { min-width: 36px; padding: 4px 5px; font-size: .62rem; }
 }
 
 /* Móviles corrientes: 361-400 px (iPhone SE2/8, 12-15, Android de 360) */
@@ -5450,20 +5521,22 @@ html:has(.dashboard-layout)::-webkit-scrollbar { display: none; }
   .mhead-body { --mhead-center: 108px; --mhead-crest: 34px; gap: 7px; }
   .mhead-team strong { font-size: .72rem; }
   .mhead-league { font-size: .68rem; }
-  .mhead-center .card-odds-row { gap: 3px; }
-  .mhead-center .card-odd { min-width: 32px; padding: 4px; font-size: .58rem; }
-  .mhead .score-stats-summary { gap: 6px; }
+  .mhead .score-stats-summary { gap: 5px; }
+  .mhead .score-stat-chip { padding: 4px 7px; }
+  .mhead .score-stat-label { font-size: .53rem; }
 }
 
 /* Los más estrechos (iPhone SE 1ª gen, 320 px): el árbitro ya no cabe en la
    columna central, pasa a la fila completa debajo. */
 @media (max-width: 360px) {
   .mhead-body { --mhead-center: 96px; --mhead-crest: 30px; gap: 6px; }
-  .mhead-body .card-referee { grid-column: 1 / -1; width: 100%; }
   .mhead-team strong { font-size: .68rem; }
   .mhead-score { font-size: clamp(1.4rem, 8vw, 1.9rem); gap: 5px; }
-  .mhead-center .card-odd { min-width: 29px; font-size: .55rem; }
-  .mhead .score-stats-summary { flex-direction: column; gap: 5px; }
+  /* En una fila también aquí: apiladas gastaban tres líneas */
+  .mhead .score-stats-summary { flex-direction: row; gap: 4px; }
+  .mhead .score-stat-chip { padding: 4px 6px; gap: 4px; }
+  .mhead .score-stat-label { font-size: .5rem; }
+  .mhead .score-stat-chip strong { font-size: .64rem; }
 }
 
 /* Pantallas bajas (móvil apaisado, 640-680 px de alto): menos aire vertical */
@@ -5472,89 +5545,6 @@ html:has(.dashboard-layout)::-webkit-scrollbar { display: none; }
   .mhead-body { gap: 7px; }
   .mhead-score { font-size: clamp(1.4rem, 6vw, 1.9rem); }
 }
-
-.card-odds-row {
-  order: 3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  width: 100%;
-}
-
-.card-odd {
-  min-width: 46px;
-  padding: 7px 8px;
-  border: 1px solid rgba(255,255,255,.07);
-  border-radius: 9px;
-  color: #e6f0ed;
-  text-align: center;
-  background: rgba(255,255,255,.045);
-  font-size: .7rem;
-  font-weight: 900;
-}
-
-.card-odd.is-home { color: #66e4b3; background: rgba(16,185,129,.075); }
-.card-odd.is-draw { color: #f4c867; background: rgba(245,158,11,.065); }
-.card-odd.is-away { color: #f39ba5; background: rgba(244,63,94,.055); }
-
-.card-referee {
-  order: 4;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  width: 100%;
-  margin-top: 2px;
-  padding: 7px 8px;
-  border: 1px solid rgba(255,255,255,.055);
-  border-radius: 11px;
-  color: #7f949b;
-  background: rgba(255,255,255,.025);
-}
-
-.card-referee > svg {
-  flex: 0 0 auto;
-  color: #65e6b6;
-}
-
-.card-referee > span {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.card-referee small {
-  color: #667b83;
-  font-size: .48rem;
-  font-weight: 750;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
-.card-referee strong {
-  margin-top: 2px;
-  overflow: hidden;
-  color: #d8e6e2;
-  font-size: .73rem;
-  font-weight: 850;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.card-referee i {
-  display: grid;
-  place-items: center;
-  min-width: 28px;
-  height: 24px;
-  border-radius: 7px;
-  font-size: .56rem;
-  font-style: normal;
-  font-weight: 900;
-}
-
-.card-referee i.is-yellow { color: #f8ce68; background: rgba(245,158,11,.09); }
-.card-referee i.is-red { color: #fb9ba6; background: rgba(244,63,94,.08); }
 
 /* Navegación compacta del resumen de análisis. Las dos barras conservan una
    sola fila y dejan el overflow al gesto horizontal nativo en móvil. */

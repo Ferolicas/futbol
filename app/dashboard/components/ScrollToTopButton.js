@@ -13,13 +13,15 @@ export default function ScrollToTopButton() {
       if (frame != null) return;
       frame = requestAnimationFrame(() => {
         frame = null;
-        setVisible(window.scrollY > 520);
+        setVisible(window.scrollY > 520 || document.body.classList.contains('match-fs-open'));
       });
     };
     update();
     window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('dashboard:card-expanded', update);
     return () => {
       window.removeEventListener('scroll', update);
+      window.removeEventListener('dashboard:card-expanded', update);
       if (frame != null) cancelAnimationFrame(frame);
       correctionFrames.current.forEach(cancelAnimationFrame);
       correctionFrames.current = [];
@@ -39,6 +41,10 @@ export default function ScrollToTopButton() {
       document.body.scrollTop = 0;
       window.scrollTo(0, 0);
     };
+
+    // Con una tarjeta desplegada a pantalla completa la página de detrás no
+    // scrollea, así que primero hay que cerrarla. El dashboard escucha esto.
+    window.dispatchEvent(new CustomEvent('dashboard:collapse-cards'));
 
     correctionFrames.current.forEach(cancelAnimationFrame);
     correctionFrames.current = [];
