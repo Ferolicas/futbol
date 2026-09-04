@@ -59,6 +59,19 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   exactos —el casco cae a caballo del cuarto y se partía—. Los cuatro comparten
   lienzo de 384×440 con el objeto centrado y sin escalar, y la máscara del brillo
   mide justo cuatro veces ese ancho, que es lo que mantiene alineada la fila.
+- Tarjeta de partido (dashboard de fútbol): una sola tarjeta con liga y fecha,
+  escudos, nombre y posición de cada equipo, marcador o hora, córners y tarjetas,
+  goleadores, y entre los dos escudos las cuotas con la mini tarjeta del árbitro
+  (nombre y promedio de amarillas y rojas) justo debajo. Antes eran tres bloques
+  apilados y el logo del bookmaker; el logo se retiró y los tres bloques se
+  fundieron para que el desplegable no quede tan abajo. Por debajo de 360 px la
+  tarjeta del árbitro pasa a fila completa y los nombres largos reparten en hasta
+  tres líneas en vez de recortarse.
+- Partido desplegado: ocupa la pantalla completa. La tarjeta queda fija justo
+  debajo del nav y solo scrollea el bloque de datos, sin indicador de barra. El
+  scroll o el deslizamiento sobre la cabecera —fuera de la zona de datos— salta
+  al partido analizado anterior o siguiente. El dashboard tampoco muestra ya el
+  indicador de barra de scroll de la ventana.
 - Header autenticado: muestra `Chat` a la izquierda, el video-logo centrado al
   54% del ancho y `Buscar` a la derecha. La búsqueda abre un Spotlight de pantalla
   completa sobre el mismo fondo de la app. Abre directamente una única superficie

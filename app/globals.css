@@ -902,6 +902,56 @@ body {
 .chev-ico.up { transform: rotate(180deg); }
 
 /* Accordion animation with grid */
+/* ===================== PARTIDO DESPLEGADO A PANTALLA COMPLETA =====================
+   Al abrir una tarjeta analizada, su cabecera queda fija justo debajo del nav y
+   solo scrollea el bloque de datos, sin barra visible. El scroll o el swipe
+   fuera de esa zona (sobre la cabecera) salta al partido anterior o siguiente. */
+body.match-fs-open { overflow: hidden; }
+
+.match-fs {
+  position: fixed;
+  z-index: 400;
+  top: var(--match-fs-top, 72px);
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px max(7px, calc((100vw - 1120px) / 2 + 8px)) 0;
+  background: linear-gradient(181deg, #030000 0%, #000009 22%, #10493a 100%);
+  overscroll-behavior: contain;
+}
+
+.match-fs-head {
+  flex: 0 0 auto;
+  /* El gesto vertical aquí cambia de partido, no scrollea */
+  touch-action: pan-x;
+}
+
+.match-fs-head .acc-head { padding: 0 0 8px; }
+.match-fs-head .acc-head:hover,
+.match-fs-head .acc-head:active { background: transparent; }
+
+/* Zona de datos: única que scrollea, y sin indicador de barra */
+.match-fs-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.match-fs-body::-webkit-scrollbar { display: none; }
+
+/* Dentro de la capa el contenido ya no anima el desplegado: se muestra entero */
+.match-fs-body .acc-content { display: block; }
+.match-fs-body .acc-content.open .acc-inner { padding: 0 4px 24px; border-top: 0; }
+
+/* Sin indicador de barra de scroll en el dashboard */
+html:has(.dashboard-layout) { scrollbar-width: none; }
+html:has(.dashboard-layout)::-webkit-scrollbar { display: none; }
+
 .acc-content {
   display: grid;
   grid-template-rows: 0fr;
@@ -5228,6 +5278,201 @@ body {
 }
 
 /* Cuotas, árbitro y acordeones */
+/* ===================== TARJETA ÚNICA DE CABECERA =====================
+   Liga, escudos, posición, marcador, córners/tarjetas, cuotas y árbitro en un
+   solo bloque. Antes eran tres filas sueltas que ocupaban el triple de alto y
+   dejaban el desplegable muy abajo. */
+.mhead {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px 13px;
+  border: 2px solid rgba(30,135,105,.5);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(30,135,105,.25), rgba(0,0,9,.4), rgba(30,135,105,.15));
+}
+
+.mhead-league {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: #dbe7e4;
+  font-size: .73rem;
+  font-weight: 700;
+}
+
+.mhead-league .league-logo { flex: 0 0 auto; }
+
+.mhead-league-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mhead-date {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: rgba(255,255,255,.55);
+  font-size: .67rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.mhead-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(var(--mhead-center, 132px), auto) minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+}
+
+/* El escudo lo dimensiona el CSS: TeamLogo fija width/height en línea y el
+   atributo ganaría a la clase, así que aquí hace falta !important. */
+.mhead-team .team-crest,
+.mhead-team .team-logo-fallback {
+  width: var(--mhead-crest, 40px) !important;
+  height: var(--mhead-crest, 40px) !important;
+}
+
+.mhead-team {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  text-align: center;
+}
+
+/* Dos líneas antes que recortar: en la columna estrecha "Central Córdoba SdE"
+   se quedaba en "Central Có…" en todos los móviles. */
+.mhead-team strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  width: 100%;
+  overflow: hidden;
+  color: #f1f5f9;
+  font-size: .8rem;
+  font-weight: 750;
+  line-height: 1.16;
+  overflow-wrap: anywhere;
+  hyphens: auto;
+}
+
+.mhead-team small {
+  color: rgba(255,255,255,.5);
+  font-size: .63rem;
+  font-weight: 750;
+}
+
+/* Columna central: es el hueco entre los dos escudos, y ahí van marcador,
+   cuotas y árbitro. */
+.mhead-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mhead-status {
+  padding: 3px 10px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(255,255,255,.1);
+  font-size: .58rem;
+  font-weight: 800;
+  letter-spacing: .05em;
+  white-space: nowrap;
+}
+
+.mhead-score {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #f1f5f9;
+  font-size: clamp(1.7rem, 7vw, 2.4rem);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.mhead-score-sep { opacity: .4; }
+
+.mhead-kickoff {
+  color: #f1f5f9;
+  font-size: clamp(1.1rem, 4.5vw, 1.5rem);
+  font-weight: 700;
+}
+
+.mhead-center .card-odds-row {
+  order: 0;
+  flex-wrap: wrap;
+  width: auto;
+  gap: 4px;
+}
+
+.mhead-center .card-odd {
+  min-width: 40px;
+  padding: 5px 6px;
+  font-size: .66rem;
+}
+
+/* Hijo del grid, no de la columna central: cae justo debajo de las cuotas y
+   entre los dos escudos, y en pantallas estrechas pasa a la fila entera. */
+.mhead-body .card-referee {
+  grid-column: 2;
+  order: 0;
+  width: auto;
+  margin-top: 0;
+  padding: 5px 8px;
+  gap: 6px;
+}
+
+.mhead .score-stats-summary {
+  flex-direction: row;
+  align-self: center;
+  justify-content: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+/* Móviles grandes (Pro Max, Plus, Pixel XL): 412-480 px */
+@media (max-width: 480px) {
+  .mhead { padding: 10px 11px; gap: 8px; }
+  .mhead-body { --mhead-center: 120px; --mhead-crest: 36px; gap: 8px; }
+  .mhead-team strong { font-size: .76rem; }
+  .mhead-center .card-odd { min-width: 36px; padding: 4px 5px; font-size: .62rem; }
+}
+
+/* Móviles corrientes: 361-400 px (iPhone SE2/8, 12-15, Android de 360) */
+@media (max-width: 400px) {
+  .mhead-body { --mhead-center: 108px; --mhead-crest: 34px; gap: 7px; }
+  .mhead-team strong { font-size: .72rem; }
+  .mhead-league { font-size: .68rem; }
+  .mhead-center .card-odds-row { gap: 3px; }
+  .mhead-center .card-odd { min-width: 32px; padding: 4px; font-size: .58rem; }
+  .mhead .score-stats-summary { gap: 6px; }
+}
+
+/* Los más estrechos (iPhone SE 1ª gen, 320 px): el árbitro ya no cabe en la
+   columna central, pasa a la fila completa debajo. */
+@media (max-width: 360px) {
+  .mhead-body { --mhead-center: 96px; --mhead-crest: 30px; gap: 6px; }
+  .mhead-body .card-referee { grid-column: 1 / -1; width: 100%; }
+  .mhead-team strong { font-size: .68rem; }
+  .mhead-score { font-size: clamp(1.4rem, 8vw, 1.9rem); gap: 5px; }
+  .mhead-center .card-odd { min-width: 29px; font-size: .55rem; }
+  .mhead .score-stats-summary { flex-direction: column; gap: 5px; }
+}
+
+/* Pantallas bajas (móvil apaisado, 640-680 px de alto): menos aire vertical */
+@media (max-height: 680px) {
+  .mhead { gap: 7px; padding: 9px 11px; }
+  .mhead-body { gap: 7px; }
+  .mhead-score { font-size: clamp(1.4rem, 6vw, 1.9rem); }
+}
+
 .card-odds-row {
   order: 3;
   display: flex;
@@ -5235,35 +5480,6 @@ body {
   justify-content: center;
   gap: 5px;
   width: 100%;
-}
-
-.card-bookmaker {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 31px;
-  max-width: 124px;
-  padding: 4px 8px;
-  border: 1px solid rgba(94,230,177,.15);
-  border-radius: 10px;
-  color: #9cafb2;
-  background: rgba(94,230,177,.055);
-}
-
-.card-bookmaker-logo {
-  display: block;
-  width: auto;
-  max-width: 66px;
-  height: 22px;
-  object-fit: contain;
-}
-
-.card-bookmaker span {
-  overflow: hidden;
-  font-size: .53rem;
-  font-weight: 750;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .card-odd {

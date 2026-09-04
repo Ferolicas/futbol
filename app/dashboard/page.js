@@ -21,6 +21,7 @@ import {
 import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
 import { useWorkerSocketState } from '../../hooks/useWorkerSocket';
+import { createPortal } from 'react-dom';
 import { BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
 import { todayInTz, getUserTz, fmtTimeInTz } from '../../lib/timezone';
 import { marketLabel } from '../../lib/market-labels';
@@ -1013,6 +1014,18 @@ export function FootballDashboard({
     setExpandedMatch(prev => (prev === fixtureId ? null : fixtureId));
   }, []);
 
+  // Con la tarjeta desplegada a pantalla completa, el scroll fuera de la zona de
+  // datos salta al partido analizado anterior o siguiente.
+  const stepExpandedMatch = useCallback((direction) => {
+    setExpandedMatch((current) => {
+      if (current == null) return current;
+      const ids = sorted.filter(m => analyzedSet.has(m.fixture.id)).map(m => m.fixture.id);
+      const index = ids.indexOf(current);
+      if (index < 0) return current;
+      return ids[index + direction] ?? current;
+    });
+  }, [sorted, analyzedSet]);
+
   const toggleAccordionMarket = useCallback((fixtureId, market, matchName) => {
     toggleMarket(fixtureId, market, matchName);
   }, [toggleMarket]);
@@ -1407,6 +1420,7 @@ export function FootballDashboard({
       liveStats={liveStats[m.fixture.id]}
       isExpanded={expandedMatch === m.fixture.id}
       onToggle={toggleExpandedMatch}
+      onStep={stepExpandedMatch}
       selMarkets={selectedMarkets[m.fixture.id] || EMPTY_MARKETS}
       onToggleMarket={toggleAccordionMarket}
       onViewFull={openAnalysisModal}
@@ -1899,22 +1913,112 @@ function ScoreStatsSummary({ stats }) {
   );
 }
 
+// Tarjeta única de cabecera: liga, escudos, posición, marcador, córners y
+// tarjetas, cuotas y árbitro en un solo bloque. Antes eran tres filas sueltas
+// (liga+fecha, equipos+cuotas, caja de marcador) que ocupaban el triple de
+// alto. Compartida por MatchCard y AccordionCard.
+function MatchHeadCard({ match, odds, data, standings, liveStats, userTz }) {
+  const status = match.fixture.status;
+  const live = isLive(status.short);
+  const finished = isFinished(status.short);
+  const hasScore = live || finished;
+  const awaitingOfficialResult = isAwaitingOfficialResult(match);
+  const flag = FLAGS[(match.leagueMeta || {}).country] || '';
+  const goalBurst = useGoalBurst((match.goals?.home ?? 0) + (match.goals?.away ?? 0), live);
+  const homePos = data?.homePosition || standings?.[match.teams.home.id];
+  const awayPos = data?.awayPosition || standings?.[match.teams.away.id];
+  const tz = userTz || 'UTC';
+  const cardDate = new Date(match.fixture.date).toLocaleDateString('es', { timeZone: tz, day: 'numeric', month: 'short' });
+  const sLabel = awaitingOfficialResult
+    ? 'PENDIENTE'
+    : ({ NS: 'PRÓXIMO', TBD: 'POR CONFIRMAR', '1H': 'EN VIVO — 1T', '2H': 'EN VIVO — 2T', HT: 'ENTRETIEMPO', FT: 'FINALIZADO', ET: 'EN VIVO — Extra', P: 'EN VIVO — Penales', AET: 'FINALIZADO', PEN: 'FINALIZADO', SUSP: 'SUSPENDIDO', PST: 'POSPUESTO', CANC: 'CANCELADO' }[status.short] || status.short);
+
+  return (
+    <div className={`mhead score-box-glow${live ? ' is-live' : ''}`}>
+      {goalBurst && <GoalBurst />}
+
+      <div className="mhead-league">
+        {match.league.logo
+          ? <img src={match.league.logo} alt="" title={match.league.name} className="league-logo" loading="lazy" decoding="async" />
+          : <span aria-hidden="true">{flag}</span>}
+        <span className="mhead-league-name">{match.league.name}</span>
+        <span className="mhead-date">{cardDate}</span>
+      </div>
+
+      <div className="mhead-body">
+        <div className="mhead-team">
+          <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} size={40} />
+          <strong>{match.teams.home.name}</strong>
+          {homePos && <small>{homePos}°</small>}
+        </div>
+
+        <div className="mhead-center">
+          {live ? (
+            <div className="ap2-live-badge live-badge-glow">
+              <span className="ap2-live-dot live-dot-pulse" />
+              {(status.short === 'HT' || status.short === 'BT') ? '' : 'EN VIVO'}
+              {status.elapsed > 0 && (
+                <span style={{ marginLeft: 4 }}>
+                  <MatchTimer elapsed={status.elapsed} extra={status.extra} status={status.short} />
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="mhead-status">{sLabel}</div>
+          )}
+
+          {hasScore ? (
+            <div className="mhead-score">
+              <SlotScore value={match.goals.home} className="score-num-glow" />
+              <span className="mhead-score-sep" aria-hidden="true">–</span>
+              <SlotScore value={match.goals.away} className="score-num-glow" />
+            </div>
+          ) : awaitingOfficialResult ? (
+            <div className="score-awaiting-result">Esperando marcador oficial</div>
+          ) : (
+            <div className="mhead-kickoff">{fmtTime(match.fixture.date, userTz)}</div>
+          )}
+
+          {odds && (
+            <div className="card-odds-row">
+              {odds.home != null && <div className="card-odd is-home">{odds.home.toFixed(2)}</div>}
+              {odds.draw != null && <div className="card-odd is-draw">X {odds.draw.toFixed(2)}</div>}
+              {odds.away != null && <div className="card-odd is-away">{odds.away.toFixed(2)}</div>}
+            </div>
+          )}
+
+        </div>
+
+        <div className="mhead-team is-away">
+          <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} size={40} />
+          <strong>{match.teams.away.name}</strong>
+          {awayPos && <small>{awayPos}°</small>}
+        </div>
+
+        {data?.referee && (
+          <div className="card-referee">
+            <Scale size={13} aria-hidden="true" />
+            <span><small>Árbitro</small><strong>{data.referee}</strong></span>
+            {data.refereeStats?.avgYellows != null && (
+              <i className="is-yellow">{Number(data.refereeStats.avgYellows).toFixed(1)}</i>
+            )}
+            {data.refereeStats?.avgReds != null && (
+              <i className="is-red">{Number(data.refereeStats.avgReds).toFixed(2)}</i>
+            )}
+          </div>
+        )}
+      </div>
+
+      {hasScore && <ScoreStatsSummary stats={liveStats} />}
+
+      <GoalScorersGrid liveStats={liveStats} homeId={match.teams.home.id} />
+    </div>
+  );
+}
+
 const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings, matchData, liveStats, onSelect, onHide, onFavorite, onView, userTz }) {
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
-  const hasScore = live || finished;
-  const awaitingOfficialResult = isAwaitingOfficialResult(match);
-  const meta = match.leagueMeta || {};
-  const flag = FLAGS[meta.country] || '';
-  const goalBurst = useGoalBurst((match.goals?.home ?? 0) + (match.goals?.away ?? 0), live);
-  const homePos = matchData?.homePosition || standings?.[match.teams.home.id];
-  const awayPos = matchData?.awayPosition || standings?.[match.teams.away.id];
-  const homeId = match.teams.home.id;
-  const tz = userTz || 'UTC';
-  const cardDate = new Date(match.fixture.date).toLocaleDateString('es', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long' });
-  const sLabel = awaitingOfficialResult
-    ? 'PENDIENTE DE CONFIRMACIÓN'
-    : ({ NS: 'PRÓXIMO', TBD: 'POR CONFIRMAR', '1H': 'EN VIVO — 1T', '2H': 'EN VIVO — 2T', HT: 'ENTRETIEMPO', FT: 'FINALIZADO', ET: 'EN VIVO — Extra', P: 'EN VIVO — Penales', AET: 'FINALIZADO', PEN: 'FINALIZADO', SUSP: 'SUSPENDIDO', PST: 'POSPUESTO', CANC: 'CANCELADO' }[match.fixture.status.short] || match.fixture.status.short);
 
   return (
     <div
@@ -1929,129 +2033,7 @@ const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFav
           el main thread JS, así no compiten con la apertura del acordeón. */}
       <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-        {/* ── Fila 1: Liga + Fecha ── */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '.82rem', fontWeight: 600, color: '#f1f5f9' }}>
-            {match.league.logo
-              ? <img src={match.league.logo} alt={match.league.name} title={match.league.name} className="league-logo" loading="lazy" decoding="async" />
-              : <span>{flag} {match.league.name}</span>}
-          </div>
-          <span style={{ fontSize: '.75rem', color: 'rgba(255,255,255,.6)', textTransform: 'capitalize' }}>{cardDate}</span>
-        </div>
-
-        {/* ── Fila 2: Local | Visitante + Cuotas ── */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px 12px' }}>
-          {/* Local — order 1 */}
-          <div style={{ order: 1, flex: 1, minWidth: 0 }}>
-            <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} size={36} />
-            <div style={{ fontSize: 'clamp(.9rem, 3vw, 1.25rem)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4, color: '#f1f5f9' }}>
-              {match.teams.home.name}
-            </div>
-            {homePos && <div style={{ fontSize: '.7rem', color: 'rgba(255,255,255,.55)' }}>{homePos}° posición</div>}
-          </div>
-
-          {/* Cuotas — order 3, fila propia en móvil */}
-          {odds && (() => {
-            const bkName = matchData?.odds?.bookmaker;
-            const bkLogo = bkName ? (BOOKMAKER_LOGOS[bkName.toLowerCase()] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => bkName.toLowerCase().includes(k))?.[1]) : null;
-            return (
-              <div className="card-odds-row">
-                {bkName && (
-                  <div className="card-bookmaker" title={bkName}>
-                    {bkLogo && <img className="card-bookmaker-logo" src={bkLogo} alt={bkName} loading="lazy" decoding="async" />}
-                    <span>{bkName}</span>
-                  </div>
-                )}
-                {odds.home != null && <div className="card-odd is-home">{odds.home.toFixed(2)}</div>}
-                {odds.draw != null && <div className="card-odd is-draw">X {odds.draw.toFixed(2)}</div>}
-                {odds.away != null && <div className="card-odd is-away">{odds.away.toFixed(2)}</div>}
-              </div>
-            );
-          })()}
-
-          {matchData?.referee && (
-            <div className="card-referee">
-              <Scale size={16} aria-hidden="true" />
-              <span><small>Árbitro</small><strong>{matchData.referee}</strong></span>
-              {matchData.refereeStats?.avgYellows != null && (
-                <i className="is-yellow">{Number(matchData.refereeStats.avgYellows).toFixed(1)}</i>
-              )}
-              {matchData.refereeStats?.avgReds != null && (
-                <i className="is-red">{Number(matchData.refereeStats.avgReds).toFixed(2)}</i>
-              )}
-            </div>
-          )}
-
-          {/* Visitante — order 2 */}
-          <div style={{ order: 2, flex: 1, minWidth: 0, textAlign: 'right' }}>
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} size={36} />
-            </div>
-            <div style={{ fontSize: 'clamp(.9rem, 3vw, 1.25rem)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4, color: '#f1f5f9' }}>
-              {match.teams.away.name}
-            </div>
-            {awayPos && <div style={{ fontSize: '.7rem', color: 'rgba(255,255,255,.55)' }}>{awayPos}° posición</div>}
-          </div>
-        </div>
-
-        {/* ── Score Box ── glow vía CSS (.score-box-glow), no framer-motion.
-            Los `animate={{boxShadow:[...]}} repeat:Infinity` corrían en el
-            main thread JS por cada card visible a la vez → al expandir el
-            acordeón competían por CPU y lo trababan. Movido a @keyframes CSS
-            (compositor GPU). backdropFilter:blur removido — era lo más caro de
-            repintar y el glow ya da el efecto. */}
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <div className="score-box-glow" style={{ position: 'relative', width: '100%', borderRadius: 20, background: 'linear-gradient(135deg, rgba(30,135,105,.25), rgba(0,0,9,.4), rgba(30,135,105,.15))', border: '2px solid rgba(30,135,105,.5)', padding: '16px 20px' }}>
-            {goalBurst && <GoalBurst />}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-
-              {/* Badge de estado */}
-              <div>
-                {live ? (
-                  <div className="ap2-live-badge live-badge-glow">
-                    <span className="ap2-live-dot live-dot-pulse" />
-                    {(match.fixture.status.short === 'HT' || match.fixture.status.short === 'BT') ? '' : 'EN VIVO'}
-                    {match.fixture.status.elapsed > 0 && (
-                      <span style={{ marginLeft: 4 }}>
-                        <MatchTimer elapsed={match.fixture.status.elapsed} extra={match.fixture.status.extra} status={match.fixture.status.short} />
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <div style={{ padding: '4px 14px', borderRadius: 999, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700, color: 'white', letterSpacing: '.05em' }}>
-                    {sLabel}
-                  </div>
-                )}
-              </div>
-
-              {/* Marcador o Hora */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                {hasScore ? (
-                  <>
-                    <SlotScore value={match.goals.home} className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }} />
-
-                    <ScoreStatsSummary stats={liveStats} />
-
-                    <SlotScore value={match.goals.away} className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }} />
-                  </>
-                ) : awaitingOfficialResult ? (
-                  <div className="score-awaiting-result">Esperando marcador oficial</div>
-                ) : (
-                  <div style={{ fontSize: 'clamp(1.5rem, 5vw, 2rem)', fontWeight: 700, color: '#f1f5f9' }}>
-                    {fmtTime(match.fixture.date, userTz)}
-                  </div>
-                )}
-              </div>
-
-              {/* Goleadores — 2 columnas igual al analisis */}
-              {liveStats && (liveStats.goalScorers?.length > 0 || liveStats.missedPenalties?.length > 0) && (
-                <GoalScorersGrid liveStats={liveStats} homeId={homeId} />
-              )}
-
-            </div>
-          </div>
-        </div>
-
+        <MatchHeadCard match={match} odds={odds} data={matchData} standings={standings} liveStats={liveStats} userTz={userTz} />
         {/* ── Footer: selección / favorito / ocultar ── */}
         <div className="mcard-foot">
           {isAnalyzed ? (
@@ -2156,26 +2138,86 @@ function HorizontalChoiceBar({ items, active, onChange, label, variant = 'tabs',
   );
 }
 
-const AccordionCard = memo(function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, onToggle, selMarkets, onToggleMarket, onViewFull, onRemove, isFavorite, onFavorite, userTz }) {
+// Tarjeta desplegada a pantalla completa: la cabecera queda fija bajo el nav y
+// solo scrollea el bloque de datos, sin barra visible. El scroll fuera de esa
+// zona (sobre la cabecera) salta al partido anterior o siguiente.
+const STEP_WHEEL_THRESHOLD = 70;
+const STEP_SWIPE_THRESHOLD = 48;
+
+function MatchFullscreen({ head, body, onStep }) {
+  const [mounted, setMounted] = useState(false);
+  const wheelAccum = useRef(0);
+  const wheelLock = useRef(false);
+  const touchStart = useRef(null);
+  const swiped = useRef(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const topbar = document.querySelector('.dashboard-topbar');
+    const height = topbar ? Math.round(topbar.getBoundingClientRect().height) : 72;
+    document.documentElement.style.setProperty('--match-fs-top', `${height}px`);
+    document.body.classList.add('match-fs-open');
+    return () => document.body.classList.remove('match-fs-open');
+  }, []);
+
+  const step = (direction) => {
+    if (!onStep || wheelLock.current) return;
+    wheelLock.current = true;
+    onStep(direction);
+    window.setTimeout(() => { wheelLock.current = false; }, 320);
+  };
+
+  const onWheel = (event) => {
+    wheelAccum.current += event.deltaY;
+    if (Math.abs(wheelAccum.current) < STEP_WHEEL_THRESHOLD) return;
+    const direction = wheelAccum.current > 0 ? 1 : -1;
+    wheelAccum.current = 0;
+    step(direction);
+  };
+
+  const onTouchStart = (event) => { touchStart.current = event.touches[0]?.clientY ?? null; };
+  const onTouchEnd = (event) => {
+    if (touchStart.current == null) return;
+    const delta = touchStart.current - (event.changedTouches[0]?.clientY ?? touchStart.current);
+    touchStart.current = null;
+    if (Math.abs(delta) < STEP_SWIPE_THRESHOLD) return;
+    // El toque que cierra la tarjeta vive en la misma zona: un deslizamiento
+    // para cambiar de partido no puede contar además como clic.
+    swiped.current = true;
+    step(delta > 0 ? 1 : -1);
+  };
+
+  const onClickCapture = (event) => {
+    if (!swiped.current) return;
+    swiped.current = false;
+    event.stopPropagation();
+    event.preventDefault();
+  };
+
+  if (!mounted) return null;
+
+  return createPortal(
+    <div className="match-fs">
+      <div
+        className="match-fs-head"
+        onWheel={onWheel}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        onClickCapture={onClickCapture}
+      >
+        {head}
+      </div>
+      <div className="match-fs-body">{body}</div>
+    </div>,
+    document.body,
+  );
+}
+
+const AccordionCard = memo(function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, onToggle, onStep, selMarkets, onToggleMarket, onViewFull, onRemove, isFavorite, onFavorite, userTz }) {
   const [activeAnalysisTab, setActiveAnalysisTab] = useState('markets');
-  const live = isLive(match.fixture.status.short);
-  const finished = isFinished(match.fixture.status.short);
-  const hasScore = live || finished;
-  const awaitingOfficialResult = isAwaitingOfficialResult(match);
-  const meta = match.leagueMeta || {};
-  const flag = FLAGS[meta.country] || '';
   const selCount = Object.keys(selMarkets).length;
-  const goalBurst = useGoalBurst((match.goals?.home ?? 0) + (match.goals?.away ?? 0), live);
-  const homePos = data?.homePosition || standings?.[match.teams.home.id];
-  const awayPos = data?.awayPosition || standings?.[match.teams.away.id];
-  const homeId = match.teams.home.id;
   const fixtureId = match.fixture.id;
   const matchName = `${match.teams.home.name} vs ${match.teams.away.name}`;
-  const tz = userTz || 'UTC';
-  const cardDate = new Date(match.fixture.date).toLocaleDateString('es', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long' });
-  const sLabel = awaitingOfficialResult
-    ? 'PENDIENTE DE CONFIRMACIÓN'
-    : ({ NS: 'PRÓXIMO', TBD: 'POR CONFIRMAR', '1H': 'EN VIVO — 1T', '2H': 'EN VIVO — 2T', HT: 'ENTRETIEMPO', FT: 'FINALIZADO', ET: 'EN VIVO — Extra', P: 'EN VIVO — Penales', AET: 'FINALIZADO', PEN: 'FINALIZADO', SUSP: 'SUSPENDIDO', PST: 'POSPUESTO', CANC: 'CANCELADO' }[match.fixture.status.short] || match.fixture.status.short);
 
   // "Selecciona para tu combinada" → fuente única: el catálogo canónico
   // creado por el motor. No se reconstruyen opciones desde porcentajes porque
@@ -2239,131 +2281,11 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
     }
   }, [activeAnalysisTab, resolvedAnalysisTab]);
 
-  return (
-    <div className={`acc-card ${isExpanded ? 'open' : ''}`}>
-      {/* Header */}
-      <div className="acc-head" onClick={() => onToggle(fixtureId)}>
+  const head = (
+    <div className="acc-head" onClick={() => onToggle(fixtureId)}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          {/* ── Fila 1: Liga + Fecha ── */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '.82rem', fontWeight: 600, color: '#f1f5f9' }}>
-              {match.league.logo && <img src={match.league.logo} alt="" className="league-logo" loading="lazy" decoding="async" />}
-              <span>{flag} {match.league.name}</span>
-            </div>
-            <span style={{ fontSize: '.75rem', color: 'rgba(255,255,255,.6)', textTransform: 'capitalize' }}>{cardDate}</span>
-          </div>
-
-          {/* ── Fila 2: Local | Visitante + Cuotas ── */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px 12px' }}>
-            {/* Local */}
-            <div style={{ order: 1, flex: 1, minWidth: 0 }}>
-              <TeamLogo src={match.teams.home.logo} name={match.teams.home.name} size={36} />
-              <div style={{ fontSize: 'clamp(.9rem, 3vw, 1.25rem)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4, color: '#f1f5f9' }}>
-                {match.teams.home.name}
-              </div>
-              {homePos && <div style={{ fontSize: '.7rem', color: 'rgba(255,255,255,.55)' }}>{homePos}° posición</div>}
-            </div>
-
-            {/* Cuotas */}
-            {odds && (() => {
-              const bkName = data?.odds?.bookmaker;
-              const bkLogo = bkName ? (BOOKMAKER_LOGOS[bkName.toLowerCase()] || Object.entries(BOOKMAKER_LOGOS).find(([k]) => bkName.toLowerCase().includes(k))?.[1]) : null;
-              return (
-              <div className="card-odds-row">
-                {bkName && (
-                    <div className="card-bookmaker" title={bkName}>
-                      {bkLogo && <img className="card-bookmaker-logo" src={bkLogo} alt={bkName} loading="lazy" decoding="async" />}
-                      <span>{bkName}</span>
-                    </div>
-                  )}
-                  {odds.home != null && <div className="card-odd is-home">{odds.home.toFixed(2)}</div>}
-                  {odds.draw != null && <div className="card-odd is-draw">X {odds.draw.toFixed(2)}</div>}
-                  {odds.away != null && <div className="card-odd is-away">{odds.away.toFixed(2)}</div>}
-                </div>
-              );
-            })()}
-
-            {/* Árbitro */}
-            {data?.referee && (
-              <div className="card-referee">
-                <Scale size={16} aria-hidden="true" />
-                <span><small>Árbitro</small><strong>{data.referee}</strong></span>
-                {data.refereeStats?.avgYellows != null && (
-                  <i className="is-yellow">{Number(data.refereeStats.avgYellows).toFixed(1)}</i>
-                )}
-                {data.refereeStats?.avgReds != null && (
-                  <i className="is-red">{Number(data.refereeStats.avgReds).toFixed(2)}</i>
-                )}
-              </div>
-            )}
-
-            {/* Visitante */}
-            <div style={{ order: 2, flex: 1, minWidth: 0, textAlign: 'right' }}>
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <TeamLogo src={match.teams.away.logo} name={match.teams.away.name} size={36} />
-              </div>
-              <div style={{ fontSize: 'clamp(.9rem, 3vw, 1.25rem)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4, color: '#f1f5f9' }}>
-                {match.teams.away.name}
-              </div>
-              {awayPos && <div style={{ fontSize: '.7rem', color: 'rgba(255,255,255,.55)' }}>{awayPos}° posición</div>}
-            </div>
-          </div>
-
-          {/* ── Score Box ── glow vía CSS (igual que MatchCard). Antes tenía
-              4 loops motion repeat:Infinity + backdropFilter:blur que corrían
-              en el main thread por cada card analizado visible → competían con
-              la apertura de los sub-acordeones. Movido a @keyframes CSS (GPU). */}
-          <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <div className="score-box-glow" style={{ position: 'relative', width: '100%', borderRadius: 20, background: 'linear-gradient(135deg, rgba(30,135,105,.25), rgba(0,0,9,.4), rgba(30,135,105,.15))', border: '2px solid rgba(30,135,105,.5)', padding: '16px 20px' }}>
-              {goalBurst && <GoalBurst />}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-
-                {/* Badge de estado */}
-                <div>
-                  {live ? (
-                    <div className="ap2-live-badge live-badge-glow">
-                      <span className="ap2-live-dot live-dot-pulse" />
-                      {(match.fixture.status.short === 'HT' || match.fixture.status.short === 'BT') ? '' : 'EN VIVO'}
-                      {match.fixture.status.elapsed > 0 && (
-                        <span style={{ marginLeft: 4 }}>
-                          <MatchTimer elapsed={match.fixture.status.elapsed} extra={match.fixture.status.extra} status={match.fixture.status.short} />
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <div style={{ padding: '4px 14px', borderRadius: 999, background: 'rgba(255,255,255,.1)', fontSize: '.75rem', fontWeight: 700, color: 'white', letterSpacing: '.05em' }}>
-                      {sLabel}
-                    </div>
-                  )}
-                </div>
-
-                {/* Marcador o Hora */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  {hasScore ? (
-                    <>
-                      <SlotScore value={match.goals.home} className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }} />
-
-                      <ScoreStatsSummary stats={liveStats} />
-
-                      <SlotScore value={match.goals.away} className="score-num-glow" style={{ fontSize: 'clamp(2.5rem, 8vw, 3.5rem)', fontWeight: 700, lineHeight: 1, color: '#f1f5f9' }} />
-                    </>
-                  ) : awaitingOfficialResult ? (
-                    <div className="score-awaiting-result">Esperando marcador oficial</div>
-                  ) : (
-                    <div style={{ fontSize: 'clamp(1.5rem, 5vw, 2rem)', fontWeight: 700, color: '#f1f5f9' }}>
-                      {fmtTime(match.fixture.date, userTz)}
-                    </div>
-                  )}
-                </div>
-
-                {/* Goleadores — 2 columnas con foto (componente compartido) */}
-                <GoalScorersGrid liveStats={liveStats} homeId={homeId} />
-
-              </div>
-            </div>
-          </div>
-
+          <MatchHeadCard match={match} odds={odds} data={data} standings={standings} liveStats={liveStats} userTz={userTz} />
           {/* ── Indicador: remove / fav / selCount / prob / chevron ── */}
           <div className="acc-indicator">
             {onRemove && (
@@ -2387,10 +2309,11 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
           </div>
 
         </div>
-      </div>
+    </div>
+  );
 
-      {/* Content */}
-      {isExpanded && <div className="acc-content open">
+  const body = (
+    <div className="acc-content open">
         <div className="acc-inner">
           {data ? (
             <>
@@ -2531,8 +2454,17 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
             <div className="no-data-inline">Sin datos de analisis</div>
           )}
         </div>
-      </div>}
     </div>
+  );
+
+  if (!isExpanded) return <div className="acc-card">{head}</div>;
+
+  return (
+    <>
+      {/* La copia en la lista mantiene el alto de la fila virtualizada */}
+      <div className="acc-card open">{head}</div>
+      <MatchFullscreen head={head} body={body} onStep={onStep} />
+    </>
   );
 });
 
