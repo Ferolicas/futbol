@@ -2649,9 +2649,11 @@ body {
 
 .apple-sports-sequence {
   position: relative;
-  width: min(520px, 94vw);
+  /* En pantallas bajas la fila encoge antes que comerse el hueco */
+  width: min(520px, 94vw, 44vh);
   aspect-ratio: 1536 / 440;
-  margin: 7px auto 0;
+  /* Dos saltos de línea respecto al texto del hero (line-height 29px) */
+  margin: clamp(24px, 6.4vh, 58px) auto 0;
   isolation: isolate;
   pointer-events: none;
 }
@@ -6872,7 +6874,8 @@ body {
 
   .apple-sports-sequence {
     width: min(358px, 100%);
-    margin-top: 6px;
+    /* Dos saltos de línea (line-height 20px en móvil) */
+    margin-top: 40px;
   }
 
   .apple-scene-header {
@@ -7105,7 +7108,7 @@ body {
   .apple-hero-stats { margin-top: 14px; }
   .apple-sports-sequence {
     width: min(306px, 88vw);
-    margin-top: 1px;
+    margin-top: 40px;
   }
 
   .apple-feature-card {
