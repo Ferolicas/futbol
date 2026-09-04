@@ -2166,6 +2166,25 @@ function MatchFullscreen({ head, body, onStep }) {
   const touchStart = useRef(null);
   const swiped = useRef(false);
 
+  const layerRef = useRef(null);
+
+  // Las pestañas y los filtros van fijos, uno bajo el otro. La altura de las
+  // pestañas cambia con el ancho y con cuántas quepan, así que se mide: con un
+  // valor fijo los filtros se colaban por detrás al hacer scroll.
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!layer) return undefined;
+    const tabs = layer.querySelector('.analysis-choice-scroll.is-tabs');
+    if (!tabs) return undefined;
+    const sync = () => {
+      layer.style.setProperty('--match-fs-tabs', `${Math.round(tabs.getBoundingClientRect().height)}px`);
+    };
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(tabs);
+    return () => observer.disconnect();
+  });
+
   useEffect(() => {
     setMounted(true);
     const topbar = document.querySelector('.dashboard-topbar');
@@ -2216,7 +2235,7 @@ function MatchFullscreen({ head, body, onStep }) {
   if (!mounted) return null;
 
   return createPortal(
-    <div className="match-fs">
+    <div className="match-fs" ref={layerRef}>
       <div
         className="match-fs-head"
         onWheel={onWheel}
@@ -2315,15 +2334,9 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           <MatchHeadCard match={match} odds={odds} data={data} standings={standings} liveStats={liveStats} userTz={userTz} isFavorite={isFavorite} onFavorite={onFavorite} onDismiss={onRemove} />
-          {/* ── Indicador: remove / fav / selCount / prob / chevron ── */}
+          {/* ── Indicador: selCount / chevron ── */}
           <div className="acc-indicator">
             {selCount > 0 && <span className="acc-sel-count">{selCount} sel.</span>}
-            {data?.combinada && (data.combinada.selections || []).length > 0 && (
-              <span className="acc-mini">
-                {cap(data.combinada.combinedProbability)}%
-                {data.combinada.combinedOdd > 1 ? ` | ${data.combinada.combinedOdd}x` : ''}
-              </span>
-            )}
             <span className={`chev-ico ${isExpanded ? 'up' : ''}`}>&#9662;</span>
           </div>
 

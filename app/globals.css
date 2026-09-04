@@ -892,7 +892,6 @@ body {
   font-size: .72rem;
 }
 .acc-sel-count { color: var(--green); font-weight: 700; }
-.acc-mini { color: var(--t2); font-weight: 600; }
 .chev-ico {
   font-size: .7rem;
   color: var(--t2);
@@ -967,7 +966,7 @@ body.match-fs-open { overflow: hidden; }
 }
 
 .match-fs-body .analysis-choice-scroll.is-tabs { top: 0; }
-.match-fs-body .analysis-choice-scroll.is-filters { top: 46px; z-index: 5; }
+.match-fs-body .analysis-choice-scroll.is-filters { top: var(--match-fs-tabs, 62px); z-index: 5; }
 
 /* Flechas para moverse entre partidos con la tarjeta desplegada */
 .match-fs-nav {
@@ -1034,7 +1033,6 @@ html:has(.dashboard-layout)::-webkit-scrollbar { display: none; }
 .app .badge-ft,
 .app .score-vs,
 .app .mcard-tname,
-.app .acc-mini,
 .app .chev-ico { color: rgba(255,255,255,.75); }
 .app .mcard-league { color: rgba(255,255,255,.55); }
 .app .badge-ns { color: rgba(255,255,255,.9); }
@@ -10554,7 +10552,6 @@ input:checked + .cb-mark::after {
 .app .pos-chip { color: white; background: rgba(30,135,105,.25); border: 1px solid rgba(30,135,105,.4); border-radius: 6px; padding: 1px 6px; font-size: .65rem; font-weight: 700; }
 .app .odd-chip { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15); border-radius: 8px; color: white; padding: 3px 10px; font-size: .8rem; font-weight: 700; }
 .app .odd-chip.x { background: rgba(255,255,255,.05); color: white; }
-.app .acc-mini { color: #4ade80; font-weight: 700; }
 .app .acc-sel-count { color: #4ade80; font-size: .72rem; font-weight: 700; }
 .app .chev-ico { color: white; }
 .app .btn-x, .app .btn-fav { color: white; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12); border-radius: 6px; }

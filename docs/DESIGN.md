@@ -62,15 +62,17 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - Tarjeta de partido (dashboard de fútbol): una sola tarjeta con liga, fecha,
   favorito y descartar en la primera línea; escudo, nombre, posición y cuota de
   ese equipo a cada lado; estado y marcador u hora en el centro; y una fila con
-  córners, cuota del empate y tarjetas. Sin logo de bookmaker y sin datos del
-  árbitro. La cuota del ganador va pegada a la posición y la del empate entre
+  córners, cuota del empate y tarjetas. Sin logo de bookmaker, sin datos del
+  árbitro y sin el chip de probabilidad y cuota de la combinada. La cuota del ganador va pegada a la posición y la del empate entre
   córners y tarjetas: así el centro queda libre y la tarjeta ocupa tres líneas en
   vez de las siete de antes. Los nombres largos reparten en hasta tres líneas en
   vez de recortarse.
 - Partido desplegado: ocupa la pantalla completa. La tarjeta queda fija justo
   debajo del nav y solo scrollea el bloque de datos, sin indicador de barra, con
   las pestañas del análisis y los filtros de cada categoría fijos en la parte
-  alta de esa zona. La zona termina sobre el dock de Hoy/Próximos para que "Ver
+  alta de esa zona: los filtros se anclan a la altura real de las pestañas,
+  medida en tiempo de ejecución, porque con un valor fijo se colaban por detrás
+  al hacer scroll. La zona termina sobre el dock de Hoy/Próximos para que "Ver
   análisis completo" no quede debajo. Se cambia de partido con las flechas de la
   derecha o deslizando sobre la cabecera. El botón "Arriba" va pegado abajo a la
   derecha y cierra la tarjeta antes de subir. El dashboard tampoco muestra ya el
