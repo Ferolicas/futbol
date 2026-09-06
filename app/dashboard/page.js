@@ -53,6 +53,7 @@ import MarketOutcomeBadge from './components/MarketOutcomeBadge';
 import { marketResultState, settleMarketSelection } from '../../lib/market-settlement';
 import { resolveDailyPickView } from '../../lib/daily-pick-view';
 import { groupSavedCombinadaSelections } from '../../lib/saved-combinada';
+import { freeRecommendationForRail } from '../../lib/free-recommendation-rail';
 import { BaseballDashboard } from './baseball/page';
 import MultisportDashboard from './components/MultisportDashboard';
 import {
@@ -107,6 +108,7 @@ const cap = (v) => {
 // detalle, cambio de fecha) lo saltan.
 let _splashDone = false;
 const EMPTY_MARKETS = Object.freeze({});
+const EMPTY_DAILY_RECOMMENDATIONS = Object.freeze([]);
 const DASHBOARD_SPORT_KEYS = new Set(['football', 'baseball', 'basketball', 'american_football']);
 
 // _dashCache fue eliminado en favor de SWR. SWR mantiene su propia cache
@@ -1301,8 +1303,18 @@ export function FootballDashboard({
     };
   }, [fixtures, hiddenSet, favoritesSet, leagueFilter]);
 
+  const freeApuestaRecommendations = useMemo(() => {
+    if (!isFree) return EMPTY_DAILY_RECOMMENDATIONS;
+    return fixtures.map((game) => freeRecommendationForRail({
+      sport: 'football',
+      game,
+      analysis: analyzedData[game.fixture?.id],
+      liveResult: liveStats[game.fixture?.id] || null,
+    })).filter((selection) => selection && !selection.resultState.isFinal);
+  }, [analyzedData, fixtures, isFree, liveStats]);
+
   const apuestaDelDia = useMemo(() => {
-    if (isFree) return { selections: freeDailyResults, combinedProbability: 0 };
+    if (isFree) return { selections: [...freeApuestaRecommendations, ...freeDailyResults], combinedProbability: 0 };
     // Reglas:
     //  - Solo selecciones con probabilidad ≥75%, fiabilidad ≥90% y cuota real ≥1.20
     //  - SIN límite por partido: si un partido tiene 10 opciones que cumplen,
@@ -1374,7 +1386,7 @@ export function FootballDashboard({
       selections: all,
       combinedProbability: +combinedProbability.toFixed(2),
     };
-  }, [analyzedData, fixtureById, isFree, freeDailyResults]);
+  }, [analyzedData, fixtureById, isFree, freeApuestaRecommendations, freeDailyResults]);
 
   const customCombinada = useMemo(() => {
     const all = [];
@@ -1667,7 +1679,7 @@ export function FootballDashboard({
         {/* FLOATING: Combinada counter */}
         {totalSel > 0 && statusFilter !== 'favoritos' && (
           <div className="float-bar float-bar-combinada slide-up">
-            <button className="btn-comb-float" onClick={() => setStatusFilter('favoritos')}>
+            <button className="btn-comb-float" onClick={() => { setExpandedMatch(null); setStatusFilter('favoritos'); }}>
               <span className="float-comb-icon"><Layers3 size={19} aria-hidden="true" /></span>
               <span><small>Tu selección</small><strong>Ver combinada · {totalSel}</strong></span>
               {customCombinada && <span className="float-odd">{customCombinada.combinedOdd}x</span>}
@@ -1720,7 +1732,7 @@ function ApuestaSelectionRail({ selections, averageProbability, fixtures, liveSt
   const [preferredView, setPreferredView] = useState('picks');
   const fixtureMap = useMemo(() => new Map((fixtures || []).map((fixture) => [String(fixture.fixture?.id), fixture])), [fixtures]);
   const decorated = useMemo(() => (selections || []).map((selection) => {
-    if (isFree) return selection;
+    if (selection.resultState && selection.outcome) return selection;
     const game = fixtureMap.get(String(selection.fixtureId));
     const result = liveStats?.[selection.fixtureId] || liveStats?.[String(selection.fixtureId)] || null;
     return {
@@ -1730,9 +1742,9 @@ function ApuestaSelectionRail({ selections, averageProbability, fixtures, liveSt
       outcome: settleMarketSelection({ sport: 'football', selection, game, liveResult: result }),
     };
   }), [fixtureMap, liveStats, selections, isFree]);
-  const picks = isFree ? [] : decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
+  const picks = decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
   const results = decorated.filter((selection) => selection.resultState?.isFinal || (!isFree && selection.resultState?.isLive));
-  const view = isFree ? 'results' : resolveDailyPickView(preferredView, picks.length, results.length);
+  const view = resolveDailyPickView(preferredView, picks.length, results.length);
   const visible = view === 'results' ? results : picks;
   const visibleProbability = visible.length
     ? visible.reduce((sum, selection) => sum + Number(selection.rawProbability ?? selection.probability), 0) / visible.length
@@ -1791,7 +1803,7 @@ function ApuestaSelectionRail({ selections, averageProbability, fixtures, liveSt
                 <b>{String(index + 1).padStart(2, '0')}</b>
               </span>
               <small>{sel.matchName}</small>
-              <strong>{displayMarketName}</strong>
+              <strong>{sel.bookmaker ? `${sel.bookmaker} · ` : ''}{displayMarketName}</strong>
               {view === 'results' && (
                 <MarketOutcomeBadge
                   outcome={sel.outcome}

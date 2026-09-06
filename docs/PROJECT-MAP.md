@@ -1020,7 +1020,11 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - Fútbol conserva los criterios de su catálogo Pro; los otros tres deportes
   reutilizan `buildBaseballApuestaDelDia`. La liquidación reutiliza
   `market-settlement`, incluyendo pérdidas y resultados pendientes de datos oficiales.
-- Las tiras de los cuatro deportes mantienen Resultados activo en Gratis, incluso
-  cuando no hay finalizados. Los catálogos y la alternancia de vistas Pro siguen iguales.
+- Las tiras de los cuatro deportes reutilizan, para las recomendaciones próximas,
+  la única `freePreview.selection` ya autorizada por el servidor para cada partido.
+  Así no desaparecen opciones de la vista inicial y cada una mantiene cuota y casa
+  reales sin leer el catálogo Pro. `freeDailyResults` sigue limitado a cierres oficiales.
+- Gratis y Pro alternan automáticamente entre recomendaciones y Resultados según
+  haya opciones en cada vista. Los catálogos Pro siguen iguales.
 - Pruebas: `tests/free-daily-results.test.js` comprueba el límite de acceso,
   probabilidades originales, aciertos/fallos y fuente Pro sin mutaciones.

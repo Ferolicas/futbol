@@ -35,6 +35,7 @@ import { displayBettingText } from '../utils/display-betting-text';
 import MarketOutcomeBadge from './MarketOutcomeBadge';
 import { marketResultState, settleMarketSelection } from '../../../lib/market-settlement';
 import { resolveDailyPickView } from '../../../lib/daily-pick-view';
+import { freeRecommendationForRail } from '../../../lib/free-recommendation-rail';
 
 function detectTimeZone() {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone; }
@@ -179,7 +180,7 @@ function MultisportDailyPickRail({ apuesta, games, slug }) {
     [games],
   );
   const decorated = useMemo(() => (apuesta?.selections || []).map((selection) => {
-    if (isFree) return selection;
+    if (selection.resultState && selection.outcome) return selection;
     const game = gamesById.get(String(selection.fixtureId));
     return {
       ...selection,
@@ -188,9 +189,9 @@ function MultisportDailyPickRail({ apuesta, games, slug }) {
       outcome: settleMarketSelection({ sport: slug, selection, game }),
     };
   }), [apuesta?.selections, gamesById, slug, isFree]);
-  const picks = isFree ? [] : decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
+  const picks = decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
   const results = decorated.filter((selection) => selection.resultState?.isFinal || (!isFree && selection.resultState?.isLive));
-  const view = isFree ? 'results' : resolveDailyPickView(preferredView, picks.length, results.length);
+  const view = resolveDailyPickView(preferredView, picks.length, results.length);
   const visible = view === 'results' ? results : picks;
   const average = visible.length
     ? visible.reduce((sum, selection) => sum + Number(selection.rawProbability ?? selection.probability), 0) / visible.length
@@ -496,12 +497,14 @@ export default function MultisportDashboard({
 
   const totalSelections = combination?.selections.length || 0;
   const pendingGames = useMemo(() => games.filter((game) => !game.isAnalyzed).length, [games]);
-  const apuestaDelDia = useMemo(
-    () => isFree ? { selections: currentData?.freeDailyResults || [], combinedProbability: 0 }
-      : buildBaseballApuestaDelDia(games.filter((game) => game.isAnalyzed && game.analysis))
-      || { selections: [], combinedProbability: 0 },
-    [games, isFree, currentData],
-  );
+  const apuestaDelDia = useMemo(() => {
+    if (!isFree) return buildBaseballApuestaDelDia(games.filter((game) => game.isAnalyzed && game.analysis))
+      || { selections: [], combinedProbability: 0 };
+    const recommendations = games.map((game) => freeRecommendationForRail({
+      sport, game, analysis: game.analysis, liveResult: game.liveResult,
+    })).filter((selection) => selection && !selection.resultState.isFinal);
+    return { selections: [...recommendations, ...(currentData?.freeDailyResults || [])], combinedProbability: 0 };
+  }, [games, isFree, currentData, sport]);
 
   const toggleExpanded = useCallback((gameId) => {
     setExpandedMatch((current) => current === gameId ? null : gameId);
@@ -692,7 +695,7 @@ export default function MultisportDashboard({
 
         {statusFilter !== 'favoritos' && totalSelections > 0 && (
           <div className="float-bar float-bar-combinada slide-up">
-            <button className="btn-comb-float" onClick={() => setStatusFilter('favoritos')}>
+            <button className="btn-comb-float" onClick={() => { setExpandedMatch(null); setStatusFilter('favoritos'); }}>
               <span className="float-comb-icon"><Layers3 size={19} aria-hidden="true" /></span>
               <span><small>Tu selección</small><strong>Ver combinada · {totalSelections}</strong></span>
               {combination && <span className="float-odd">{combination.combinedOdd.toFixed(2)}x</span>}

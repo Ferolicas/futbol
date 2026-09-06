@@ -136,6 +136,10 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   conserva siempre su nombre y aspecto presionado cuando está activo. Si ya no
   queda ninguna selección próxima y existe al menos una en vivo o finalizada,
   esa vista se activa automáticamente para evitar una tira vacía.
+  En Gratis, la vista inicial reutiliza la misma opción de 60–70% que aparece
+  dentro de cada partido; Resultados conserva las opciones liquidadas al cierre.
+- Indicador de combinada: se pinta por encima de la tarjeta de análisis abierta.
+  Al tocarlo, el detalle se cierra y el constructor se abre dentro de Favoritos.
 - Terminología de mercados: la interfaz muestra `Más de` y `Menos de`. Los
   nombres históricos que todavía contengan `Over`, `Under` u `O/U` se traducen
   justo antes de renderizarse, sin alterar claves, cálculos ni datos del motor.

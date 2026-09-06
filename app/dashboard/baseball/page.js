@@ -58,6 +58,7 @@ import {
 } from '../../../lib/recommendation-policy';
 import { marketResultState, settleMarketSelection } from '../../../lib/market-settlement';
 import { resolveDailyPickView } from '../../../lib/daily-pick-view';
+import { freeRecommendationForRail } from '../../../lib/free-recommendation-rail';
 
 const BaseballAnalysisExperience = dynamic(
   () => import('./analisis/[id]/page').then((module) => module.BaseballAnalysisExperience),
@@ -368,9 +369,14 @@ export function BaseballDashboard({
     [games, analyzed, hidden],
   );
 
-  const apuestaDelDia = useMemo(() => isFree
-    ? { selections: fxData?.date === date ? (fxData.freeDailyResults || []) : [], combinedProbability: 0 }
-    : buildBaseballApuestaDelDia(analyzedGames), [analyzedGames, isFree, fxData, date]);
+  const apuestaDelDia = useMemo(() => {
+    if (!isFree) return buildBaseballApuestaDelDia(analyzedGames);
+    const recommendations = analyzedGames.map((game) => freeRecommendationForRail({
+      sport: 'baseball', game, analysis: game.analysis, liveResult: game.liveResult,
+    })).filter((selection) => selection && !selection.resultState.isFinal);
+    const results = fxData?.date === date ? (fxData.freeDailyResults || []) : [];
+    return { selections: [...recommendations, ...results], combinedProbability: 0 };
+  }, [analyzedGames, isFree, fxData, date]);
 
   const liveCount = games.filter(g => !hidden.includes(g.id) && isLive(effectiveGameStatus(g))).length;
   const upcomingCount = games.filter(g => !hidden.includes(g.id) && effectiveGameStatus(g) === 'NS').length;
@@ -504,7 +510,7 @@ export function BaseballDashboard({
       {statusFilter !== 'favoritos' && totalSel > 0 && (
         <button
           className="baseball-comb-action"
-          onClick={() => setStatusFilter('favoritos')}
+          onClick={() => { setExpandedMatch(null); setStatusFilter('favoritos'); }}
         >
           <span><Layers3 size={18} aria-hidden="true" /></span>
           <span><small>Tu selección</small><strong>Mi combinada · {totalSel}</strong></span>
@@ -887,7 +893,7 @@ function ApuestaDelDiaBlock({ apuesta, games }) {
   const [preferredView, setPreferredView] = useState('picks');
   const gamesById = useMemo(() => new Map((games || []).map((game) => [String(game.id), game])), [games]);
   const decorated = useMemo(() => (apuesta.selections || []).map((selection) => {
-    if (isFree) return selection;
+    if (selection.resultState && selection.outcome) return selection;
     const game = gamesById.get(String(selection.fixtureId));
     return {
       ...selection,
@@ -896,9 +902,9 @@ function ApuestaDelDiaBlock({ apuesta, games }) {
       outcome: settleMarketSelection({ sport: 'baseball', selection, game }),
     };
   }), [apuesta.selections, gamesById, isFree]);
-  const picks = isFree ? [] : decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
+  const picks = decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
   const results = decorated.filter((selection) => selection.resultState?.isFinal || (!isFree && selection.resultState?.isLive));
-  const view = isFree ? 'results' : resolveDailyPickView(preferredView, picks.length, results.length);
+  const view = resolveDailyPickView(preferredView, picks.length, results.length);
   const visible = view === 'results' ? results : picks;
   const visibleProbability = visible.length
     ? visible.reduce((sum, selection) => sum + Number(selection.rawProbability ?? selection.probability), 0) / visible.length

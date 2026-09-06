@@ -25,6 +25,7 @@ for (const sport of ['football', 'baseball', 'basketball', 'american_football'])
     assert.deepEqual(results.map(r => r.outcome.status), ['won', 'lost']);
     assert.ok(results.every(r => r.resultState.isFinal && !r.resultState.isLive));
     assert.ok(results.every(r => r.rawProbability === 81.369));
+    assert.ok(results.every(r => r.bookmaker === 'Bet365'));
     assert.doesNotMatch(JSON.stringify(results), /Original pick [125]|SECRET|sampleN|evidence|combinada/);
     assert.deepEqual(source, original, 'Pro source remains intact');
     assert.deepEqual(freeDailyResults({ ...source, fixtures: fixtures.filter(g => g.id < 3) }), []);
@@ -34,7 +35,7 @@ for (const sport of ['football', 'baseball', 'basketball', 'american_football'])
 test('only the original qualifying daily catalog is exposed after official closure', async () => {
   const { freeDailyResults } = await import('../lib/free-daily-results.js');
   const game = { fixture: { id: 9, status: { short: 'FT' } }, teams: { home: { name: 'A' }, away: { name: 'B' } } };
-  const selected = { id: 'total_corners_over8_5', name: 'Córners', probability: 89, confidence: 94, odd: 1.3 };
+  const selected = { id: 'total_corners_over8_5', name: 'Córners', probability: 89, confidence: 94, odd: 1.3, bookmaker: 'Bet365' };
   const source = { sport: 'football', fixtures: [game], analyzedData: { 9: { combinada: { source: 'context-engine', selectable: [
     selected, { ...selected, name: 'Low reliability', confidence: 89 },
     { ...selected, name: 'Low probability', probability: 74 }, { ...selected, name: 'Low odds', odd: 1.1 },

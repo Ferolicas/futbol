@@ -5246,6 +5246,13 @@ html:has(.dashboard-layout)::-webkit-scrollbar { display: none; }
   pointer-events: none;
 }
 
+/* La tarjeta analizada vive en z=400. La confirmación de la combinada queda
+   por encima mientras está abierta para que el toque sea visible y accionable. */
+body.match-fs-open .float-bar-combinada {
+  z-index: 460;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+}
+
 .btn-comb-float {
   display: grid !important;
   grid-template-columns: 38px minmax(0, 1fr) auto 18px;

@@ -113,11 +113,14 @@ test('Apuesta del día usa cabecera fija y tarjetas compactas con desplazamiento
   for (const source of [football, baseball, multisport]) {
     assert.match(source, /resolveDailyPickView\(preferredView, picks\.length, results\.length\)/);
     assert.match(source, /<span>Resultados<\/span>/);
+    assert.match(source, /freeRecommendationForRail/);
+    assert.doesNotMatch(source, /const picks = isFree \? \[\]/);
   }
   assert.doesNotMatch(football, /className="daily-pick-title-card"/);
   assert.doesNotMatch(baseball, /className="daily-pick-title-card"/);
   assert.match(styles, /\.daily-pick-track[\s\S]*overflow-x: auto/);
   assert.match(styles, /scroll-snap-type: x proximity/);
+  assert.match(styles, /body\.match-fs-open \.float-bar-combinada \{[\s\S]*z-index: 460/);
 });
 
 test('el dock inferior llega al borde y el header tapa el contenido al hacer scroll', () => {
