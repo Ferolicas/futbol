@@ -2,7 +2,7 @@
 // node --env-file=.env.local scripts/announce-free-access.mjs [--send]
 // Resend idempotency: https://resend.com/docs/dashboard/emails/idempotency-keys
 import pg from 'pg';
-import { readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { FREE_ANNOUNCEMENT_VERSION, FREE_ANNOUNCEMENT_SUBJECT, FREE_ANNOUNCEMENT_HTML } from '../lib/free-announcement-template.js';
 import { hasActiveEntitlement } from '../lib/entitlements.js';
 
@@ -15,9 +15,7 @@ if (testEmail && send) throw new Error('Choose --test or --send');
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false }, max: 2 });
 const subject = FREE_ANNOUNCEMENT_SUBJECT;
 const html = FREE_ANNOUNCEMENT_HTML;
-const emailHtml = html.replace('https://cfanalisis.com/email/free-access-cta.png', 'cid:cf-free-cta');
-const attachments = [{ filename: 'cf-free-cta.png', content_type: 'image/png', content_id: 'cf-free-cta',
-  content: (await readFile(new URL('../public/email/free-access-cta.png', import.meta.url))).toString('base64') }];
+
 
 try {
   await writeFile('/tmp/cf-free-announcement.html', html, { mode: 0o600 });
@@ -25,7 +23,7 @@ try {
     if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY missing');
     const response = await fetch('https://api.resend.com/emails', { method: 'POST', signal: AbortSignal.timeout(20000),
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json', 'Idempotency-Key': `${CAMPAIGN}/preview-${FREE_ANNOUNCEMENT_VERSION}/${testEmail}` },
-      body: JSON.stringify({ from: process.env.FROM_EMAIL || 'CF Análisis <info@cfanalisis.com>', to: [testEmail], subject: `[Vista previa] ${subject}`, html: emailHtml, attachments }),
+      body: JSON.stringify({ from: process.env.FROM_EMAIL || 'CF Análisis <info@cfanalisis.com>', to: [testEmail], subject: `[Vista previa] ${subject}`, html }),
     });
     const result = await response.json();
     if (!response.ok || !result.id) throw new Error(`Preview failed: HTTP ${response.status} ${result.name || ''}`);
@@ -54,7 +52,7 @@ try {
         response = await fetch('https://api.resend.com/emails', {
           method: 'POST', signal: AbortSignal.timeout(20000),
           headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json', 'Idempotency-Key': `${CAMPAIGN}/${recipient.id}` },
-          body: JSON.stringify({ from: process.env.FROM_EMAIL || 'CF Análisis <info@cfanalisis.com>', to: [recipient.email], subject, html: emailHtml, attachments }),
+          body: JSON.stringify({ from: process.env.FROM_EMAIL || 'CF Análisis <info@cfanalisis.com>', to: [recipient.email], subject, html }),
         });
         result = await response.json();
         if (response.ok || (response.status !== 429 && response.status < 500)) break;

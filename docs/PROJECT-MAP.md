@@ -927,7 +927,7 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   propietario pidió revisar la vista previa antes de autorizar el envío masivo.**
 
 - El correo de lanzamiento usa fondo verde oscuro `#061d16` con gradiente
-  constante y protección de texto para Gmail. El CTA metalizado con letras
-  negras viaja como PNG inline (CID) para preservar el contraste; el enlace
-  sigue siendo `/dashboard`. Vista previa v4 enviada al propietario; envío
+  constante y protección de texto para Gmail. El CTA es un enlace HTML metalizado
+  con texto negro y altura de 112px, hacia `/dashboard`. No usar imagen para
+  el botón. Vista previa v5 enviada al propietario; envío
   masivo pendiente de su revisión final.
