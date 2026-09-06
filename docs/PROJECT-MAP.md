@@ -929,5 +929,8 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - El correo de lanzamiento usa fondo verde oscuro `#061d16` con gradiente
   constante y protección de texto para Gmail. El CTA es un enlace HTML metalizado
   con texto negro y altura de 112px, hacia `/dashboard`. No usar imagen para
-  el botón. Vista previa v5 enviada al propietario; envío
+  el botón. Vista previa v6 enviada al propietario; envío
   masivo pendiente de su revisión final.
+- Gmail puede invertir el negro pese a `!important` y `text-fill-color`. El
+  texto HTML del CTA usa `background-clip:text` y gradiente negro en el selector
+  específico de Gmail; una captura local no equivale a verificar su app móvil.
