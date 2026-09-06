@@ -14,7 +14,7 @@ CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combina
 | Cache/realtime | Redis + worker TypeScript/WebSocket |
 | Pagos | Stripe mundial; Mercado Pago en Colombia |
 | Email | Resend/ZeptoMail según plantilla |
-| Deploy | GitHub Actions → `/apps/futbol` → build standalone → PM2 |
+| Deploy | GitHub Actions → `.web-releases/` → validación standalone → PM2 |
 
 Los entregables de producto no ejecutables viven en `docs/flashcards/`: allí
 están las fichas de preparación para tiendas y de funcionamiento, en HTML y PNG.
@@ -881,7 +881,7 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   búsqueda; ya no encadena una cápsula y un segundo panel. Los filtros deportivos
   se pueden seleccionar y deseleccionar con un segundo toque; su color depende
   directamente del estado `aria-pressed`, sin un `hover` táctil persistente.
-- El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.
+- Cada release standalone recibe copias propias de `.env`, `public/` y `.next/static`; nunca enlazar sus archivos con un build activo.
 
 
 ### Acceso gratuito (2026-09-06)
@@ -969,3 +969,7 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   desde su configuración completa; rollback restaura el proceso anterior de la
   misma forma. Esta activación puede producir un breve reinicio, pero el build
   ya no borra archivos del servidor activo.
+
+- En fútbol, los porcentajes bloqueados toman la misma versión del catálogo
+  que la respuesta Pro (incluida su caché). PG aporta `_freeScored`; no mezclar
+  el catálogo PG con otro snapshot Redis, porque sus porcentajes pueden variar.

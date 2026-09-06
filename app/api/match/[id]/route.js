@@ -41,9 +41,12 @@ export async function GET(request, { params }) {
 
   if (!paidAccess) {
     if (!/^\d+$/.test(id)) return Response.json({ error: 'Invalid id' }, { status: 400 });
-    const { rows } = await pgPool.query('SELECT fixture_id, analysis, combinada FROM match_analysis WHERE fixture_id=$1', [id]);
+    const [{ rows }, paidDocument] = await Promise.all([
+      pgPool.query('SELECT fixture_id, analysis, combinada FROM match_analysis WHERE fixture_id=$1', [id]),
+      getCachedAnalysis(id, clientDate),
+    ]);
     if (!rows[0]) return Response.json({ error: 'Match not analyzed yet', notFound: true }, { status: 404 });
-    return Response.json({ analysis: freeAnalysis(rows[0]) }, { headers: { 'Cache-Control': 'private, no-store' } });
+    return Response.json({ analysis: freeAnalysis({ ...rows[0], combinada: paidDocument?.combinada || { selectable: [] } }) }, { headers: { 'Cache-Control': 'private, no-store' } });
   }
 
 
