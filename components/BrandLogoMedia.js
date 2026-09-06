@@ -8,10 +8,14 @@ import { useEffect, useState } from 'react';
 const ANIMATED_LOGO = '/logo-metalizado-alpha.avif?v=2';
 const STATIC_FALLBACK = '/logo-metalizado-alpha-fast.webp';
 
-export default function BrandLogoMedia({ className = '', ariaLabel = 'CF Análisis' }) {
+export default function BrandLogoMedia({ className = '', ariaLabel = 'CF Análisis', animated = true }) {
   const [mode, setMode] = useState('static');
 
   useEffect(() => {
+    if (!animated) {
+      setMode('static');
+      return undefined;
+    }
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
       setMode('static');
       return undefined;
@@ -24,7 +28,7 @@ export default function BrandLogoMedia({ className = '', ariaLabel = 'CF Anális
       probe.onload = null;
       probe.onerror = null;
     };
-  }, []);
+  }, [animated]);
 
   return (
     <img

@@ -9,7 +9,7 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 test('el header queda reducido a chat, logo centrado y búsqueda Spotlight', () => {
   const header = read('app/dashboard/components/DashboardHeader.js');
   const spotlight = read('app/dashboard/components/AppleSpotlightSearch.js');
-  assert.match(header, /<BrandLogoMedia \/>/);
+  assert.match(header, /<BrandLogoMedia animated=\{false\} \/>/);
   assert.match(header, /<ChatWidget \/>/);
   assert.match(header, /<AppleSpotlightSearch \/>/);
   assert.doesNotMatch(header, /SportToggle|dashboard-account|initialUser/);
@@ -24,6 +24,20 @@ test('el header queda reducido a chat, logo centrado y búsqueda Spotlight', () 
   const logo = read('components/BrandLogoMedia.js');
   assert.match(logo, /logo-metalizado-alpha\.avif\?v=2/);
   assert.doesNotMatch(logo, /logo-metalizado-fast\.webm|brand-logo-alpha-video/);
+});
+
+test('el dashboard inicia sin splash bloqueante ni efectos pesados simultáneos', () => {
+  const football = read('app/dashboard/page.js');
+  const header = read('app/dashboard/components/DashboardHeader.js');
+  const access = read('app/dashboard/components/FreeAccessProvider.js');
+  const styles = read('app/globals.css');
+
+  assert.doesNotMatch(football, /if \(splash\)|setSplash|splashFade|_splashDone/);
+  assert.match(header, /<BrandLogoMedia animated=\{false\} \/>/);
+  assert.match(access, /window\.setTimeout\(visit, 2500\)/);
+  const overlay = styles.slice(styles.indexOf('.free-plan-overlay {'), styles.indexOf('}', styles.indexOf('.free-plan-overlay {')));
+  assert.doesNotMatch(overlay, /backdrop-filter/);
+  assert.match(styles, /\.app \.mcard-in \{\s*animation: none;/);
 });
 
 test('el chat ocupa la pantalla y se minimiza hacia su botón con movimiento reducido seguro', () => {

@@ -35,7 +35,6 @@ import {
 } from '../../lib/recommendation-policy';
 import { setAnalysisCache } from '../../lib/analysis-cache';
 import { fetcher } from '../../lib/fetcher';
-import BrandLogoMedia from '../../components/BrandLogoMedia';
 import { useLiveStats } from './live-stats-context';
 import { useSelectedMarkets } from './selected-markets-context';
 import {
@@ -103,10 +102,6 @@ const cap = (v) => {
   return Math.floor((value + 1e-9) * 100) / 100;
 };
 
-// Splash-once-per-tab: el splash de bienvenida solo se muestra en la
-// primera carga del tab. Las subsiguientes navegaciones (back desde
-// detalle, cambio de fecha) lo saltan.
-let _splashDone = false;
 const EMPTY_MARKETS = Object.freeze({});
 const EMPTY_DAILY_RECOMMENDATIONS = Object.freeze([]);
 const DASHBOARD_SPORT_KEYS = new Set(['football', 'baseball', 'basketball', 'american_football']);
@@ -162,8 +157,6 @@ export function FootballDashboard({
   unifiedDashboard = false,
 } = {}) {
   const router = useRouter();
-  const [splash, setSplash] = useState(!_splashDone);
-  const [splashFade, setSplashFade] = useState(false);
   // Banner de bienvenida tras checkout exitoso (ver efecto checkout=success).
   const [welcome, setWelcome] = useState(false);
   const [userTz, setUserTz] = useState('UTC'); // corrected on mount to user's real timezone
@@ -706,25 +699,6 @@ export function FootballDashboard({
       })
       .catch(() => {});
   }, []);
-
-  // Track loading via ref so splash effect can read latest value
-  const loadingRef = useRef(loading);
-  useEffect(() => { loadingRef.current = loading; }, [loading]);
-
-  // Splash screen: show briefly on FIRST visit only, fade out as soon as data loads
-  useEffect(() => {
-    if (_splashDone) { setSplash(false); return; }
-    const minTime = new Promise(r => setTimeout(r, 800));
-    const dataReady = new Promise(r => {
-      const check = () => !loadingRef.current ? r() : setTimeout(check, 50);
-      check();
-    });
-    Promise.all([minTime, dataReady]).then(() => {
-      _splashDone = true;
-      setSplashFade(true);
-      setTimeout(() => setSplash(false), 400);
-    });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Bienvenida tras checkout exitoso: el PaymentModal vuelve a
   // /dashboard?checkout=success&plan=X. Mostramos un banner de confirmación
@@ -1444,7 +1418,7 @@ export function FootballDashboard({
   }, [expandedMatch, sorted, matchVirtualizer]);
 
   useEffect(() => {
-    if (splash || loading || !matchListRef.current) return;
+    if (loading || !matchListRef.current) return;
     const updateOffset = () => {
       if (!matchListRef.current) return;
       const next = matchListRef.current.getBoundingClientRect().top + window.scrollY;
@@ -1457,7 +1431,6 @@ export function FootballDashboard({
       window.removeEventListener('resize', updateOffset);
     };
   }, [
-    splash,
     loading,
     apuestaDelDia?.selections?.length,
     batchRunning,
@@ -1503,21 +1476,6 @@ export function FootballDashboard({
       userTz={userTz}
     />
   ));
-
-  if (splash) {
-    return (
-      <div className={`splash ${splashFade ? 'fade-out' : ''}`}>
-        <div className="splash-content">
-          <div className="splash-logo-wrap">
-            <BrandLogoMedia
-              className="splash-logo splash-logo-video"
-            />
-          </div>
-          <p className="splash-almost">Ya casi estamos…</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <>

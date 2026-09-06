@@ -13,7 +13,7 @@ export default function DashboardHeader() {
       <ChatWidget />
 
       <Link href="/dashboard" className="dashboard-brand" aria-label="Ir al dashboard">
-        <BrandLogoMedia />
+        <BrandLogoMedia animated={false} />
       </Link>
 
       <div className="dashboard-header-actions"><AppleSpotlightSearch /><UpgradeButton /></div>

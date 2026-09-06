@@ -46,10 +46,12 @@ export default function FreeAccessProvider({ isFree, userId, children }) {
       } catch { /* Access never depends on a promotional modal. */ }
       finally { busy = false; }
     };
-    visit();
+    // El aviso comercial no compite con la hidratación, las cuotas ni el
+    // primer gesto del usuario. Se consulta cuando el dashboard ya está listo.
+    const initialTimer = window.setTimeout(visit, 2500);
     const timer = setInterval(visit, 60_000);
     document.addEventListener('visibilitychange', visit);
-    return () => { alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', visit); };
+    return () => { alive = false; clearTimeout(initialTimer); clearInterval(timer); document.removeEventListener('visibilitychange', visit); };
   }, [isFree, userId]);
 
   useEffect(() => {
