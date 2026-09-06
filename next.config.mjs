@@ -40,7 +40,7 @@ const nextConfig = {
       { key: 'Content-Security-Policy', value: csp },
       { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
     ];
-    return [{ source: '/:path*', headers: securityHeaders }];
+    return [{ source: '/:path*', headers: securityHeaders }, ...['/api/fixtures', '/api/match/:id', '/api/baseball/fixtures', '/api/baseball/match/:id', '/api/sports/:sport/fixtures', '/api/sports/:sport/match/:id', '/api/auth/session', '/api/free/visit'].map(source => ({ source, headers: [{ key: 'Cache-Control', value: 'private, no-store' }] }))];
   },
 };
 

@@ -1,3 +1,4 @@
+import { freeFootballList } from '../../../lib/free-access-server';
 import { getFixtures, getQuota, getCachedStandingsPositions } from '../../../lib/api-football';
 import { analysisDateKey, getAnalyzedMatchesFull, getAnalyzedFixtureIds } from '../../../lib/sanity-cache';
 import { redisGet, redisMGet, redisSet, KEYS, TTL } from '../../../lib/redis';
@@ -41,9 +42,8 @@ export async function GET(request) {
     const supabase = createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!(await userHasActivePlan(user))) {
-      return Response.json({ error: 'Subscription required' }, { status: 403 });
-    }
+    const paidAccess = await userHasActivePlan(user);
+
 
     // ===== PHASE 1: Load fixtures (Redis -> Supabase/API) =====
     const isPastDate = date < todayStr;
@@ -643,8 +643,8 @@ export async function GET(request) {
       favorites,
       userTimezone,
       analyzed: userAnalyzed,
-      analyzedOdds,
-      analyzedData,
+      analyzedOdds: paidAccess ? analyzedOdds : {},
+      analyzedData: paidAccess ? analyzedData : await freeFootballList(analyzedData),
       standings: responseStandings,
       initialLiveStats,
       batchStatus: batchFlag ? {

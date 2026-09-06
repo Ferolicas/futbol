@@ -1,4 +1,5 @@
 'use client';
+import { useFreeAccess, LockedAnalysis } from '../../components/FreeAccessProvider';
 
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -54,7 +55,12 @@ function getProbColor(v) {
   return 'lo';
 }
 
-export function AnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, onClose }) {
+export function AnalysisExperience(props) {
+  const { isFree } = useFreeAccess();
+  return isFree ? <div className="app free-detail"><LockedAnalysis title="Análisis completo" /></div> : <PaidAnalysisExperience {...props} />;
+}
+
+function PaidAnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, onClose }) {
   const params = useParams();
   const router = useRouter();
   const fixtureId = fixtureIdProp || params.id;

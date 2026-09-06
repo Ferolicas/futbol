@@ -71,6 +71,7 @@ export default function SignInPage() {
 
       // La cookie ya existe; sincronizamos el contexto antes de navegar para
       // que nombre, avatar y estado por usuario aparezcan en el primer render.
+      try { if (data.user?.id) sessionStorage.removeItem(`cf-free-visit:${data.user.id}`); } catch {}
       await refreshSession();
       router.replace(selectedPlan ? checkoutHref : (safeRedirect || '/dashboard'));
     } catch {

@@ -1,4 +1,6 @@
 'use client';
+import { useFreeAccess, LockedAnalysis } from './FreeAccessProvider';
+import { SportAnalysisTabs } from './SharedSportAnalysis';
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -116,7 +118,12 @@ function FullFrequencies({ prediction, homeName, awayName, scoreLabel }) {
   );
 }
 
-export default function MultisportAnalysisPage({ sport, slug, sportLabel, scoreLabel }) {
+export default function MultisportAnalysisPage(props) {
+  const { isFree } = useFreeAccess();
+  return isFree ? <main className="app free-detail"><Link href="/dashboard">← Volver al dashboard</Link><LockedAnalysis title="Análisis completo" /></main> : <PaidMultisportAnalysisPage {...props} />;
+}
+
+function PaidMultisportAnalysisPage({ sport, slug, sportLabel, scoreLabel }) {
   const params = useParams();
   const router = useRouter();
   const fixtureId = params.id;
@@ -147,7 +154,7 @@ export default function MultisportAnalysisPage({ sport, slug, sportLabel, scoreL
   if (error) return <div className="msa-page"><button className="msa-back" onClick={() => router.back()}>← Volver</button><div className="msa-error">{error}</div></div>;
 
   return (
-    <main className="msa-page">
+    <main className="msa-page app">
       <Link className="msa-back" href={`/dashboard/${slug}`}>← Volver a {sportLabel}</Link>
       <header className="msa-hero">
         <small>{sportLabel} · {analysis.league_name}</small>
@@ -155,6 +162,7 @@ export default function MultisportAnalysisPage({ sport, slug, sportLabel, scoreL
         <time>{analysis.start_time ? new Date(analysis.start_time).toLocaleString('es-ES') : ''}</time>
       </header>
 
+      <SportAnalysisTabs game={{ id: fixtureId, analysis, teams: { home: { name: homeName }, away: { name: awayName } } }} sport={sport} scoreLabel={scoreLabel} />
       <Section title="Arma tu combinada · Bet365">
         <p className="msa-muted">Misma política de béisbol: línea exacta de Bet365, probabilidad mínima del 65% y cuota mínima de 1,20.</p>
         {markets.length ? <div className="msa-markets">{markets.map((market) => (

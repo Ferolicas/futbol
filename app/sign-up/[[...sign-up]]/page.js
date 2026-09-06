@@ -32,7 +32,6 @@ export default function SignUpPage() {
   const purchaseIntent = normalizePurchaseIntent(searchParams.get('intent'));
   const selectedPlanLabel = purchasePlanLabel(selectedPlan);
   const signInHref = purchaseRoute('/sign-in', 'plan', selectedPlan, purchaseIntent);
-  const checkoutHref = purchaseRoute('/planes', 'checkout', selectedPlan, purchaseIntent);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -65,9 +64,9 @@ export default function SignUpPage() {
       }
 
       // Sesión ya creada por signupUser. Si la compra nació en la Home,
-      // conservamos únicamente el ID validado para abrir su checkout.
+      // conservamos únicamente el ID validado como preferencia de plan.
       await refreshSession();
-      router.replace(checkoutHref);
+      router.replace(purchaseRoute('/dashboard', 'plan', selectedPlan, purchaseIntent));
     } catch {
       setError('Error al registrarse. Intenta de nuevo.');
       setLoading(false);
@@ -95,13 +94,13 @@ export default function SignUpPage() {
           </p>
           <h2>Decide con datos.<br /><span>No a ciegas.</span></h2>
           <p className="signup-value-copy">
-            Crea tu cuenta y accede al siguiente paso para elegir el plan que mejor se adapte a ti.
+            Crea tu cuenta y entra gratis a los cuatro deportes. Puedes mejorar a Pro cuando quieras.
           </p>
 
           <ul className="signup-benefits">
-            <li><span><BarChart3 size={17} aria-hidden="true" /></span> Análisis estadístico completo</li>
-            <li><span><Check size={17} aria-hidden="true" /></span> Combinadas inteligentes</li>
-            <li><span><Sparkles size={17} aria-hidden="true" /></span> Más de 15 ligas</li>
+            <li><span><BarChart3 size={17} aria-hidden="true" /></span> Una recomendación gratis por evento elegible</li>
+            <li><span><Check size={17} aria-hidden="true" /></span> Probabilidades de 60–70%</li>
+            <li><span><Sparkles size={17} aria-hidden="true" /></span> Cuatro deportes en un solo lugar</li>
           </ul>
 
           <div className="signup-value-note">
@@ -124,7 +123,7 @@ export default function SignUpPage() {
             <div className="signup-journey" aria-label="Proceso de acceso">
               <span className="is-active"><strong>1</strong> Cuenta</span>
               <i aria-hidden="true" />
-              <span><strong>2</strong> Plan</span>
+              <span><strong>2</strong> Acceso</span>
               <i aria-hidden="true" />
               <span><strong>3</strong> Analiza</span>
             </div>
@@ -133,8 +132,8 @@ export default function SignUpPage() {
             <h1>Empieza con ventaja</h1>
             <p>
               {selectedPlanLabel
-                ? `Completa tus datos y abriremos el pago del Plan ${selectedPlanLabel}.`
-                : 'Completa tus datos. En el siguiente paso podrás elegir tu plan.'}
+                ? `Entra gratis y elige el Plan ${selectedPlanLabel} si quieres acceso completo.`
+                : 'Completa tus datos y empieza gratis. Sin tarjeta.'}
             </p>
           </header>
 

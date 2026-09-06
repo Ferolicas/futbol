@@ -6,6 +6,8 @@ import { getCachedAnalysis, cacheAnalysis, getCachedFixtures } from '../../../..
 import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { getCurrentUser } from '../../../../lib/auth-pg';
+import { freeAnalysis } from '../../../../lib/free-access';
+import { pgPool } from '../../../../lib/db';
 import { userHasActivePlan } from '../../../../lib/require-active-plan';
 import { jsonError } from '../../../../lib/api-error';
 import { redisRateLimit } from '../../../../lib/ratelimit-redis';
@@ -35,9 +37,15 @@ export async function GET(request, { params }) {
   if (!user) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  if (!(await userHasActivePlan(user))) {
-    return Response.json({ error: 'Subscription required' }, { status: 403 });
+  const paidAccess = await userHasActivePlan(user);
+
+  if (!paidAccess) {
+    if (!/^\d+$/.test(id)) return Response.json({ error: 'Invalid id' }, { status: 400 });
+    const { rows } = await pgPool.query('SELECT fixture_id, analysis, combinada FROM match_analysis WHERE fixture_id=$1', [id]);
+    if (!rows[0]) return Response.json({ error: 'Match not analyzed yet', notFound: true }, { status: 404 });
+    return Response.json({ analysis: freeAnalysis(rows[0]) }, { headers: { 'Cache-Control': 'private, no-store' } });
   }
+
 
   try {
     let analysis = await getCachedAnalysis(id, clientDate);
@@ -149,7 +157,7 @@ export async function GET(request, { params }) {
     }
 
     const quota = await getQuota();
-    return Response.json({ analysis, resultStats, quota });
+    return Response.json({ analysis, resultStats, quota }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     console.error('[match:GET]', error.message);
     return jsonError(error);

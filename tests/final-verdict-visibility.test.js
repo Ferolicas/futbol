@@ -32,7 +32,7 @@ test('cada opción del veredicto identifica su porcentaje de probabilidad', () =
 
 test('la tarjeta de béisbol conserva el veredicto y sus porcentajes', () => {
   const route = read('app/api/baseball/fixtures/route.js');
-  const dashboard = read('app/dashboard/baseball/page.js');
+  const dashboard = read('app/dashboard/components/SharedSportAnalysis.js');
   assert.match(route, /finalVerdict: analysis\.analysis\?\.finalVerdict \|\| null/);
-  assert.match(dashboard, /verdict=\{game\.analysis\?\.analysis\?\.finalVerdict\}/);
+  assert.match(dashboard, /verdict=\{analysis\?\.analysis\?\.finalVerdict\}/);
 });

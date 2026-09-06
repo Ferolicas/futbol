@@ -142,14 +142,13 @@ test('el límite defensivo de 500 devuelve una señal explícita', () => {
   assert.equal(result.fixtureIds.length, 500);
 });
 
-test('la tarjeta pendiente abre estado automático y no ofrece analizar manualmente', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../app/dashboard/baseball/page.js'), 'utf8');
-  assert.match(source, /Preparando análisis automático/);
-  assert.match(source, /Actualizando el análisis automáticamente/);
-  assert.doesNotMatch(source, /Analizar \$\{selected\.size\}/);
-  assert.doesNotMatch(source, /else onSelect\(game\.id\)/);
-  assert.match(source, /role="LOCAL" winProbability=\{winProbabilities\?\.home\}/);
-  assert.match(source, /role="VISITANTE" winProbability=\{winProbabilities\?\.away\}/);
+test('la tarjeta pendiente abre estado automático y conserva la evidencia en el diseño común', () => {
+  const dashboard = fs.readFileSync(path.join(__dirname, '../app/dashboard/baseball/page.js'), 'utf8');
+  const shared = fs.readFileSync(path.join(__dirname, '../app/dashboard/components/SharedSportAnalysis.js'), 'utf8');
+  assert.match(dashboard, /<SharedSportCard/);
+  assert.match(shared, /El análisis se está preparando automáticamente/);
+  assert.match(shared, /winProbabilities/);
+  assert.doesNotMatch(shared, /Generar análisis ahora/);
 });
 
 test('todos los consumidores operativos de Baseball solicitan exclusivamente MLB', () => {
@@ -183,7 +182,7 @@ test('la interfaz prioriza Final oficial y muestra el boxscore MLB', () => {
   const resultStats = fs.readFileSync(path.join(__dirname, '../app/dashboard/baseball/components/BaseballResultStats.js'), 'utf8');
   assert.match(dashboard, /const effectiveGameStatus/);
   assert.match(dashboard, /isFinished\(game\?\.status\?\.short\)/);
-  assert.match(dashboard, /<BaseballResultStats/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../app/dashboard/components/SharedSportAnalysis.js'), 'utf8'), /<BaseballResultStats/);
   assert.match(resultStats, /short: 'HR'/);
   assert.match(resultStats, /short: 'RBI'/);
   assert.match(resultStats, /CARRERAS POR ENTRADA/);

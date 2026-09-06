@@ -1,3 +1,4 @@
+import FreeAccessProvider from './components/FreeAccessProvider';
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '../../lib/supabase-auth';
 import { supabaseAdmin } from '../../lib/supabase';
@@ -23,12 +24,9 @@ export default async function DashboardLayout({ children }) {
     .eq('id', user.id)
     .single();
 
-  const isAdmin = ['admin', 'owner'].includes(profile?.role);
-  if (!isAdmin && !hasActiveEntitlement(profile)) {
-    redirect('/planes');
-  }
 
   return (
+    <FreeAccessProvider isFree={!hasActiveEntitlement(profile)} userId={user.id}>
     <div className="dashboard-layout">
       <DashboardHeader />
       <SelectedMarketsProvider>
@@ -38,5 +36,6 @@ export default async function DashboardLayout({ children }) {
       </SelectedMarketsProvider>
       <ScrollToTopButton />
     </div>
+    </FreeAccessProvider>
   );
 }

@@ -1,4 +1,5 @@
 'use client';
+import { useFreeAccess, LockedAnalysis } from '../../../components/FreeAccessProvider';
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -20,7 +21,12 @@ const isBet365Market = (market) => String(market?.bookmaker || '').normalize('NF
   && Number(market?.odd) >= 1.20
   && Number(market?.rawProbability ?? market?.probability) >= BASEBALL_RECOMMENDATION_MIN_PROBABILITY;
 
-export function BaseballAnalysisExperience({ fixtureId, embedded = false, onClose }) {
+export function BaseballAnalysisExperience(props) {
+  const { isFree } = useFreeAccess();
+  return isFree ? <div className="app free-detail"><LockedAnalysis title="Análisis completo" /></div> : <PaidBaseballAnalysisExperience {...props} />;
+}
+
+function PaidBaseballAnalysisExperience({ fixtureId, embedded = false, onClose }) {
   const params = useParams();
   const router = useRouter();
   const fid = fixtureId || params.id;

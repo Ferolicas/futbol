@@ -1,4 +1,5 @@
 'use client';
+import SharedSportCard from './SharedSportAnalysis';
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
@@ -257,157 +258,10 @@ function MultisportDailyPickRail({ apuesta, games, slug }) {
 const EMPTY_SELECTED_PICKS = Object.freeze({});
 
 const MatchCard = memo(function MatchCard({ game, timeZone, scoreLabel, slug, expanded, onToggle, selectedPicks, onTogglePick, favorite, onFavorite }) {
-  const analysis = game.analysis;
-  const probabilities = analysis?.probabilities;
-  const moneyline = probabilities?.moneyline;
-  const total = bestTotal(probabilities);
-  const live = isGameLive(game);
-  const final = isGameFinal(game);
-  const bestOdds = analysis?.best_odds || {};
-  const homeScore = game.scores?.home?.total;
-  const awayScore = game.scores?.away?.total;
-  const picks = (analysis?.combinada?.selectable || analysis?.combinada?.selections || [])
-    .filter((pick) => probability(pick) != null && oddValue(pick.odd) != null);
-  const homeProbability = probability(moneyline?.home);
-  const awayProbability = probability(moneyline?.away);
-  const homeSamples = Number(probabilities?.engine?.samples?.homeTeam || 0);
-  const awaySamples = Number(probabilities?.engine?.samples?.awayTeam || 0);
-
-  return (
-    <article className={`mcard ms-match-card ${expanded ? 'open done' : 'done'} ${live ? 'live' : ''} ${final ? 'fin' : ''}`}>
-      <button
-        type="button"
-        className={`ms-favorite-button ${favorite ? 'is-active' : ''}`}
-        onClick={() => onFavorite(game.id)}
-        aria-label={favorite ? 'Quitar de favoritos' : 'Guardar en favoritos'}
-        aria-pressed={favorite}
-      >
-        <Star size={16} fill={favorite ? 'currentColor' : 'none'} aria-hidden="true" />
-      </button>
-      <button type="button" className="ms-match-head" onClick={() => onToggle(game.id)} aria-expanded={expanded}>
-        <div className="ms-match-meta">
-          <span>{game.league?.name || 'Competición'}</span>
-          <span>{cardDate(game.date, timeZone)}</span>
-        </div>
-
-        <div className="ms-score-grid">
-          <div className="ms-team">
-            <TeamLogo team={game.teams?.home} />
-            <strong>{game.teams?.home?.name}</strong>
-          </div>
-          <div className="ms-score">
-            {live || final ? (
-              <>
-                <small className={live ? 'is-live' : ''}>{live ? 'EN VIVO' : 'FINALIZADO'}</small>
-                <strong>{homeScore ?? '—'}<i>–</i>{awayScore ?? '—'}</strong>
-              </>
-            ) : (
-              <>
-                <span>{gameTime(game.date, timeZone)}</span>
-                <small>PRÓXIMO</small>
-              </>
-            )}
-          </div>
-          <div className="ms-team away">
-            <TeamLogo team={game.teams?.away} />
-            <strong>{game.teams?.away?.name}</strong>
-          </div>
-        </div>
-
-        <div className="ms-card-summary">
-          {game.isAnalyzed && (homeProbability != null || awayProbability != null) ? (
-            <span className="ms-summary-probabilities">
-              {homeProbability != null && <b>{game.teams.home.name} {homeProbability}%</b>}
-              {awayProbability != null && <b>{game.teams.away.name} {awayProbability}%</b>}
-            </span>
-          ) : (
-            <span className="pending">Análisis en preparación</span>
-          )}
-          {Object.keys(selectedPicks).length > 0 && <span className="ms-selected-count">{Object.keys(selectedPicks).length} elegidas</span>}
-          <ChevronDown size={18} aria-hidden="true" />
-        </div>
-      </button>
-
-      <div className="ms-card-body" aria-hidden={!expanded}>
-        <div>
-          {!analysis ? (
-            <div className="ms-empty-analysis">
-              <BarChart3 size={22} aria-hidden="true" />
-              <span>La recomendación aparecerá cuando estén procesados los datos disponibles de este partido.</span>
-            </div>
-          ) : (
-            <>
-              <details className="ms-sub-accordion" open>
-                <summary><Layers3 size={16} aria-hidden="true" /><span>Arma tu combinada</span><small>{picks.length} opciones</small></summary>
-                <section className="ms-analysis-section picks">
-                  {picks.length > 0 ? (
-                    <div className="ms-pick-list">
-                      {picks.map((pick) => (
-                        <PickButton
-                          key={pick.id}
-                          pick={pick}
-                          selected={Boolean(selectedPicks[pick.id])}
-                          onToggle={() => onTogglePick(game, pick)}
-                          outcome={settleMarketSelection({ sport: slug, selection: pick, game })}
-                          resultState={marketResultState({ sport: slug, game })}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="ms-empty-market">
-                      Bet365 no tiene ahora una línea exacta compatible con el cálculo, probabilidad mínima del 65% y cuota mínima de 1,20.
-                    </div>
-                  )}
-                </section>
-              </details>
-
-              <details className="ms-sub-accordion">
-                <summary><BarChart3 size={16} aria-hidden="true" /><span>Frecuencias calculadas</span></summary>
-                <section className="ms-analysis-section">
-                  <h3>Probabilidad de resultado</h3>
-                  <ProbabilityLine label={`${game.teams.home.name} gana`} entry={moneyline?.home} odd={bestOdds?.moneyline?.home} />
-                  <ProbabilityLine label={`${game.teams.away.name} gana`} entry={moneyline?.away} odd={bestOdds?.moneyline?.away} />
-                  {moneyline?.draw && <ProbabilityLine label="Empate" entry={moneyline.draw} odd={bestOdds?.moneyline?.draw} />}
-                </section>
-
-                {total && (
-                  <section className="ms-analysis-section">
-                    <h3>Mejor frecuencia de anotación</h3>
-                    <ProbabilityLine
-                      label={`${total.side} ${total.line} ${scoreLabel}`}
-                      entry={{ probability: total.probability, evidence: total.evidence }}
-                      odd={bestOdds?.totals?.[total.line]?.[total.side === 'Más de' ? 'over' : 'under']}
-                    />
-                  </section>
-                )}
-
-                <section className="ms-analysis-section compact">
-                  <h3><ShieldCheck size={15} aria-hidden="true" /> Cómo llega a estos porcentajes</h3>
-                  <p>Se cuentan resultados reales y la temporada actual tiene más peso que el historial anterior. Rival, localía y jugadores disponibles solo ponderan partidos registrados semejantes.</p>
-                  <div className="ms-evidence-summary">
-                    <span>{game.teams.home.name}: {homeSamples} partidos</span>
-                    <span>{game.teams.away.name}: {awaySamples} partidos</span>
-                  </div>
-                </section>
-              </details>
-
-              <FinalVerdictPanel
-                verdict={analysis?.analysis?.finalVerdict}
-                homeName={game.teams.home.name}
-                awayName={game.teams.away.name}
-                compact
-              />
-
-              <Link className="ms-view-full" href={`/dashboard/${slug}/analisis/${encodeURIComponent(game.id)}`}>
-                <span><small>Explora cada mercado y periodo</small><strong>Ver análisis completo</strong></span>
-                <ArrowRight size={18} aria-hidden="true" />
-              </Link>
-            </>
-          )}
-        </div>
-      </div>
-    </article>
-  );
+  return <SharedSportCard game={game} sport={slug} scoreLabel={scoreLabel} timeZone={timeZone}
+    expanded={expanded} onToggle={() => onToggle(game.id)} selected={selectedPicks}
+    onTogglePick={pick => onTogglePick(game, pick)} favorite={favorite} onFavorite={onFavorite}
+    onViewFull={() => { window.location.href = `/dashboard/${slug}/analisis/${encodeURIComponent(game.id)}`; }} />;
 });
 
 function CombinedBet({ combination, onRemove, onClear }) {

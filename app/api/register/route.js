@@ -64,7 +64,7 @@ export async function POST(request) {
 
     // Welcome email (fire and forget). NO incluir password en claro en el email
     // ya no es necesario — el usuario la eligió. Mantenemos compat con la firma.
-    sendWelcomeEmail({ to: emailLower, name: name.trim(), password }).catch((e) =>
+    sendWelcomeEmail({ to: emailLower, name: name.trim() }).catch((e) =>
       console.error('[Register] Welcome email failed:', e.message)
     );
 

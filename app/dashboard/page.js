@@ -1,4 +1,5 @@
 'use client';
+import { FreeRecommendations, LockedAnalysis } from './components/FreeAccessProvider';
 
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -1971,7 +1972,7 @@ function MatchTeamMeta({ position, odd, side }) {
 // tarjetas, cuotas y árbitro en un solo bloque. Antes eran tres filas sueltas
 // (liga+fecha, equipos+cuotas, caja de marcador) que ocupaban el triple de
 // alto. Compartida por MatchCard y AccordionCard.
-function MatchHeadCard({ match, odds, data, standings, liveStats, userTz, isFavorite, onFavorite, onDismiss }) {
+export function MatchHeadCard({ match, odds, data, standings, liveStats, userTz, isFavorite, onFavorite, onDismiss, sport = 'football' }) {
   const status = match.fixture.status;
   const live = isLive(status.short);
   const finished = isFinished(status.short);
@@ -2060,7 +2061,7 @@ function MatchHeadCard({ match, odds, data, standings, liveStats, userTz, isFavo
 
       </div>
 
-      {(hasScore || odds?.draw != null) && <ScoreStatsSummary stats={liveStats} drawOdd={odds?.draw ?? null} />}
+      {sport === 'football' && (hasScore || odds?.draw != null) && <ScoreStatsSummary stats={liveStats} drawOdd={odds?.draw ?? null} />}
 
       <GoalScorersGrid liveStats={liveStats} homeId={match.teams.home.id} />
     </div>
@@ -2124,7 +2125,7 @@ function revealHorizontalChoice(element) {
   });
 }
 
-function HorizontalChoiceBar({ items, active, onChange, label, variant = 'tabs', idPrefix }) {
+export function HorizontalChoiceBar({ items, active, onChange, label, variant = 'tabs', idPrefix }) {
   const isTabs = variant === 'tabs';
   const select = (event, key) => {
     event.stopPropagation();
@@ -2187,7 +2188,7 @@ function HorizontalChoiceBar({ items, active, onChange, label, variant = 'tabs',
 const STEP_WHEEL_THRESHOLD = 70;
 const STEP_SWIPE_THRESHOLD = 48;
 
-function MatchFullscreen({ head, body, onStep }) {
+export function MatchFullscreen({ head, body, onStep }) {
   const [mounted, setMounted] = useState(false);
   const [topOffset, setTopOffset] = useState(null);
   const wheelAccum = useRef(0);
@@ -2278,14 +2279,14 @@ function MatchFullscreen({ head, body, onStep }) {
         {head}
       </div>
       <div className="match-fs-body">{body}</div>
-      <nav className="match-fs-nav" aria-label="Cambiar de partido">
+      {onStep && <nav className="match-fs-nav" aria-label="Cambiar de partido">
         <button type="button" onClick={() => step(-1)} aria-label="Partido anterior">
           <ChevronUp size={20} aria-hidden="true" />
         </button>
         <button type="button" onClick={() => step(1)} aria-label="Partido siguiente">
           <ChevronDown size={20} aria-hidden="true" />
         </button>
-      </nav>
+      </nav>}
     </div>,
     // Dentro de .app, no en body: media hoja de estilos del dashboard cuelga de
     // `.app ...` y en body la tarjeta desplegada perdería todo eso.
@@ -2343,11 +2344,12 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
     const hasPlayers = ['scorers', 'shooters', 'shotsTotalists', 'assisters', 'foulers', 'bookers']
       .some((key) => Array.isArray(highlights?.[key]) && highlights[key].length > 0);
     return [
-      markets.length > 0 && { key: 'markets', label: 'Mercados para tu combinada', count: markets.length, icon: Layers3, color: '#5ee6b1' },
-      data?.calculatedProbabilities && { key: 'stats', label: 'Estadísticas calculadas', icon: Scale, color: '#f97316' },
-      data?.calculatedProbabilities && { key: 'probs', label: 'Frecuencias calculadas', icon: BarChart3, color: '#2dd4bf' },
+      (data?.access === 'free' || markets.length > 0) && { key: 'markets', label: 'Mercados para tu combinada', count: markets.length, icon: Layers3, color: '#5ee6b1' },
+      (data?.access === 'free' || data?.calculatedProbabilities) && { key: 'stats', label: 'Estadísticas calculadas', icon: Scale, color: '#f97316' },
+      (data?.access === 'free' || data?.calculatedProbabilities) && { key: 'probs', label: 'Frecuencias calculadas', icon: BarChart3, color: '#2dd4bf' },
       hasPlayers && { key: 'players', label: 'Jugadores destacados', icon: Sparkles, color: '#fbbf24' },
       { key: 'verdict', label: 'Veredicto final', icon: Flag, color: '#f5e400' },
+      data?.access === 'free' && { key: 'full', label: 'Análisis completo', icon: BarChart3, color: '#bce1ab' },
     ].filter(Boolean);
   }, [data, markets.length]);
   const resolvedAnalysisTab = analysisTabs.some((tab) => tab.key === activeAnalysisTab)
@@ -2399,6 +2401,9 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                 idPrefix={analysisTabPrefix}
               />
 
+              {data.access === 'free' ? (resolvedAnalysisTab === 'markets'
+                ? <FreeRecommendations preview={data.freePreview} />
+                : <LockedAnalysis title={analysisTabs.find(tab => tab.key === resolvedAnalysisTab)?.label} />) : <>
               {resolvedAnalysisTab === 'markets' && markets.length > 0 && (
                 <section
                   id={`${analysisTabPrefix}-panel-markets`}
@@ -2510,6 +2515,8 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                   />
                 </section>
               )}
+
+              </>}
 
               {/* Last5Block y StatsBlock se quitaron del acordeon: son datos
                   base de input al modelo, no recomendaciones accionables. El

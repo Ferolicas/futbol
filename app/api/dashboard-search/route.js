@@ -1,5 +1,4 @@
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
-import { userHasActivePlan } from '../../../lib/require-active-plan';
 import { pgPool } from '../../../lib/db';
 import {
   normalizeDashboardSearchQuery,
@@ -14,9 +13,7 @@ export async function GET(request) {
     const supabase = createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!(await userHasActivePlan(user))) {
-      return Response.json({ error: 'Subscription required' }, { status: 403 });
-    }
+
 
     const { searchParams } = new URL(request.url);
     const query = normalizeDashboardSearchQuery(searchParams.get('q'));

@@ -1,6 +1,7 @@
 import { pgPool } from '../../../../../../lib/db';
 import { getMultisportConfig } from '../../../../../../lib/multisport-config';
 import { getCurrentUser } from '../../../../../../lib/auth-pg';
+import { freeAnalysis } from '../../../../../../lib/free-access';
 import { userHasActivePlan } from '../../../../../../lib/require-active-plan';
 import { jsonError } from '../../../../../../lib/api-error';
 
@@ -10,7 +11,7 @@ export async function GET(_request, { params }) {
   try {
     const user = await getCurrentUser();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!(await userHasActivePlan(user))) return Response.json({ error: 'Subscription required' }, { status: 403 });
+    const paidAccess = await userHasActivePlan(user);
     const config = getMultisportConfig(params.sport);
     if (config.key === 'baseball') return Response.json({ error: 'Use /api/baseball/match' }, { status: 400 });
     const table = `${config.tablePrefix}_match_analysis`;
@@ -26,7 +27,7 @@ export async function GET(_request, { params }) {
       ),
     ]);
     if (!analysis.rows[0]) return Response.json({ error: 'Not analyzed yet' }, { status: 404 });
-    return Response.json({ success: true, analysis: analysis.rows[0], match: match.rows[0] || null });
+    return Response.json({ success: true, analysis: paidAccess ? analysis.rows[0] : freeAnalysis(analysis.rows[0], config.key), match: match.rows[0] || null });
   } catch (error) {
     console.error('[api/sports/match]', error.message);
     return jsonError(error);

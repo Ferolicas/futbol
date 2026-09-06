@@ -28,6 +28,7 @@
 import { supabaseAdmin } from '../../../lib/supabase';
 import { simulateBracket } from '../../../lib/tournament-bracket';
 import { getCurrentUser } from '../../../lib/auth-pg';
+import { userHasActivePlan } from '../../../lib/require-active-plan';
 import { jsonError } from '../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
@@ -57,9 +58,11 @@ const TOURNAMENT_LEAGUES = new Set([
 
 export async function GET(request) {
   // R12 FIX: Monte Carlo CPU-bound (hasta 50k iter) → exigir sesión para evitar DoS anónimo.
-  if (!(await getCurrentUser())) {
+  const user = await getCurrentUser();
+  if (!user) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
+  if (!(await userHasActivePlan(user))) return Response.json({ error: 'Subscription required' }, { status: 403 });
   const { searchParams } = new URL(request.url);
   const leagueId   = Number(searchParams.get('league'));
   const seasonArg  = searchParams.get('season');

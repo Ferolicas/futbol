@@ -4,6 +4,7 @@
  */
 import { supabaseAdmin } from '../../../../../lib/supabase';
 import { getCurrentUser } from '../../../../../lib/auth-pg';
+import { freeAnalysis } from '../../../../../lib/free-access';
 import { userHasActivePlan } from '../../../../../lib/require-active-plan';
 import { jsonError } from '../../../../../lib/api-error';
 import { MULTISPORT_CACHE_VERSION } from '../../../../../lib/multisport-analysis';
@@ -18,9 +19,8 @@ export async function GET(_request, { params }) {
     if (!user) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    if (!(await userHasActivePlan(user))) {
-      return Response.json({ error: 'Subscription required' }, { status: 403 });
-    }
+    const paidAccess = await userHasActivePlan(user);
+
     const fixtureId = Number(params.id);
     if (!fixtureId) return Response.json({ error: 'Invalid id' }, { status: 400 });
 
@@ -38,7 +38,7 @@ export async function GET(_request, { params }) {
 
     return Response.json({
       success: true,
-      analysis: analysisRes.data,
+      analysis: paidAccess ? analysisRes.data : freeAnalysis(analysisRes.data, 'baseball'),
       result: resultRes.data || null,
     });
   } catch (e) {
