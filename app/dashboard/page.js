@@ -1775,7 +1775,7 @@ function ApuestaSelectionRail({ selections, averageProbability, fixtures, liveSt
           </button>
         </span>
         <span className="daily-pick-heading-summary">
-          <b>{visible.length} opciones</b>
+          <b>{visible.length} opciones{visible.length > 1 && <span className="daily-pick-swipe-hint"> · desliza →</span>}</b>
           {visible.length > 0 && <em>{cap(visibleProbability)}% probabilidad</em>}
         </span>
       </header>

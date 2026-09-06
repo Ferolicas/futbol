@@ -13437,6 +13437,8 @@ input:checked + .cb-mark::after {
   font-weight: 780;
 }
 
+.daily-pick-swipe-hint { display: none; }
+
 .daily-pick-heading-summary em {
   padding: 4px 7px;
   border: 1px solid rgba(94,230,177,.18);
@@ -13612,8 +13614,9 @@ input:checked + .cb-mark::after {
   .daily-pick-heading-title { gap: 5px; }
   .daily-pick-heading-title > strong { font-size: .71rem; }
   .daily-results-button { min-height: 27px; padding: 0 7px; font-size: .51rem; }
-  .daily-pick-heading-summary > b { display: none; }
-  .daily-pick-heading-summary em { font-size: .49rem; }
+  .daily-pick-heading-summary > b { display: block; color: var(--dash-green); font-size: .51rem; }
+  .daily-pick-swipe-hint { display: inline; color: #91a69f; font-weight: 720; }
+  .daily-pick-heading-summary em { display: none; }
 }
 
 @media (max-width: 359px) {

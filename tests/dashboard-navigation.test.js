@@ -121,6 +121,8 @@ test('Apuesta del día usa cabecera fija y tarjetas compactas con desplazamiento
   assert.doesNotMatch(baseball, /className="daily-pick-title-card"/);
   assert.match(styles, /\.daily-pick-track[\s\S]*overflow-x: auto/);
   assert.match(styles, /scroll-snap-type: x proximity/);
+  assert.match(football, /daily-pick-swipe-hint/);
+  assert.match(styles, /\.daily-pick-swipe-hint \{ display: inline/);
   assert.match(styles, /body\.match-fs-open \.float-bar-combinada \{[\s\S]*z-index: 460/);
 });
 
