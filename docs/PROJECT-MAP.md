@@ -934,3 +934,22 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - Gmail puede invertir el negro pese a `!important` y `text-fill-color`. El
   texto HTML del CTA usa `background-clip:text` y gradiente negro en el selector
   específico de Gmail; una captura local no equivale a verificar su app móvil.
+
+### Despliegue aislado de la web (2026-09-06)
+
+- Incidente reproducido durante un deploy: `MODULE_NOT_FOUND` de
+  `.next/standalone/.next/server/app/dashboard/page.js` y `_error.js`. El
+  workflow reconstruía la carpeta que aún atendía peticiones.
+- `scripts/vps/deploy-web.sh` archiva el commit en `.web-releases/release-*`,
+  instala con `npm ci`, compila y copia `.env`, `public/` y estáticos dentro de
+  ese runtime. La versión activa permanece intacta durante esta preparación.
+- `check-web-release.cjs` arranca el candidato en un puerto efímero local y
+  comprueba portada, login, dashboard, sesión, rechazo sin sesión y archivos
+  JS/CSS antes de activar PM2. Después verifica la ruta exacta del proceso y
+  repite los checks; revierte a la configuración anterior si falla.
+- Los snapshots PM2 y las versiones quedan fuera de Git, con permisos privados.
+  Se retienen los archivos de la versión anterior para rollback y sus hashes
+  estáticos para pestañas abiertas. Caddy sigue sirviendo `/apps/futbol/public`.
+- El proceso web ya no depende de `/apps/futbol/.next/standalone`: su ruta
+  autoritativa es `pm2 jlist` y `.web-releases/current`. No construir sobre
+  esa ruta. El worker conserva su despliegue y ubicación actuales.

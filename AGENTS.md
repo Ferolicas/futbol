@@ -18,7 +18,7 @@ CF Análisis es una aplicación móvil de análisis de fútbol, béisbol, balonc
 
 - Desarrollo: `npm run dev`
 - Build obligatorio: `npm run build`
-- Producción: push a `main` activa `.github/workflows/deploy.yml`.
+- Producción: push a `main` activa `.github/workflows/deploy.yml`. La web se compila en `.web-releases/` y se comprueba antes de cambiar PM2; nunca ejecutar build sobre la carpeta que está sirviendo producción.
 
 Autorización permanente del propietario: toda solicitud de implementación incluye
 commit y push a `main` al terminar y validar, lo que activa el deploy de producción.
