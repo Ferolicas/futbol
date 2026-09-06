@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { fetcher } from '../../../lib/fetcher';
 import { usePusherEvent } from '../../../lib/use-pusher';
+import { useWorkerSocketState } from '../../../hooks/useWorkerSocket';
 import { buildBaseballApuestaDelDia } from '../../../lib/baseball-combinada';
 import DashboardBuffer from './DashboardBuffer';
 import {
@@ -361,9 +362,12 @@ export default function MultisportDashboard({
   }, [sport]);
 
   const key = timeZoneReady ? `/api/sports/${slug}/fixtures?date=${date}&tz=${encodeURIComponent(timeZone)}` : null;
+  const wsState = useWorkerSocketState();
   const { data, error, isLoading, isValidating, mutate } = useSWR(key, fetcher, {
-    refreshInterval: 60_000,
-    revalidateOnFocus: true,
+    refreshInterval: (latest) => latest?.fixtures?.some((fixture) => !fixture.isAnalyzed)
+      ? 30_000
+      : (wsState === 'connected' ? 0 : 300_000),
+    revalidateOnFocus: wsState !== 'connected',
     keepPreviousData: true,
     dedupingInterval: 15_000,
   });
@@ -372,7 +376,43 @@ export default function MultisportDashboard({
   const games = currentData?.fixtures || [];
   const competitions = currentData?.competitions || [];
 
-  usePusherEvent(`${sport}-live`, 'update', useCallback(() => { mutate(); }, [mutate]));
+  const refreshTimerRef = useRef(null);
+  const scheduleRefresh = useCallback((minimum = 2_000, spread = 28_000) => {
+    if (refreshTimerRef.current) return;
+    refreshTimerRef.current = window.setTimeout(() => {
+      refreshTimerRef.current = null;
+      mutate();
+    }, minimum + Math.floor(Math.random() * spread));
+  }, [mutate]);
+  useEffect(() => () => window.clearTimeout(refreshTimerRef.current), []);
+
+  // Los marcadores llegan completos por WebSocket: aplicarlos al cache evita
+  // que un evento haga que miles de clientes golpeen el mismo endpoint.
+  usePusherEvent(`${sport}-live`, 'update', useCallback((payload) => {
+    if (!Array.isArray(payload?.games) || payload.date !== date) return;
+    const updates = new Map(payload.games.map(game => [String(game.id), game]));
+    mutate((current) => current ? {
+      ...current,
+      fixtures: (current.fixtures || []).map((game) => {
+        const update = updates.get(String(game.id));
+        if (!update) return game;
+        return {
+          ...game,
+          status: { ...game.status, ...update.status },
+          scores: {
+            home: { ...game.scores?.home, total: update.home?.score ?? game.scores?.home?.total },
+            away: { ...game.scores?.away, total: update.away?.score ?? game.scores?.away?.total },
+          },
+          periods: update.periods || game.periods,
+        };
+      }),
+    } : current, { revalidate: false });
+    if (payload.games.some(game => game.status?.isFinal || game.status?.short === 'FT')) scheduleRefresh(5_000, 45_000);
+  }, [date, mutate, scheduleRefresh]));
+
+  usePusherEvent(`${sport}-analysis`, 'ready', useCallback((payload) => {
+    if (payload?.date === date) scheduleRefresh();
+  }, [date, scheduleRefresh]));
 
   const changeDate = useCallback((nextDate) => {
     if (!nextDate || nextDate === date) return;
@@ -528,6 +568,7 @@ export default function MultisportDashboard({
     getItemKey: (index) => rows[index]?.key || index,
     shouldAdjustScrollPositionOnItemSizeChange: () => false,
   });
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false;
 
   useEffect(() => {
     if (!listRef.current) return undefined;

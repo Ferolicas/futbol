@@ -39,7 +39,10 @@ export async function GET(request, { params }) {
       sport: config.key,
       date,
       timeZone,
-      fixtures: paidAccess ? fixtures : fixtures.map(game => ({ ...game, analysis: freeAnalysis(game.analysis, config.key) })),
+      fixtures: paidAccess ? fixtures : fixtures.map(game => ({
+        ...game,
+        analysis: freeAnalysis(game.analysis, config.key, { game, liveResult: game.liveResult }),
+      })),
       ...(!paidAccess ? { freeDailyResults: freeDailyResults({ sport: config.key, fixtures }) } : {}),
       count: fixtures.length,
       competitions: competitions.map(({ id, key, name, country }) => ({ id, key, name, country })),

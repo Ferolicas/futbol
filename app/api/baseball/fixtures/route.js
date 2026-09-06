@@ -200,10 +200,15 @@ export async function GET(request) {
       const isAnalyzed = analysisMap.has(fid);
       const result = resultsMap.get(fid) || null;
       const playerStats = playerStatsByFixture.get(fid);
+      const liveResult = result && playerStats ? { ...result, player_stats: playerStats } : result;
       return {
         ...f,
-        analysis: paidAccess ? analysisMap.get(fid) || null : freeAnalysis((analysesRes.data || []).find(a => toNum(a.fixture_id) === fid), 'baseball'),
-        liveResult: result && playerStats ? { ...result, player_stats: playerStats } : result,
+        analysis: paidAccess ? analysisMap.get(fid) || null : freeAnalysis(
+          (analysesRes.data || []).find(a => toNum(a.fixture_id) === fid),
+          'baseball',
+          { game: { ...f, liveResult }, liveResult },
+        ),
+        liveResult,
         isAnalyzed,
         analysisPending: !isAnalyzed,
         isHidden: hiddenSet.has(fid),

@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { analyzeSportDate, cronTargetDate } from '../../shared.js';
+import { analyzeSportDate, cronTargetDate, triggerEvent } from '../../shared.js';
 
 /** @param {string} sport @param {any} payload @param {any} job */
 async function run(sport, payload, job) {
@@ -12,6 +12,7 @@ async function run(sport, payload, job) {
   const result = await analyzeSportDate(sport, date, { concurrency: 6, oddsTtl: 6 * 3600 });
   await job?.updateProgress?.({ phase: result.ok ? 'complete' : 'failed', ...result, startedAt });
   if (!result.ok) throw new Error(`${sport} analyze incompleto: ${result.failed}/${result.total}`);
+  await triggerEvent(`${sport}-analysis`, 'ready', { date, analyzed: result.analyzed, at: new Date().toISOString() });
   return result;
 }
 

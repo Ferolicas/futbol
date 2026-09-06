@@ -10,6 +10,7 @@ import {
   buildSportAnalysisCoverageDates,
   cronTargetDate,
   redisSet,
+  triggerEvent,
 } from '../../shared.js';
 
 // Rastro para baseball-watchdog. Sin esto un cuelgue de la cola pasa inadvertido
@@ -88,6 +89,9 @@ async function runCoverage(payload, job) {
   };
   await job?.updateProgress?.({ phase: result.ok ? 'complete' : 'failed', ...result, startedAt });
   await markLastRun('coverage', { dates: targetDates, analyzed: result.analyzed, failed: result.failed });
+  await Promise.all(reports.filter((report) => report.ok && report.analyzed > 0).map((report) => (
+    triggerEvent('baseball-analysis', 'ready', { date: report.date, analyzed: report.analyzed, at: new Date().toISOString() })
+  )));
   if (!result.ok) throw new Error(`baseball coverage incompleta: ${result.failed} fallos en ${targetDates.join(',')}`);
   return result;
 }
@@ -110,5 +114,6 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
     date, analyzed: result.analyzed, total: result.total, failed: result.failed,
   });
   if (!result.ok) throw new Error(`baseball empirical analyze incompleto: ${result.failed}/${result.total}`);
+  await triggerEvent('baseball-analysis', 'ready', { date, analyzed: result.analyzed, at: new Date().toISOString() });
   return { ...result, durationSec: Math.round((Date.now() - startedAt) / 100) / 10 };
 }

@@ -40,6 +40,7 @@ import {
 } from '../../../lib/baseball-combinada';
 import { fetcher } from '../../../lib/fetcher';
 import { usePusherEvent } from '../../../lib/use-pusher';
+import { useWorkerSocketState } from '../../../hooks/useWorkerSocket';
 import {
   DashboardDateStrip,
   DashboardStatusDock,
@@ -181,16 +182,29 @@ export function BaseballDashboard({
   const fixturesKey = date
     ? `/api/baseball/fixtures?date=${date}&tz=${encodeURIComponent(userTz)}`
     : null;
+  const wsState = useWorkerSocketState();
   const { data: fxData, mutate: fixturesMutate, isLoading: loadingFixtures } = useSWR(
     fixturesKey,
     fetcher,
     {
-      refreshInterval: (latest) => latest?.fixtures?.some((fixture) => !fixture.isAnalyzed) ? 5_000 : 60_000,
-      revalidateOnFocus: true,
+      refreshInterval: (latest) => latest?.fixtures?.some((fixture) => !fixture.isAnalyzed)
+        ? 30_000
+        : (wsState === 'connected' ? 0 : 300_000),
+      revalidateOnFocus: wsState !== 'connected',
       dedupingInterval: 5000,
       keepPreviousData: true,
     },
   );
+
+  const refreshTimerRef = useRef(null);
+  const scheduleRefresh = useCallback((minimum = 2_000, spread = 28_000) => {
+    if (refreshTimerRef.current) return;
+    refreshTimerRef.current = window.setTimeout(() => {
+      refreshTimerRef.current = null;
+      fixturesMutate();
+    }, minimum + Math.floor(Math.random() * spread));
+  }, [fixturesMutate]);
+  useEffect(() => () => window.clearTimeout(refreshTimerRef.current), []);
 
   // ─── Estado EN VIVO por WebSocket ──────────────────────────────────
   // El worker (baseball-live) emite 'baseball-live'/'update' con el estado
@@ -227,7 +241,12 @@ export function BaseballDashboard({
       }
       return next;
     });
-  }, []));
+    if (data.games.some(game => game?.isFinal)) scheduleRefresh(5_000, 45_000);
+  }, [scheduleRefresh]));
+
+  usePusherEvent('baseball-analysis', 'ready', useCallback((payload) => {
+    if (payload?.date === date) scheduleRefresh();
+  }, [date, scheduleRefresh]));
 
   const rawGames = fxData?.fixtures || [];
   // Aplicar overrides en vivo sobre el liveResult de cada juego.

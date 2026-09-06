@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-06 · Base: `8262c2f` · Acceso gratuito y presentación multideporte
+Actualizado: 2026-09-06 · Base: `6040446` · Free con cuota real, cierre oficial y rendimiento
 
 ## Identidad y stack
 
@@ -551,8 +551,13 @@ emite el evento. Sus snapshots viven en claves Redis
 
 ### Rendimiento del dashboard
 
-La lista de partidos está virtualizada: solo se montan las filas próximas al viewport, independientemente de
-que existan 20, 100, 400 o más partidos. “Apuesta del día” usa una tira horizontal
+La lista de partidos está virtualizada también en WebKit/iOS: solo se montan las
+filas próximas al viewport, independientemente de que existan 20, 100, 400 o más
+partidos. `content-visibility` por sí solo no evita que React y el DOM retengan
+cientos de tarjetas y Safari termine recargando la pestaña. La versión actual de
+`virtual-core` lee la política de compensación desde la instancia; por eso se
+asigna allí para que las mediciones dinámicas no tiren del scroll durante un
+impulso rápido. “Apuesta del día” usa una tira horizontal
 compacta con `content-visibility`, snap táctil y cuota individual. Una tarjeta
 analizada cerrada no monta mercados,
 probabilidades ni jugadores; al abrirse, `ResizeObserver` mide solo esa fila sin
@@ -566,6 +571,14 @@ rápidos no dejen una versión anterior en PostgreSQL. Un botón flotante “Arr
 aparece después de 520 px y vuelve al inicio de inmediato. El chat ya no flota
 sobre las tarjetas: vive en el header y su pantalla completa respeta movimiento
 reducido.
+
+Fútbol, béisbol, baloncesto y fútbol americano aplican los marcadores recibidos
+por WebSocket directamente a su estado local. Con la conexión activa no sondean
+la jornada completa; si cae, revalidan como respaldo cada cinco minutos. Los
+eventos que sí requieren datos durables —análisis, cuotas, alineaciones o cierre—
+programan la lectura con dispersión aleatoria para que miles de clientes no
+golpeen PostgreSQL en el mismo segundo. Mientras un análisis está pendiente, los
+deportes secundarios comprueban su estado cada 30 segundos.
 
 `/dashboard` es el panel deportivo único. El selector Deporte cambia en estado
 local entre fútbol, béisbol, baloncesto y fútbol americano, conserva la jornada
@@ -889,23 +902,35 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - El layout admite toda sesión PG válida. `hasActiveEntitlement` y los flujos
   Stripe/MP conservan la misma decisión de acceso ilimitado.
 - `lib/free-access.js` construye un DTO por lista permitida: metadatos del
-  partido, una opción 60–70% con fiabilidad >=90%, y objetos que contienen
-  **solo probability** para las bloqueadas. Nunca incluye su ID, etiqueta,
-  categoría, cuota, evidencia, frecuencias o veredicto. No se cachea la
-  respuesta de un usuario para otro (`private, no-store`).
+  partido y una sola opción calculada de 60–70%, independiente de fiabilidad.
+  Solo la publica si cruza el mercado con una cuota real >=1.20 y una casa
+  identificada; no acepta cuotas implícitas, estimadas ni el agregado antiguo
+  sin atribución. Antes del cierre, los objetos bloqueados contienen **solo
+  probability** y nunca incluyen ID, etiqueta, categoría, cuota, evidencia,
+  frecuencias o veredicto. No se cachea la respuesta de un usuario para otro
+  (`private, no-store`).
 - GET de fixtures/detalle de los cuatro deportes aplica la proyección al
   usuario gratuito. POST de análisis, odds y simulación de torneos requieren Pro. La
   búsqueda de partidos está disponible para cualquier cuenta autenticada.
 - El scored comercial de fútbol se guardaba recortado a >=70%. El campo
   independiente `_freeScored` conserva las líneas válidas para Free, calculadas
   por `free-football-evidence.js` sin modificar `_scored` ni la combinada.
-  Usa la misma evidencia por equipo/temporada y posterior estadístico; el
-  suelo de probabilidad para evaluar la fiabilidad Free es 60%; el de Pro sigue siendo 70%. En ambos se exige fiabilidad >=90%. No son garantías
-  de acierto. Si no existe una opción elegible, se informa y no se inventa.
+  Usa la misma evidencia por equipo/temporada y posterior estadístico y conserva
+  todas las líneas entre 60% y 70% aunque su fiabilidad sea inferior al 90%.
+  La frontera HTTP exige después una cuota real vigente para mostrarlas. Pro
+  conserva sus umbrales. No son garantías de acierto. Si no existe una opción
+  elegible con cuota, se informa y no se inventa.
+- Al confirmar el final oficial, las mismas API revelan las opciones Pro que
+  estaban ocultas y que tenían cuota real: devuelven únicamente nombre,
+  probabilidad, cuota, casa y liquidación. `market-settlement` produce los
+  stickers Ganada/Perdida; una línea sin dato oficial queda Pendiente y un push
+  se presenta como Nula. Antes de ese cierre no viaja ningún nombre o ID oculto.
 - `FreeAccessProvider` muestra planes en las visitas 1, 4, 7… Una visita
   conserva UUID por pestaña, incluyendo recargas, hasta 30 minutos de
   inactividad. Un login nuevo reinicia ese identificador. `free_app_visits`
-  deduplica en PG con bloqueo por usuario. El contador jamás concede acceso.
+  deduplica en PG con bloqueo por usuario. La pestaña reporta cada UUID una sola
+  vez y solo actualiza su actividad local, evitando una transacción por minuto
+  y cliente. El contador jamás concede acceso.
 - El navegador solo difumina texto de relleno. `Ver` (ojo), pestañas bloqueadas
   y botón metálico `Mejorar a Pro` abren el selector; el checkout existente
   confirma el pago antes de dar acceso completo. SWR se aísla por usuario/tier.
@@ -919,7 +944,9 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - Migración aditiva: `scripts/migrate-free-access.sql` (visitas y registro de
   campaña). Backup previo: `/var/backups/cf-free/pre-free-20260906.sql.gz`.
 - `scripts/backfill-free-evidence.mjs --apply` completa solo `_freeScored` y
-  `displayFrequencies` en jornadas recientes; nunca reemplaza los picks de pago.
+  `displayFrequencies` en jornadas recientes; `--refresh-football` recalcula la
+  jornada actual con la política 60–70% sin fiabilidad. Nunca reemplaza los
+  picks de pago.
 - `scripts/announce-free-access.mjs` tiene modo seco por defecto, `--test EMAIL`
   para vista previa y `--send` para la campaña. Excluye usuarios con acceso
   vigente, admins y cuentas de prueba; relee el plan antes de cada envío.
@@ -967,10 +994,16 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   desde su configuración completa; rollback restaura el proceso anterior de la
   misma forma. Esta activación puede producir un breve reinicio, pero el build
   ya no borra archivos del servidor activo.
+- La activación inicia `cfanalisis-web` en modo cluster con al menos dos
+  instancias sobre el mismo puerto. `CF_WEB_INSTANCES` permite aumentar ese
+  número; la validación exige que todas apunten al runtime candidato y el
+  rollback conserva el modo y el número que estaban activos.
 
 - En fútbol, los porcentajes bloqueados toman la misma versión del catálogo
   que la respuesta Pro (incluida su caché). PG aporta `_freeScored`; no mezclar
   el catálogo PG con otro snapshot Redis, porque sus porcentajes pueden variar.
+  Tanto la opción visible como las ocultas deben cruzarse con una cuota real de
+  una casa identificada; una cuota agregada sin atribución no es publicable.
 
 ### Resultados de Apuesta del día para Gratis (2026-09-06)
 

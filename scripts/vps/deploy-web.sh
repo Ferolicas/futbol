@@ -15,14 +15,24 @@ pm2 jlist > "$RELEASE_DIR/pm2-before.json"
 node - "$RELEASE_DIR" <<'JS'
 const fs = require('node:fs');
 const dir = process.argv[2];
-const processInfo = JSON.parse(fs.readFileSync(`${dir}/pm2-before.json`)).find(p => p.name === 'cfanalisis-web');
+const processList = JSON.parse(fs.readFileSync(`${dir}/pm2-before.json`));
+const webProcesses = processList.filter(p => p.name === 'cfanalisis-web');
+const processInfo = webProcesses[0];
 if (!processInfo) throw Error('cfanalisis-web is not registered in PM2');
 const previous = processInfo.pm2_env;
 const config = { name: 'cfanalisis-web', script: previous.pm_exec_path, cwd: previous.pm_cwd,
-  interpreter: previous.exec_interpreter || 'node', node_args: previous.node_args || [],
-  exec_mode: 'fork', autorestart: true, env: { ...(previous.env || {}), NODE_ENV: 'production', PORT: previous.PORT || 3000 } };
-fs.writeFileSync(`${dir}/rollback.config.json`, JSON.stringify({ apps: [config] }), { mode: 0o600 });
-fs.writeFileSync(`${dir}/release.config.json`, JSON.stringify({ apps: [{ ...config, script: `${dir}/.next/standalone/server.js`, cwd: `${dir}/.next/standalone` }] }), { mode: 0o600 });
+  interpreter: previous.exec_interpreter || 'node', node_args: previous.node_args || [], autorestart: true,
+  env: { ...(previous.env || {}), NODE_ENV: 'production', PORT: previous.PORT || 3000 } };
+const rollbackMode = previous.exec_mode === 'cluster_mode' ? 'cluster' : 'fork';
+const configuredInstances = Number(previous.env?.CF_WEB_INSTANCES);
+const desiredInstances = Number.isInteger(configuredInstances) && configuredInstances >= 2
+  ? configuredInstances
+  : 2;
+fs.writeFileSync(`${dir}/rollback.config.json`, JSON.stringify({ apps: [{ ...config,
+  exec_mode: rollbackMode, instances: webProcesses.length }] }), { mode: 0o600 });
+fs.writeFileSync(`${dir}/release.config.json`, JSON.stringify({ apps: [{ ...config,
+  script: `${dir}/.next/standalone/server.js`, cwd: `${dir}/.next/standalone`,
+  exec_mode: 'cluster', instances: desiredInstances }] }), { mode: 0o600 });
 fs.writeFileSync(`${dir}/previous-runtime`, require('node:path').dirname(previous.pm_exec_path));
 JS
 
@@ -66,8 +76,10 @@ pm2 jlist > "$RELEASE_DIR/pm2-after.json"
 if ! node - "$RELEASE_DIR" <<'JS'
 const fs = require('node:fs');
 const dir = process.argv[2];
-const active = JSON.parse(fs.readFileSync(`${dir}/pm2-after.json`)).find(p => p.name === 'cfanalisis-web');
-if (active?.pm2_env?.pm_exec_path !== `${dir}/.next/standalone/server.js`) throw Error('PM2 did not activate the candidate runtime');
+const expected = JSON.parse(fs.readFileSync(`${dir}/release.config.json`)).apps[0];
+const active = JSON.parse(fs.readFileSync(`${dir}/pm2-after.json`)).filter(p => p.name === 'cfanalisis-web');
+if (active.length !== expected.instances) throw Error(`PM2 started ${active.length}/${expected.instances} web instances`);
+if (active.some(p => p.pm2_env?.pm_exec_path !== `${dir}/.next/standalone/server.js`)) throw Error('PM2 did not activate the candidate runtime');
 JS
 then rollback; exit 1; fi
 HEALTHY=0

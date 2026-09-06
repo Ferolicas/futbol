@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { SWRConfig } from 'swr';
 import { Eye, LockKeyhole, Sparkles, X } from 'lucide-react';
+import MarketOutcomeBadge from './MarketOutcomeBadge';
 
 const AccessContext = createContext({ isFree: false, openPlans: () => {} });
 export const useFreeAccess = () => useContext(AccessContext);
@@ -20,18 +21,26 @@ export default function FreeAccessProvider({ isFree, userId, children }) {
     let alive = true;
     let busy = false;
     const visit = async () => {
-      if (busy || document.visibilityState === 'hidden') return;
+      if (document.visibilityState === 'hidden') return;
+      const key = `cf-free-visit:${userId}`;
+      let saved;
+      try { saved = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch {}
+      if (!saved || Date.now() - saved.lastSeen > 30 * 60_000) {
+        saved = { id: crypto.randomUUID(), lastSeen: Date.now(), dismissed: false, reported: false };
+      }
+      saved.lastSeen = Date.now();
+      sessionStorage.setItem(key, JSON.stringify(saved));
+      // El mismo UUID ya está deduplicado en PostgreSQL. Recordarlo también en
+      // la pestaña evita repetir auth + transacción cada minuto por cada usuario.
+      if (saved.reported || busy) return;
       busy = true;
       try {
-        const key = `cf-free-visit:${userId}`;
-        let saved;
-        try { saved = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch {}
-        if (!saved || Date.now() - saved.lastSeen > 30 * 60_000) saved = { id: crypto.randomUUID(), lastSeen: Date.now(), dismissed: false };
-        saved.lastSeen = Date.now();
-        sessionStorage.setItem(key, JSON.stringify(saved));
         const response = await fetch('/api/free/visit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ visitId: saved.id }), cache: 'no-store' });
         const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
         if (!alive) return;
+        saved.reported = true;
+        sessionStorage.setItem(key, JSON.stringify(saved));
         if (result.paid) { window.location.reload(); return; }
         if (result.showPlans && !saved.dismissed) setOpen(true);
       } catch { /* Access never depends on a promotional modal. */ }
@@ -85,7 +94,7 @@ export default function FreeAccessProvider({ isFree, userId, children }) {
           return <Link key={id} href={`/planes?checkout=${id}&intent=${encodeURIComponent(intent)}`}><strong>{name}</strong><span>{amount || 'Ver precio'} <span aria-hidden="true">→</span></span></Link>;
         })}</div>
         <button className="free-continue" onClick={close}>Continuar gratis</button>
-        <small>Gratis: una opción de 60–70% por evento cuando exista evidencia suficiente. Sin tarjeta.</small>
+        <small>Gratis: una opción calculada de 60–70% con cuota real por evento cuando exista. Sin tarjeta.</small>
       </section>
     </div>, document.body)}
   </AccessContext.Provider>;
@@ -107,15 +116,22 @@ export function LockedAnalysis({ title = 'Análisis completo' }) {
 export function FreeRecommendations({ preview }) {
   const { openPlans } = useFreeAccess();
   const pick = preview?.selection;
+  const revealed = preview?.revealed || [];
+  const isFinal = !!pick?.outcome || revealed.length > 0;
   const pct = value => `${Math.floor(Number(value) * 100) / 100}%`;
   return <div className="analysis-tab-stack free-recommendations">
-    <p className="probability-explainer">Tu opción gratis · probabilidad de 60–70% · fiabilidad mínima del 90%.</p>
-    {!pick && <p className="free-empty">{preview?.unavailable || 'La opción gratuita aparecerá cuando el análisis tenga evidencia suficiente.'}</p>}
+    <p className="probability-explainer">{isFinal
+      ? 'Partido finalizado · todas las opciones ya muestran su resultado oficial.'
+      : 'Tu opción gratis · probabilidad de 60–70% con cuota real.'}</p>
+    {!pick && <p className="free-empty">{preview?.unavailable || 'La opción gratuita aparecerá cuando exista una probabilidad de 60–70% con cuota real.'}</p>}
     <div className="markets-grid">
-      {pick && <article className="mkt free-visible"><span className="mkt-name">{pick.name}</span><span className="mkt-validation is-validated">Tu recomendación gratis</span><div className="mkt-bar"><div className="mkt-fill" style={{ width: `${pick.probability}%` }} /></div><div className="mkt-nums"><strong className="mkt-pct">{pct(pick.probability)}</strong><small>Fiabilidad {pct(pick.reliability)}</small>{pick.odd && <span className="mkt-odd">{pick.odd.toFixed(2)}</span>}</div></article>}
+      {pick && <article className={`mkt free-visible ${pick.outcome?.status === 'won' ? 'has-won' : pick.outcome?.status === 'lost' ? 'has-lost' : ''}`}><span className="mkt-name">{pick.name}</span><span className="mkt-validation is-validated">Tu recomendación gratis</span>{pick.outcome && <MarketOutcomeBadge outcome={pick.outcome} pendingLabel="Pendiente oficial" compact />}<div className="mkt-bar"><div className="mkt-fill" style={{ width: `${pick.probability}%` }} /></div><div className="mkt-nums"><strong className="mkt-pct">{pct(pick.probability)}</strong><span className="mkt-odd">@{pick.odd.toFixed(2)}</span><small>{pick.bookmaker}</small></div></article>}
       {(preview?.locked || []).map((item, index) => <button key={index} className="mkt free-hidden" onClick={openPlans} aria-label={`Ver opción Pro con probabilidad ${pct(item.probability)}`}>
         <span className="free-fake-label" aria-hidden="true">Recomendación exclusiva Pro</span><span className="free-eye"><Eye size={18} /> Ver</span><div className="mkt-bar"><div className="mkt-fill" style={{ width: `${item.probability}%` }} /></div><span className="mkt-pct">{pct(item.probability)}</span>
       </button>)}
+      {revealed.map((item, index) => <article key={`${item.name}-${index}`} className={`mkt free-revealed ${item.outcome?.status === 'won' ? 'has-won' : item.outcome?.status === 'lost' ? 'has-lost' : ''}`}>
+        <span className="mkt-name">{item.name}</span><span className="mkt-validation is-reference">Opción Pro revelada</span><MarketOutcomeBadge outcome={item.outcome} pendingLabel="Pendiente oficial" compact /><div className="mkt-bar"><div className="mkt-fill" style={{ width: `${item.probability}%` }} /></div><div className="mkt-nums"><strong className="mkt-pct">{pct(item.probability)}</strong><span className="mkt-odd">@{item.odd.toFixed(2)}</span><small>{item.bookmaker}</small></div>
+      </article>)}
     </div>
   </div>;
 }

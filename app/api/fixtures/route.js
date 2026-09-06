@@ -645,7 +645,7 @@ export async function GET(request) {
       userTimezone,
       analyzed: userAnalyzed,
       analyzedOdds: paidAccess ? analyzedOdds : {},
-      analyzedData: paidAccess ? analyzedData : await freeFootballList(analyzedData),
+      analyzedData: paidAccess ? analyzedData : await freeFootballList(analyzedData, fixtures, initialLiveStats),
       ...(!paidAccess ? { freeDailyResults: freeDailyResults({ sport: 'football', fixtures, analyzedData, liveStats: initialLiveStats }) } : {}),
       standings: responseStandings,
       initialLiveStats,

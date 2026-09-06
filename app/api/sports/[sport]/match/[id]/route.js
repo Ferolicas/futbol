@@ -27,7 +27,16 @@ export async function GET(_request, { params }) {
       ),
     ]);
     if (!analysis.rows[0]) return Response.json({ error: 'Not analyzed yet' }, { status: 404 });
-    return Response.json({ success: true, analysis: paidAccess ? analysis.rows[0] : freeAnalysis(analysis.rows[0], config.key), match: match.rows[0] || null });
+    const game = match.rows[0] || null;
+    return Response.json({
+      success: true,
+      analysis: paidAccess ? analysis.rows[0] : freeAnalysis(
+        analysis.rows[0],
+        config.key,
+        game ? { game, liveResult: game } : null,
+      ),
+      match: game,
+    });
   } catch (error) {
     console.error('[api/sports/match]', error.message);
     return jsonError(error);

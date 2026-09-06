@@ -41,12 +41,29 @@ export async function GET(request, { params }) {
 
   if (!paidAccess) {
     if (!/^\d+$/.test(id)) return Response.json({ error: 'Invalid id' }, { status: 400 });
-    const [{ rows }, paidDocument] = await Promise.all([
-      pgPool.query('SELECT fixture_id, analysis, combinada FROM match_analysis WHERE fixture_id=$1', [id]),
+    const [{ rows }, paidDocument, { rows: resultRows }] = await Promise.all([
+      pgPool.query('SELECT fixture_id, analysis, combinada, live_stats FROM match_analysis WHERE fixture_id=$1', [id]),
       getCachedAnalysis(id, clientDate),
+      pgPool.query(`SELECT fixture_id,status,goals,score,corners,yellow_cards,red_cards,
+                           goal_scorers,card_events,created_at
+                    FROM match_results WHERE fixture_id=$1`, [id]),
     ]);
     if (!rows[0]) return Response.json({ error: 'Match not analyzed yet', notFound: true }, { status: 404 });
-    return Response.json({ analysis: freeAnalysis({ ...rows[0], combinada: paidDocument?.combinada || { selectable: [] } }) }, { headers: { 'Cache-Control': 'private, no-store' } });
+    const durableResult = buildDurableResultSnapshot(resultRows[0]);
+    const liveResult = durableResult || rows[0].live_stats || null;
+    const stored = rows[0].analysis || {};
+    const game = {
+      fixture: { id: Number(id), status: liveResult?.status || stored.status },
+      goals: liveResult?.goals || stored.goals,
+      score: liveResult?.score || stored.score,
+    };
+    return Response.json({
+      analysis: freeAnalysis(
+        { ...rows[0], combinada: paidDocument?.combinada || { selectable: [] } },
+        'football',
+        { game, liveResult },
+      ),
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   }
 
 

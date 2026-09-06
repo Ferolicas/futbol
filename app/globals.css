@@ -13830,6 +13830,9 @@ input:checked + .cb-mark::after {
 .free-fake-label { display:block; filter:blur(6px); user-select:none; opacity:.65; margin-bottom:30px; }
 .free-eye { position:absolute; left:50%; top:38%; transform:translate(-50%,-50%); display:inline-flex; align-items:center; gap:6px; padding:7px 13px; border-radius:20px; background:#10241ee8; color:#eef7e3; border:1px solid #dceccb55; font-weight:800; }
 .free-visible { border-color:#9bc994!important; }
+.free-visible.has-won,.free-revealed.has-won { border-color:rgba(74,222,128,.55)!important; background:linear-gradient(145deg,rgba(74,222,128,.1),rgba(255,255,255,.025)); }
+.free-visible.has-lost,.free-revealed.has-lost { border-color:rgba(248,113,113,.5)!important; background:linear-gradient(145deg,rgba(248,113,113,.09),rgba(255,255,255,.025)); }
+.free-revealed { cursor:default; }
 .free-visible .mkt-nums { flex-wrap:wrap; gap:8px; }
 .free-visible .mkt-nums small { font-size:10px; color:#c4dec2; }
 .free-empty { padding:18px; color:#bfd3c4; line-height:1.5; font-size:13px; }

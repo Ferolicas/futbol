@@ -1,6 +1,6 @@
 # CF Análisis — sistema visual
 
-Actualizado: 2026-09-01
+Actualizado: 2026-09-06
 
 ## Dirección
 
@@ -171,6 +171,11 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   al botón de soporte. Usa icono Lucide, área táctil mínima de 48 px, foco
   visible y siempre salta de inmediato al encabezado; no anima el recorrido
   porque las listas virtualizadas muy largas pueden interrumpirlo al remedirse.
+- Acceso Gratis: cada partido muestra una sola opción de 60–70% con cuota y
+  nombre de la casa. Las opciones Pro enseñan únicamente su porcentaje mientras
+  el encuentro no haya terminado. Tras el final oficial se revelan con nombre,
+  cuota, casa y sticker Ganada/Perdida; Pendiente oficial y Nula conservan el
+  tratamiento neutro del resto de mercados.
 
 ## Motion y rendimiento
 
@@ -185,6 +190,10 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   estado visual depende de la selección real, no de un `hover` persistente.
 - El modal de análisis no intercepta ni agrupa gestos: conserva la inercia y la
   respuesta nativas de cada navegador.
+- Las listas de jornadas usan ventana de DOM también en iOS y mantienen solo
+  las tarjetas próximas al viewport. Los marcadores WebSocket se aplican en
+  memoria; las lecturas completas necesarias se dispersan en el tiempo y el
+  sondeo de respaldo solo funciona cuando se pierde realtime.
 
 ## Responsive
 

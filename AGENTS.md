@@ -41,7 +41,7 @@ toques nada”, “no subir” o equivalente.
 - La UI es móvil primero; escritorio adapta la versión móvil.
 - No cambiar precios ni monedas fuera de `lib/stripe.js`.
 - Nunca confiar en plan, precio o estado de pago enviados por el cliente.
-- Free se filtra en servidor: una opción 60–70% con fiabilidad >=90%; de las bloqueadas solo viaja la probabilidad. Nunca enviar etiquetas/IDs ocultos al navegador.
+- Free se filtra en servidor: una opción 60–70%, independiente de fiabilidad, solo con cuota real >=1.20 y casa identificada. Antes del cierre, de las bloqueadas solo viaja la probabilidad y nunca sus etiquetas/IDs; después del final oficial se revelan nombre, cuota, casa y resultado.
 - Un plan solo se activa después de confirmación del proveedor/webhook.
 - No sustituir auth PG por Supabase: los nombres `supabase*` restantes son adaptadores de compatibilidad.
 - El checkout automático transporta solo un ID de plan validado y una intención opaca; jamás el precio.

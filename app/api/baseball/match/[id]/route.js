@@ -36,10 +36,21 @@ export async function GET(_request, { params }) {
       return Response.json({ error: 'Not analyzed yet' }, { status: 404 });
     }
 
+    const result = resultRes.data || null;
+    const game = {
+      ...analysisRes.data,
+      id: fixtureId,
+      status: result?.status || analysisRes.data.status,
+      liveResult: result,
+    };
     return Response.json({
       success: true,
-      analysis: paidAccess ? analysisRes.data : freeAnalysis(analysisRes.data, 'baseball'),
-      result: resultRes.data || null,
+      analysis: paidAccess ? analysisRes.data : freeAnalysis(
+        analysisRes.data,
+        'baseball',
+        { game, liveResult: result },
+      ),
+      result,
     });
   } catch (e) {
     console.error('[api/baseball/match]', e.message);

@@ -28,7 +28,6 @@ import { createPortal } from 'react-dom';
 import { BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
 import { todayInTz, getUserTz, fmtTimeInTz } from '../../lib/timezone';
 import { marketLabel } from '../../lib/market-labels';
-import { useIsIOS } from '../../lib/is-ios';
 import { isTelegramMarketAllowed as isDailyPickMarketAllowed } from '../../lib/telegram-daily-pick';
 import {
   isFootballFrontendDailyPickEligible,
@@ -223,6 +222,7 @@ export function FootballDashboard({
   const liveFallbackInFlightRef = useRef(null);
   const liveFallbackLastRunRef = useRef(0);
   const wsConnectedAtRef = useRef(0);
+  const fixturesRefreshTimerRef = useRef(null);
   // Web push notifications
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushSupported, setPushSupported] = useState(false);
@@ -398,7 +398,7 @@ export function FootballDashboard({
       revalidateOnReconnect: true,
       dedupingInterval: 5000,
       keepPreviousData: true,
-      // Toda la hidratacion (carga inicial, cambio de fecha, poll de 60s y
+      // Toda la hidratacion (carga inicial, cambio de fecha, respaldo de 5 min y
       // focus) pasa por applyFixturesData → una sola ruta, un solo fetch.
       onSuccess: (data) => { applyFixturesDataRef.current?.(data); },
       onError: (err) => {
@@ -410,7 +410,7 @@ export function FootballDashboard({
   );
 
   // Skeleton al cargar por primera vez y al cambiar de fecha/tz (cambia la key
-  // de SWR). El poll de 60s y el focus NO cambian la key → no parpadea skeleton.
+  // de SWR). La revalidación de respaldo y el focus no cambian la key.
   useEffect(() => {
     if (fixturesKey) setLoading(true);
   }, [fixturesKey]);
@@ -419,7 +419,7 @@ export function FootballDashboard({
   // estaba duplicada entre el onSuccess de SWR y un fetch manual en loadFixtures,
   // lo que disparaba /api/fixtures 2-3 veces por carga. Ahora es la unica ruta:
   // la usa el onSuccess de SWR para la carga inicial, el cambio de fecha, el
-  // poll de 60s y el focus.
+  // respaldo de 5 min y el focus.
   const applyFixturesData = useCallback((data) => {
     if (!data) { setLoading(false); return; }
     if (data.error && !data.fixtures?.length) {
@@ -534,6 +534,18 @@ export function FootballDashboard({
     if (opts.clearLiveStats) clearLiveOnNextLoadRef.current = true;
     return fixturesMutate();
   }, [fixturesMutate]);
+
+  // Los eventos que sí necesitan releer el catálogo se escalonan entre
+  // pestañas. Así un final, unas cuotas o un batch no crean una ráfaga de
+  // miles de peticiones simultáneas al mismo endpoint.
+  const scheduleFixturesRefresh = useCallback((minimum = 2_000, spread = 28_000) => {
+    if (fixturesRefreshTimerRef.current) return;
+    fixturesRefreshTimerRef.current = window.setTimeout(() => {
+      fixturesRefreshTimerRef.current = null;
+      fixturesMutate();
+    }, minimum + Math.floor(Math.random() * spread));
+  }, [fixturesMutate]);
+  useEffect(() => () => window.clearTimeout(fixturesRefreshTimerRef.current), []);
 
   // Fallback cache-only: lee el snapshot del worker en Redis. La ruta GET nunca
   // dispara proveedores externos y se deduplica para que solo exista una
@@ -825,21 +837,24 @@ export function FootballDashboard({
     if (!data?.matches) return;
     pusherLastUpdate.current = Date.now();
     setFixtures(prev => applyLiveUpdate(prev, data.matches));
-  }, [applyLiveUpdate]));
+    if (data.matches.some(match => isFinished(match.status?.short || match.fixture?.status?.short))) {
+      scheduleFixturesRefresh(5_000, 45_000);
+    }
+  }, [applyLiveUpdate, scheduleFixturesRefresh]));
 
   // Lineups: notify that lineups are available (only for today)
   usePusherEvent(isViewingToday ? 'match-updates' : null, 'lineups-ready', useCallback((data) => {
     if (!data?.fixtureIds) return;
     // Reload fixtures to get updated analysis with lineups
-    loadFixtures(date);
-  }, [date, loadFixtures]));
+    scheduleFixturesRefresh();
+  }, [scheduleFixturesRefresh]));
 
   // Las cuotas Bet365/Bwin se completan en fases prepartido. Al recibir una
   // actualización recargamos el análisis ya reconstruido (probabilidades y
   // reglas intactas; solo cambian cuotas/opciones disponibles).
   usePusherEvent(isViewingToday ? 'match-updates' : null, 'odds-ready', useCallback((data) => {
-    if (data?.date === date && data?.fixtureIds?.length) loadFixtures(date);
-  }, [date, loadFixtures]));
+    if (data?.date === date && data?.fixtureIds?.length) scheduleFixturesRefresh();
+  }, [date, scheduleFixturesRefresh]));
 
   // Odds update from The Odds API cron
   usePusherEvent(isViewingToday ? 'live-scores' : null, 'odds-update', useCallback((data) => {
@@ -867,18 +882,20 @@ export function FootballDashboard({
   usePusherEvent(isViewingToday ? 'analysis' : null, 'batch-complete', useCallback((data) => {
     if (data?.date === date) {
       setBatchRunning(false);
-      loadFixtures(date);
+      scheduleFixturesRefresh();
     }
-  }, [date, loadFixtures]));
+  }, [date, scheduleFixturesRefresh]));
 
-  // Polling fallback: if batch is running, poll every 20s until it completes
+  // Polling de respaldo solo sin WebSocket. Con realtime conectado el evento
+  // batch-complete hace la recarga; así una tarea global no convierte a todos
+  // los clientes en un pico de sondeo contra PostgreSQL.
   useEffect(() => {
-    if (!batchRunning) return;
+    if (!batchRunning || wsState === 'connected') return;
     const pollBatch = setInterval(() => {
-      loadFixtures(date);
-    }, 20000);
+      scheduleFixturesRefresh(0, 30_000);
+    }, 60_000);
     return () => clearInterval(pollBatch);
-  }, [batchRunning, date, loadFixtures]);
+  }, [batchRunning, wsState, scheduleFixturesRefresh]);
 
   // Live updates come exclusively from Pusher (cron/live pushes every minute).
   // No more client-side polling — saves API quota and reduces latency.
@@ -1375,18 +1392,13 @@ export function FootballDashboard({
     [selectedMarkets],
   );
 
-  // Solo se montan las filas próximas al viewport. Incluso con 400 partidos o
-  // más, el DOM conserva aproximadamente 8–12 tarjetas; la altura total sigue
-  // siendo desplazable y cada fila dinámica se mide al abrirse.
-  // En iOS no: allí la lista va en flujo normal y virtualiza el navegador con
-  // `content-visibility: auto` (ver el render de .match-list).
-  const isIOS = useIsIOS();
+  // Solo se montan las filas próximas al viewport en todos los navegadores,
+  // incluido WebKit/iOS. `content-visibility` ahorra pintura, pero no memoria:
+  // montar cientos de tarjetas hacía que Safari terminara recargando la pestaña.
   const matchListRef = useRef(null);
   const [matchListOffset, setMatchListOffset] = useState(0);
   const matchVirtualizer = useWindowVirtualizer({
-    // En iOS la lista va sin ventana JS (ver el render), así que el
-    // virtualizador se queda a cero y no mide ni posiciona nada.
-    count: !loading && !isIOS ? sorted.length : 0,
+    count: !loading ? sorted.length : 0,
     estimateSize: () => 310,
     overscan: 5,
     scrollMargin: matchListOffset,
@@ -1395,14 +1407,12 @@ export function FootballDashboard({
     // evita que el virtualizador "compense" el cambio y saque la fila pulsada
     // del viewport antes de que React termine de pintarla.
     //
-    // OJO: hoy esto no hace nada. virtual-core 3.17.7 lee la propiedad en la
-    // instancia (`this.shouldAdjustScrollPositionOnItemSizeChange`) y nunca la
-    // copia desde las opciones, así que el callback jamás se consulta y manda
-    // el comportamiento por defecto de la librería. Se deja puesto porque
-    // declara la intención y volverá a aplicarse cuando la librería lo lea
-    // desde `options`; si se necesita ya, hay que asignarlo sobre la instancia.
     shouldAdjustScrollPositionOnItemSizeChange: () => false,
   });
+  // virtual-core 3.17 lee esta política desde la instancia. Sin la asignación
+  // explícita, al medir filas durante un impulso largo WebKit compensaba el
+  // scroll y producía tirones al volver hacia arriba.
+  matchVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false;
 
   // Al cerrar la tarjeta hay que dejar la lista en el partido donde se cerró,
   // no donde se abrió el primero: con las flechas se puede haber avanzado
@@ -1418,13 +1428,8 @@ export function FootballDashboard({
     }
     const index = sorted.findIndex(m => m.fixture.id === previous);
     if (index < 0) return;
-    if (isIOS) {
-      document.querySelector(`[data-fixture-id="${previous}"]`)
-        ?.scrollIntoView({ block: 'center' });
-      return;
-    }
     matchVirtualizer.scrollToIndex(index, { align: 'center' });
-  }, [expandedMatch, sorted, isIOS, matchVirtualizer]);
+  }, [expandedMatch, sorted, matchVirtualizer]);
 
   useEffect(() => {
     if (splash || loading || !matchListRef.current) return;
@@ -1611,23 +1616,7 @@ export function FootballDashboard({
                   : 'No hay partidos que coincidan con los filtros de esta fecha.'}</p>
               </div>
             )}
-            {sorted.length > 0 && (isIOS ? (
-              // iOS: sin ventana JS. El virtualizador monta y mide cada fila al
-              // entrar en rango, y los impulsos largos de Safari saltan filas
-              // enteras sin llegar a montarlas; al volver hacia arriba esas
-              // filas se miden por primera vez, pasan de los 310px estimados a
-              // su alto real y empujan todo lo de abajo. Medido en WebKit: 13
-              // de 34 pasos con tirones de hasta 115px subiendo, 0 bajando.
-              // Aquí basta `content-visibility: auto` de .mcard/.acc-card, que
-              // ya se salta el render fuera de pantalla y recuerda el alto real.
-              <div className="match-list">
-                {sorted.map(m => (
-                  <div key={m.fixture.id} data-fixture-id={m.fixture.id} className="virtual-match-row" style={{ paddingBottom: 8 }}>
-                    {renderMatchCard(m)}
-                  </div>
-                ))}
-              </div>
-            ) : (
+            {sorted.length > 0 && (
               <div
                 ref={matchListRef}
                 className="match-list match-list-virtual"
@@ -1662,7 +1651,7 @@ export function FootballDashboard({
                   );
                 })}
               </div>
-            ))}
+            )}
           </>
         )}
 

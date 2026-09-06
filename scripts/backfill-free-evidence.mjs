@@ -1,14 +1,16 @@
 // Add only Free evidence and display ladders; never replace paid predictions.
-// node --env-file=.env.local scripts/backfill-free-evidence.mjs [--apply]
+// node --env-file=.env.local scripts/backfill-free-evidence.mjs [--apply] [--refresh-football]
 import pg from 'pg';
 import football from '../lib/model-engine.js';
 import { freeFootballEvidence } from '../lib/free-football-evidence.js';
 import { computeMultisportEmpiricalPrediction } from '../lib/multisport-empirical-engine.js';
 const apply = process.argv.includes('--apply');
+const refreshFootball = process.argv.includes('--refresh-football');
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false }, max: 2 });
 try {
   const footballRows = await pool.query(`SELECT a.fixture_id,a.analysis,m.season,m.phase FROM match_analysis a LEFT JOIN model.matches m USING(fixture_id)
-    WHERE a.date >= CURRENT_DATE-1 AND NOT (a.analysis ? '_freeScored') ORDER BY a.date DESC`);
+    WHERE a.date >= ${refreshFootball ? 'CURRENT_DATE' : 'CURRENT_DATE-1'}
+      AND ($1::boolean OR NOT (a.analysis ? '_freeScored')) ORDER BY a.date DESC`, [refreshFootball]);
   let complete = 0, available = 0;
   for (const row of footballRows.rows) {
     const a = row.analysis;
@@ -19,7 +21,7 @@ try {
     const prediction = await football.predict(pool, context, { currentLineups: a.lineups?.available ? a.lineups.data : null });
     const evidence = freeFootballEvidence(prediction.markets);
     if (Object.keys(evidence).length) available++;
-    if (apply) await pool.query("UPDATE match_analysis SET analysis=jsonb_set(analysis,'{_freeScored}',$2::jsonb) WHERE fixture_id=$1 AND NOT (analysis ? '_freeScored')", [row.fixture_id, JSON.stringify(evidence)]);
+    if (apply) await pool.query("UPDATE match_analysis SET analysis=jsonb_set(analysis,'{_freeScored}',$2::jsonb) WHERE fixture_id=$1", [row.fixture_id, JSON.stringify(evidence)]);
     complete++;
     if (complete % 25 === 0) console.log(JSON.stringify({ sport: 'football', complete, available, apply }));
   }
