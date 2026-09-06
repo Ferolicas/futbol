@@ -60,3 +60,20 @@ test('integer frequency grids count strict sides and use the observed range', as
   assert.equal(grid[10].under.rawProbability, .25);
   assert.deepEqual(displayFrequencyLadder([], .65, 1), {});
 });
+
+test('locked percentages come from the actual Pro catalog, not 100% evidence extremes', async () => {
+  const { freeAnalysis } = await import('../lib/free-access.js');
+  for (const sport of ['football', 'baseball', 'basketball', 'american_football']) {
+    const source = { _scored: { total_goals_over0_5: { prob_final: 1, confidence: 1 } },
+      probabilities: { totals: { lines: { '0.5': { over: { rawProbability: 1, evidence: { n: 1000, hits: 1000 } } } } } },
+      combinada: { selectable: [
+        { id: 'free', name: 'Free', probability: 65, confidence: 95 },
+        { id: 'pro-a', name: 'Secret A', probability: 84.5, confidence: 96 },
+        { id: 'pro-b', name: 'Secret B', probability: 92.25, confidence: 96 },
+      ] } };
+    const original = structuredClone(source);
+    assert.deepEqual(freeAnalysis(source, sport).freePreview.locked, [{ probability: 92.25 }, { probability: 84.5 }]);
+    assert.deepEqual(freeAnalysis({ ...source, combinada: { selectable: [] } }, sport).freePreview.locked, []);
+    assert.deepEqual(source, original);
+  }
+});

@@ -30,7 +30,7 @@ git archive HEAD | tar -x -C "$RELEASE_DIR"
 cp .env "$RELEASE_DIR/.env"
 (
   cd "$RELEASE_DIR"
-  NODE_ENV=development npm ci --include=dev --no-audit --no-fund
+  NODE_ENV=development npm install --include=dev --no-audit --no-fund
   NODE_ENV=production npm run build
 )
 cp .env "$RUNTIME_DIR/.env"

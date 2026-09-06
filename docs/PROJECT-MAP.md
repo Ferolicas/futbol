@@ -941,7 +941,7 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   `.next/standalone/.next/server/app/dashboard/page.js` y `_error.js`. El
   workflow reconstruía la carpeta que aún atendía peticiones.
 - `scripts/vps/deploy-web.sh` archiva el commit en `.web-releases/release-*`,
-  instala con `npm ci`, compila y copia `.env`, `public/` y estáticos dentro de
+  instala con `npm install` (flujo existente del repositorio), compila y copia `.env`, `public/` y estáticos dentro de
   ese runtime. La versión activa permanece intacta durante esta preparación.
 - `check-web-release.cjs` arranca el candidato en un puerto efímero local y
   comprueba portada, login, dashboard, sesión, rechazo sin sesión y archivos
@@ -953,3 +953,13 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - El proceso web ya no depende de `/apps/futbol/.next/standalone`: su ruta
   autoritativa es `pm2 jlist` y `.web-releases/current`. No construir sobre
   esa ruta. El worker conserva su despliegue y ubicación actuales.
+
+- El lockfile heredado no contiene todas las dependencias declaradas; el
+  instalador del deploy conserva `npm install`, dentro de la carpeta candidata.
+  Un fallo durante esa preparación no interrumpe la versión activa.
+- Las opciones bloqueadas Free provienen únicamente de `combinada.selectable`
+  de Pro, con sus porcentajes de presentación. No usar extremos de las tablas
+  de frecuencias (p. ej., históricos al 100%) como recomendaciones ocultas.
+- El modal conserva la lista de planes, con la tipografía Jakarta, superficie
+  y acentos de `/planes`. Tras este ajuste y las correcciones, el propietario
+  autorizó expresamente el envío masivo (2026-09-06).
