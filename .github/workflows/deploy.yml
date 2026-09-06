@@ -73,54 +73,12 @@ jobs:
             # Triggers: rutas, componentes, lib/* (algunas las usa el worker
             # tambien — esas tambien disparan el bloque worker abajo),
             # middleware, config, deps, assets publicos.
-            WEB_RE='^(app/|components/|lib/|middleware\.js|next\.config\.|package\.json|package-lock\.json|public/|hooks/|jsconfig\.json)'
+            WEB_RE='^(app/|components/|lib/|middleware\.js|next\.config\.|package\.json|package-lock\.json|public/|hooks/|jsconfig\.json|scripts/vps/(deploy-web\.sh|check-web-release\.cjs)|\.github/workflows/deploy\.yml)'
             if echo "$CHANGED" | grep -qE "$WEB_RE"; then
               echo ""
               echo "▶ Frontend changed — rebuilding Next.js"
 
-              # Dev deps necesarias para next build (typescript types, etc).
-              NODE_ENV=development npm install --include=dev --no-audit --no-fund
-
-              # Build prod
-              NODE_ENV=production npm run build
-
-              # ── .env para el server standalone de Node ──
-              # El standalone arranca desde .next/standalone/ y carga SU PROPIO
-              # .env (loadEnvConfig relativo a su dir), que tiene PRIORIDAD sobre
-              # el env que inyecta PM2. Si no lo sincronizamos, el standalone
-              # queda con el .env horneado en un build viejo → claves rotadas en
-              # /apps/futbol/.env NO surten efecto (bug real: RESEND_API_KEY vieja
-              # → emails 401 durante días). Copiar el .env actual lo evita.
-              cp .env .next/standalone/.env
-
-              # ── PUBLIC para el server standalone de Node ──
-              # El standalone de Next NO incluye public/ — hay que ponérselo al
-              # lado. ANTES esto era un SYMLINK:
-              #     ln -sfn "$PWD/public" .next/standalone/public
-              # y era la RAÍZ del bug recurrente: cualquier rm/ln/cp que tocara
-              # .next/standalone/public podía SEGUIR el enlace y vaciar el public
-              # REAL del repo (/apps/futbol/public), que es de donde sirve Caddy
-              # (ver scripts/vps/Caddyfile: root * /apps/futbol/public).
-              #
-              # SOLUCIÓN DEFINITIVA: COPIA, no symlink. Así el public del repo
-              # NUNCA es destino de ninguna operación del standalone → imposible
-              # vaciarlo desde aquí. Es ~1.9MB, copia trivial.
-              [ -L .next/standalone/public ] && unlink .next/standalone/public || true
-              rm -rf .next/standalone/public
-              mkdir -p .next/standalone/public
-              cp -a public/. .next/standalone/public/
-
-              # ── .next/static ── (regenerado por next build, NO compartido con
-              # el repo → aquí un symlink SÍ es seguro: su target es build output
-              # efímero, no archivos versionados que debamos preservar).
-              mkdir -p .next/standalone/.next
-              [ -L .next/standalone/.next/static ] && rm -f .next/standalone/.next/static
-              [ -d .next/standalone/.next/static ] && [ ! -L .next/standalone/.next/static ] && rm -rf .next/standalone/.next/static || true
-              ln -sfn "$PWD/.next/static" .next/standalone/.next/static
-
-              # Restart (no reload) para que el server standalone tome el build
-              # nuevo sin servir desde un working dir viejo.
-              pm2 restart cfanalisis-web --update-env
+              bash scripts/vps/deploy-web.sh
 
               echo "✓ Next.js redeployed"
             else

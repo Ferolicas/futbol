@@ -19,3 +19,6 @@ tmp_fixture.json
 /.clerk/
 
 .vercel
+
+# Private immutable deployment artifacts and runtime snapshots
+.web-releases/
