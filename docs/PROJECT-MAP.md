@@ -963,3 +963,9 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - El modal conserva la lista de planes, con la tipografía Jakarta, superficie
   y acentos de `/planes`. Tras este ajuste y las correcciones, el propietario
   autorizó expresamente el envío masivo (2026-09-06).
+
+- La versión instalada de PM2 no cambia `pm_exec_path` con `startOrReload`.
+  Tras validar el candidato se reemplaza únicamente el proceso `cfanalisis-web`
+  desde su configuración completa; rollback restaura el proceso anterior de la
+  misma forma. Esta activación puede producir un breve reinicio, pero el build
+  ya no borra archivos del servidor activo.

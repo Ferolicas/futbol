@@ -45,12 +45,20 @@ if [ -d "$PREVIOUS_BUILD/static" ]; then
 fi
 node scripts/vps/check-web-release.cjs "$RUNTIME_DIR"
 
+activate() {
+  # This PM2 version does not update pm_exec_path for an existing app through
+  # startOrReload. Replace only this named process after candidate validation.
+  if pm2 describe cfanalisis-web > /dev/null 2>&1; then
+    pm2 delete cfanalisis-web > /dev/null || return 1
+  fi
+  pm2 start "$1" --only cfanalisis-web --update-env
+}
 rollback() {
   echo 'Candidate failed after activation; restoring the previous runtime'
-  pm2 startOrReload "$RELEASE_DIR/rollback.config.json" --only cfanalisis-web --update-env
+  activate "$RELEASE_DIR/rollback.config.json"
   pm2 save
 }
-if ! pm2 startOrReload "$RELEASE_DIR/release.config.json" --only cfanalisis-web --update-env; then
+if ! activate "$RELEASE_DIR/release.config.json"; then
   rollback
   exit 1
 fi
