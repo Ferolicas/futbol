@@ -2,7 +2,7 @@
 
 ## Producto y producción
 
-CF Análisis es una aplicación móvil de análisis de fútbol y béisbol con planes de suscripción. Producción: `https://cfanalisis.com` · VPS: `/apps/futbol` · PM2: `cfanalisis-web` · PostgreSQL: `cfanalisis`.
+CF Análisis es una aplicación móvil de análisis de fútbol, béisbol, baloncesto y fútbol americano con acceso gratuito limitado y planes de suscripción. Producción: `https://cfanalisis.com` · VPS: `/apps/futbol` · PM2: `cfanalisis-web` · PostgreSQL: `cfanalisis`.
 
 ## Stack real
 
@@ -41,6 +41,7 @@ toques nada”, “no subir” o equivalente.
 - La UI es móvil primero; escritorio adapta la versión móvil.
 - No cambiar precios ni monedas fuera de `lib/stripe.js`.
 - Nunca confiar en plan, precio o estado de pago enviados por el cliente.
+- Free se filtra en servidor: una opción 60–70% con fiabilidad >=90%; de las bloqueadas solo viaja la probabilidad. Nunca enviar etiquetas/IDs ocultos al navegador.
 - Un plan solo se activa después de confirmación del proveedor/webhook.
 - No sustituir auth PG por Supabase: los nombres `supabase*` restantes son adaptadores de compatibilidad.
 - El checkout automático transporta solo un ID de plan validado y una intención opaca; jamás el precio.

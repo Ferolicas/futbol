@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-04 · Commit: `56fdcca`
+Actualizado: 2026-09-06 · Base: `8262c2f` · Acceso gratuito y presentación multideporte
 
 ## Identidad y stack
 
@@ -31,14 +31,14 @@ Las creatividades listas para campañas se guardan en `public/marketing/`.
 | `/reset-password` | `app/reset-password/page.js` | No | Cambio de contraseña con token |
 | `/planes` | `app/planes/page.js` | Sí | Selección y apertura de checkout |
 | `/pago/estado` | `app/pago/estado/` | Sí | Confirmación durable y recuperación del pago |
-| `/dashboard` | `app/dashboard/layout.js`, `page.js` | Plan activo | Panel único de fútbol, béisbol, baloncesto y fútbol americano |
-| `/dashboard/analisis/[id]` | `app/dashboard/analisis/[id]/page.js` | Plan activo | Análisis de fútbol |
-| `/dashboard/baseball` | `app/dashboard/baseball/page.js` | Plan activo | Alias que redirige al panel único con béisbol activo |
-| `/dashboard/baloncesto` | `app/dashboard/baloncesto/page.js` | Plan activo | Alias que redirige al panel único con baloncesto activo |
-| `/dashboard/futbol-americano` | `app/dashboard/futbol-americano/page.js` | Plan activo | Alias que redirige al panel único con fútbol americano activo |
-| `/dashboard/baloncesto/analisis/[id]` | `app/dashboard/baloncesto/analisis/[id]/page.js` | Plan activo | Análisis completo por mitades/cuartos, mercados Bet365 y veredicto |
-| `/dashboard/futbol-americano/analisis/[id]` | `app/dashboard/futbol-americano/analisis/[id]/page.js` | Plan activo | Análisis completo por mitades/cuartos, mercados Bet365 y veredicto |
-| `/api/dashboard-search` | `app/api/dashboard-search/route.js` | Plan activo | Búsqueda DB-only de equipos, ligas y partidos en los cuatro deportes |
+| `/dashboard` | `app/dashboard/layout.js`, `page.js` | Sesión (Free/Pro) | Panel único de fútbol, béisbol, baloncesto y fútbol americano |
+| `/dashboard/analisis/[id]` | `app/dashboard/analisis/[id]/page.js` | Sesión (Free/Pro) | Análisis de fútbol |
+| `/dashboard/baseball` | `app/dashboard/baseball/page.js` | Sesión (Free/Pro) | Alias que redirige al panel único con béisbol activo |
+| `/dashboard/baloncesto` | `app/dashboard/baloncesto/page.js` | Sesión (Free/Pro) | Alias que redirige al panel único con baloncesto activo |
+| `/dashboard/futbol-americano` | `app/dashboard/futbol-americano/page.js` | Sesión (Free/Pro) | Alias que redirige al panel único con fútbol americano activo |
+| `/dashboard/baloncesto/analisis/[id]` | `app/dashboard/baloncesto/analisis/[id]/page.js` | Sesión (Free/Pro) | Análisis completo por mitades/cuartos, mercados Bet365 y veredicto |
+| `/dashboard/futbol-americano/analisis/[id]` | `app/dashboard/futbol-americano/analisis/[id]/page.js` | Sesión (Free/Pro) | Análisis completo por mitades/cuartos, mercados Bet365 y veredicto |
+| `/api/dashboard-search` | `app/api/dashboard-search/route.js` | Sesión (Free/Pro) | Búsqueda DB-only de equipos, ligas y partidos en los cuatro deportes |
 | `/admin` | `app/admin/` | Admin/owner | Operación y clientes |
 | `/ferney` | `app/ferney/` | Privada | Auditoría del propietario |
 | `/ferney/informes` | `app/ferney/informes/` | Admin/owner | Informes interactivos móviles de fútbol y MLB |
@@ -121,7 +121,7 @@ dos frames para absorber el reajuste de filas y la inercia de Safari.
 1. Home obtiene `/api/detect-country` y `/api/currency`.
 2. El CTA genera `plan` validado + `intent` opaca (`lib/purchase-flow.js`).
 3. Registro llama `/api/register`; `signupUser` crea usuario, perfil, sesión y cookie.
-4. Registro redirige a `/planes?checkout=<plan>&intent=<id>`.
+4. Registro redirige a `/dashboard` (conserva plan/intención en la URL si existían). El modal permite elegir Pro o continuar gratis.
 5. `/planes` valida auth e intención, resuelve país/moneda y consume la intención una sola vez.
 6. Colombia abre `MercadoPagoModal`; otros países crean una suscripción incompleta y abren `PaymentModal`.
 7. Cada operación usa un UUID durable; reintentos, dos pestañas y respuestas perdidas reutilizan el mismo recurso.
@@ -882,3 +882,52 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   se pueden seleccionar y deseleccionar con un segundo toque; su color depende
   directamente del estado `aria-pressed`, sin un `hover` táctil persistente.
 - El standalone necesita copiar `.env`, `public/` y enlazar `.next/static` como define el workflow.
+
+
+### Acceso gratuito (2026-09-06)
+
+- El layout admite toda sesión PG válida. `hasActiveEntitlement` y los flujos
+  Stripe/MP conservan la misma decisión de acceso ilimitado.
+- `lib/free-access.js` construye un DTO por lista permitida: metadatos del
+  partido, una opción 60–70% con fiabilidad >=90%, y objetos que contienen
+  **solo probability** para las bloqueadas. Nunca incluye su ID, etiqueta,
+  categoría, cuota, evidencia, frecuencias o veredicto. No se cachea la
+  respuesta de un usuario para otro (`private, no-store`).
+- GET de fixtures/detalle de los cuatro deportes aplica la proyección al
+  usuario gratuito. POST de análisis, odds y simulación de torneos requieren Pro. La
+  búsqueda de partidos está disponible para cualquier cuenta autenticada.
+- El scored comercial de fútbol se guardaba recortado a >=70%. El campo
+  independiente `_freeScored` conserva las líneas válidas para Free, calculadas
+  por `free-football-evidence.js` sin modificar `_scored` ni la combinada.
+  Usa la misma evidencia por equipo/temporada y posterior estadístico; el
+  suelo de probabilidad para evaluar la fiabilidad Free es 60%; el de Pro sigue siendo 70%. En ambos se exige fiabilidad >=90%. No son garantías
+  de acierto. Si no existe una opción elegible, se informa y no se inventa.
+- `FreeAccessProvider` muestra planes en las visitas 1, 4, 7… Una visita
+  conserva UUID por pestaña, incluyendo recargas, hasta 30 minutos de
+  inactividad. Un login nuevo reinicia ese identificador. `free_app_visits`
+  deduplica en PG con bloqueo por usuario. El contador jamás concede acceso.
+- El navegador solo difumina texto de relleno. `Ver` (ojo), pestañas bloqueadas
+  y botón metálico `Mejorar a Pro` abren el selector; el checkout existente
+  confirma el pago antes de dar acceso completo. SWR se aísla por usuario/tier.
+- `SharedSportAnalysis` reutiliza la cabecera, tarjetas, pestañas y presentación
+  a pantalla completa de fútbol para béisbol, baloncesto y fútbol americano.
+  `displayFrequencies` agrega líneas de presentación: carreras desde 0 de 1
+  en 1, puntos de 10 en 10 hasta el máximo observado; no altera mercados Pro,
+  probabilidades, cuotas ni ponderaciones. La evidencia detallada sigue en las
+  páginas completas. La lista de béisbol recibe frecuencias compactas sin
+  historial de jugadores ni evidencia por muestra.
+- Migración aditiva: `scripts/migrate-free-access.sql` (visitas y registro de
+  campaña). Backup previo: `/var/backups/cf-free/pre-free-20260906.sql.gz`.
+- `scripts/backfill-free-evidence.mjs --apply` completa solo `_freeScored` y
+  `displayFrequencies` en jornadas recientes; nunca reemplaza los picks de pago.
+- `scripts/announce-free-access.mjs` tiene modo seco por defecto, `--test EMAIL`
+  para vista previa y `--send` para la campaña. Excluye usuarios con acceso
+  vigente, admins y cuentas de prueba; relee el plan antes de cada envío.
+  `email_campaign_deliveries` e idempotencia Resend evitan duplicados. **El
+  propietario pidió revisar la vista previa antes de autorizar el envío masivo.**
+
+- El correo de lanzamiento usa fondo verde oscuro `#061d16` con gradiente
+  constante y protección de texto para Gmail. El CTA metalizado con letras
+  negras viaja como PNG inline (CID) para preservar el contraste; el enlace
+  sigue siendo `/dashboard`. Vista previa v4 enviada al propietario; envío
+  masivo pendiente de su revisión final.
