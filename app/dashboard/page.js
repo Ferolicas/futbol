@@ -1679,7 +1679,11 @@ export function FootballDashboard({
         {/* FLOATING: Combinada counter */}
         {totalSel > 0 && statusFilter !== 'favoritos' && (
           <div className="float-bar float-bar-combinada slide-up">
-            <button className="btn-comb-float" onClick={() => { setExpandedMatch(null); setStatusFilter('favoritos'); }}>
+            <button className="btn-comb-float" onClick={() => {
+              setExpandedMatch(null);
+              setStatusFilter('favoritos');
+              window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' }));
+            }}>
               <span className="float-comb-icon"><Layers3 size={19} aria-hidden="true" /></span>
               <span><small>Tu selección</small><strong>Ver combinada · {totalSel}</strong></span>
               {customCombinada && <span className="float-odd">{customCombinada.combinedOdd}x</span>}

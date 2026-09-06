@@ -510,7 +510,11 @@ export function BaseballDashboard({
       {statusFilter !== 'favoritos' && totalSel > 0 && (
         <button
           className="baseball-comb-action"
-          onClick={() => { setExpandedMatch(null); setStatusFilter('favoritos'); }}
+          onClick={() => {
+            setExpandedMatch(null);
+            setStatusFilter('favoritos');
+            window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' }));
+          }}
         >
           <span><Layers3 size={18} aria-hidden="true" /></span>
           <span><small>Tu selección</small><strong>Mi combinada · {totalSel}</strong></span>

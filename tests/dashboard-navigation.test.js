@@ -115,6 +115,7 @@ test('Apuesta del día usa cabecera fija y tarjetas compactas con desplazamiento
     assert.match(source, /<span>Resultados<\/span>/);
     assert.match(source, /freeRecommendationForRail/);
     assert.doesNotMatch(source, /const picks = isFree \? \[\]/);
+    assert.match(source, /setStatusFilter\('favoritos'\);[\s\S]*window\.requestAnimationFrame\(\(\) => window\.scrollTo\(\{ top: 0/);
   }
   assert.doesNotMatch(football, /className="daily-pick-title-card"/);
   assert.doesNotMatch(baseball, /className="daily-pick-title-card"/);

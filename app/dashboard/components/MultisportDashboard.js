@@ -695,7 +695,11 @@ export default function MultisportDashboard({
 
         {statusFilter !== 'favoritos' && totalSelections > 0 && (
           <div className="float-bar float-bar-combinada slide-up">
-            <button className="btn-comb-float" onClick={() => { setExpandedMatch(null); setStatusFilter('favoritos'); }}>
+            <button className="btn-comb-float" onClick={() => {
+              setExpandedMatch(null);
+              setStatusFilter('favoritos');
+              window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' }));
+            }}>
               <span className="float-comb-icon"><Layers3 size={19} aria-hidden="true" /></span>
               <span><small>Tu selección</small><strong>Ver combinada · {totalSelections}</strong></span>
               {combination && <span className="float-odd">{combination.combinedOdd.toFixed(2)}x</span>}
