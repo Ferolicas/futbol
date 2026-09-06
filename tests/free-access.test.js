@@ -13,6 +13,7 @@ test('Free returns one real 60–70% option; locked payloads contain only percen
     ] } };
   const original = structuredClone(source);
   const result = freeAnalysis(source);
+  assert.equal(result.freePreview.selection.id, 'free-high');
   assert.equal(result.freePreview.selection.name, 'Visible');
   assert.equal(result.freePreview.selection.probability, 70);
   assert.equal(result.freePreview.selection.odd, 1.6);

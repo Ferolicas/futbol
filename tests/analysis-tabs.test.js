@@ -35,3 +35,13 @@ test('Veredicto final puede integrarse abierto dentro de su pestaña', () => {
   assert.match(panel, /if \(embedded\)/);
   assert.match(panel, /final-verdict-panel is-embedded/);
 });
+
+test('la recomendación Gratis se puede añadir a la combinada en los cuatro deportes', () => {
+  const free = read('app/dashboard/components/FreeAccessProvider.js');
+  const football = read('app/dashboard/page.js');
+  const shared = read('app/dashboard/components/SharedSportAnalysis.js');
+  assert.match(free, /aria-pressed=\{pickSelected\}/);
+  assert.match(free, /onToggle\(pick\)/);
+  assert.match(football, /<FreeRecommendations preview=\{data\.freePreview\} selected=\{selMarkets\}/);
+  assert.match(shared, /<FreeRecommendations preview=\{analysis\.freePreview\} selected=\{selected\} onToggle=\{onToggle\}/);
+});

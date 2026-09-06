@@ -56,7 +56,7 @@ export function SportAnalysisTabs({ game, sport, scoreLabel, selected = {}, onTo
   return <div className="acc-content open"><div className="acc-inner">
     <HorizontalChoiceBar items={tabs} active={active} onChange={setActive} label="Secciones del análisis" idPrefix={`sport-${sport}-${game.id}`} />
     <section className="analysis-tab-panel" role="tabpanel" id={`sport-${sport}-${game.id}-panel-${active}`} aria-labelledby={`sport-${sport}-${game.id}-tab-${active}`}>
-      {free ? active === 'markets' ? <FreeRecommendations preview={analysis.freePreview} /> : <LockedAnalysis title={tabs.find(t => t.key === active).label} />
+      {free ? active === 'markets' ? <FreeRecommendations preview={analysis.freePreview} selected={selected} onToggle={onToggle} /> : <LockedAnalysis title={tabs.find(t => t.key === active).label} />
         : active === 'markets' ? <div className="markets"><div className="markets-grid">{picks.map(pick => {
           const probability = Math.min(95, Math.floor(Number(pick.rawProbability ?? pick.probability) * 100) / 100);
           const state = marketResultState({ sport, game, liveResult: game.liveResult });

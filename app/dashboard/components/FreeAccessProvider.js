@@ -113,19 +113,32 @@ export function LockedAnalysis({ title = 'Análisis completo' }) {
   </div>;
 }
 
-export function FreeRecommendations({ preview }) {
+export function FreeRecommendations({ preview, selected = {}, onToggle = null }) {
   const { openPlans } = useFreeAccess();
   const pick = preview?.selection;
   const revealed = preview?.revealed || [];
   const isFinal = !!pick?.outcome || revealed.length > 0;
+  const canSelect = !!pick?.id && !pick.outcome && typeof onToggle === 'function';
+  const pickSelected = !!selected?.[pick?.id];
   const pct = value => `${Math.floor(Number(value) * 100) / 100}%`;
+  const visibleContent = pick && <>
+    <span className="mkt-name">{pick.name}</span>
+    <span className="mkt-validation is-validated">{canSelect
+      ? (pickSelected ? 'Añadida a tu combinada' : 'Toca para añadir a tu combinada')
+      : 'Tu recomendación gratis'}</span>
+    {pick.outcome && <MarketOutcomeBadge outcome={pick.outcome} pendingLabel="Pendiente oficial" compact />}
+    <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${pick.probability}%` }} /></div>
+    <div className="mkt-nums"><strong className="mkt-pct">{pct(pick.probability)}</strong><span className="mkt-odd">@{pick.odd.toFixed(2)}</span><small>{pick.bookmaker}</small>{pickSelected && <span className="mkt-chk">&#10003;</span>}</div>
+  </>;
   return <div className="analysis-tab-stack free-recommendations">
     <p className="probability-explainer">{isFinal
       ? 'Partido finalizado · todas las opciones ya muestran su resultado oficial.'
       : 'Tu opción gratis · probabilidad de 60–70% con cuota real.'}</p>
     {!pick && <p className="free-empty">{preview?.unavailable || 'La opción gratuita aparecerá cuando exista una probabilidad de 60–70% con cuota real.'}</p>}
     <div className="markets-grid">
-      {pick && <article className={`mkt free-visible ${pick.outcome?.status === 'won' ? 'has-won' : pick.outcome?.status === 'lost' ? 'has-lost' : ''}`}><span className="mkt-name">{pick.name}</span><span className="mkt-validation is-validated">Tu recomendación gratis</span>{pick.outcome && <MarketOutcomeBadge outcome={pick.outcome} pendingLabel="Pendiente oficial" compact />}<div className="mkt-bar"><div className="mkt-fill" style={{ width: `${pick.probability}%` }} /></div><div className="mkt-nums"><strong className="mkt-pct">{pct(pick.probability)}</strong><span className="mkt-odd">@{pick.odd.toFixed(2)}</span><small>{pick.bookmaker}</small></div></article>}
+      {pick && (canSelect
+        ? <button type="button" className={`mkt free-visible ${pickSelected ? 'on' : ''}`} aria-pressed={pickSelected} onClick={(event) => { event.stopPropagation(); onToggle(pick); }} aria-label={`${pickSelected ? 'Quitar' : 'Añadir'} ${pick.name} ${pickSelected ? 'de' : 'a'} tu combinada`}>{visibleContent}</button>
+        : <article className={`mkt free-visible ${pick.outcome?.status === 'won' ? 'has-won' : pick.outcome?.status === 'lost' ? 'has-lost' : ''}`}>{visibleContent}</article>)}
       {(preview?.locked || []).map((item, index) => <button key={index} className="mkt free-hidden" onClick={openPlans} aria-label={`Ver opción Pro con probabilidad ${pct(item.probability)}`}>
         <span className="free-fake-label" aria-hidden="true">Recomendación exclusiva Pro</span><span className="free-eye"><Eye size={18} /> Ver</span><div className="mkt-bar"><div className="mkt-fill" style={{ width: `${item.probability}%` }} /></div><span className="mkt-pct">{pct(item.probability)}</span>
       </button>)}

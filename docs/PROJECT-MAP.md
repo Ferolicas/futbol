@@ -909,6 +909,11 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
   probability** y nunca incluyen ID, etiqueta, categoría, cuota, evidencia,
   frecuencias o veredicto. No se cachea la respuesta de un usuario para otro
   (`private, no-store`).
+- La opción Free visible incluye su ID canónico porque el selector de combinada
+  lo necesita. `FreeRecommendations` la presenta como botón seleccionable y
+  reutiliza los constructores de fútbol, béisbol, baloncesto y fútbol americano;
+  la cuota total y la probabilidad compuesta salen de esa opción real. Los IDs
+  de las opciones Pro ocultas continúan fuera del navegador.
 - GET de fixtures/detalle de los cuatro deportes aplica la proyección al
   usuario gratuito. POST de análisis, odds y simulación de torneos requieren Pro. La
   búsqueda de partidos está disponible para cualquier cuenta autenticada.

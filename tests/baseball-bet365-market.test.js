@@ -386,6 +386,17 @@ test('las combinadas descartan selecciones viejas o ajenas al catálogo Bet365 a
   assert.equal(custom.selections[0].odd, 1.95);
   assert.equal(custom.selections[0].bookmaker, 'Bet365');
 
+  const freeGame = {
+    ...game,
+    analysis: { access: 'free', freePreview: { selection: canonical } },
+  };
+  const freeCustom = buildCustomBaseballCombinada({
+    99: { 'total-8.5-under': canonical },
+  }, { 99: freeGame });
+  assert.equal(freeCustom.selections.length, 1);
+  assert.equal(freeCustom.selections[0].odd, 1.95);
+  assert.equal(freeCustom.selections[0].bookmaker, 'Bet365');
+
   // La Apuesta del Día exige fiabilidad demostrada: una selección sin muestra
   // detrás no se publica por muy alto que sea su porcentaje.
   assert.equal(buildBaseballApuestaDelDia([game], { minProb: 90 }), null);

@@ -2339,7 +2339,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
     const hasPlayers = ['scorers', 'shooters', 'shotsTotalists', 'assisters', 'foulers', 'bookers']
       .some((key) => Array.isArray(highlights?.[key]) && highlights[key].length > 0);
     return [
-      (data?.access === 'free' || markets.length > 0) && { key: 'markets', label: 'Mercados para tu combinada', count: markets.length, icon: Layers3, color: '#5ee6b1' },
+      (data?.access === 'free' || markets.length > 0) && { key: 'markets', label: 'Mercados para tu combinada', count: data?.access === 'free' ? (data.freePreview?.selection ? 1 : 0) : markets.length, icon: Layers3, color: '#5ee6b1' },
       (data?.access === 'free' || data?.calculatedProbabilities) && { key: 'stats', label: 'Estadísticas calculadas', icon: Scale, color: '#f97316' },
       (data?.access === 'free' || data?.calculatedProbabilities) && { key: 'probs', label: 'Frecuencias calculadas', icon: BarChart3, color: '#2dd4bf' },
       hasPlayers && { key: 'players', label: 'Jugadores destacados', icon: Sparkles, color: '#fbbf24' },
@@ -2397,7 +2397,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
               />
 
               {data.access === 'free' ? (resolvedAnalysisTab === 'markets'
-                ? <FreeRecommendations preview={data.freePreview} />
+                ? <FreeRecommendations preview={data.freePreview} selected={selMarkets} onToggle={(pick) => onToggleMarket(fixtureId, pick, matchName)} />
                 : <LockedAnalysis title={analysisTabs.find(tab => tab.key === resolvedAnalysisTab)?.label} />) : <>
               {resolvedAnalysisTab === 'markets' && markets.length > 0 && (
                 <section

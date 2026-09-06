@@ -172,7 +172,8 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   visible y siempre salta de inmediato al encabezado; no anima el recorrido
   porque las listas virtualizadas muy largas pueden interrumpirlo al remedirse.
 - Acceso Gratis: cada partido muestra una sola opción de 60–70% con cuota y
-  nombre de la casa. Las opciones Pro enseñan únicamente su porcentaje mientras
+  nombre de la casa. Antes del cierre se puede tocar para añadirla o quitarla de
+  la combinada, con el mismo borde activo y check de Pro. Las opciones Pro enseñan únicamente su porcentaje mientras
   el encuentro no haya terminado. Tras el final oficial se revelan con nombre,
   cuota, casa y sticker Ganada/Perdida; Pendiente oficial y Nula conservan el
   tratamiento neutro del resto de mercados.
