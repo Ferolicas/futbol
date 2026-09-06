@@ -1,3 +1,4 @@
+import { freeDailyResults } from '../../../../../lib/free-daily-results';
 import { listSportFixtures } from '../../../../../lib/multisport-analysis';
 import { getMultisportConfig, getSportCompetitions, isIsoDate } from '../../../../../lib/multisport-config';
 import { getCurrentUser } from '../../../../../lib/auth-pg';
@@ -39,6 +40,7 @@ export async function GET(request, { params }) {
       date,
       timeZone,
       fixtures: paidAccess ? fixtures : fixtures.map(game => ({ ...game, analysis: freeAnalysis(game.analysis, config.key) })),
+      ...(!paidAccess ? { freeDailyResults: freeDailyResults({ sport: config.key, fixtures }) } : {}),
       count: fixtures.length,
       competitions: competitions.map(({ id, key, name, country }) => ({ id, key, name, country })),
     });

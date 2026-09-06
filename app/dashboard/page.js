@@ -1,5 +1,5 @@
 'use client';
-import { FreeRecommendations, LockedAnalysis } from './components/FreeAccessProvider';
+import { useFreeAccess, FreeRecommendations, LockedAnalysis } from './components/FreeAccessProvider';
 
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -178,6 +178,8 @@ export function FootballDashboard({
   const [favorites, setFavorites] = useState([]);
   const [analyzed, setAnalyzed] = useState([]);
   const [analyzedOdds, setAnalyzedOdds] = useState({});
+  const { isFree } = useFreeAccess();
+  const [freeDailyResults, setFreeDailyResults] = useState([]);
   const [analyzedData, setAnalyzedData] = useState({});
   const [standings, setStandings] = useState({});
   const [sortBy] = useState('time');
@@ -453,6 +455,7 @@ export function FootballDashboard({
     setAnalyzed(data.analyzed || []);
     setAnalyzedOdds(data.analyzedOdds || {});
     setAnalyzedData(data.analyzedData || {});
+    setFreeDailyResults(data.freeDailyResults || []);
     setStandings(data.standings || {});
     if (data.error) console.warn('[fixtures] degradado:', data.error);
     setError(data.error ? 'Algunos datos podrían estar desactualizados.' : '');
@@ -1282,6 +1285,7 @@ export function FootballDashboard({
   }, [fixtures, hiddenSet, favoritesSet, leagueFilter]);
 
   const apuestaDelDia = useMemo(() => {
+    if (isFree) return { selections: freeDailyResults, combinedProbability: 0 };
     // Reglas:
     //  - Solo selecciones con probabilidad ≥75%, fiabilidad ≥90% y cuota real ≥1.20
     //  - SIN límite por partido: si un partido tiene 10 opciones que cumplen,
@@ -1353,7 +1357,7 @@ export function FootballDashboard({
       selections: all,
       combinedProbability: +combinedProbability.toFixed(2),
     };
-  }, [analyzedData, fixtureById]);
+  }, [analyzedData, fixtureById, isFree, freeDailyResults]);
 
   const customCombinada = useMemo(() => {
     const all = [];
@@ -1723,9 +1727,11 @@ export function FootballDashboard({
 /* ======================== MATCH CARD ======================== */
 
 function ApuestaSelectionRail({ selections, averageProbability, fixtures, liveStats }) {
+  const { isFree } = useFreeAccess();
   const [preferredView, setPreferredView] = useState('picks');
   const fixtureMap = useMemo(() => new Map((fixtures || []).map((fixture) => [String(fixture.fixture?.id), fixture])), [fixtures]);
   const decorated = useMemo(() => (selections || []).map((selection) => {
+    if (isFree) return selection;
     const game = fixtureMap.get(String(selection.fixtureId));
     const result = liveStats?.[selection.fixtureId] || liveStats?.[String(selection.fixtureId)] || null;
     return {
@@ -1734,10 +1740,10 @@ function ApuestaSelectionRail({ selections, averageProbability, fixtures, liveSt
       resultState: marketResultState({ sport: 'football', game, liveResult: result }),
       outcome: settleMarketSelection({ sport: 'football', selection, game, liveResult: result }),
     };
-  }), [fixtureMap, liveStats, selections]);
-  const picks = decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
-  const results = decorated.filter((selection) => selection.resultState.isLive || selection.resultState.isFinal);
-  const view = resolveDailyPickView(preferredView, picks.length, results.length);
+  }), [fixtureMap, liveStats, selections, isFree]);
+  const picks = isFree ? [] : decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
+  const results = decorated.filter((selection) => selection.resultState?.isFinal || (!isFree && selection.resultState?.isLive));
+  const view = isFree ? 'results' : resolveDailyPickView(preferredView, picks.length, results.length);
   const visible = view === 'results' ? results : picks;
   const visibleProbability = visible.length
     ? visible.reduce((sum, selection) => sum + Number(selection.rawProbability ?? selection.probability), 0) / visible.length
@@ -1773,7 +1779,7 @@ function ApuestaSelectionRail({ selections, averageProbability, fixtures, liveSt
           <div className="daily-pick-empty">
             <strong>{view === 'results' ? 'Aún no hay resultados' : 'Aún no hay recomendaciones'}</strong>
             <span>{view === 'results'
-              ? 'Los partidos en vivo y finalizados aparecerán aquí.'
+              ? (isFree ? 'Aquí aparecerán las recomendaciones cuando los partidos hayan finalizado.' : 'Los partidos en vivo y finalizados aparecerán aquí.')
               : 'Las opciones aparecerán cuando la casa publique líneas que cumplan los criterios.'}</span>
           </div>
         )}

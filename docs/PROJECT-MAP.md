@@ -923,14 +923,12 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - `scripts/announce-free-access.mjs` tiene modo seco por defecto, `--test EMAIL`
   para vista previa y `--send` para la campaña. Excluye usuarios con acceso
   vigente, admins y cuentas de prueba; relee el plan antes de cada envío.
-  `email_campaign_deliveries` e idempotencia Resend evitan duplicados. **El
-  propietario pidió revisar la vista previa antes de autorizar el envío masivo.**
+  `email_campaign_deliveries` e idempotencia Resend evitan duplicados. El propietario aprobó la vista previa v7 y autorizó el envío después del ajuste del modal.
 
 - El correo de lanzamiento usa fondo verde oscuro `#061d16` con gradiente
   constante y protección de texto para Gmail. El CTA es un enlace HTML con el degradado verde de `.btn-hero` de la landing
   con texto negro y altura de 112px, hacia `/dashboard`. No usar imagen para
-  el botón. Vista previa v7 enviada al propietario; envío
-  masivo pendiente de su revisión final.
+  el botón. Campaña `free-access-launch-2026-09-06` enviada: 74 aceptados, sin fallos de envío; primer seguimiento del proveedor: 68 entregados, 3 pendientes y 3 rebotados.
 - Gmail puede invertir el negro pese a `!important` y `text-fill-color`. El
   texto HTML del CTA usa `background-clip:text` y gradiente negro en el selector
   específico de Gmail; una captura local no equivale a verificar su app móvil.
@@ -973,3 +971,18 @@ Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 - En fútbol, los porcentajes bloqueados toman la misma versión del catálogo
   que la respuesta Pro (incluida su caché). PG aporta `_freeScored`; no mezclar
   el catálogo PG con otro snapshot Redis, porque sus porcentajes pueden variar.
+
+### Resultados de Apuesta del día para Gratis (2026-09-06)
+
+- Las tres API de jornadas publican `freeDailyResults` solo para cuentas Gratis.
+  `lib/free-daily-results.js` exige cierre oficial antes de leer el catálogo de
+  Apuesta del día y devuelve una lista permitida de campos de presentación y
+  liquidación. No incluye análisis, evidencia ni recomendaciones de partidos
+  próximos o en vivo. No recalcula probabilidades ni selecciona solo aciertos.
+- Fútbol conserva los criterios de su catálogo Pro; los otros tres deportes
+  reutilizan `buildBaseballApuestaDelDia`. La liquidación reutiliza
+  `market-settlement`, incluyendo pérdidas y resultados pendientes de datos oficiales.
+- Las tiras de los cuatro deportes mantienen Resultados activo en Gratis, incluso
+  cuando no hay finalizados. Los catálogos y la alternancia de vistas Pro siguen iguales.
+- Pruebas: `tests/free-daily-results.test.js` comprueba el límite de acceso,
+  probabilidades originales, aciertos/fallos y fuente Pro sin mutaciones.

@@ -1,3 +1,4 @@
+import { freeDailyResults } from '../../../../lib/free-daily-results';
 import { displayProbabilities } from '../../../../lib/display-probabilities';
 /**
  * GET /api/baseball/fixtures?date=YYYY-MM-DD&tz=<IANA>
@@ -211,7 +212,12 @@ export async function GET(request) {
     });
     enriched.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    return Response.json({ success: true, date, userTz, fetchedDates: fetchDates, fixtures: enriched, count: enriched.length });
+    const dailyResults = paidAccess ? null : freeDailyResults({ sport: 'baseball', fixtures: enriched.map(game => ({
+      ...game, analysis: analysisMap.get(toNum(game.id)) || null,
+    })) });
+    return Response.json({ success: true, date, userTz, fetchedDates: fetchDates, fixtures: enriched, count: enriched.length,
+      ...(!paidAccess ? { freeDailyResults: dailyResults } : {}),
+    });
   } catch (e) {
     console.error('[api/baseball/fixtures]', e.message);
     return jsonError(e);

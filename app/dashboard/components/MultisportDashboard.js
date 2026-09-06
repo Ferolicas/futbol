@@ -1,4 +1,5 @@
 'use client';
+import { useFreeAccess } from './FreeAccessProvider';
 import SharedSportCard from './SharedSportAnalysis';
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -170,12 +171,14 @@ function PickButton({ pick, selected, onToggle, outcome, resultState }) {
 }
 
 function MultisportDailyPickRail({ apuesta, games, slug }) {
+  const { isFree } = useFreeAccess();
   const [preferredView, setPreferredView] = useState('picks');
   const gamesById = useMemo(
     () => new Map((games || []).map((game) => [String(game.id), game])),
     [games],
   );
   const decorated = useMemo(() => (apuesta?.selections || []).map((selection) => {
+    if (isFree) return selection;
     const game = gamesById.get(String(selection.fixtureId));
     return {
       ...selection,
@@ -183,10 +186,10 @@ function MultisportDailyPickRail({ apuesta, games, slug }) {
       resultState: marketResultState({ sport: slug, game }),
       outcome: settleMarketSelection({ sport: slug, selection, game }),
     };
-  }), [apuesta?.selections, gamesById, slug]);
-  const picks = decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
-  const results = decorated.filter((selection) => selection.resultState.isLive || selection.resultState.isFinal);
-  const view = resolveDailyPickView(preferredView, picks.length, results.length);
+  }), [apuesta?.selections, gamesById, slug, isFree]);
+  const picks = isFree ? [] : decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
+  const results = decorated.filter((selection) => selection.resultState?.isFinal || (!isFree && selection.resultState?.isLive));
+  const view = isFree ? 'results' : resolveDailyPickView(preferredView, picks.length, results.length);
   const visible = view === 'results' ? results : picks;
   const average = visible.length
     ? visible.reduce((sum, selection) => sum + Number(selection.rawProbability ?? selection.probability), 0) / visible.length
@@ -222,7 +225,7 @@ function MultisportDailyPickRail({ apuesta, games, slug }) {
           <div className="daily-pick-empty">
             <strong>{view === 'results' ? 'Aún no hay resultados' : 'Aún no hay recomendaciones'}</strong>
             <span>{view === 'results'
-              ? 'Los partidos en vivo y finalizados aparecerán aquí.'
+              ? (isFree ? 'Aquí aparecerán las recomendaciones cuando los partidos hayan finalizado.' : 'Los partidos en vivo y finalizados aparecerán aquí.')
               : 'Las opciones aparecerán cuando Bet365 publique líneas que cumplan los criterios.'}</span>
           </div>
         )}
@@ -364,6 +367,7 @@ export default function MultisportDashboard({
     keepPreviousData: true,
     dedupingInterval: 15_000,
   });
+  const { isFree } = useFreeAccess();
   const currentData = data?.date === date ? data : null;
   const games = currentData?.fixtures || [];
   const competitions = currentData?.competitions || [];
@@ -453,9 +457,10 @@ export default function MultisportDashboard({
   const totalSelections = combination?.selections.length || 0;
   const pendingGames = useMemo(() => games.filter((game) => !game.isAnalyzed).length, [games]);
   const apuestaDelDia = useMemo(
-    () => buildBaseballApuestaDelDia(games.filter((game) => game.isAnalyzed && game.analysis))
+    () => isFree ? { selections: currentData?.freeDailyResults || [], combinedProbability: 0 }
+      : buildBaseballApuestaDelDia(games.filter((game) => game.isAnalyzed && game.analysis))
       || { selections: [], combinedProbability: 0 },
-    [games],
+    [games, isFree, currentData],
   );
 
   const toggleExpanded = useCallback((gameId) => {

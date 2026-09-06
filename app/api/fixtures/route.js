@@ -1,3 +1,4 @@
+import { freeDailyResults } from '../../../lib/free-daily-results';
 import { freeFootballList } from '../../../lib/free-access-server';
 import { getFixtures, getQuota, getCachedStandingsPositions } from '../../../lib/api-football';
 import { analysisDateKey, getAnalyzedMatchesFull, getAnalyzedFixtureIds } from '../../../lib/sanity-cache';
@@ -645,6 +646,7 @@ export async function GET(request) {
       analyzed: userAnalyzed,
       analyzedOdds: paidAccess ? analyzedOdds : {},
       analyzedData: paidAccess ? analyzedData : await freeFootballList(analyzedData),
+      ...(!paidAccess ? { freeDailyResults: freeDailyResults({ sport: 'football', fixtures, analyzedData, liveStats: initialLiveStats }) } : {}),
       standings: responseStandings,
       initialLiveStats,
       batchStatus: batchFlag ? {

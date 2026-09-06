@@ -1,4 +1,5 @@
 'use client';
+import { useFreeAccess } from '../components/FreeAccessProvider';
 import SharedSportCard from '../components/SharedSportAnalysis';
 
 /**
@@ -150,6 +151,7 @@ export function BaseballDashboard({
   // en el cliente (useEffect). Sin esto, el initializer corría en SSR → UTC y
   // se quedaba en UTC para siempre → el frontend mostraba todo en horario UTC.
   // Mismo patrón que el dashboard de fútbol.
+  const { isFree } = useFreeAccess();
   const [userTz, setUserTz] = useState('UTC');
   const [date, setDate] = useState(() => todayInTz('UTC'));
   useEffect(() => {
@@ -347,7 +349,9 @@ export function BaseballDashboard({
     [games, analyzed, hidden],
   );
 
-  const apuestaDelDia = useMemo(() => buildBaseballApuestaDelDia(analyzedGames), [analyzedGames]);
+  const apuestaDelDia = useMemo(() => isFree
+    ? { selections: fxData?.date === date ? (fxData.freeDailyResults || []) : [], combinedProbability: 0 }
+    : buildBaseballApuestaDelDia(analyzedGames), [analyzedGames, isFree, fxData, date]);
 
   const liveCount = games.filter(g => !hidden.includes(g.id) && isLive(effectiveGameStatus(g))).length;
   const upcomingCount = games.filter(g => !hidden.includes(g.id) && effectiveGameStatus(g) === 'NS').length;
@@ -860,9 +864,11 @@ function BaseballProbBlock({ markets }) {
 // SUB-COMPONENTES (apuesta del día, combinada en Favoritos, empty state)
 // =====================================================================
 function ApuestaDelDiaBlock({ apuesta, games }) {
+  const { isFree } = useFreeAccess();
   const [preferredView, setPreferredView] = useState('picks');
   const gamesById = useMemo(() => new Map((games || []).map((game) => [String(game.id), game])), [games]);
   const decorated = useMemo(() => (apuesta.selections || []).map((selection) => {
+    if (isFree) return selection;
     const game = gamesById.get(String(selection.fixtureId));
     return {
       ...selection,
@@ -870,10 +876,10 @@ function ApuestaDelDiaBlock({ apuesta, games }) {
       resultState: marketResultState({ sport: 'baseball', game }),
       outcome: settleMarketSelection({ sport: 'baseball', selection, game }),
     };
-  }), [apuesta.selections, gamesById]);
-  const picks = decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
-  const results = decorated.filter((selection) => selection.resultState.isLive || selection.resultState.isFinal);
-  const view = resolveDailyPickView(preferredView, picks.length, results.length);
+  }), [apuesta.selections, gamesById, isFree]);
+  const picks = isFree ? [] : decorated.filter((selection) => !selection.resultState.isLive && !selection.resultState.isFinal);
+  const results = decorated.filter((selection) => selection.resultState?.isFinal || (!isFree && selection.resultState?.isLive));
+  const view = isFree ? 'results' : resolveDailyPickView(preferredView, picks.length, results.length);
   const visible = view === 'results' ? results : picks;
   const visibleProbability = visible.length
     ? visible.reduce((sum, selection) => sum + Number(selection.rawProbability ?? selection.probability), 0) / visible.length
@@ -909,7 +915,7 @@ function ApuestaDelDiaBlock({ apuesta, games }) {
           <div className="daily-pick-empty">
             <strong>{view === 'results' ? 'Aún no hay resultados' : 'Aún no hay recomendaciones'}</strong>
             <span>{view === 'results'
-              ? 'Los partidos en vivo y finalizados aparecerán aquí.'
+              ? (isFree ? 'Aquí aparecerán las recomendaciones cuando los partidos hayan finalizado.' : 'Los partidos en vivo y finalizados aparecerán aquí.')
               : 'Las opciones aparecerán cuando Bet365 publique líneas que cumplan los criterios.'}</span>
           </div>
         )}
