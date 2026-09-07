@@ -175,3 +175,6 @@ compiled artifact:
 npm run build
 node dist/index.js
 ```
+
+El workflow de producción sí compila `dist/` y recarga los procesos realtime y
+heavy cuando cambia este directorio o el protocolo compartido.

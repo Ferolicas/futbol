@@ -1,6 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   poweredByHeader: false,
+  // Cada release se construye dentro de `.web-releases/`, debajo de otra copia
+  // del repositorio. Sin raíces explícitas Next 16 detecta el lockfile padre y
+  // anida `server.js`, rompiendo el runtime standalone esperado por PM2.
+  turbopack: {
+    root: process.cwd(),
+  },
+  outputFileTracingRoot: process.cwd(),
   // Standalone output: copia solo el bundle minimo necesario + node_modules
   // de dependencias usadas a .next/standalone/. Permite arrancar la app con
   // `node .next/standalone/server.js` en cualquier host (VPS, Docker, etc.)
