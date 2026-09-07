@@ -52,7 +52,7 @@ jobs:
             -r zap-report.html -J zap-report.json
       - name: Upload DAST evidence
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: zap-staging-${{ github.run_id }}
           path: |
