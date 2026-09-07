@@ -6,13 +6,13 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('el header queda reducido a chat, logo centrado y búsqueda Spotlight', () => {
+test('el header conserva avatar, logo centrado y búsqueda Spotlight', () => {
   const header = read('app/dashboard/components/DashboardHeader.js');
   const spotlight = read('app/dashboard/components/AppleSpotlightSearch.js');
   assert.match(header, /<BrandLogoMedia animated=\{false\} \/>/);
   assert.match(header, /<ChatWidget \/>/);
   assert.match(header, /<AppleSpotlightSearch \/>/);
-  assert.doesNotMatch(header, /SportToggle|dashboard-account|initialUser/);
+  assert.doesNotMatch(header, /SportToggle|initialUser/);
   assert.match(spotlight, /createPortal\(overlay, document\.body\)/);
   assert.match(spotlight, /selectedSports\.length\) params\.set\('sports'/);
   assert.match(spotlight, /Sin ningún deporte seleccionado, buscaremos en toda la app/);
@@ -50,6 +50,12 @@ test('el chat ocupa la pantalla y se minimiza hacia su botón con movimiento red
   assert.doesNotMatch(chat, /animationState|scaleX:\s*\.055|filter:\s*'blur\(3px\)'/);
   assert.match(chat, /useReducedMotion\(\)/);
   assert.match(chat, /aria-label="Minimizar chat"/);
+  assert.match(chat, /className="dashboard-avatar"/);
+  assert.match(chat, /aria-label="Menú de cuenta"/);
+  assert.match(chat, />Chat<\/span>/);
+  assert.match(chat, /Cerrar sesión/);
+  assert.match(chat, /supabase\?\.auth\.signOut\(\)/);
+  assert.doesNotMatch(chat, /className="dashboard-chat-trigger"/);
 });
 
 test('la búsqueda normaliza acentos, valida deportes y crea rutas correctas', async () => {

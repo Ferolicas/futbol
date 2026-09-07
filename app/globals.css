@@ -11281,6 +11281,11 @@ input:checked + .cb-mark::after {
   min-width: 0;
 }
 
+.dashboard-account-chat {
+  z-index: 3;
+  margin-right: auto;
+}
+
 .dashboard-account-trigger {
   display: flex;
   align-items: center;
@@ -11299,9 +11304,15 @@ input:checked + .cb-mark::after {
 }
 
 .dashboard-account-trigger:hover,
-.dashboard-account-trigger.is-open {
+.dashboard-account-trigger.is-open,
+.dashboard-account-trigger:focus-visible {
   border-color: rgba(255,255,255,.08);
   background: rgba(255,255,255,.04);
+  outline: none;
+}
+
+.dashboard-account-trigger:focus-visible {
+  box-shadow: 0 0 0 2px #040e14, 0 0 0 4px rgba(94,230,177,.72);
 }
 
 .dashboard-avatar {
@@ -11329,6 +11340,23 @@ input:checked + .cb-mark::after {
 }
 
 .dashboard-account-trigger > svg { flex: 0 0 auto; color: #74868f; }
+
+.dashboard-account-unread {
+  position: absolute;
+  top: 1px;
+  left: 27px;
+  display: grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border: 2px solid #061118;
+  border-radius: 999px;
+  color: #fff;
+  background: #ec3e56;
+  font-size: .5rem;
+  line-height: 1;
+}
 
 .dashboard-account-menu {
   position: absolute;
@@ -11391,7 +11419,7 @@ input:checked + .cb-mark::after {
   padding: 9px 10px;
   border: 1px solid transparent;
   border-radius: 11px;
-  color: #fda4af;
+  color: #dce9e6;
   background: transparent;
   font: inherit;
   font-size: .7rem;
@@ -11399,9 +11427,38 @@ input:checked + .cb-mark::after {
   cursor: pointer;
 }
 
-.dashboard-account-menu > button:hover {
+.dashboard-account-menu > button:hover,
+.dashboard-account-menu > button:focus-visible {
+  outline: none;
+}
+
+.dashboard-account-menu > button.is-chat:hover,
+.dashboard-account-menu > button.is-chat:focus-visible {
+  border-color: rgba(94,230,177,.18);
+  color: #83edc6;
+  background: rgba(16,185,129,.09);
+}
+
+.dashboard-account-menu > button.is-logout {
+  color: #fda4af;
+}
+
+.dashboard-account-menu > button.is-logout:hover,
+.dashboard-account-menu > button.is-logout:focus-visible {
   border-color: rgba(251,113,133,.15);
   background: rgba(190,24,93,.09);
+}
+
+.dashboard-account-menu > button:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+
+.dashboard-account-menu > button > span { flex: 1 1 auto; text-align: left; }
+.dashboard-account-menu > button > small {
+  color: #83edc6;
+  font-size: .57rem;
+  font-weight: 800;
 }
 
 .app {

@@ -82,8 +82,10 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   La capa se monta con un portal dentro de `.app`, no en `body`: buena parte de
   la hoja de estilos del dashboard cuelga de `.app …` y fuera de ahí la tarjeta
   perdería esos estilos.
-- Header autenticado: muestra `Chat` a la izquierda, el video-logo centrado al
-  54% del ancho y `Buscar` a la derecha. La búsqueda abre un Spotlight de pantalla
+- Header autenticado: muestra a la izquierda un avatar con la inicial y, cuando
+  hay anchura suficiente, el primer nombre. Su menú reúne `Chat` y `Cerrar sesión`;
+  en móvil conserva únicamente la inicial para no comprimir el logo ni las acciones.
+  El video-logo permanece centrado y `Buscar` queda a la derecha. La búsqueda abre un Spotlight de pantalla
   completa sobre el mismo fondo de la app. Abre directamente una única superficie
   con el campo, los cuatro filtros deportivos y la lista de resultados, sin montar
   un segundo panel al tocar el campo. Admite filtros
@@ -96,7 +98,7 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   Finalizados → Favoritos`. `En vivo` ocupa el centro, sobresale como círculo
   rojo de transmisión y mantiene un pulso leve; el dock deja espacio seguro a
   las acciones flotantes y al gesto inferior del sistema.
-- Chat: el acceso vive en el header y abre soporte en toda la pantalla. Al
+- Chat: el acceso vive dentro del menú del avatar del header y abre soporte en toda la pantalla. Al
   abrir, la pantalla opaca aparece directamente y el contenido entra de forma
   breve, sin miniaturas oscuras ni capas translúcidas intermedias. Al minimizar,
   la superficie se contrae hacia el propio botón con una curva tipo ventana de

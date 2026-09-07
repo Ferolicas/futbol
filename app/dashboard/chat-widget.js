@@ -4,25 +4,31 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   ArrowLeft,
   CheckCircle2,
+  ChevronDown,
   Globe2,
   Headphones,
+  LogOut,
   MessageCircle,
   Minimize2,
   Send,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../components/providers';
 import { usePusherEvent } from '../../lib/use-pusher';
 
 export default function ChatWidget() {
-  const { user } = useAuth();
+  const { user, supabase } = useAuth();
   const reduceMotion = useReducedMotion();
+  const accountRef = useRef(null);
   const triggerRef = useRef(null);
   const messagesEndRef = useRef(null);
   const pollRef = useRef(null);
   const openRef = useRef(false);
+  const accountMenuId = useId();
   const [mounted, setMounted] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [origin, setOrigin] = useState({ x: 24, y: 24 });
   const [view, setView] = useState('menu');
@@ -95,8 +101,58 @@ export default function ChatWidget() {
         y: rect.top + rect.height / 2,
       });
     }
+    setAccountOpen(false);
     setFeedback('');
     setIsOpen(true);
+  };
+
+  useEffect(() => {
+    if (!accountOpen) return undefined;
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      accountRef.current?.querySelector('[role="menuitem"]')?.focus();
+    });
+    const closeOnOutside = (event) => {
+      if (!accountRef.current?.contains(event.target)) setAccountOpen(false);
+    };
+    const handleKeys = (event) => {
+      if (event.key === 'Escape') {
+        setAccountOpen(false);
+        triggerRef.current?.focus();
+        return;
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      const items = [...(accountRef.current?.querySelectorAll('[role="menuitem"]') || [])];
+      if (!items.length) return;
+      event.preventDefault();
+      const current = items.indexOf(document.activeElement);
+      const next = event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? items.length - 1
+          : event.key === 'ArrowDown'
+            ? (current + 1) % items.length
+            : (current <= 0 ? items.length : current) - 1;
+      items[next]?.focus();
+    };
+
+    document.addEventListener('pointerdown', closeOnOutside);
+    document.addEventListener('keydown', handleKeys);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener('pointerdown', closeOnOutside);
+      document.removeEventListener('keydown', handleKeys);
+    };
+  }, [accountOpen]);
+
+  const signOut = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await supabase?.auth.signOut();
+    } finally {
+      window.location.assign('/');
+    }
   };
 
   useEffect(() => {
@@ -166,7 +222,9 @@ export default function ChatWidget() {
   };
 
   const fmtTime = (date) => new Date(date).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-  const firstName = user?.name?.split(' ')[0] || user?.displayName?.split(' ')[0] || 'Usuario';
+  const fullName = user?.name || user?.displayName || user?.email?.split('@')[0] || 'Usuario';
+  const firstName = fullName.trim().split(/\s+/)[0] || 'Usuario';
+  const initial = firstName.charAt(0).toLocaleUpperCase('es-ES');
 
   if (!user) return null;
 
@@ -310,18 +368,37 @@ export default function ChatWidget() {
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="dashboard-chat-trigger"
-        onClick={openChat}
-        aria-label="Abrir chat y soporte"
-        aria-expanded={isOpen}
-      >
-        <MessageCircle size={20} aria-hidden="true" />
-        <span>Chat</span>
-        {unread > 0 && <b>{unread > 9 ? '9+' : unread}</b>}
-      </button>
+      <div className="dashboard-account dashboard-account-chat" ref={accountRef}>
+        <button
+          ref={triggerRef}
+          type="button"
+          className={`dashboard-account-trigger ${accountOpen ? 'is-open' : ''}`}
+          onClick={() => setAccountOpen((open) => !open)}
+          aria-label={`Abrir menú de ${firstName}`}
+          aria-controls={accountMenuId}
+          aria-expanded={accountOpen}
+          aria-haspopup="menu"
+        >
+          <span className="dashboard-avatar" aria-hidden="true">{initial}</span>
+          <span className="dashboard-account-name">{firstName}</span>
+          <ChevronDown size={15} aria-hidden="true" />
+          {unread > 0 && <b className="dashboard-account-unread">{unread > 9 ? '9+' : unread}</b>}
+        </button>
+
+        {accountOpen && (
+          <div id={accountMenuId} className="dashboard-account-menu" role="menu" aria-label="Menú de cuenta">
+            <button type="button" className="dashboard-account-action is-chat" onClick={openChat} role="menuitem">
+              <MessageCircle size={17} aria-hidden="true" />
+              <span>Chat</span>
+              {unread > 0 && <small>{unread > 9 ? '9+' : unread} sin leer</small>}
+            </button>
+            <button type="button" className="dashboard-account-action is-logout" onClick={signOut} disabled={loggingOut} role="menuitem">
+              <LogOut size={17} aria-hidden="true" />
+              <span>{loggingOut ? 'Cerrando sesión…' : 'Cerrar sesión'}</span>
+            </button>
+          </div>
+        )}
+      </div>
       {mounted ? createPortal(panel, document.body) : null}
     </>
   );
