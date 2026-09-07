@@ -9,7 +9,11 @@
  *
  * Payload: {}
  */
-import { triggerEvent, redisGet, redisSet, KEYS, TTL, incrementApiCallCount, footballApiRequest } from '../../shared.js';
+import { redisGet, redisSet, KEYS, TTL, incrementApiCallCount, footballApiRequest } from '../../shared.js';
+import {
+  createFixtureDeltaState,
+  publishFixtureDeltas,
+} from '../../realtime/publishFixtureDeltas.js';
 
 const LIVE_STATUSES = ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'];
 
@@ -40,7 +44,8 @@ export async function runLiveCorners(_payload = {}) {
   }
 
   let apiCalls = 0;
-  const pusherUpdates = [];
+  const cornerUpdates = [];
+  const deltaState = createFixtureDeltaState(liveData);
 
   await Promise.all(liveFixtureIds.map(async (fid) => {
     const stats = await apiFetch(`/fixtures/statistics?fixture=${fid}`);
@@ -66,20 +71,23 @@ export async function runLiveCorners(_payload = {}) {
     const prevC = existing?.corners || {};
     const hCorners = Math.max(getVal(homeStats, 'Corner Kicks'), prevC.home ?? 0);
     const aCorners = Math.max(getVal(awayStats, 'Corner Kicks'), prevC.away ?? 0);
-    const corners = { home: hCorners, away: aCorners, total: hCorners + aCorners };
+    const corners = { home: hCorners, away: aCorners, total: hCorners + aCorners, isReal: true };
+
+    if (prevC.home === corners.home && prevC.away === corners.away) return;
 
     liveData[fid] = { ...existing, corners };
-    pusherUpdates.push({ fixtureId: fid, corners });
+    cornerUpdates.push({ fixtureId: fid, corners });
   }));
 
-  if (pusherUpdates.length > 0) {
+  if (cornerUpdates.length > 0) {
     await redisSet(KEYS.liveStats(today), liveData, TTL.liveStats);
-    await triggerEvent('live-scores', 'corners-update', {
-      date: today, matches: pusherUpdates, timestamp: new Date().toISOString(),
+    await publishFixtureDeltas(cornerUpdates, deltaState, {
+      date: today,
+      source: 'corners',
     });
   }
 
   if (apiCalls > 0) await incrementApiCallCount(apiCalls); // NT7: 1 INCRBY en vez de N INCR
 
-  return { ok: true, checkedMatches: liveFixtureIds.length, updatedMatches: pusherUpdates.length, apiCalls };
+  return { ok: true, checkedMatches: liveFixtureIds.length, updatedMatches: cornerUpdates.length, apiCalls };
 }

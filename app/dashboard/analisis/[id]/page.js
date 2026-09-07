@@ -11,7 +11,11 @@ import {
 } from 'lucide-react';
 import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../../../lib/bookmakers';
 import { getAnalysisCache, setAnalysisCache } from '../../../../lib/analysis-cache';
-import { useLiveStats } from '../../live-stats-context';
+import {
+  mergeLiveStats,
+  setFixtureLiveStats,
+  useFixtureLiveStats,
+} from '../../realtime/fixture-store';
 import { useSelectedMarkets } from '../../selected-markets-context';
 import { getUserTz, fmtTimeInTz, todayInTz } from '../../../../lib/timezone';
 import { useWorkerSocketState } from '../../../../hooks/useWorkerSocket';
@@ -90,10 +94,9 @@ function PaidAnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, on
   const [refreshingLineups, setRefreshingLineups] = useState(false);
   const [refreshingInjuries, setRefreshingInjuries] = useState(false);
   const [userCountry, setUserCountry] = useState('default');
-  const { liveStats: allLiveStats, setLiveStats, isPopulated } = useLiveStats();
-  const liveStats = allLiveStats[fixtureId];
+  const liveStats = useFixtureLiveStats(fixtureId);
   // F1: estado del WebSocket. El marcador/stats en vivo llegan por WS vía el
-  // contexto live-stats (suscripción global a 'live-scores'). El poll HTTP de 15s
+  // store granular (suscripción exclusiva a este fixture). El poll HTTP de 15s
   // solo se usa como FALLBACK cuando el WS NO está conectado.
   const wsState = useWorkerSocketState();
   const [, tickLive] = useState(0);
@@ -147,7 +150,7 @@ function PaidAnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, on
       setProbabilities(data.analysis.calculatedProbabilities || null);
       setCombinada(data.analysis.combinada || null);
       if (data.resultStats) {
-        setLiveStats(prev => ({ ...prev, [fixtureId]: data.resultStats }));
+        setFixtureLiveStats(fixtureId, data.resultStats);
       }
       // Refresh the hand-off cache so a quick back-and-forth uses the fresher data
       setAnalysisCache(fixtureId, { analysis: data.analysis });
@@ -156,7 +159,7 @@ function PaidAnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, on
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [fixtureId, setLiveStats]);
+  }, [fixtureId]);
 
   // On mount: if we hydrated from the hand-off cache, fetch silently in the
   // background so the user sees instant content. Otherwise fetch with spinner.
@@ -166,7 +169,7 @@ function PaidAnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, on
 
   useEffect(() => {
     if (!analysis) return;
-    const existing = allLiveStats[fixtureId];
+    const existing = liveStats;
     // Un cierre durable también es una respuesta completa cuando el proveedor
     // solo cubre marcador/goles. No repetir peticiones buscando mercados que no
     // existen para esa competición.
@@ -180,7 +183,7 @@ function PaidAnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, on
           const refreshRes = await fetch('/api/refresh-live');
           const refreshData = await refreshRes.json();
           if (refreshData.liveStats && Object.keys(refreshData.liveStats).length > 0) {
-            setLiveStats(prev => ({ ...prev, ...refreshData.liveStats }));
+            mergeLiveStats(refreshData.liveStats);
             return;
           }
         }
@@ -188,7 +191,7 @@ function PaidAnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, on
         const data = await res.json();
         const matchStats = data.liveStats?.find(s => Number(s.fixtureId) === Number(fixtureId));
         if (matchStats) {
-          setLiveStats(prev => ({ ...prev, [fixtureId]: matchStats }));
+          setFixtureLiveStats(fixtureId, matchStats);
           return;
         }
         const fetchRes = await fetch(`/api/match/${fixtureId}`, {
@@ -198,7 +201,7 @@ function PaidAnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, on
         });
         const fetchData = await fetchRes.json();
         if (fetchData.stats) {
-          setLiveStats(prev => ({ ...prev, [fixtureId]: fetchData.stats }));
+          setFixtureLiveStats(fixtureId, fetchData.stats);
         }
       } catch {}
     };
@@ -207,8 +210,8 @@ function PaidAnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, on
   }, [fixtureId, !!analysis]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // F1: poll de stats (córners/tarjetas/scorers) cada 15s SOLO COMO FALLBACK
-  // cuando el WebSocket NO está conectado. Con el WS conectado, el contexto
-  // live-stats recibe los updates en tiempo real (a los ~ms del tick de 20s del
+  // cuando el WebSocket NO está conectado. Con el WS conectado, el store
+  // granular recibe los updates en tiempo real (a los ~ms del tick de 20s del
   // worker) y este poll queda desactivado → 0 tráfico redundante.
   useEffect(() => {
     const liveStatuses = ['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'INT'];
@@ -221,7 +224,7 @@ function PaidAnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, on
         const data = await res.json();
         const matchStats = data.liveStats?.find(s => Number(s.fixtureId) === Number(fixtureId));
         if (matchStats) {
-          setLiveStats(prev => ({ ...prev, [fixtureId]: matchStats }));
+          setFixtureLiveStats(fixtureId, matchStats);
         }
       } catch {}
     };
@@ -229,17 +232,16 @@ function PaidAnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, on
     pollLiveStats(); // primer fetch inmediato al perder el WS
     const intervalId = setInterval(pollLiveStats, 15000);
     return () => clearInterval(intervalId);
-  }, [fixtureId, liveStatusShort, setLiveStats, wsState]);
+  }, [fixtureId, liveStatusShort, wsState]);
 
   useEffect(() => {
-    const stats = allLiveStats[fixtureId];
-    if (!stats?.status) return;
+    if (!liveStats?.status) return;
     setAnalysis(prev => prev ? ({
       ...prev,
-      status: stats.status,
-      goals: stats.goals || prev.goals,
+      status: liveStats.status,
+      goals: liveStats.goals || prev.goals,
     }) : prev);
-  }, [allLiveStats[fixtureId]?.status?.short, allLiveStats[fixtureId]?.goals?.home, allLiveStats[fixtureId]?.goals?.away]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [liveStats?.status?.short, liveStats?.goals?.home, liveStats?.goals?.away]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [lineupsError, setLineupsError] = useState('');
 

@@ -10,7 +10,8 @@ export const dynamic = 'force-dynamic';
 
 const IMMUTABLE = 'public, max-age=2592000, s-maxage=2592000, immutable';
 
-export async function GET(_req, { params }) {
+export async function GET(_req, props) {
+  const params = await props.params;
   const id = String(params?.id || '').replace(/[^0-9]/g, '');
   if (!id) return new Response(null, { status: 400 });
 

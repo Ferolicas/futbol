@@ -196,9 +196,11 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
 - El modal de análisis no intercepta ni agrupa gestos: conserva la inercia y la
   respuesta nativas de cada navegador.
 - Las listas de jornadas usan ventana de DOM también en iOS y mantienen solo
-  las tarjetas próximas al viewport. Los marcadores WebSocket se aplican en
-  memoria; las lecturas completas necesarias se dispersan en el tiempo y el
-  sondeo de respaldo solo funciona cuando se pierde realtime.
+  las tarjetas próximas al viewport. Fútbol recibe deltas WebSocket con secuencia
+  por fixture y cada tarjeta se suscribe solo a su entrada mediante
+  `useSyncExternalStore`; un cambio no vuelve a renderizar las demás tarjetas.
+  Las lecturas completas necesarias se dispersan en el tiempo y el sondeo de
+  respaldo solo funciona cuando se pierde realtime.
 
 ## Responsive
 

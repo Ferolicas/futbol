@@ -2,7 +2,7 @@
 import { useFreeAccess, FreeRecommendations, LockedAnalysis } from './components/FreeAccessProvider';
 
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import useSWR from 'swr';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
@@ -35,7 +35,14 @@ import {
 } from '../../lib/recommendation-policy';
 import { setAnalysisCache } from '../../lib/analysis-cache';
 import { fetcher } from '../../lib/fetcher';
-import { useLiveStats } from './live-stats-context';
+import {
+  getFixtureLiveStats,
+  getLiveStatsSnapshot,
+  mergeLiveStats as mergeFixtureLiveStats,
+  replaceLiveStats,
+  useFixtureLiveStats,
+  useLiveStatsSnapshot,
+} from './realtime/fixture-store';
 import { useSelectedMarkets } from './selected-markets-context';
 import {
   DashboardDateStrip,
@@ -111,9 +118,11 @@ const DASHBOARD_SPORT_KEYS = new Set(['football', 'baseball', 'basketball', 'ame
 // instantaneo + revalidacion en background es lo mismo que daba _dashCache,
 // sin tener que sincronizar a mano hidden/favorites/fixtures cada vez.
 
-export default function Dashboard({ searchParams } = {}) {
-  const requestedSport = DASHBOARD_SPORT_KEYS.has(searchParams?.sport)
-    ? searchParams.sport
+export default function Dashboard() {
+  const searchParams = useSearchParams();
+  const sportParam = searchParams.get('sport');
+  const requestedSport = DASHBOARD_SPORT_KEYS.has(sportParam)
+    ? sportParam
     : 'football';
   const [activeSport, setActiveSport] = useState(requestedSport);
   const [sharedDate, setSharedDate] = useState(null);
@@ -196,8 +205,6 @@ export function FootballDashboard({
   // Multiple saved combinadas
   const [savedCombinadas, setSavedCombinadas] = useState([]);
   const [savingComb, setSavingComb] = useState(false);
-  // Live match stats — shared context: dashboard + detail page use the same data
-  const { liveStats, setLiveStats, isPopulated } = useLiveStats();
   // El WebSocket es la fuente primaria; SWR y el snapshot Redis solo actúan
   // como respaldo conservador si la conexión cae o deja de entregar eventos.
   const wsState = useWorkerSocketState();
@@ -206,8 +213,6 @@ export function FootballDashboard({
   const [analysisModalId, setAnalysisModalId] = useState(null);
   // Track Pusher activity (for debugging/diagnostics)
   const pusherLastUpdate = useRef(0);
-  // Ref to always have the latest liveStats without adding it as a loadFixtures dependency
-  const liveStatsRef = useRef(liveStats);
   // Senala que la proxima carga de fixtures debe REEMPLAZAR los live stats
   // (cambio de fecha) en vez de mergearlos (poll/focus de la misma fecha).
   const clearLiveOnNextLoadRef = useRef(false);
@@ -304,13 +309,8 @@ export function FootballDashboard({
       });
   }, []);
 
-  // liveStats persiste a traves de SPA-navigation via su Context propio
-  // (live-stats-context.js), no requiere reseed manual aqui.
-
-  // Keep liveStatsRef in sync (used in loadFixtures to avoid stale closure)
-  useEffect(() => {
-    liveStatsRef.current = liveStats;
-  }, [liveStats]);
+  // El store externo persiste durante la navegación SPA y cada tarjeta se
+  // suscribe únicamente a su fixture.
 
   // Apply live data to fixtures — NEVER downgrade a finished match or go backwards in time
   const applyLiveUpdate = useCallback((prev, freshMatches) => {
@@ -431,7 +431,7 @@ export function FootballDashboard({
     // Apply current liveStats on top of server data — prevents overwriting a FT
     // status that refreshLiveData already fixed in React state when the server
     // Redis cache hasn't caught up yet.
-    const currentLive = liveStatsRef.current;
+    const currentLive = getLiveStatsSnapshot();
     const FT_SET = new Set(['FT', 'AET', 'PEN']);
     const fxWithLiveOverride = Object.keys(currentLive).length > 0
       ? fx.map(f => {
@@ -460,63 +460,19 @@ export function FootballDashboard({
       ? Date.now() - new Date(data.batchStatus.startedAt).getTime() : 0;
     setBatchRunning(!!(data.batchStatus?.started && !data.batchStatus?.completed && batchAge < 600000));
 
-    // Populate initial live stats from /api/fixtures response (corners, cards, scorers)
+    // Seed/reconcile del store granular desde el snapshot HTTP de respaldo.
     if (data.initialLiveStats && Object.keys(data.initialLiveStats).length > 0) {
       if (clearLiveStats) {
-        // Date change: replace entirely with server data (old date data is irrelevant)
-        setLiveStats(data.initialLiveStats);
+        replaceLiveStats(data.initialLiveStats);
       } else {
-        // Same date refresh: merge carefully, never downgrade FT stats
-        const FT = ['FT', 'AET', 'PEN'];
-        setLiveStats(prev => {
-          const next = { ...prev };
-          for (const [fid, fresh] of Object.entries(data.initialLiveStats)) {
-            const existing = next[fid];
-            if (existing && FT.includes(existing.status?.short)) {
-              next[fid] = {
-                ...existing,
-                corners: isCoveredCounter(fresh.corners) ? fresh.corners : existing.corners,
-                yellowCards: isCoveredCounter(fresh.yellowCards) ? fresh.yellowCards : existing.yellowCards,
-                redCards: isCoveredCounter(fresh.redCards) ? fresh.redCards : existing.redCards,
-                goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : existing.goalScorers,
-                cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : existing.cardEvents,
-                missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : existing.missedPenalties,
-              };
-            } else if (!existing) {
-              // Primera vez que vemos el partido (seed inicial) → snapshot del server.
-              next[fid] = fresh;
-            } else {
-              // Partido EN VIVO con datos ya presentes (normalmente del WS, que es
-              // la fuente de verdad en vivo y va por delante de este poll de 60s).
-              // NO reemplazar en bloque: eso reseteaba los córners que el WS ya
-              // avanzó (bug "frontend 0-0 / córner no actualiza"). El poll solo
-              // rellena huecos y los córners NUNCA bajan (máximo por-lado).
-              const ph = isCoveredCounter(existing.corners) ? existing.corners.home : 0;
-              const pa = isCoveredCounter(existing.corners) ? existing.corners.away : 0;
-              const fh = isCoveredCounter(fresh.corners) ? fresh.corners.home : 0;
-              const fa = isCoveredCounter(fresh.corners) ? fresh.corners.away : 0;
-              const ch = Math.max(ph, fh), ca = Math.max(pa, fa);
-              next[fid] = {
-                ...fresh,
-                ...existing, // el WS (existing) gana sobre el snapshot del poll
-                corners: isCoveredCounter(existing.corners) || isCoveredCounter(fresh.corners)
-                  ? { home: ch, away: ca, total: ch + ca, isReal: true }
-                  : (existing.corners || fresh.corners),
-                goalScorers: existing.goalScorers?.length > 0 ? existing.goalScorers : (fresh.goalScorers || []),
-                cardEvents: existing.cardEvents?.length > 0 ? existing.cardEvents : (fresh.cardEvents || []),
-                missedPenalties: existing.missedPenalties?.length > 0 ? existing.missedPenalties : (fresh.missedPenalties || []),
-              };
-            }
-          }
-          return next;
-        });
+        mergeFixtureLiveStats(data.initialLiveStats);
       }
     } else if (clearLiveStats) {
-      setLiveStats({});
+      replaceLiveStats({});
     }
 
     setLoading(false);
-  }, [setLiveStats]);
+  }, []);
 
   // Mantener el puente onSuccess→applyFixturesData siempre fresco (evita TDZ:
   // el onSuccess de SWR esta declarado antes que applyFixturesData).
@@ -554,66 +510,17 @@ export function FootballDashboard({
         if (!res.ok) return;
         const data = await res.json();
         if (dateRef.current !== sentDate) return;
-        const FT = ['FT', 'AET', 'PEN'];
-
-        // Helper: merge live stats into state
-        const mergeLiveStats = (statsObj) => {
+        const mergeFallbackStats = (statsObj) => {
           if (!statsObj || typeof statsObj !== 'object') return;
-          setLiveStats(prev => {
-            const next = { ...prev };
-            let changed = false;
-            for (const [fid, fresh] of Object.entries(statsObj)) {
-              const existing = next[fid];
-              let candidate;
-              // If server says FT, always accept — this fixes stale "live" entries
-              if (FT.includes(fresh.status?.short)) {
-                candidate = {
-                  ...(existing || {}),
-                  ...fresh,
-                  corners: isCoveredCounter(fresh.corners) ? fresh.corners : (existing?.corners || fresh.corners),
-                  goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : (existing?.goalScorers || []),
-                  cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : (existing?.cardEvents || []),
-                  missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : (existing?.missedPenalties || []),
-                };
-              } else if (existing && FT.includes(existing.status?.short)) {
-                // Existing is FT — only upgrade stats, never downgrade status
-                candidate = {
-                  ...existing,
-                  corners: isCoveredCounter(fresh.corners) ? fresh.corners : existing.corners,
-                  yellowCards: isCoveredCounter(fresh.yellowCards) ? fresh.yellowCards : existing.yellowCards,
-                  redCards: isCoveredCounter(fresh.redCards) ? fresh.redCards : existing.redCards,
-                  goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : existing.goalScorers,
-                  cardEvents: fresh.cardEvents?.length > 0 ? fresh.cardEvents : existing.cardEvents,
-                  missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : existing.missedPenalties,
-                };
-              } else if (existing && isLive(existing.status?.short) && isPendingStatus(fresh.status?.short)) {
-                // El snapshot de detalle puede parpadear NS mientras el feed
-                // global sigue live. Conservar la evidencia ya observada.
-                candidate = existing;
-              } else {
-                candidate = {
-                  ...(existing || {}),
-                  ...fresh,
-                  corners: isCoveredCounter(fresh.corners) ? fresh.corners : (existing?.corners || fresh.corners),
-                  goalScorers: fresh.goalScorers?.length > 0 ? fresh.goalScorers : (existing?.goalScorers || []),
-                  missedPenalties: fresh.missedPenalties?.length > 0 ? fresh.missedPenalties : (existing?.missedPenalties || []),
-                };
-              }
-              if (JSON.stringify(candidate) !== JSON.stringify(existing)) {
-                next[fid] = candidate;
-                changed = true;
-              }
-            }
-            return changed ? next : prev;
-          });
+          mergeFixtureLiveStats(statsObj);
           setFixtures(prev => applyLiveUpdate(prev, Object.values(statsObj)));
         };
 
         if (data.liveStats && typeof data.liveStats === 'object') {
-          mergeLiveStats(data.liveStats);
+          mergeFallbackStats(data.liveStats);
         }
         if (data.viewDateLiveStats && typeof data.viewDateLiveStats === 'object') {
-          mergeLiveStats(data.viewDateLiveStats);
+          mergeFallbackStats(data.viewDateLiveStats);
         }
       } catch {}
     })();
@@ -806,9 +713,21 @@ export function FootballDashboard({
   // Las notificaciones se manejan exclusivamente via toggleFavorite. El endpoint
   // /api/push/test sigue disponible para diagnóstico via consola si hace falta.
 
-  // === PUSHER REAL-TIME EVENTS ===
-  // Only subscribe to Pusher for today's date — past dates are historical/fixed
-  // Live scores: update fixture list in real-time (liveStats handled by LiveStatsProvider)
+  // === REALTIME EVENTS ===
+  // El store aplica stats a la tarjeta concreta. Este listener solo toca la
+  // lista padre cuando cambian status/marcador, porque esos campos afectan a
+  // filtros, orden y cierres durables.
+  usePusherEvent(isViewingToday ? 'live-scores' : null, 'fixture-delta', useCallback((delta) => {
+    if (!delta?.fixtureId || !delta?.changes) return;
+    pusherLastUpdate.current = Date.now();
+    setFixtures(prev => applyLiveUpdate(prev, [{ fixtureId: delta.fixtureId, ...delta.changes }]));
+    if (isFinished(delta.changes.status?.short)) {
+      scheduleFixturesRefresh(5_000, 45_000);
+    }
+  }, [applyLiveUpdate, scheduleFixturesRefresh]));
+
+  // Compatibilidad durante el despliegue mientras el worker anterior aún
+  // publica snapshots v1.
   usePusherEvent(isViewingToday ? 'live-scores' : null, 'update', useCallback((data) => {
     if (!data?.matches) return;
     pusherLastUpdate.current = Date.now();
@@ -852,7 +771,7 @@ export function FootballDashboard({
     });
   }, []));
 
-  // corners-update handled by LiveStatsProvider
+  // fixture-delta/corners-update los consume LiveStatsBridge.
 
   // Analysis batch: reload when complete (via Pusher, only for today)
   usePusherEvent(isViewingToday ? 'analysis' : null, 'batch-complete', useCallback((data) => {
@@ -1283,9 +1202,9 @@ export function FootballDashboard({
       sport: 'football',
       game,
       analysis: analyzedData[game.fixture?.id],
-      liveResult: liveStats[game.fixture?.id] || null,
+      liveResult: getFixtureLiveStats(game.fixture?.id),
     })).filter((selection) => selection && !selection.resultState.isFinal);
-  }, [analyzedData, fixtures, isFree, liveStats]);
+  }, [analyzedData, fixtures, isFree]);
 
   const apuestaDelDia = useMemo(() => {
     if (isFree) return { selections: [...freeApuestaRecommendations, ...freeDailyResults], combinedProbability: 0 };
@@ -1447,7 +1366,6 @@ export function FootballDashboard({
       data={analyzedData[m.fixture.id]}
       odds={analyzedOdds[m.fixture.id]}
       standings={standings}
-      liveStats={liveStats[m.fixture.id]}
       isExpanded={expandedMatch === m.fixture.id}
       onToggle={toggleExpandedMatch}
       onStep={stepExpandedMatch}
@@ -1468,7 +1386,6 @@ export function FootballDashboard({
       odds={analyzedOdds[m.fixture.id]}
       standings={standings}
       matchData={analyzedData[m.fixture.id]}
-      liveStats={liveStats[m.fixture.id]}
       onSelect={toggleSelect}
       onHide={doHide}
       onFavorite={toggleFavorite}
@@ -1523,7 +1440,6 @@ export function FootballDashboard({
             selections={apuestaDelDia?.selections || []}
             averageProbability={apuestaDelDia?.combinedProbability || 0}
             fixtures={fixtures}
-            liveStats={liveStats}
           />
         )}
 
@@ -1689,12 +1605,12 @@ export function FootballDashboard({
 
 /* ======================== MATCH CARD ======================== */
 
-function ApuestaSelectionRail({ selections, averageProbability, fixtures, liveStats }) {
+function ApuestaSelectionRail({ selections, averageProbability, fixtures }) {
   const { isFree } = useFreeAccess();
+  const liveStats = useLiveStatsSnapshot();
   const [preferredView, setPreferredView] = useState('picks');
   const fixtureMap = useMemo(() => new Map((fixtures || []).map((fixture) => [String(fixture.fixture?.id), fixture])), [fixtures]);
   const decorated = useMemo(() => (selections || []).map((selection) => {
-    if (selection.resultState && selection.outcome) return selection;
     const game = fixtureMap.get(String(selection.fixtureId));
     const result = liveStats?.[selection.fixtureId] || liveStats?.[String(selection.fixtureId)] || null;
     return {
@@ -2037,7 +1953,8 @@ export function MatchHeadCard({ match, odds, data, standings, liveStats, userTz,
   );
 }
 
-const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings, matchData, liveStats, onSelect, onHide, onFavorite, onView, userTz }) {
+const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFavorite, odds, standings, matchData, onSelect, onHide, onFavorite, onView, userTz }) {
+  const liveStats = useFixtureLiveStats(match.fixture.id);
   const live = isLive(match.fixture.status.short);
   const finished = isFinished(match.fixture.status.short);
 
@@ -2263,7 +2180,8 @@ export function MatchFullscreen({ head, body, onStep }) {
   );
 }
 
-const AccordionCard = memo(function AccordionCard({ match, data, odds, standings, liveStats, isExpanded, onToggle, onStep, selMarkets, onToggleMarket, onViewFull, onRemove, isFavorite, onFavorite, userTz }) {
+const AccordionCard = memo(function AccordionCard({ match, data, odds, standings, isExpanded, onToggle, onStep, selMarkets, onToggleMarket, onViewFull, onRemove, isFavorite, onFavorite, userTz }) {
+  const liveStats = useFixtureLiveStats(match.fixture.id);
   const [activeAnalysisTab, setActiveAnalysisTab] = useState('markets');
   const selCount = Object.keys(selMarkets).length;
   const fixtureId = match.fixture.id;

@@ -21,7 +21,8 @@ const {
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-export async function GET(request, { params }) {
+export async function GET(request, props) {
+  const params = await props.params;
   const { id } = params;
   const { searchParams } = new URL(request.url);
   const clientDate = searchParams.get('date');
@@ -185,7 +186,8 @@ export async function GET(request, { params }) {
 }
 
 // POST: refresh lineups or injuries
-export async function POST(request, { params }) {
+export async function POST(request, props) {
+  const params = await props.params;
   const { id } = params;
   // R8 FIX: las acciones analyze/refresh-stats/refresh-lineups gastan cuota
   // API-Football → exigir sesión + plan activo o admin (igual que baseball).

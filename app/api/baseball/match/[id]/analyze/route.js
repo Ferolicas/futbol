@@ -8,7 +8,8 @@ import { jsonError } from '../../../../../../lib/api-error';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
-export async function POST(_request, { params }) {
+export async function POST(_request, props) {
+  const params = await props.params;
   try {
     const user = await getCurrentUser();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
@@ -20,7 +21,7 @@ export async function POST(_request, { params }) {
     for (const offset of [-1, 0, 1]) {
       const value = new Date(`${today}T12:00:00Z`);
       value.setUTCDate(value.getUTCDate() + offset);
-      games.push(...await getSportGamesByDate('baseball', value.toISOString().slice(0, 10)).catch(() => []));
+      games.push(...(await getSportGamesByDate('baseball', value.toISOString().slice(0, 10)).catch(() => [])));
     }
     const game = games.find((item) => String(item.id) === fixtureId);
     if (!game) return Response.json({ error: 'Game not found in MLB Stats API (±1 day)' }, { status: 404 });

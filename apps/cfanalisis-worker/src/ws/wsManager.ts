@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Gestor de WebSocket nativo — reemplaza Pusher.
  *

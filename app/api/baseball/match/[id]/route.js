@@ -11,7 +11,8 @@ import { MULTISPORT_CACHE_VERSION } from '../../../../../lib/multisport-analysis
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(_request, { params }) {
+export async function GET(_request, props) {
+  const params = await props.params;
   try {
     // R13 FIX: análisis premium de baseball → exigir sesión + plan activo/admin
     // (consistente con la lista /api/baseball/fixtures y con fútbol).

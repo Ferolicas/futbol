@@ -6,12 +6,13 @@ CF Análisis es una aplicación móvil de análisis de fútbol, béisbol, balonc
 
 ## Stack real
 
-- Next.js 14 App Router, React 18 y JavaScript.
+- Next.js 16.3 App Router, React 19.2 y JavaScript.
 - PostgreSQL nativo mediante `pg` y el adaptador `lib/db.js`.
 - Autenticación propia: bcrypt + `auth_sessions` + cookie JWT `cf_session`.
 - Redis nativo mediante ioredis.
 - Stripe fuera de Colombia; Mercado Pago para Colombia.
-- Realtime y tareas pesadas en `apps/cfanalisis-worker`.
+- Realtime y tareas pesadas en `apps/cfanalisis-worker`; fútbol publica deltas
+  tipados por fixture mediante `packages/realtime-protocol`.
 - Gestor del repositorio: npm (`package-lock.json`).
 
 ## Comandos
@@ -53,4 +54,6 @@ toques nada”, “no subir” o equivalente.
 - En local, PostgreSQL y Redis del VPS requieren túneles a `127.0.0.1:16432` y `127.0.0.1:16379`.
 - Stripe y Mercado Pago locales usan credenciales LIVE salvo que se reemplacen expresamente.
 - React Strict Mode/Fast Refresh puede remontar efectos: toda apertura automática de checkout debe deduplicarse.
+- Next.js 16 requiere Node.js >=20.9 y sus APIs de request (`cookies`, `params`,
+  `searchParams`) son asíncronas en componentes y rutas de servidor.
 - Caddy y el standalone dependen de que `public/` permanezca íntegro; no editar producción manualmente.

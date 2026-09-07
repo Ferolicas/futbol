@@ -4,7 +4,8 @@ import PaymentStatusClient from './payment-status-client';
 
 export const metadata = { title: 'Estado del pago - CF Analisis' };
 
-export default async function PaymentStatusPage({ searchParams }) {
+export default async function PaymentStatusPage(props) {
+  const searchParams = await props.searchParams;
   const user = await getCurrentUser();
   if (!user) redirect('/sign-in');
   const attemptId = typeof searchParams?.attempt === 'string' ? searchParams.attempt : '';

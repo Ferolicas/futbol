@@ -6,7 +6,8 @@ import { jsonError } from '../../../../../lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(request, { params }) {
+export async function POST(request, props) {
+  const params = await props.params;
   try {
     const user = await getCurrentUser();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });

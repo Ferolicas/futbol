@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@cfanalisis/realtime-protocol": "file:../../packages/realtime-protocol",
     "@fastify/websocket": "^11.0.1",
     "@supabase/supabase-js": "^2.101.1",
     "@types/pg": "^8.20.0",

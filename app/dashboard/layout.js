@@ -2,7 +2,7 @@ import FreeAccessProvider from './components/FreeAccessProvider';
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '../../lib/supabase-auth';
 import { supabaseAdmin } from '../../lib/supabase';
-import LiveStatsProvider from './live-stats-context';
+import LiveStatsBridge from './realtime/live-stats-bridge';
 import SelectedMarketsProvider from './selected-markets-context';
 import DashboardHeader from './components/DashboardHeader';
 import ScrollToTopButton from './components/ScrollToTopButton';
@@ -30,9 +30,9 @@ export default async function DashboardLayout({ children }) {
     <div className="dashboard-layout">
       <DashboardHeader />
       <SelectedMarketsProvider>
-        <LiveStatsProvider>
+        <LiveStatsBridge>
           {children}
-        </LiveStatsProvider>
+        </LiveStatsBridge>
       </SelectedMarketsProvider>
       <ScrollToTopButton />
     </div>

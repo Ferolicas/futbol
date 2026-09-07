@@ -13,7 +13,8 @@ export const metadata = {
   title: 'Selecciona tu Plan - CFanalisis',
 };
 
-export default async function PlanesPage({ searchParams }) {
+export default async function PlanesPage(props) {
+  const searchParams = await props.searchParams;
   const autoCheckoutPlan = normalizePurchasePlan(searchParams?.checkout);
   const purchaseIntent = normalizePurchaseIntent(searchParams?.intent);
   const supabase = createSupabaseServerClient();

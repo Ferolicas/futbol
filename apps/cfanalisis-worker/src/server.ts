@@ -1,5 +1,5 @@
-// @ts-nocheck
 import Fastify from 'fastify';
+import type { FastifyRequest } from 'fastify';
 import os from 'os';
 import { execSync } from 'child_process';
 import { isValidQueue, queues, QUEUE_NAMES, type QueueName } from './queues.js';
@@ -26,7 +26,7 @@ if (!SECRET && process.env.NODE_ENV === 'production') {
 
 // Auth PRIVILEGIADA (admin/status, retry, calibrate, enqueue, broadcast): SIEMPRE
 // WORKER_SECRET (server-only, nunca expuesto al cliente).
-function requireAuth(req): boolean {
+function requireAuth(req: FastifyRequest): boolean {
   const auth = req.headers['authorization'];
   const token = typeof auth === 'string' ? auth.replace(/^Bearer\s+/i, '') : '';
   return !SECRET || token === SECRET;
@@ -65,7 +65,9 @@ async function collectActiveJobs() {
       const elapsedMs = Date.now() - startedAt;
       let etaMs = null;
       // Progress is either a number (0-100) or an object set via job.updateProgress({...})
-      const p = typeof progress === 'object' && progress !== null ? progress : null;
+      const p = typeof progress === 'object' && progress !== null
+        ? progress as { processed?: number; total?: number }
+        : null;
       const processed = p?.processed ?? null;
       const total = p?.total ?? null;
       if (processed && total && processed > 0) {
@@ -126,7 +128,7 @@ async function collectAnalysisStatus(date: string) {
     (Array.isArray(analysis?.globallyAnalyzed) ? analysis.globallyAnalyzed : []).map(Number),
   );
 
-  const summary = (f) => ({
+  const summary = (f: any) => ({
     fixtureId: Number(f.fixture.id),
     homeTeam: f.teams?.home?.name,
     awayTeam: f.teams?.away?.name,
@@ -304,11 +306,19 @@ export function buildServer() {
 
   // Errores en handlers Fastify → loguear + alerta Telegram (con dedup).
   app.setErrorHandler((err, req, reply) => {
+    const error = err instanceof Error ? err : new Error(String(err));
+    const route = req.routeOptions?.url || req.url;
+    const statusCode = typeof err === 'object' && err && 'statusCode' in err
+      ? Number(err.statusCode) || 500
+      : 500;
     notifyError(
-      { source: 'fastify', name: `${req.method} ${req.routerPath || req.url}`, extra: { url: req.url } },
-      err,
+      { source: 'fastify', name: `${req.method} ${route}`, extra: { url: req.url } },
+      error,
     ).catch(() => {});
-    reply.code(err.statusCode || 500).send({ ok: false, error: err.message });
+    reply.code(statusCode).send({
+      ok: false,
+      error: error.message,
+    });
   });
 
   // WebSocket plugin — registrado de forma sincrona dentro del ready chain.

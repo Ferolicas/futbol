@@ -8,7 +8,7 @@
  * Payload: {}
  */
 import {
-  ALL_LEAGUE_IDS, triggerEvent,
+  ALL_LEAGUE_IDS,
   redisGet, redisSet, redisDel, KEYS, TTL,
   incrementApiCallCount, sendPushNotification,
   supabaseAdmin, getMatchSchedule, pgQuery,
@@ -25,6 +25,10 @@ import {
   collectStaleLiveFixtureIds,
   shouldRejectStatusRegression,
 } from './live-reconciliation.js';
+import {
+  createFixtureDeltaState,
+  publishFixtureDeltas,
+} from '../../realtime/publishFixtureDeltas.js';
 import { queues } from '../../queues.js';
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
@@ -1379,6 +1383,8 @@ export async function runLive(_payload = {}) {
   const now = Date.now();
   const LL = '[live]';
   const t0 = Date.now();
+  const existingLive = (await redisGet(KEYS.liveStats(today))) || {};
+  const deltaState = createFixtureDeltaState(existingLive);
 
   // Smart schedule check — skip si no hay matches activos en ninguno de los 3 días.
   async function loadSchedule(d) {
@@ -1420,10 +1426,10 @@ export async function runLive(_payload = {}) {
     // El helper ya corrigió liveStats + fixtures:{d} + fixtureStats con datos
     // reales. Aquí solo broadcasteamos para que el front lo despegue/actualice
     // al instante (status + marcador + goleadores reales).
-    triggerEvent('live-scores', 'update', {
-      date: today, liveCount: 0, matches: reconciledMatches,
-      timestamp: new Date().toISOString(), reconciliation: true,
-    }).catch(() => {});
+    await publishFixtureDeltas(reconciledMatches, deltaState, {
+      date: today,
+      source: 'reconciliation',
+    }).catch((error) => console.error(`${LL} reconciliation delta fallo:`, error.message));
   }
 
   // Si falta el calendario ACTUAL no podemos usar el de ayer para concluir
@@ -1543,14 +1549,12 @@ export async function runLive(_payload = {}) {
       };
     });
     if (earlyUpdates.length > 0) {
-      triggerEvent('live-scores', 'update', {
-        date: today, liveCount: tracked.length, matches: earlyUpdates,
-        timestamp: new Date().toISOString(), partial: true,
-      }).catch(() => {});
+      await publishFixtureDeltas(earlyUpdates, deltaState, {
+        date: today,
+        source: 'early',
+      });
     }
   } catch (e) { console.error(`${LL} early broadcast fallo:`, e.message); }
-
-  const existingLive = (await redisGet(KEYS.liveStats(today))) || {};
 
   // Un único fan-out en lotes de 20 sustituye las dos rondas legacy por partido
   // (`/fixtures?id=X` para goleador + `/fixtures/statistics?fixture=X`). Cada
@@ -1758,13 +1762,14 @@ export async function runLive(_payload = {}) {
       .map((match) => match.fixtureId),
   );
 
-  // Pusher update
-  const allPusherUpdates = [];
+  // Cada fixture publica únicamente los campos que cambiaron desde el snapshot
+  // anterior (y desde el delta temprano de este mismo tick).
+  const finalUpdates = [];
   tracked.forEach(m => {
     const fid = m.fixture.id;
     const details = liveDetailsMap[fid];
     const merged = mergedLive[fid];
-    allPusherUpdates.push({
+    finalUpdates.push({
       fixtureId: fid,
       status: m.fixture.status,
       goals: m.goals,
@@ -1774,13 +1779,15 @@ export async function runLive(_payload = {}) {
       redCards: details?.redCards || null,
       goalScorers: details?.goalScorers || [],
       missedPenalties: details?.missedPenalties || [],
+      cardEvents: details?.cardEvents || [],
     });
   });
-  allPusherUpdates.push(...finishedUpdates);
+  finalUpdates.push(...finishedUpdates);
 
-  if (allPusherUpdates.length > 0) {
-    await triggerEvent('live-scores', 'update', {
-      date: today, liveCount: tracked.length, matches: allPusherUpdates, timestamp: new Date().toISOString(),
+  if (finalUpdates.length > 0) {
+    await publishFixtureDeltas(finalUpdates, deltaState, {
+      date: today,
+      source: 'detail',
     });
   }
 

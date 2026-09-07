@@ -1,14 +1,14 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-07 · Base: `17c9256` · Free con cuota real, cierre oficial y arranque optimizado
+Actualizado: 2026-09-07 · Base: `17c9256` · Next 16 y realtime granular por fixture
 
 ## Identidad y stack
 
-CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combinadas y mercados estadísticos. Es una PWA móvil primero, servida por Next.js 14 desde el VPS mediante PM2/Caddy.
+CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combinadas y mercados estadísticos. Es una PWA móvil primero, servida por Next.js 16.3 desde el VPS mediante PM2/Caddy.
 
 | Área | Implementación |
 |---|---|
-| Web/API | Next.js App Router, React 18, JavaScript |
+| Web/API | Next.js 16.3 App Router, React 19.2, JavaScript |
 | Datos | PostgreSQL 17, `pg`, wrapper `pgAdmin` |
 | Auth | bcrypt, JWT HS256 y sesiones revocables en PostgreSQL |
 | Cache/realtime | Redis + worker TypeScript/WebSocket |
@@ -143,7 +143,7 @@ El Brick recoge el método → `subscribe` valida sesión/plan/geografía y reca
 
 ### Auth
 
-`lib/auth-pg.js` crea/verifica usuarios y sesiones. `lib/auth-session.js` firma `cf_session`. `middleware.js` valida firma/expiración; layouts y endpoints vuelven a comprobar la sesión contra PostgreSQL.
+`lib/auth-pg.js` crea/verifica usuarios y sesiones. `lib/auth-session.js` firma `cf_session`. `proxy.js` valida firma/expiración; layouts y endpoints vuelven a comprobar la sesión contra PostgreSQL.
 
 Tras login o registro, las pantallas cliente llaman `refreshSession()` antes de navegar. El layout autenticado resuelve sesión y acceso en servidor antes de montar el encabezado mínimo compartido.
 
@@ -517,9 +517,13 @@ schedulers nuevos. Añadir `--dry` permite verificar cobertura sin escribir DB.
 
 ### Realtime
 
-`apps/cfanalisis-worker` ingiere y publica actualizaciones. El cliente WebSocket
-reenvía todos sus topics al abrir o reconectar. El dashboard usa esos eventos
-como fuente primaria; si no recibe eventos durante 50 s, su watchdog consulta
+`apps/cfanalisis-worker` ingiere y publica actualizaciones. En fútbol mantiene
+el snapshot anterior por fixture, calcula exclusivamente los campos modificados
+y emite `fixture-delta` con `fixtureId`, secuencia monotónica, timestamp y
+`changes`. Worker y web validan el mismo contrato Zod/TypeScript de
+`packages/realtime-protocol`; un paquete atrasado o mal formado no pisa el estado.
+El cliente WebSocket reenvía todos sus topics al abrir o reconectar. El dashboard
+usa esos eventos como fuente primaria; si no recibe eventos durante 50 s, su watchdog consulta
 solo el snapshot Redis mediante `GET /api/refresh-live`, con una única petición
 en vuelo y separación mínima de 20 s. La revalidación completa de fixtures queda
 como respaldo cada 5 min únicamente para hoy y con el WebSocket caído.
@@ -562,6 +566,13 @@ compacta con `content-visibility`, snap táctil y cuota individual. Una tarjeta
 analizada cerrada no monta mercados,
 probabilidades ni jugadores; al abrirse, `ResizeObserver` mide solo esa fila sin
 compensar el scroll. Las tarjetas están memoizadas y reciben handlers estables.
+Los datos live de fútbol ya no viven en un Context global. Un store construido
+sobre `useSyncExternalStore` conserva una entrada y un conjunto de suscriptores
+por fixture: un cambio en el partido 1005 despierta su tarjeta, pero no las de
+1001–1004. Solo la tira Apuesta del día mantiene una suscripción agregada porque
+liquida selecciones de varios encuentros. Durante el despliegue el puente acepta
+temporalmente los eventos snapshot `update`/`corners-update` del worker anterior;
+el contrato normal es `fixture-delta`.
 El arranque del dashboard no usa una pantalla de espera global: muestra el
 armazón inmediatamente, mantiene estáticos el logo y las tarjetas, y difiere la
 promoción sin aplicar blur a toda la vista, evitando long tasks y remontajes en

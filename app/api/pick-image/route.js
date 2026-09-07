@@ -294,10 +294,9 @@ export async function GET(request) {
 
     // Logo metalizado (el de la app), no el escudo antiguo.
     let cfLogo = null;
-    for (const path of [join(process.cwd(), 'public/logo-cf.png'), join(process.cwd(), '../public/logo-cf.png')]) {
-      if (!existsSync(path)) continue;
-      cfLogo = `data:image/png;base64,${readFileSync(path).toString('base64')}`;
-      break;
+    const logoPath = join(process.cwd(), 'public', 'logo-cf.png');
+    if (existsSync(logoPath)) {
+      cfLogo = `data:image/png;base64,${readFileSync(logoPath).toString('base64')}`;
     }
 
     const [homeLogo, awayLogo] = await Promise.all([

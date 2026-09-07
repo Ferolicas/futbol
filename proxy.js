@@ -45,7 +45,7 @@ async function verifySessionToken(token) {
   }
 }
 
-export async function middleware(request) {
+export async function proxy(request) {
   const { pathname } = request.nextUrl;
 
   // ── Validar sesión PG (cookie JWT) — solo firma + expiry, sin DB ──

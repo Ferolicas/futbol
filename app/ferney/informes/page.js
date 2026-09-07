@@ -14,7 +14,8 @@ function validDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value) : bogotaToday();
 }
 
-export default async function PersonalReportsPage({ searchParams }) {
+export default async function PersonalReportsPage(props) {
+  const searchParams = await props.searchParams;
   const date = validDate(searchParams?.date);
   const initialSport = searchParams?.deporte === 'baseball' ? 'baseball' : 'futbol';
   const selectedTeamId = /^\d+$/.test(String(searchParams?.equipo || ''))
