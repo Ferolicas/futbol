@@ -298,7 +298,10 @@ export function buildServer() {
   // Fastify v5: la opcion `logger` solo acepta boolean | LoggerConfiguration.
   // Para pasar una instancia Pino ya creada hay que usar `loggerInstance`,
   // si no lanza "logger options only accepts a configuration object".
-  const app = Fastify({ loggerInstance: logger });
+  // El request logger automático serializa `req.url` antes de nuestros hooks y
+  // podría conservar credenciales de clientes antiguos que aún usan query
+  // params. Solo emitimos la línea propia, que pasa siempre por redactUrl().
+  const app = Fastify({ loggerInstance: logger, disableRequestLogging: true });
 
   // Diagnostico: loguear el path EXACTO de cada request entrante.
   // Util cuando aparecen 404 "fantasma" (proxies que recortan URL, env

@@ -73,6 +73,7 @@ test('las barreras de seguridad permanecen en las rutas críticas', async () => 
   assert.doesNotMatch(client, /\?secret=/);
   assert.match(client, /Sec-WebSocket-Protocol|REALTIME_WS_PROTOCOL/);
   assert.match(server, /preValidation/);
+  assert.match(server, /disableRequestLogging: true/);
   assert.match(server, /statusCode >= 500 \? 'internal_error'/);
   assert.match(server, /app\.get\('\/queues\/:name\/status'[\s\S]*requireAuth/);
   assert.match(chat, /update = update\.eq\('user_id', user\.id\)/);
