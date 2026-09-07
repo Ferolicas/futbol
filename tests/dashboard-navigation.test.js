@@ -56,6 +56,8 @@ test('el chat ocupa la pantalla y se minimiza hacia su botón con movimiento red
   assert.match(chat, /Cerrar sesión/);
   assert.match(chat, /supabase\?\.auth\.signOut\(\)/);
   assert.doesNotMatch(chat, /className="dashboard-chat-trigger"/);
+  const styles = read('app/globals.css');
+  assert.match(styles, /\.dashboard-account-chat \.dashboard-account-menu \{\s*right: auto;\s*left: 0;/);
 });
 
 test('la búsqueda normaliza acentos, valida deportes y crea rutas correctas', async () => {

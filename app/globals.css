@@ -11372,6 +11372,13 @@ input:checked + .cb-mark::after {
   animation: dashboardAccountIn .18s ease-out both;
 }
 
+/* El avatar del dashboard vive en el extremo izquierdo. El menú debe crecer
+   hacia el interior de la pantalla, no fuera del viewport. */
+.dashboard-account-chat .dashboard-account-menu {
+  right: auto;
+  left: 0;
+}
+
 @keyframes dashboardAccountIn {
   from { opacity: 0; transform: translateY(-5px) scale(.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
