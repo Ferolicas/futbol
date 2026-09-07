@@ -27,7 +27,8 @@ chmod 0644 /etc/apt/keyrings/grafana.asc
 printf '%s\n' 'deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main' \
   > /etc/apt/sources.list.d/grafana.list
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y grafana
+GRAFANA_VERSION="${GRAFANA_VERSION:-12.4.10}"
+DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades "grafana=${GRAFANA_VERSION}"
 
 install -m 0644 "${OBS_DIR}/prometheus.yml" /etc/prometheus/prometheus.yml
 install -m 0644 "${OBS_DIR}/alerts.yml" /etc/prometheus/cfanalisis-alerts.yml
