@@ -32,7 +32,7 @@ trap cleanup EXIT INT TERM
   /usr/lib/postgresql/17/bin/pg_restore --list "${DUMP_FILE}" >/dev/null
   cleanup
   sudo -u postgres createdb "${DRILL_DB}"
-  /usr/lib/postgresql/17/bin/pg_restore \
+  sudo -u postgres /usr/lib/postgresql/17/bin/pg_restore \
     --dbname="${DRILL_DB}" --no-owner --no-privileges --jobs=2 "${DUMP_FILE}"
   TABLES="$(sudo -u postgres psql -XAtd "${DRILL_DB}" -c "select count(*) from pg_catalog.pg_tables where schemaname not in ('pg_catalog','information_schema')")"
   if [ "${TABLES}" -lt 10 ]; then
