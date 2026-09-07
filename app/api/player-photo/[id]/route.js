@@ -21,6 +21,10 @@ export async function GET(_req, props) {
   }
   return new Response(photo.body, {
     status: 200,
-    headers: { 'Content-Type': 'image/png', 'Cache-Control': IMMUTABLE },
+    headers: {
+      'Content-Type': 'image/png',
+      'Cache-Control': IMMUTABLE,
+      'X-Content-Type-Options': 'nosniff',
+    },
   });
 }

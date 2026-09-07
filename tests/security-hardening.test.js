@@ -24,6 +24,8 @@ test('pick-image bloquea redirects, limita bytes y aplica rate limit fail-closed
   const source = read('app/api/pick-image/route.js');
   assert.equal(source.includes("redirect: 'error'"), true);
   assert.equal(source.includes('MAX_REMOTE_IMAGE_BYTES'), true);
+  assert.equal(source.includes('/^\\/football\\/teams\\/([0-9]{1,12})\\.png$/'), true);
+  assert.equal(source.includes('TRUSTED_RASTER_TYPES'), true);
   assert.equal(source.includes("redisRateLimit('pick-image'"), true);
   assert.equal(source.includes('failClosed: true'), true);
 });

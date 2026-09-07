@@ -29,10 +29,9 @@ const MAX_OPTIONS = 3;
 const MAX_PAYLOAD_LENGTH = 12_000;
 const TRUSTED_IMG_ORIGINS = new Map([
   ['media.api-sports.io', 'https://media.api-sports.io'],
-  ['www.mlbstatic.com', 'https://www.mlbstatic.com'],
-  ['mlbstatic.com', 'https://mlbstatic.com'],
 ]);
 const MAX_REMOTE_IMAGE_BYTES = 2_000_000;
+const TRUSTED_RASTER_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 function cleanText(value, maxLength = 120) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
@@ -132,9 +131,11 @@ async function toBase64(url) {
     const trustedOrigin = TRUSTED_IMG_ORIGINS.get(parsed.hostname.toLowerCase());
     if (!trustedOrigin || parsed.protocol !== 'https:' || parsed.username || parsed.password) return null;
     if (parsed.port && parsed.port !== '443') return null;
+    const pathMatch = parsed.pathname.match(/^\/football\/teams\/([0-9]{1,12})\.png$/);
+    if (!pathMatch) return null;
     // Reconstruir desde un origen constante evita que credenciales/origen de la
     // entrada sobrevivan a la validación. Los redirects quedan prohibidos.
-    const trustedUrl = new URL(`${parsed.pathname}${parsed.search}`, trustedOrigin);
+    const trustedUrl = new URL(`/football/teams/${pathMatch[1]}.png`, trustedOrigin);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
@@ -145,8 +146,8 @@ async function toBase64(url) {
     }).finally(() => clearTimeout(timeout));
     if (!response.ok) return null;
 
-    const contentType = response.headers.get('content-type') || '';
-    if (!contentType.startsWith('image/')) return null;
+    const contentType = (response.headers.get('content-type') || '').split(';')[0].toLowerCase();
+    if (!TRUSTED_RASTER_TYPES.has(contentType)) return null;
     const declaredLength = Number(response.headers.get('content-length') || 0);
     if (declaredLength > MAX_REMOTE_IMAGE_BYTES || !response.body) return null;
 
