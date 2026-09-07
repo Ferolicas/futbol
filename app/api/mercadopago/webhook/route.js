@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { safeLogFields } from '../../../../lib/safe-log.js';
 import {
   getAuthorizedPayment,
   getMercadoPagoOrder,
@@ -349,7 +350,7 @@ export async function POST(request) {
     return Response.json({ received: true });
   } catch (error) {
     await failWebhookEvent('mercadopago', eventId, error).catch(() => {});
-    console.error('[mp:webhook]', eventId, type, error.message);
+    console.error('[mp:webhook]', safeLogFields({ eventId, type, error: error?.message }));
     // Mercado Pago reintenta al no recibir 200/201. No convertimos 429/5xx/404
     // transitorios de su API en un falso "notfound" exitoso.
     return Response.json({ error: 'Webhook handler failed' }, { status: 500 });

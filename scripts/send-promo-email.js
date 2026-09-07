@@ -7,50 +7,27 @@
  *   node scripts/send-promo-email.js --all                            # blast to everyone
  *   node scripts/send-promo-email.js --all --dry                      # list recipients, no send
  *
- * Reads ZEPTOMAIL_API_KEY, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
- * from .env.local at the project root.
+ * Requiere ZEPTOMAIL_API_KEY y DATABASE_URL en el entorno. Para cargar un
+ * archivo de entorno hazlo explícitamente con `node --env-file=.env.local`.
  */
 
-const fs = require('fs');
-const path = require('path');
+const { Pool } = require('pg');
 
-// ─── load .env.local ──────────────────────────────────────────────────────────
-const envPath = path.join(__dirname, '..', '.env.local');
-if (!fs.existsSync(envPath)) {
-  console.error('Missing .env.local at project root');
-  process.exit(1);
-}
-const env = {};
-const raw = fs.readFileSync(envPath, 'utf8').replace(/^﻿/, '');
-raw.split(/\r?\n/).forEach((rawLine) => {
-  let line = rawLine.trim();
-  if (!line || line.startsWith('#')) return;
-  if (line.startsWith('export ')) line = line.slice(7).trim();
-  const eq = line.indexOf('=');
-  if (eq < 0) return;
-  const key = line.slice(0, eq).trim();
-  let val = line.slice(eq + 1).trim();
-  if (
-    (val.startsWith('"') && val.endsWith('"')) ||
-    (val.startsWith("'") && val.endsWith("'"))
-  ) {
-    val = val.slice(1, -1);
-  }
-  env[key] = val;
-});
+const ZEPTOMAIL_API_KEY = process.env.ZEPTOMAIL_API_KEY;
+const DATABASE_URL = process.env.DATABASE_URL;
 
-const ZEPTOMAIL_API_KEY = env.ZEPTOMAIL_API_KEY || process.env.ZEPTOMAIL_API_KEY;
-const SUPABASE_URL = env.NEXT_PUBLIC_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_KEY = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-if (!ZEPTOMAIL_API_KEY || !SUPABASE_URL || !SUPABASE_KEY) {
-  console.error('Missing required env vars. Detected keys in .env.local:');
+if (!ZEPTOMAIL_API_KEY || !DATABASE_URL) {
+  console.error('Missing required environment variables:');
   console.error('  ZEPTOMAIL_API_KEY:', ZEPTOMAIL_API_KEY ? 'OK' : 'MISSING');
-  console.error('  NEXT_PUBLIC_SUPABASE_URL:', SUPABASE_URL ? 'OK' : 'MISSING');
-  console.error('  SUPABASE_SERVICE_ROLE_KEY:', SUPABASE_KEY ? 'OK' : 'MISSING');
-  console.error(`\nLoaded ${Object.keys(env).length} keys total: ${Object.keys(env).slice(0, 10).join(', ')}${Object.keys(env).length > 10 ? '...' : ''}`);
+  console.error('  DATABASE_URL:', DATABASE_URL ? 'OK' : 'MISSING');
   process.exit(1);
 }
+
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
+  max: 2,
+});
 
 // ─── args ─────────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
@@ -125,7 +102,10 @@ function buildPlanCard(plan) {
 }
 
 function buildHtml(name) {
-  const greet = name && name.trim() ? name.trim().split(' ')[0] : 'apostador';
+  const greetRaw = name && name.trim() ? name.trim().split(' ')[0] : 'apostador';
+  const greet = String(greetRaw).slice(0, 80).replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[char]));
   const plansHtml = PLANS.map(buildPlanCard).join('');
 
   return `<!DOCTYPE html>
@@ -251,18 +231,12 @@ async function sendOne({ to, name }) {
   return res.json();
 }
 
-// ─── Supabase fetch (REST) ────────────────────────────────────────────────────
+// ─── PostgreSQL local/directo ─────────────────────────────────────────────────
 async function fetchAllUsers() {
-  const url = `${SUPABASE_URL}/rest/v1/user_profiles?select=email,name,subscription_status,role`;
-  const res = await fetch(url, {
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-    },
-  });
-  if (!res.ok) throw new Error(`Supabase ${res.status}: ${await res.text()}`);
-  return res.json();
+  const { rows } = await pool.query(
+    'SELECT email, name, subscription_status, role FROM user_profiles ORDER BY created_at ASC',
+  );
+  return rows;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -303,4 +277,4 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 })().catch((e) => {
   console.error('Fatal:', e);
   process.exit(1);
-});
+}).finally(() => pool.end().catch(() => {}));

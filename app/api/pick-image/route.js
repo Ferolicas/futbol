@@ -19,6 +19,7 @@ import satori from 'satori';
 import sharp from 'sharp';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import { redisRateLimit, clientIp } from '../../../lib/ratelimit-redis';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,11 +27,12 @@ export const dynamic = 'force-dynamic';
 const WIDTH = 800;
 const MAX_OPTIONS = 3;
 const MAX_PAYLOAD_LENGTH = 12_000;
-const ALLOWED_IMG_HOSTS = new Set([
-  'media.api-sports.io',
-  'www.mlbstatic.com',
-  'mlbstatic.com',
+const TRUSTED_IMG_ORIGINS = new Map([
+  ['media.api-sports.io', 'https://media.api-sports.io'],
+  ['www.mlbstatic.com', 'https://www.mlbstatic.com'],
+  ['mlbstatic.com', 'https://mlbstatic.com'],
 ]);
+const MAX_REMOTE_IMAGE_BYTES = 2_000_000;
 
 function cleanText(value, maxLength = 120) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
@@ -127,21 +129,38 @@ async function toBase64(url) {
   if (!url) return null;
   try {
     const parsed = new URL(url);
-    if (!ALLOWED_IMG_HOSTS.has(parsed.hostname)) return null;
+    const trustedOrigin = TRUSTED_IMG_ORIGINS.get(parsed.hostname.toLowerCase());
+    if (!trustedOrigin || parsed.protocol !== 'https:' || parsed.username || parsed.password) return null;
+    if (parsed.port && parsed.port !== '443') return null;
+    // Reconstruir desde un origen constante evita que credenciales/origen de la
+    // entrada sobrevivan a la validación. Los redirects quedan prohibidos.
+    const trustedUrl = new URL(`${parsed.pathname}${parsed.search}`, trustedOrigin);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
-    const response = await fetch(parsed, { signal: controller.signal });
-    clearTimeout(timeout);
+    const response = await fetch(trustedUrl, {
+      signal: controller.signal,
+      redirect: 'error',
+      cache: 'no-store',
+    }).finally(() => clearTimeout(timeout));
     if (!response.ok) return null;
 
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.startsWith('image/')) return null;
     const declaredLength = Number(response.headers.get('content-length') || 0);
-    if (declaredLength > 2_000_000) return null;
+    if (declaredLength > MAX_REMOTE_IMAGE_BYTES || !response.body) return null;
 
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length > 2_000_000) return null;
+    const chunks = [];
+    let received = 0;
+    for await (const chunk of response.body) {
+      received += chunk.byteLength;
+      if (received > MAX_REMOTE_IMAGE_BYTES) {
+        await response.body.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(Buffer.from(chunk));
+    }
+    const buffer = Buffer.concat(chunks, received);
     return `data:${contentType};base64,${buffer.toString('base64')}`;
   } catch {
     return null;
@@ -272,6 +291,13 @@ function optionRow(option, index) {
 
 export async function GET(request) {
   try {
+    const rl = await redisRateLimit('pick-image', clientIp(request), 30, 60, { failClosed: true });
+    if (!rl.success) {
+      return Response.json({ error: 'Demasiadas solicitudes' }, {
+        status: rl.available ? 429 : 503,
+        headers: { 'Cache-Control': 'no-store', 'Retry-After': '60' },
+      });
+    }
     const { searchParams } = new URL(request.url);
     const match = readMatch(searchParams);
     const date = cleanText(searchParams.get('fecha'), 40);

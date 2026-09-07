@@ -6,6 +6,7 @@ import {
 } from '../../../../lib/payment-store';
 import { reconcilePaymentAttempt } from '../../../../lib/payment-reconcile';
 import { hasActiveEntitlement } from '../../../../lib/entitlements';
+import { safeLogFields } from '../../../../lib/safe-log.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +31,7 @@ export async function GET(request) {
       attempt = await getPaymentAttemptForUser(attemptId, user.id);
     } catch (error) {
       verificationDelayed = true;
-      console.error('[payment-status:reconcile]', attemptId, error.message);
+      console.error('[payment-status:reconcile]', safeLogFields({ attemptId, error: error?.message }));
     }
   }
 

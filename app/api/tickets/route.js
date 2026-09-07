@@ -6,8 +6,16 @@ import { supabaseAdmin } from '../../../lib/supabase';
 import { sendTicketNotification } from '../../../lib/resend-email';
 import { logAction } from '../../../lib/audit';
 import { jsonError } from '../../../lib/api-error';
+import { randomBytes } from 'crypto';
+import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
+
+const ticketSchema = z.object({
+  message: z.string().trim().min(1).max(4000).optional(),
+  ticketId: z.string().trim().min(1).max(80).optional(),
+  reply: z.string().trim().min(1).max(4000).optional(),
+}).strict();
 
 // GET: List tickets
 export async function GET() {
@@ -41,7 +49,9 @@ export async function POST(request) {
 
   const { data: profile } = await supabaseAdmin.from('user_profiles').select('role, name, email').eq('id', user.id).single();
   const isAdmin = profile?.role === 'admin';
-  const { message, ticketId: targetTicketId, reply } = await request.json();
+  const parsed = ticketSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return Response.json({ error: 'Invalid ticket payload' }, { status: 400 });
+  const { message, ticketId: targetTicketId, reply } = parsed.data;
 
   try {
     if (isAdmin && targetTicketId && reply) {
@@ -69,7 +79,7 @@ export async function POST(request) {
     // R26 FIX: antes el id era `CFA_${1000+count(*)}` → (a) full scan por ticket,
     // (b) race: dos creaciones simultáneas obtenían el mismo count → mismo id →
     // choque con el UNIQUE. Ahora un id único sin escaneo (timestamp base36 + sufijo).
-    const ticketId = `CFA_${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+    const ticketId = `CFA_${Date.now().toString(36).toUpperCase()}${randomBytes(4).toString('hex').toUpperCase()}`;
 
     const { error } = await supabaseAdmin.from('tickets').insert({
       ticket_id: ticketId,

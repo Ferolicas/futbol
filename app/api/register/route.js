@@ -11,9 +11,12 @@ export const dynamic = 'force-dynamic';
 export async function POST(request) {
   try {
     // A2: rate-limit compartido (Redis) — 5/min/IP anti abuso de registro.
-    const rl = await redisRateLimit('register', clientIp(request), 5, 60);
+    const rl = await redisRateLimit('register', clientIp(request), 5, 60, { failClosed: true });
     if (!rl.success) {
-      return Response.json({ error: 'Demasiados intentos. Espera un momento.' }, { status: 429 });
+      return Response.json(
+        { error: rl.available ? 'Demasiados intentos. Espera un momento.' : 'Servicio temporalmente no disponible.' },
+        { status: rl.available ? 429 : 503, headers: { 'Retry-After': '60' } },
+      );
     }
 
     const { name, email, password } = await request.json();

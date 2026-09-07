@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import type { FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import os from 'os';
 import { execSync } from 'child_process';
 import { createHash, timingSafeEqual } from 'crypto';
@@ -41,6 +41,15 @@ function requireAuth(req: FastifyRequest): boolean {
   const auth = req.headers['authorization'];
   const token = typeof auth === 'string' ? auth.replace(/^Bearer\s+/i, '') : '';
   return secretEquals(token, SECRET);
+}
+
+type RateBucket = { window: number; count: number };
+
+function requestPeer(req: FastifyRequest): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  const raw = Array.isArray(forwarded) ? forwarded.at(-1) : forwarded?.split(',').at(-1);
+  const candidate = raw?.trim() || req.ip || 'anonymous';
+  return candidate.replace(/[^0-9a-fA-F:.]/g, '').slice(0, 64) || 'anonymous';
 }
 
 function redactUrl(value: string | undefined): string | undefined {
@@ -309,6 +318,46 @@ export function buildServer() {
   // params. Solo emitimos la línea propia, que pasa siempre por redactUrl().
   const app = Fastify({ loggerInstance: logger, disableRequestLogging: true });
   const requestStartedAt = new WeakMap<object, bigint>();
+  const privilegedRateBuckets = new Map<string, RateBucket>();
+
+  function takePrivilegedRateSlot(key: string, limit: number): boolean {
+    const currentWindow = Math.floor(Date.now() / 60_000);
+    const previous = privilegedRateBuckets.get(key);
+    const bucket = previous?.window === currentWindow
+      ? { window: currentWindow, count: previous.count + 1 }
+      : { window: currentWindow, count: 1 };
+    privilegedRateBuckets.set(key, bucket);
+
+    // El mapa solo conserva identidades de la ventana actual y tiene un límite
+    // duro para que un ataque con muchas IP no se convierta en fuga de memoria.
+    if (privilegedRateBuckets.size > 2_000) {
+      for (const [candidate, value] of privilegedRateBuckets) {
+        if (value.window !== currentWindow) privilegedRateBuckets.delete(candidate);
+      }
+      while (privilegedRateBuckets.size > 2_000) {
+        const oldest = privilegedRateBuckets.keys().next().value;
+        if (oldest === undefined) break;
+        privilegedRateBuckets.delete(oldest);
+      }
+    }
+    return bucket.count <= limit;
+  }
+
+  // Una sola puerta para todos los endpoints privilegiados. Los intentos sin
+  // credencial válida se limitan mucho antes que el tráfico interno autenticado.
+  const privilegedGuard = async (req: FastifyRequest, reply: FastifyReply) => {
+    const peer = requestPeer(req);
+    if (!requireAuth(req)) {
+      if (!takePrivilegedRateSlot(`denied:${peer}`, 20)) {
+        return reply.header('Retry-After', '60').code(429).send({ error: 'too_many_requests' });
+      }
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+    const limit = req.method === 'GET' ? 600 : 60;
+    if (!takePrivilegedRateSlot(`allowed:${peer}:${req.method}`, limit)) {
+      return reply.header('Retry-After', '60').code(429).send({ error: 'too_many_requests' });
+    }
+  };
 
   // Diagnostico: loguear el path EXACTO de cada request entrante.
   // Util cuando aparecen 404 "fantasma" (proxies que recortan URL, env
@@ -402,15 +451,13 @@ export function buildServer() {
     }
   });
 
-  app.get('/stats', async (req, reply) => {
-    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+  app.get('/stats', { preHandler: privilegedGuard }, async (_req, _reply) => {
     return { ok: true, ts: new Date().toISOString(), ...getVpsStats() };
   });
 
   // Prometheus scrape protegido. El worker escucha solo en loopback, pero el
   // secreto sigue siendo obligatorio porque Caddy también enruta este host.
-  app.get('/metrics', async (req, reply) => {
-    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+  app.get('/metrics', { preHandler: privilegedGuard }, async (_req, reply) => {
     const [db, redis, queueHealth] = await Promise.all([
       pingPostgres(),
       pingRedis(),
@@ -436,8 +483,7 @@ export function buildServer() {
   // telemetría del cliente lo reportó, hora en que el frontend lo mostró
   // (tShown) + latencia detección→pantalla. Filtros opcionales:
   //   ?date=YYYY-MM-DD (Bogotá, default hoy)  ?fid=<fixtureId>  ?type=goal|corner|…
-  app.get('/admin/eventlog', async (req, reply) => {
-    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+  app.get('/admin/eventlog', { preHandler: privilegedGuard }, async (req, _reply) => {
     const q = req.query as { date?: string; fid?: string; type?: string };
     const date = q.date || bogotaToday();
     let events: any[] = (await redisGet(`eventlog:${date}`)) || [];
@@ -484,8 +530,7 @@ export function buildServer() {
       });
   });
 
-  app.get('/queues/:name/status', async (req, reply) => {
-    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+  app.get('/queues/:name/status', { preHandler: privilegedGuard }, async (req, reply) => {
     const name = (req.params as { name: string }).name;
     if (!isValidQueue(name)) return reply.code(404).send({ error: 'unknown queue' });
     const q = queues[name];
@@ -502,8 +547,7 @@ export function buildServer() {
   // === Admin dashboard ===
   // Returns everything the /ferney page needs in a single call.
   // Defaults `date` to today UTC if not provided.
-  app.get('/admin/status', async (req, reply) => {
-    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+  app.get('/admin/status', { preHandler: privilegedGuard }, async (req, reply) => {
     const date = (req.query as { date?: string }).date
       || new Date().toISOString().split('T')[0];
     try {
@@ -531,8 +575,7 @@ export function buildServer() {
 
   // Re-enqueue a single job (manual retry from the dashboard) OR enqueue a
   // fresh job in a queue when no jobId is provided.
-  app.post('/admin/retry', async (req, reply) => {
-    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+  app.post('/admin/retry', { preHandler: privilegedGuard }, async (req, reply) => {
     const body = (req.body || {}) as { queue?: string; jobId?: string; payload?: unknown };
     if (!body.queue || !isValidQueue(body.queue)) {
       return reply.code(400).send({ error: 'queue invalid' });
@@ -558,8 +601,7 @@ export function buildServer() {
   // per-market diff} so the dashboard can show what changed. Blocks the
   // request until done — typical run is a few seconds, occasionally up to
   // ~30s when the predictions table is large.
-  app.post('/admin/calibrate', async (req, reply) => {
-    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+  app.post('/admin/calibrate', { preHandler: privilegedGuard }, async (req, reply) => {
     // Fútbol ya no usa calibración isotónica (Dixon-Coles purgado; el motor de
     // contexto + ML no requiere calibración global). Solo baseball.
     const sport = ((req.query as { sport?: string }).sport || 'baseball').toLowerCase();
@@ -582,8 +624,7 @@ export function buildServer() {
   // configurado TELEGRAM_BOT_TOKEN y TELEGRAM_ALERT_CHAT_ID, recibes el
   // mensaje en ~2s. Sujeto al mismo dedup 1/min que las alertas reales,
   // asi que llamar 10 veces seguidas solo dispara la primera.
-  app.post('/admin/test-alert', async (req, reply) => {
-    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+  app.post('/admin/test-alert', { preHandler: privilegedGuard }, async (req, _reply) => {
     const note = (req.body as { note?: string } | undefined)?.note || 'test alert';
     await notifyError(
       { source: 'fastify', name: 'POST /admin/test-alert', extra: { note } },
@@ -594,8 +635,7 @@ export function buildServer() {
 
   // Broadcast desde Vercel — sustituye la llamada directa a Pusher
   // que hacian las API routes del frontend (ej. /api/chat).
-  app.post('/broadcast', async (req, reply) => {
-    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+  app.post('/broadcast', { preHandler: privilegedGuard }, async (req, reply) => {
     const body = (req.body || {}) as { channel?: string; event?: string; data?: unknown };
     if (!body.channel || !body.event) {
       return reply.code(400).send({ error: 'channel y event son obligatorios' });
@@ -604,9 +644,7 @@ export function buildServer() {
     return { ok: true, channel: body.channel, event: body.event, delivered };
   });
 
-  app.post('/enqueue/:queue', async (req, reply) => {
-    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
-
+  app.post('/enqueue/:queue', { preHandler: privilegedGuard }, async (req, reply) => {
     const queueName = (req.params as { queue: string }).queue;
     if (!isValidQueue(queueName)) {
       return reply.code(404).send({ error: 'unknown queue', queue: queueName });

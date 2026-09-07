@@ -89,7 +89,7 @@ export async function notifyError(ctx: ErrorContext, err: unknown): Promise<void
   // Loguear siempre (independiente del envio a Telegram).
   logger.error(
     { source: ctx.source, name: ctx.name, jobId: ctx.jobId, extra: ctx.extra, err: msg, stack },
-    `[${ctx.source}] ${ctx.name ?? ''} ${msg}`.trim(),
+    'worker error',
   );
 
   if (!BOT_TOKEN || !CHAT_ID) return;

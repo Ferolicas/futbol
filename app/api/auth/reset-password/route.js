@@ -14,9 +14,12 @@ const BCRYPT_ROUNDS = 10;
 export async function POST(request) {
   try {
     // A2: rate-limit compartido (Redis) — 20/min/IP anti fuerza-bruta de tokens.
-    const rl = await redisRateLimit('reset', clientIp(request), 20, 60);
+    const rl = await redisRateLimit('reset', clientIp(request), 20, 60, { failClosed: true });
     if (!rl.success) {
-      return Response.json({ error: 'Demasiados intentos. Espera un momento.' }, { status: 429 });
+      return Response.json(
+        { error: rl.available ? 'Demasiados intentos. Espera un momento.' : 'Servicio temporalmente no disponible.' },
+        { status: rl.available ? 429 : 503, headers: { 'Retry-After': '60' } },
+      );
     }
 
     const { token, password } = await request.json();

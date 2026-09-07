@@ -21,9 +21,9 @@ test('DAST y carga solo entran a staging privado por túnel', () => {
   for (const source of [dast, load]) {
     assert.match(source, /-L 3100:127\.0\.0\.1:3100/);
     assert.match(source, /StrictHostKeyChecking=yes/);
-    assert.doesNotMatch(source, /https:\/\/cfanalisis\.com/);
+    assert.equal(source.includes('https://cfanalisis.com'), false);
   }
-  assert.match(script, /baseUrl !== 'http:\/\/127\.0\.0\.1:3100'/);
+  assert.equal(script.includes("baseUrl !== 'http://127.0.0.1:3100'"), true);
   assert.match(script, /vus > 10/);
 });
 

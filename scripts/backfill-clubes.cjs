@@ -9,11 +9,14 @@
 try { require('dotenv').config({ path: '.env.local' }); } catch {}
 try { require('dotenv').config({ path: '.env' }); } catch {}
 const fs = require('fs');
+const path = require('path');
 const { Pool } = require('pg');
 const { footballApiRequest, closeFootballApiClient } = require('../lib/football-api-client.cjs');
 const KEY = process.env.FOOTBALL_API_KEY || process.env.NEXT_PUBLIC_API_FOOTBALL_KEY;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false }, max: 4 });
-const CHECKPOINT = '/tmp/bf_clubes_checkpoint.json';
+const STATE_DIR = process.env.CFANALISIS_STATE_DIR || path.join(process.cwd(), '.runtime');
+fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
+const CHECKPOINT = process.env.BACKFILL_CLUBES_CHECKPOINT || path.join(STATE_DIR, 'backfill-clubes-checkpoint.json');
 const SEASONS = [2024, 2025];
 const QUOTA_SAFETY = 1500; // margen para no pasarse del límite diario
 

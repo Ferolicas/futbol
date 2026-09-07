@@ -81,8 +81,9 @@ test('las barreras de seguridad permanecen en las rutas críticas', async () => 
   assert.match(server, /preValidation/);
   assert.match(server, /disableRequestLogging: true/);
   assert.match(server, /statusCode >= 500 \? 'internal_error'/);
-  assert.match(server, /app\.get\('\/queues\/:name\/status'[\s\S]*requireAuth/);
-  assert.match(server, /app\.get\('\/metrics'[\s\S]*requireAuth/);
+  assert.match(server, /const privilegedGuard/);
+  assert.match(server, /app\.get\('\/queues\/:name\/status', \{ preHandler: privilegedGuard \}/);
+  assert.match(server, /app\.get\('\/metrics', \{ preHandler: privilegedGuard \}/);
   assert.match(chat, /update = update\.eq\('user_id', user\.id\)/);
   assert.match(workerIndex, /process\.env\.WORKER_HOST \|\| '127\.0\.0\.1'/);
 });

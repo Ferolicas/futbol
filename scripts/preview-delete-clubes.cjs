@@ -4,6 +4,9 @@
 try { require('dotenv').config({ path: '.env.local' }); } catch {}
 try { require('dotenv').config({ path: '.env' }); } catch {}
 const { Pool } = require('pg');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const p = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
@@ -88,14 +91,15 @@ const WHITELIST = [
   }
 
   // CSV completo a archivo para revisión total
-  const fs = require('fs');
   const csv = ['team_id,partidos,country,league_principal,name,league_ids'];
   for (const r of cand.rows) {
     const esc = s => `"${String(s ?? '').replace(/"/g, '""')}"`;
     csv.push(`${r.team_id},${r.total_matches},${esc(r.country)},${esc(r.league_principal)},${esc(r.name)},${esc((r.lids || []).join('|'))}`);
   }
-  fs.writeFileSync('/tmp/clubes_a_eliminar.csv', csv.join('\n'));
-  console.log('\nCSV completo: /tmp/clubes_a_eliminar.csv');
+  const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cfanalisis-clubes-preview-'));
+  const outputPath = path.join(outputDir, 'clubes_a_eliminar.csv');
+  fs.writeFileSync(outputPath, csv.join('\n'), { mode: 0o600, flag: 'wx' });
+  console.log(`\nCSV completo: ${outputPath}`);
 
   await p.end();
 })().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
