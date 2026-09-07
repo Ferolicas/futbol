@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-07 · Base: `c09b043` · Next 16 y realtime granular por fixture
+Actualizado: 2026-09-07 · Base: `90e2bd8` · Next 16, realtime granular y acceso WS efímero
 
 ## Identidad y stack
 
