@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-06 · Base: `6040446` · Free con cuota real, cierre oficial y rendimiento
+Actualizado: 2026-09-07 · Base: `17c9256` · Free con cuota real, cierre oficial y arranque optimizado
 
 ## Identidad y stack
 
@@ -562,6 +562,10 @@ compacta con `content-visibility`, snap táctil y cuota individual. Una tarjeta
 analizada cerrada no monta mercados,
 probabilidades ni jugadores; al abrirse, `ResizeObserver` mide solo esa fila sin
 compensar el scroll. Las tarjetas están memoizadas y reciben handlers estables.
+El arranque del dashboard no usa una pantalla de espera global: muestra el
+armazón inmediatamente, mantiene estáticos el logo y las tarjetas, y difiere la
+promoción sin aplicar blur a toda la vista, evitando long tasks y remontajes en
+la primera interacción.
 El selector de competición de fútbol es multiselección con checkboxes y acciones
 “Todas”/“Ninguna”. `GET/PUT /api/user/leagues` persiste la preferencia por
 usuario, pero nunca limita fixtures, workers, análisis ni cuotas: el filtro se
