@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-07 · Base: `17c9256` · Next 16 y realtime granular por fixture
+Actualizado: 2026-09-07 · Base: `c09b043` · Next 16 y realtime granular por fixture
 
 ## Identidad y stack
 
