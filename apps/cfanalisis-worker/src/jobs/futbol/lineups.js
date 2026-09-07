@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Job: futbol-lineups
  * Port of /api/cron/lineups. Runs near match kickoff — fetches lineups + injuries

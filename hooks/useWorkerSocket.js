@@ -101,6 +101,13 @@ class WorkerSocket {
   }
 
   async connect() {
+    // El staging privado reutiliza los assets inmutables de producción, pero
+    // nunca debe abrir el gateway realtime LIVE con credenciales de staging.
+    if (process.env.NODE_ENV === 'production' &&
+        !['cfanalisis.com', 'www.cfanalisis.com'].includes(window.location.hostname)) {
+      this.setState('disconnected');
+      return;
+    }
     if (!WS_URL) {
       console.warn('[ws] NEXT_PUBLIC_WORKER_WS_URL ausente');
       return;

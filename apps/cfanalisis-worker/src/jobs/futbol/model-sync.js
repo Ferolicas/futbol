@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Job: futbol-model-sync (FASE 2E) — mantiene el schema `model` fresco cada noche.
  *

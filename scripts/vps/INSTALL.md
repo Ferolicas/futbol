@@ -338,3 +338,27 @@ sudo crontab -e
 - Expected body contains: `"status":"ok"` ó `"status":"degraded"` (la app considera degraded como funcional)
 - Frecuencia recomendada: 1 minuto
 - Webhook de alerta al bot Telegram `@cfanalisis_bot` (chat ID se incluye en `health.env`).
+
+---
+
+## Bloque 6 — staging privado y observabilidad
+
+Después de un backup integral del VPS y con una release web válida:
+
+```bash
+cd /apps/futbol
+sudo bash scripts/vps/provision-staging.sh
+sudo bash scripts/vps/install-observability.sh
+```
+
+El staging queda en `127.0.0.1:3100`; Grafana en `127.0.0.1:3300` y Prometheus
+en `127.0.0.1:9090`. No añadir estos puertos a Caddy/UFW. Los accesos, SLO y
+procedimientos están en `docs/enterprise/`.
+
+Crons root:
+
+```cron
+15 3 * * * /apps/backup/redis_backup.sh >> /apps/backup/backup.log 2>&1
+17 */6 * * * /apps/backup/offsite_backup_retry.sh >> /apps/backup/offsite-retry.log 2>&1
+30 4 1 * * /apps/backup/restore_drill.sh --run >> /apps/backup/restore-drill.log 2>&1
+```

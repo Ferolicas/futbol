@@ -44,8 +44,13 @@ test('admin puede escuchar chat-admin sin poder inventar chats ajenos', () => {
 
 test('rechaza firma incorrecta, token alterado y secretos débiles', async () => {
   const { token } = await signRealtimeAccessToken({ userId: USER_ID, workerSecret: SECRET });
+  const [header, payload, signature] = token.split('.');
+  const alteredPayload = `${payload[0] === 'A' ? 'B' : 'A'}${payload.slice(1)}`;
   assert.equal(await verifyRealtimeAccessToken(token, OTHER_SECRET), null);
-  assert.equal(await verifyRealtimeAccessToken(`${token.slice(0, -1)}x`, SECRET), null);
+  assert.equal(
+    await verifyRealtimeAccessToken(`${header}.${alteredPayload}.${signature}`, SECRET),
+    null,
+  );
   await assert.rejects(
     signRealtimeAccessToken({ userId: USER_ID, workerSecret: 'weak' }),
     /missing or too short/,
@@ -72,10 +77,12 @@ test('las barreras de seguridad permanecen en las rutas críticas', async () => 
   assert.doesNotMatch(client, /NEXT_PUBLIC_(?:WS_TOKEN|WORKER_SECRET)/);
   assert.doesNotMatch(client, /\?secret=/);
   assert.match(client, /Sec-WebSocket-Protocol|REALTIME_WS_PROTOCOL/);
+  assert.match(client, /\['cfanalisis\.com', 'www\.cfanalisis\.com'\]/);
   assert.match(server, /preValidation/);
   assert.match(server, /disableRequestLogging: true/);
   assert.match(server, /statusCode >= 500 \? 'internal_error'/);
   assert.match(server, /app\.get\('\/queues\/:name\/status'[\s\S]*requireAuth/);
+  assert.match(server, /app\.get\('\/metrics'[\s\S]*requireAuth/);
   assert.match(chat, /update = update\.eq\('user_id', user\.id\)/);
   assert.match(workerIndex, /process\.env\.WORKER_HOST \|\| '127\.0\.0\.1'/);
 });

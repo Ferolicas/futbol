@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { prepareSportDate, cronTargetDate } from '../../shared.js';
 
 export async function runBasketballFixtures(payload = {}) {

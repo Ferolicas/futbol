@@ -16,17 +16,18 @@
 #   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 #
 # Retencion:
-#   Local: 2 dias.
-#   Remoto: 14 dias (Redis es cache + queues, menos critico que Postgres).
+#   Local: 7 dias por defecto.
+#   Remoto: 14 dias por defecto (Redis es cache + queues, menos critico).
 # ============================================================================
 
 set -uo pipefail
+umask 077
 
 BACKUP_DIR="/apps/backup"
 ENV_FILE="${BACKUP_DIR}/.env"
 LOG_FILE="${BACKUP_DIR}/backup.log"
-LOCAL_RETENTION_DAYS=2
-REMOTE_RETENTION_DAYS=14
+LOCAL_RETENTION_DAYS="${REDIS_LOCAL_RETENTION_DAYS:-7}"
+REMOTE_RETENTION_DAYS="${REDIS_REMOTE_RETENTION_DAYS:-14}"
 
 if [ -f "${ENV_FILE}" ]; then
   # shellcheck disable=SC1090
@@ -64,9 +65,17 @@ log "start redis backup ${RDB_FILE}"
 # ── 1. Dump RDB via redis-cli ────────────────────────────────────────────
 # `--rdb` le pide al server que escriba un RDB snapshot fresco al path que
 # le indicamos. No bloquea operaciones (Redis hace fork BGSAVE internamente).
-if ! redis-cli --rdb "${RDB_FILE}" > /dev/null 2>&1; then
+REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+export REDISCLI_AUTH="${REDIS_PASSWORD:-}"
+if ! redis-cli -h "${REDIS_HOST}" -p "${REDIS_PORT}" --rdb "${RDB_FILE}" > /dev/null 2>&1; then
   rm -f "${RDB_FILE}"
   fail "redis-cli --rdb fallo"
+fi
+
+if command -v redis-check-rdb >/dev/null 2>&1 && ! redis-check-rdb "${RDB_FILE}" >/dev/null 2>&1; then
+  rm -f "${RDB_FILE}"
+  fail "redis-check-rdb no pudo validar el snapshot"
 fi
 
 # Verifica que el archivo se creo y tiene contenido
@@ -78,6 +87,7 @@ fi
 # Comprime para ahorrar espacio (gzip -6 — default, buen balance)
 gzip -f "${RDB_FILE}"
 RDB_FILE="${RDB_FILE}.gz"
+sha256sum "${RDB_FILE}" > "${RDB_FILE}.sha256"
 RDB_SIZE="$(du -h "${RDB_FILE}" | cut -f1)"
 log "redis dump OK (${RDB_SIZE})"
 
@@ -90,22 +100,34 @@ if ! command -v rclone >/dev/null 2>&1; then
   fail "rclone no instalado"
 fi
 
-if ! rclone copy "${RDB_FILE}" "${RCLONE_REMOTE}/" \
-      --transfers=1 --checkers=1 --retries=3; then
+if ! rclone copyto "${RDB_FILE}" "${RCLONE_REMOTE}/$(basename "${RDB_FILE}")" \
+      --transfers=1 --checkers=1 --retries=8 --low-level-retries=10 \
+      --retries-sleep=1m --tpslimit=2 --tpslimit-burst=2; then
   fail "rclone upload fallo"
 fi
+
+if ! rclone copyto "${RDB_FILE}.sha256" "${RCLONE_REMOTE}/$(basename "${RDB_FILE}.sha256")" \
+      --transfers=1 --checkers=1 --retries=5 --retries-sleep=1m \
+      --tpslimit=2 --tpslimit-burst=2; then
+  fail "rclone upload del checksum Redis fallo"
+fi
+
+touch "${BACKUP_DIR}/.redis_offsite_success"
 
 log "upload OK to ${RCLONE_REMOTE}"
 
 # ── 3. Limpia locales > N dias ───────────────────────────────────────────
 find "${BACKUP_DIR}" -maxdepth 1 -name 'redis_*.rdb.gz' \
   -type f -mtime "+${LOCAL_RETENTION_DAYS}" -delete
+find "${BACKUP_DIR}" -maxdepth 1 -name 'redis_*.rdb.gz.sha256' \
+  -type f -mtime "+${LOCAL_RETENTION_DAYS}" -delete
 
 # ── 4. Limpia remotos > N dias ───────────────────────────────────────────
 rclone delete "${RCLONE_REMOTE}/" \
   --min-age "${REMOTE_RETENTION_DAYS}d" \
-  --include 'redis_*.rdb.gz' \
-  --drive-use-trash=false 2>&1 | tee -a "${LOG_FILE}" || true
+  --include 'redis_*.rdb.gz*' \
+  --tpslimit=2 --tpslimit-burst=2 2>&1 | tee -a "${LOG_FILE}" || true
 
 log "DONE redis_${TS}.rdb.gz (${RDB_SIZE})"
+"${BACKUP_DIR}/backup_status_metrics.sh" >/dev/null 2>&1 || true
 exit 0

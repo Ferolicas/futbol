@@ -1,4 +1,3 @@
-// @ts-nocheck
 /** Finaliza MLB e ingiere dos hechos empíricos independientes por partido. */
 import { finalizeSportDate, bogotaToday } from '../../shared.js';
 

@@ -83,7 +83,8 @@ exactly as before — the Vercel endpoint now enqueues instead of executing.
 
 Copy `.env.example` to `.env` and fill in. Required:
 
-- `WORKER_SECRET` — shared with Vercel (`WORKER_SECRET` env var there too).
+- `WORKER_SECRET` — compartido solo con la web del VPS y Prometheus; nunca con
+  el navegador.
 - `WORKER_HOST=127.0.0.1` — do not expose Fastify directly to the Internet.
 - `REDIS_HOST` / `REDIS_PORT` — local Redis for BullMQ (default 127.0.0.1:6379).
 - `DATABASE_URL` — PostgreSQL through local PgBouncer.
@@ -163,8 +164,11 @@ pm2 save && pm2 startup
   $WORKER_SECRET`; returns `waiting / active / completed / failed / delayed`.
 - `GET /admin/status` — authenticated operational detail (queues, DB/Redis,
   memory and WebSocket clients).
+- `GET /metrics` — formato Prometheus, también autenticado con
+  `Authorization: Bearer $WORKER_SECRET`.
 - Standard BullMQ events (`completed`, `failed`, `error`) are logged to stdout.
-- For a UI, point Bull Board or Arena at the same Redis on the VPS.
+- Prometheus/Grafana/Alertmanager y exporters se provisionan desde
+  `ops/observability/`; todos escuchan solo en loopback.
 
 ## Build (optional)
 

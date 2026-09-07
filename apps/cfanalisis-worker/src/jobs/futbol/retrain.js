@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Job: futbol-retrain — ciclo nocturno del motor empírico contextual.
  *

@@ -1,0 +1,71 @@
+name: Staging DAST
+
+on:
+  schedule:
+    - cron: '41 4 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfanalisis-staging-dast
+  cancel-in-progress: false
+
+jobs:
+  zap-baseline:
+    name: OWASP ZAP passive baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Open authenticated tunnel to private staging
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          install -m 600 /dev/null "$HOME/.ssh/cfanalisis"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/cfanalisis"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          ssh -i "$HOME/.ssh/cfanalisis" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -N -L 3100:127.0.0.1:3100 "root@$VPS_HOST" &
+          echo $! > /tmp/cfanalisis-staging-tunnel.pid
+          for attempt in {1..20}; do
+            if curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3100/api/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - name: Run ZAP baseline without active attacks
+        id: zap
+        continue-on-error: true
+        run: |
+          docker run --rm --network host \
+            -v "$PWD:/zap/wrk/:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t http://127.0.0.1:3100 -m 3 -I \
+            -r zap-report.html -J zap-report.json
+      - name: Upload DAST evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: zap-staging-${{ github.run_id }}
+          path: |
+            zap-report.html
+            zap-report.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Close tunnel
+        if: always()
+        run: |
+          if test -f /tmp/cfanalisis-staging-tunnel.pid; then
+            kill "$(cat /tmp/cfanalisis-staging-tunnel.pid)" 2>/dev/null || true
+          fi
+      - name: Enforce ZAP failures
+        if: steps.zap.outcome == 'failure'
+        run: exit 1

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Job: futbol-cleanup
  * Port of /api/cron/cleanup. Deletes old rows from Supabase. Redis keys

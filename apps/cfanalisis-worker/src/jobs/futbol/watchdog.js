@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Job: futbol-watchdog — dead-man's switch del pipeline nocturno (JS-1).
  *

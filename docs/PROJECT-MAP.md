@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-07 · Base: `90e2bd8` · Next 16, realtime granular y acceso WS efímero
+Actualizado: 2026-09-07 · Base: `e44df89` · Next 16, realtime granular y operación enterprise
 
 ## Identidad y stack
 
@@ -1056,3 +1056,33 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   haya opciones en cada vista. Los catálogos Pro siguen iguales.
 - Pruebas: `tests/free-daily-results.test.js` comprueba el límite de acceso,
   probabilidades originales, aciertos/fallos y fuente Pro sin mutaciones.
+
+### Operación enterprise (2026-09-07)
+
+- Todo push a `main` debe superar primero la batería completa de pruebas, auditoría de dependencias,
+  build Next y typecheck/build del worker; el deploy depende del job `quality`.
+  CodeQL, Gitleaks y Dependabot vigilan código, historial, actions y paquetes.
+- El DAST OWASP ZAP semanal y la carga k6 acotada entran únicamente por túnel
+  SSH a `127.0.0.1:3100`. La propia prueba rechaza otro target y limita 10 VUs/
+  60 s, de modo que jamás apunta por error a producción.
+- Staging usa un proceso PM2, base `cfanalisis_staging`, Redis DB 15 y un `.env`
+  generado sin pagos, correo ni APIs deportivas. No clona filas de producción.
+  El cliente realtime solo se habilita en los dos hostnames oficiales.
+- `apps/cfanalisis-worker/src/metrics.ts` expone `/metrics` detrás de
+  `WORKER_SECRET`: procesos, dependencias, HTTP, BullMQ, jobs, WebSockets,
+  rechazos, backpressure y deltas. Fastify devuelve `X-Request-Id` para
+  correlación. Logger, notifier y shared ya pasan TypeScript estricto sin
+  `@ts-nocheck`; las exclusiones redundantes desaparecieron de los jobs JS.
+- `ops/observability/` provisiona Prometheus, exporters, Blackbox, Alertmanager
+  Telegram y Grafana, todos en loopback. El dashboard muestra disponibilidad,
+  latencia, colas, realtime, capacidad y edad de backups. La retención de
+  métricas es 30 días.
+- PostgreSQL genera dump diario validado + SHA-256; Redis genera RDB validado +
+  SHA-256. Ambos conservan siete días locales, tienen reintento remoto cada seis
+  horas y alertan si la copia externa supera 48 h. El simulacro mensual restaura
+  solo en `cfanalisis_restore_drill` y publica evidencia/fecha a Prometheus.
+- El cleanup de MLB ya no destruye a los 30/60 días análisis y resultados que
+  sirven de evidencia al motor; solo retira la caché regenerable de siete días.
+- SLO, incidentes, secretos, retención, desastre, staging y futura alta
+  disponibilidad están formalizados en `docs/enterprise/`. Sin segunda máquina
+  persiste el SPOF físico y no se declara HA/PITR que el VPS no puede garantizar.

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Job: futbol-live-corners
  * Port of /api/cron/live-corners. Fetches /fixtures/statistics for currently

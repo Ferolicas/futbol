@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Job: baseball-fixtures (MLB, MLB Stats API)
  *

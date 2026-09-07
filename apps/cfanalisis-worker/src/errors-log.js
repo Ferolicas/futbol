@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Persistent error log for the /ferney dashboard.
  *

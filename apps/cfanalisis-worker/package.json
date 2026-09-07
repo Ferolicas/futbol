@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "description": "BullMQ worker for cfanalisis crons. Receives HTTP enqueue webhooks from Vercel and processes jobs against Redis 127.0.0.1:6379.",
   "main": "dist/index.js",
   "scripts": {
@@ -15,6 +18,7 @@
   "dependencies": {
     "@cfanalisis/realtime-protocol": "file:../../packages/realtime-protocol",
     "@fastify/websocket": "11.3.0",
+    "@prometheus-io/client": "^0.16.1",
     "@supabase/supabase-js": "^2.101.1",
     "@types/pg": "^8.20.0",
     "bullmq": "^5.34.0",

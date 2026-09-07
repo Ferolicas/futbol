@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Job: baseball-cleanup
  * Port of /api/cron/baseball/cleanup. Deletes baseball cache rows older
@@ -16,14 +15,13 @@ const cutoff = (days) => {
 
 export async function runBaseballCleanup(_payload = {}) {
   const fixturesCutoff = cutoff(7);
-  const analysisCutoff = cutoff(30);
-  const resultsCutoff = cutoff(60);
+  const a = await supabaseAdmin
+    .from('baseball_fixtures_cache')
+    .delete()
+    .lt('date', fixturesCutoff);
 
-  const [a, b, c] = await Promise.all([
-    supabaseAdmin.from('baseball_fixtures_cache').delete().lt('date', fixturesCutoff),
-    supabaseAdmin.from('baseball_match_analysis').delete().lt('date', analysisCutoff),
-    supabaseAdmin.from('baseball_match_results').delete().lt('date', resultsCutoff),
-  ]);
-
-  return { ok: true, deleted: { fixtures: a.count, analysis: b.count, results: c.count } };
+  // Análisis y resultados son evidencia histórica del motor empírico. Antes se
+  // eliminaban a los 30/60 días, reduciendo cada mes el dataset de validación.
+  // Solo se purga la caché regenerable; los hechos durables se conservan.
+  return { ok: true, deleted: { fixtures: a.count, analysis: 0, results: 0 } };
 }

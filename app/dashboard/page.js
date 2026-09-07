@@ -25,8 +25,8 @@ import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
 import { useWorkerSocketState } from '../../hooks/useWorkerSocket';
 import { createPortal } from 'react-dom';
-import { BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../lib/bookmakers';
-import { todayInTz, getUserTz, fmtTimeInTz } from '../../lib/timezone';
+import { BOOKMAKER_LOGOS } from '../../lib/bookmakers';
+import { todayInTz, getUserTz } from '../../lib/timezone';
 import { marketLabel } from '../../lib/market-labels';
 import { isTelegramMarketAllowed as isDailyPickMarketAllowed } from '../../lib/telegram-daily-pick';
 import {
@@ -66,6 +66,19 @@ import {
   leagueSelectionIncludes,
   normalizeLeagueSelection,
 } from '../../lib/league-view-filter';
+import {
+  cap,
+  detectCountry,
+  fmtTime,
+  isAwaitingOfficialResult,
+  isCoveredCounter,
+  isFinished,
+  isLive,
+  isPendingStatus,
+  isPostponed,
+  statusText,
+  today,
+} from './utils/match-display';
 
 const AnalysisExperience = dynamic(
   () => import('./analisis/[id]/page').then((module) => module.AnalysisExperience),
@@ -74,40 +87,6 @@ const AnalysisExperience = dynamic(
     loading: () => <DashboardBuffer compact />,
   },
 );
-
-function detectCountry() {
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return TIMEZONE_TO_COUNTRY[tz] || 'default';
-  } catch { return 'default'; }
-}
-
-// Uses the user's local timezone — never UTC (fixes LATAM "shows next day" bug)
-const today = (tz) => todayInTz(tz || getUserTz());
-const fmtTime = (d, tz) => fmtTimeInTz(d, tz || getUserTz());
-const isLive = (s) => ['1H', '2H', 'HT', 'ET', 'P', 'BT', 'LIVE'].includes(s);
-const isFinished = (s) => ['FT', 'AET', 'PEN', 'AWD', 'WO'].includes(s);
-const isPostponed = (s) => ['PST', 'CANC', 'SUSP', 'ABD'].includes(s);
-const isCoveredCounter = (counter) => counter?.isReal === true || Number(counter?.total || 0) > 0;
-const isPendingStatus = (s) => ['NS', 'TBD'].includes(s);
-const isAwaitingOfficialResult = (match, now = Date.now()) => {
-  if (!isPendingStatus(match?.fixture?.status?.short)) return false;
-  const kickoff = new Date(match?.fixture?.date || 0).getTime();
-  return Number.isFinite(kickoff) && kickoff > 0 && now > kickoff + 130 * 60 * 1000;
-};
-const statusText = (s) => ({
-  NS: 'Proximo', '1H': '1T', '2H': '2T', HT: 'Entretiempo',
-  FT: 'Final', ET: 'Extra', P: 'Penales', AET: 'Extra', PEN: 'Penales',
-  SUSP: 'Suspendido', PST: 'Pospuesto', CANC: 'Cancelado',
-}[s] || s);
-
-// El motor y los rankings usan el valor crudo; esta función es exclusivamente
-// visual y evita mostrar más de 95% o redondear 94.999% hacia 95%.
-const cap = (v) => {
-  const value = Math.max(0, Math.min(100, Number(v) || 0));
-  if (value >= 95) return 95;
-  return Math.floor((value + 1e-9) * 100) / 100;
-};
 
 const EMPTY_MARKETS = Object.freeze({});
 const EMPTY_DAILY_RECOMMENDATIONS = Object.freeze([]);

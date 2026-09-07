@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Job: futbol-live
  * Port of /api/cron/live. Polls live fixtures from API-Football, persists

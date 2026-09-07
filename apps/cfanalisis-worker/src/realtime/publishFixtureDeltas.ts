@@ -5,6 +5,7 @@ import {
   type FixtureDelta,
 } from '@cfanalisis/realtime-protocol';
 import { triggerEvent } from '../ws/wsManager.js';
+import { recordFixtureDeltas } from '../metrics.js';
 
 type FixtureState = Record<string, unknown>;
 export type FixtureDeltaState = Map<number, FixtureState>;
@@ -86,6 +87,8 @@ export async function publishFixtureDeltas(
     published.push(delta);
     await triggerEvent('live-scores', 'fixture-delta', delta);
   }
+
+  recordFixtureDeltas(metadata.source, published.length);
 
   return published;
 }

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /** Entrenamiento walk-forward del motor MLB, sin isotónica ni meta-modelos. */
 import { pgPool, trainMultisportEmpiricalEngine } from '../../shared.js';
 

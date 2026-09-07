@@ -34,6 +34,7 @@ toques nada”, “no subir” o equivalente.
 - PostgreSQL: `lib/db.js`, adaptador legacy `lib/supabase.js`
 - Pagos: `lib/stripe.js`, `lib/mercadopago.js`
 - Worker: `apps/cfanalisis-worker/`
+- Operación enterprise: `docs/enterprise/`, `ops/observability/`
 - Migraciones: `scripts/migrate-*.sql`
 - Mapa profundo: `docs/PROJECT-MAP.md`
 
@@ -51,6 +52,10 @@ toques nada”, “no subir” o equivalente.
   WS de cinco minutos y el worker autoriza cada topic por usuario/rol.
 - El worker HTTP/WS escucha solo en `127.0.0.1`; Caddy es la única entrada
   pública. `/health` es mínimo y el detalle operativo exige `WORKER_SECRET`.
+- Staging escucha solo en `127.0.0.1:3100`, usa `cfanalisis_staging` + Redis DB
+  15 y jamás contiene credenciales LIVE ni datos personales de producción.
+- Prometheus/Grafana/Alertmanager y exporters son nativos, loopback-only; no
+  abrir sus puertos en Caddy o UFW.
 - Antes de entregar cambios: `git diff --check` y `npm run build`.
 
 ## Gotchas

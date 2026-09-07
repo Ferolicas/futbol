@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { prepareSportDate, bogotaToday, triggerEvent, supabaseAdmin } from '../../shared.js';
 
 async function withinGameWindow(sport, date) {

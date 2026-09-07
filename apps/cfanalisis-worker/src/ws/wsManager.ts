@@ -22,6 +22,11 @@
  */
 
 import { makeRedisClient } from '../redis.js';
+import {
+  observeWsBroadcast,
+  recordWsBackpressure,
+  recordWsRejected,
+} from '../metrics.js';
 
 type Socket = {
   readyState: number;
@@ -110,8 +115,15 @@ class WSManager {
     return this.subscriptions.get(topic)?.size ?? 0;
   }
 
+  subscriptionCount() {
+    let total = 0;
+    for (const sockets of this.subscriptions.values()) total += sockets.size;
+    return total;
+  }
+
   attach(socket: Socket, access: AttachAccess) {
     if (!Number.isFinite(access.expiresAt) || access.expiresAt <= Date.now()) {
+      recordWsRejected('expired');
       try { socket.close(4401, 'token-expired'); } catch {}
       return;
     }
@@ -157,6 +169,7 @@ class WSManager {
   subscribe(socket: Socket, topic: string): boolean {
     const access = this.sockets.get(socket);
     if (!access || !access.allowedTopics.has(topic)) {
+      recordWsRejected('topic');
       if (access) {
         access.violations += 1;
         try {
@@ -212,6 +225,7 @@ class WSManager {
         // RT-2: backpressure. Si el cliente no drena (>1MB en buffer), está
         // atascado → no enviar, terminar y limpiar (cuenta como muerto).
         if ((socket.bufferedAmount ?? 0) > MAX_BUFFERED) {
+          recordWsBackpressure();
           console.warn('[ws:backpressure] descarto socket atascado', { topic, event, buffered: socket.bufferedAmount });
           try { socket.terminate?.(); } catch {}
           this.detach(socket);
@@ -223,6 +237,7 @@ class WSManager {
         this.detach(socket);
       }
     }
+    observeWsBroadcast(topic, event, delivered);
     return delivered;
   }
 }

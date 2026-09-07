@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Job: futbol-raw-backfill — tanda 2 de la captura cruda total (Camino B).
  * Dispara a las 4:00 AM España (scheduler). Corre la mitad 2 de los equipos.

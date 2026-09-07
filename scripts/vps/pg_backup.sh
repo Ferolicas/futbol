@@ -12,18 +12,19 @@
 #   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 #
 # Retencion:
-#   Local: 2 dias (el resto se borra).
-#   Remoto (Google Drive): 30 dias. Se borra con --drive-use-trash=false
-#   para que la eliminacion sea inmediata y no consuma cuota en la papelera.
+#   Local: 7 dias por defecto.
+#   Remoto (Google Drive): 30 dias por defecto. La eliminacion usa la
+#   papelera del proveedor para que un error operativo siga siendo recuperable.
 # ============================================================================
 
 set -uo pipefail
+umask 077
 
 BACKUP_DIR="/apps/backup"
 ENV_FILE="${BACKUP_DIR}/.env"
 LOG_FILE="${BACKUP_DIR}/backup.log"
-LOCAL_RETENTION_DAYS=2
-REMOTE_RETENTION_DAYS=30
+LOCAL_RETENTION_DAYS="${LOCAL_RETENTION_DAYS:-7}"
+REMOTE_RETENTION_DAYS="${REMOTE_RETENTION_DAYS:-30}"
 
 # ── Cargar configuracion ────────────────────────────────────────────────────
 if [ -f "${ENV_FILE}" ]; then
@@ -80,6 +81,13 @@ if ! PGPASSWORD="${PGPASSWORD:-}" /usr/lib/postgresql/17/bin/pg_dump \
   fail "pg_dump fallo para ${PGDATABASE}"
 fi
 
+if ! /usr/lib/postgresql/17/bin/pg_restore --list "${DUMP_FILE}" >/dev/null; then
+  rm -f "${DUMP_FILE}"
+  fail "pg_restore --list no pudo validar el dump"
+fi
+
+sha256sum "${DUMP_FILE}" > "${DUMP_FILE}.sha256"
+
 DUMP_SIZE="$(du -h "${DUMP_FILE}" | cut -f1)"
 log "dump OK (${DUMP_SIZE})"
 
@@ -94,28 +102,40 @@ fi
 
 # --drive-chunk-size 64M acelera uploads para .dump >100MB sin pasarse de RAM.
 # Si la base crece a varios GB, considerar 128M.
-if ! rclone copy "${DUMP_FILE}" "${RCLONE_REMOTE}/" \
-      --transfers=1 --checkers=1 --retries=3 --low-level-retries=5 \
+if ! rclone copyto "${DUMP_FILE}" "${RCLONE_REMOTE}/$(basename "${DUMP_FILE}")" \
+      --transfers=1 --checkers=1 --retries=8 --low-level-retries=10 \
+      --retries-sleep=1m --tpslimit=2 --tpslimit-burst=2 \
       --drive-chunk-size=64M; then
   fail "rclone upload fallo a ${RCLONE_REMOTE}"
 fi
+
+if ! rclone copyto "${DUMP_FILE}.sha256" "${RCLONE_REMOTE}/$(basename "${DUMP_FILE}.sha256")" \
+      --transfers=1 --checkers=1 --retries=5 --retries-sleep=1m \
+      --tpslimit=2 --tpslimit-burst=2; then
+  fail "rclone upload del checksum fallo a ${RCLONE_REMOTE}"
+fi
+
+touch "${BACKUP_DIR}/.pg_offsite_success"
 
 log "upload OK to ${RCLONE_REMOTE}"
 
 # ── 3. Limpiar locales > N dias ────────────────────────────────────────────
 LOCAL_DELETED="$(find "${BACKUP_DIR}" -maxdepth 1 -name 'backup_cfanalisis_*.dump' \
                   -type f -mtime "+${LOCAL_RETENTION_DAYS}" -print -delete | wc -l)"
+find "${BACKUP_DIR}" -maxdepth 1 -name 'backup_cfanalisis_*.dump.sha256' \
+  -type f -mtime "+${LOCAL_RETENTION_DAYS}" -delete
 log "local cleanup: ${LOCAL_DELETED} archivos > ${LOCAL_RETENTION_DAYS}d eliminados"
 
 # ── 4. Limpiar remotos > N dias en Google Drive ────────────────────────────
-# --drive-use-trash=false hace que la eliminacion sea permanente; sin esto
-# los archivos van a la papelera y siguen contando contra la cuota.
+# La configuracion predeterminada de Google Drive envia los expirados a la
+# papelera: es intencionado para conservar una ventana de recuperacion.
 if ! rclone delete "${RCLONE_REMOTE}/" \
       --min-age "${REMOTE_RETENTION_DAYS}d" \
-      --include 'backup_cfanalisis_*.dump' \
-      --drive-use-trash=false 2>&1 | tee -a "${LOG_FILE}"; then
+      --include 'backup_cfanalisis_*.dump*' \
+      --tpslimit=2 --tpslimit-burst=2 2>&1 | tee -a "${LOG_FILE}"; then
   log "WARN: rclone delete fallo (no-fatal)"
 fi
 
 log "DONE backup_cfanalisis_${TS}.dump (${DUMP_SIZE})"
+"${BACKUP_DIR}/backup_status_metrics.sh" >/dev/null 2>&1 || true
 exit 0

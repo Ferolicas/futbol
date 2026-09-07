@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Job: baseball-live (MLB, MLB Stats API)
  *

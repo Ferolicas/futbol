@@ -1,0 +1,22 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "panels": [
+    { "type": "stat", "title": "Web + staging disponibles", "id": 1, "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 }, "targets": [{ "expr": "sum(probe_success{job=\"cfanalisis-http\"})", "refId": "A" }] },
+    { "type": "stat", "title": "WebSockets conectados", "id": 2, "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 }, "targets": [{ "expr": "cfanalisis_ws_connections", "refId": "A" }] },
+    { "type": "stat", "title": "Jobs esperando", "id": 3, "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 }, "targets": [{ "expr": "sum(cfanalisis_queue_jobs{state=\"waiting\"})", "refId": "A" }] },
+    { "type": "stat", "title": "Alertas activas", "id": 4, "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 }, "targets": [{ "expr": "sum(ALERTS{alertstate=\"firing\"})", "refId": "A" }] },
+    { "type": "timeseries", "title": "Latencia HTTP gateway p95", "id": 5, "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 }, "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(cfanalisis_http_request_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "A" }] },
+    { "type": "timeseries", "title": "Deltas realtime por minuto", "id": 6, "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 }, "targets": [{ "expr": "sum by (source) (rate(cfanalisis_fixture_deltas_total[5m]) * 60)", "legendFormat": "{{source}}", "refId": "A" }] },
+    { "type": "timeseries", "title": "CPU y memoria disponibles", "id": 7, "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 }, "targets": [{ "expr": "100 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100", "legendFormat": "CPU usada %", "refId": "A" }, { "expr": "node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100", "legendFormat": "RAM disponible %", "refId": "B" }] },
+    { "type": "timeseries", "title": "Edad de backups (horas)", "id": 8, "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 }, "targets": [{ "expr": "(time() - cfanalisis_backup_last_success_unixtime) / 3600", "legendFormat": "{{kind}}", "refId": "A" }] }
+  ],
+  "schemaVersion": 41,
+  "tags": ["cfanalisis", "enterprise"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timezone": "browser",
+  "title": "CF Análisis · Operación",
+  "uid": "cfanalisis-overview",
+  "version": 1
+}

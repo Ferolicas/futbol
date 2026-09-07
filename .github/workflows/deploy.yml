@@ -1,5 +1,8 @@
 name: Deploy to VPS
 
+permissions:
+  contents: read
+
 # Reemplaza deploy-worker.yml. Ahora deploya AMBOS — Next.js (frontend +
 # API routes) Y worker BullMQ — al mismo VPS. Decide qué redeployar
 # segun los archivos que cambiaron en el commit.
@@ -20,8 +23,50 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  quality:
+    name: Tests, types, audit and build
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: '1'
+      NEXT_TELEMETRY_DISABLED: '1'
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
+      DATABASE_SSL: 'false'
+      AUTH_JWT_SECRET: ci-only-secret-ci-only-secret-ci-only-secret
+      WORKER_SECRET: ci-only-secret-ci-only-secret-ci-only-secret
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/cfanalisis-worker/package-lock.json
+      - name: Install web dependencies
+        run: npm ci
+      - name: Audit web runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - name: Run web tests
+        run: npm test
+      - name: Build web
+        run: npm run build
+      - name: Install worker dependencies
+        working-directory: apps/cfanalisis-worker
+        run: npm ci
+      - name: Audit worker runtime dependencies
+        working-directory: apps/cfanalisis-worker
+        run: npm audit --omit=dev --audit-level=high
+      - name: Typecheck and build worker
+        working-directory: apps/cfanalisis-worker
+        run: npm run typecheck && npm run build
+
+  deploy:
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.0.3
@@ -79,6 +124,10 @@ jobs:
               echo "▶ Frontend changed — rebuilding Next.js"
 
               bash scripts/vps/deploy-web.sh
+
+              # Staging es loopback-only, usa otra BD/Redis y un .env sin
+              # proveedores LIVE. Si ya fue provisionado, sigue cada release.
+              bash scripts/vps/deploy-staging.sh
 
               echo "✓ Next.js redeployed"
             else

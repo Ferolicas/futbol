@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { analyzeSportDate, cronTargetDate, triggerEvent } from '../../shared.js';
 
 /** @param {string} sport @param {any} payload @param {any} job */

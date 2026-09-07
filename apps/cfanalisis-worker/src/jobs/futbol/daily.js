@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Job: futbol-daily
  * Port of /api/cron/daily. Reads today's fixtures from cache and enqueues

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Logger Pino — JSON estructurado a stdout + opcionalmente a archivo.
  *
@@ -19,14 +18,14 @@ const level = process.env.LOG_LEVEL || 'info';
 const logFile = process.env.LOG_FILE;
 const isProd = process.env.NODE_ENV === 'production';
 
-const streams: { stream: NodeJS.WritableStream; level?: string }[] = [];
+const streams: pino.StreamEntry[] = [];
 
 // stdout: pretty en dev, JSON crudo en prod.
 if (!isProd) {
   // pino-pretty es devDep — solo se intenta cargar en dev.
   try {
-    const PinoPretty = require('pino-pretty');
-    streams.push({ stream: PinoPretty({ colorize: true, translateTime: 'SYS:HH:MM:ss' }) });
+    const { default: pinoPretty } = await import('pino-pretty');
+    streams.push({ stream: pinoPretty({ colorize: true, translateTime: 'SYS:HH:MM:ss' }) });
   } catch {
     streams.push({ stream: process.stdout });
   }

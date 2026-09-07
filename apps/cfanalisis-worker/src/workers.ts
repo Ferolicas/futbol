@@ -4,6 +4,7 @@ import { logger } from './logger.js';
 import { notifyError } from './notifier.js';
 import type { QueueName } from './queues.js';
 import { runWithJobTimeout } from './job-timeout.js';
+import { recordJobFinished } from './metrics.js';
 
 // Futbol jobs
 import { runFixtures } from './jobs/futbol/fixtures.js';
@@ -220,6 +221,7 @@ export function startWorkers(role: WorkerRole = 'all'): Worker[] {
       maxStalledCount: lo.maxStalledCount,
     });
     w.on('completed', (job) => {
+      recordJobFinished(name, 'completed', job.processedOn);
       logger.info({ queue: name, jobId: job.id }, 'job completed');
     });
     w.on('failed', (job, err) => {
@@ -228,6 +230,7 @@ export function startWorkers(role: WorkerRole = 'all'): Worker[] {
       // suelen recuperarse en el siguiente intento → solo log, sin alerta.
       const isFinal = (job?.attemptsMade ?? 0) >= (job?.opts?.attempts ?? 1);
       if (isFinal) {
+        recordJobFinished(name, 'failed', job?.processedOn);
         notifyError(
           { source: 'job', name, jobId: job?.id, extra: { attempts: job?.attemptsMade } },
           err,

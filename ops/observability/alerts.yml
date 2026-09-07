@@ -1,0 +1,103 @@
+groups:
+  - name: cfanalisis-availability
+    rules:
+      - alert: CFAnalisisTargetDown
+        expr: up{job=~"cfanalisis-worker|postgres|redis|node"} == 0
+        for: 2m
+        labels: { severity: critical, service: cfanalisis }
+        annotations:
+          summary: 'Un componente de CF Análisis no responde'
+          description: '{{ $labels.job }} / {{ $labels.instance }} lleva al menos 2 minutos caído.'
+      - alert: CFAnalisisHttpDown
+        expr: probe_success{job="cfanalisis-http"} == 0
+        for: 2m
+        labels: { severity: critical, service: cfanalisis }
+        annotations:
+          summary: 'La web o staging no pasa su health check'
+          description: '{{ $labels.instance }} no devuelve HTTP 2xx.'
+      - alert: CFAnalisisDependencyDown
+        expr: cfanalisis_dependency_up == 0
+        for: 2m
+        labels: { severity: critical, service: cfanalisis }
+        annotations:
+          summary: 'Dependencia del realtime no disponible'
+          description: '{{ $labels.dependency }} no responde desde el gateway.'
+
+  - name: cfanalisis-capacity
+    rules:
+      - alert: CFAnalisisDiskLow
+        expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.15
+        for: 10m
+        labels: { severity: warning, service: cfanalisis }
+        annotations:
+          summary: 'Menos de 15% de disco libre'
+          description: 'El filesystem raíz conserva menos de 15% de espacio.'
+      - alert: CFAnalisisMemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+        for: 10m
+        labels: { severity: warning, service: cfanalisis }
+        annotations:
+          summary: 'Menos de 10% de memoria disponible'
+          description: 'La presión de memoria se mantiene durante 10 minutos.'
+      - alert: CFAnalisisQueueBacklog
+        expr: cfanalisis_queue_jobs{state="waiting"} > 25
+        for: 10m
+        labels: { severity: warning, service: cfanalisis }
+        annotations:
+          summary: 'Backlog anormal en BullMQ'
+          description: 'La cola {{ $labels.queue }} mantiene {{ $value }} jobs esperando.'
+      - alert: CFAnalisisJobStuck
+        expr: cfanalisis_queue_oldest_active_seconds > 1800
+        for: 5m
+        labels: { severity: warning, service: cfanalisis }
+        annotations:
+          summary: 'Job activo durante más de 30 minutos'
+          description: 'La cola {{ $labels.queue }} tiene un job activo demasiado antiguo.'
+
+  - name: cfanalisis-quality
+    rules:
+      - alert: CFAnalisisGatewayErrors
+        expr: sum(rate(cfanalisis_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(cfanalisis_http_requests_total[5m])), 0.001) > 0.02
+        for: 5m
+        labels: { severity: warning, service: cfanalisis }
+        annotations:
+          summary: 'Más de 2% de respuestas 5xx en el gateway'
+          description: 'La tasa de error del worker supera el presupuesto durante 5 minutos.'
+      - alert: CFAnalisisRealtimeAuthAbuse
+        expr: increase(cfanalisis_ws_rejected_total[5m]) > 20
+        for: 1m
+        labels: { severity: warning, service: cfanalisis }
+        annotations:
+          summary: 'Rechazos WebSocket anormales'
+          description: 'Se detectaron más de 20 intentos WS rechazados en 5 minutos.'
+
+  - name: cfanalisis-backups
+    rules:
+      - alert: CFAnalisisPostgresBackupStale
+        expr: time() - cfanalisis_backup_last_success_unixtime{kind="postgres_local"} > 108000
+        for: 10m
+        labels: { severity: critical, service: cfanalisis }
+        annotations:
+          summary: 'Backup PostgreSQL local atrasado'
+          description: 'No hay un dump validado nuevo desde hace más de 30 horas.'
+      - alert: CFAnalisisRedisBackupStale
+        expr: time() - cfanalisis_backup_last_success_unixtime{kind="redis_local"} > 108000
+        for: 10m
+        labels: { severity: critical, service: cfanalisis }
+        annotations:
+          summary: 'Backup Redis local atrasado'
+          description: 'No hay un RDB validado nuevo desde hace más de 30 horas.'
+      - alert: CFAnalisisOffsiteBackupStale
+        expr: time() - cfanalisis_backup_last_success_unixtime{kind=~"postgres_offsite|redis_offsite"} > 172800
+        for: 10m
+        labels: { severity: critical, service: cfanalisis }
+        annotations:
+          summary: 'Backup externo atrasado'
+          description: '{{ $labels.kind }} no confirma una copia externa desde hace más de 48 horas.'
+      - alert: CFAnalisisRestoreDrillOverdue
+        expr: time() - cfanalisis_backup_last_success_unixtime{kind="restore_drill"} > 3456000
+        for: 1h
+        labels: { severity: warning, service: cfanalisis }
+        annotations:
+          summary: 'Simulacro de restauración vencido'
+          description: 'No se valida una restauración completa desde hace más de 40 días.'

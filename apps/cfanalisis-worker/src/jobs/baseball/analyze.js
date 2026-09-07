@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Baseball diario — motor empírico.
  * Datos/identidad/fotos: MLB Stats oficial. Cuotas: API-Baseball.

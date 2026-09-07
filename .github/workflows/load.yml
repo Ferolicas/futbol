@@ -1,0 +1,67 @@
+name: Staging load test
+
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      virtual_users:
+        description: 'Virtual users (maximum 10)'
+        required: false
+        default: '5'
+      duration:
+        description: 'Duration (maximum 60s)'
+        required: false
+        default: '30s'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfanalisis-staging-load
+  cancel-in-progress: false
+
+jobs:
+  k6:
+    name: Bounded k6 smoke load
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      K6_BASE_URL: http://127.0.0.1:3100
+      K6_VUS: ${{ inputs.virtual_users || '3' }}
+      K6_DURATION: ${{ inputs.duration || '20s' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: grafana/setup-k6-action@v1
+        with:
+          k6-version: '2.1.0'
+      - name: Open authenticated tunnel to private staging
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          install -m 600 /dev/null "$HOME/.ssh/cfanalisis"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/cfanalisis"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          ssh -i "$HOME/.ssh/cfanalisis" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -N -L 3100:127.0.0.1:3100 "root@$VPS_HOST" &
+          echo $! > /tmp/cfanalisis-staging-tunnel.pid
+          for attempt in {1..20}; do
+            if curl --fail --silent --show-error --max-time 5 "$K6_BASE_URL/api/health"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - name: Run bounded load test
+        run: k6 run tests/load/staging-smoke.js
+      - name: Close tunnel
+        if: always()
+        run: |
+          if test -f /tmp/cfanalisis-staging-tunnel.pid; then
+            kill "$(cat /tmp/cfanalisis-staging-tunnel.pid)" 2>/dev/null || true
+          fi

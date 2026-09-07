@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Shim that re-exports lib/* symbols via dynamic imports.
  *

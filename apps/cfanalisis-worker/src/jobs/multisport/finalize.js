@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { finalizeSportDate, bogotaToday } from '../../shared.js';
 
 function addDays(date, amount) {

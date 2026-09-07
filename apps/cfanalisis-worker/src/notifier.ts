@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * notifier — envia alertas de error a Telegram con dedup distribuido.
  *

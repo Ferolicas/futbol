@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Job: baseball-watchdog — hombre muerto del pipeline de béisbol.
  *

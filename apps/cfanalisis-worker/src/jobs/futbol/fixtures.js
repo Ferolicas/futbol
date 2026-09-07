@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Job: futbol-fixtures
  * Port of /api/cron/fixtures (GET). Fetches fixtures for target date, caches in

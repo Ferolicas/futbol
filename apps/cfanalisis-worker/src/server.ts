@@ -15,6 +15,12 @@ import { logger } from './logger.js';
 import { notifyError } from './notifier.js';
 import { wsManager } from './ws/wsManager.js';
 import { runBaseballCalibration } from './jobs/calibration/baseball.js';
+import {
+  metricsContentType,
+  observeHttpRequest,
+  recordWsRejected,
+  renderMetrics,
+} from './metrics.js';
 
 const SECRET = process.env.WORKER_SECRET || '';
 
@@ -302,12 +308,15 @@ export function buildServer() {
   // podría conservar credenciales de clientes antiguos que aún usan query
   // params. Solo emitimos la línea propia, que pasa siempre por redactUrl().
   const app = Fastify({ loggerInstance: logger, disableRequestLogging: true });
+  const requestStartedAt = new WeakMap<object, bigint>();
 
   // Diagnostico: loguear el path EXACTO de cada request entrante.
   // Util cuando aparecen 404 "fantasma" (proxies que recortan URL, env
   // vars con typos, etc). Una linea por request — bajo costo, logger
   // ya filtra por LOG_LEVEL.
-  app.addHook('onRequest', async (req) => {
+  app.addHook('onRequest', async (req, reply) => {
+    requestStartedAt.set(req, process.hrtime.bigint());
+    reply.header('X-Request-Id', req.id);
     const safeUrl = redactUrl(req.url);
     const safeRawUrl = redactUrl(req.raw.url);
     req.log.info({
@@ -317,6 +326,20 @@ export function buildServer() {
       ip: req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || req.ip,
       upgrade: req.headers['upgrade'] || null,
     }, 'incoming');
+  });
+
+  app.addHook('onResponse', async (req, reply) => {
+    const startedAt = requestStartedAt.get(req);
+    requestStartedAt.delete(req);
+    const durationSeconds = startedAt
+      ? Number(process.hrtime.bigint() - startedAt) / 1_000_000_000
+      : 0;
+    observeHttpRequest(
+      req.method,
+      req.routeOptions?.url || 'unmatched',
+      reply.statusCode,
+      durationSeconds,
+    );
   });
 
   // Errores en handlers Fastify → loguear + alerta Telegram (con dedup).
@@ -355,7 +378,10 @@ export function buildServer() {
         preValidation: async (req, reply) => {
           const token = readRealtimeTokenFromProtocols(req.headers['sec-websocket-protocol']);
           const access = await verifyRealtimeAccessToken(token, SECRET);
-          if (!access) return reply.code(401).send({ error: 'unauthorized' });
+          if (!access) {
+            recordWsRejected('authentication');
+            return reply.code(401).send({ error: 'unauthorized' });
+          }
           websocketAccess.set(req, { topics: access.topics, expiresAt: access.expiresAt });
         },
       }, (socket, req) => {
@@ -379,6 +405,28 @@ export function buildServer() {
   app.get('/stats', async (req, reply) => {
     if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
     return { ok: true, ts: new Date().toISOString(), ...getVpsStats() };
+  });
+
+  // Prometheus scrape protegido. El worker escucha solo en loopback, pero el
+  // secreto sigue siendo obligatorio porque Caddy también enruta este host.
+  app.get('/metrics', async (req, reply) => {
+    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
+    const [db, redis, queueHealth] = await Promise.all([
+      pingPostgres(),
+      pingRedis(),
+      collectHealthQueues().catch(() => ({ queues: {}, issues: [] as QueueHealthIssue[] })),
+    ]);
+    const body = await renderMetrics({
+      postgresUp: db === 'ok',
+      redisUp: redis === 'ok',
+      queues: queueHealth.queues,
+      websocketConnections: wsManager.size(),
+      websocketSubscriptions: wsManager.subscriptionCount(),
+    });
+    return reply
+      .header('Content-Type', metricsContentType)
+      .header('Cache-Control', 'no-store')
+      .send(body);
   });
 
   // /admin/eventlog — auditoría temporal de eventos en vivo.

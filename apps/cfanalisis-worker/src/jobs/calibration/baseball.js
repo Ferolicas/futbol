@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Port of scripts/build-baseball-calibration.js. Builds calibration table
  * for the baseball model from `baseball_match_predictions`, persists to

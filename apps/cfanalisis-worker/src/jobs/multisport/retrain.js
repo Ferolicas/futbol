@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { pgPool, trainMultisportEmpiricalEngine } from '../../shared.js';
 
 const run = (sport, payload) => trainMultisportEmpiricalEngine({
