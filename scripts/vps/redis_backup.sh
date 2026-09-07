@@ -67,10 +67,16 @@ log "start redis backup ${RDB_FILE}"
 # le indicamos. No bloquea operaciones (Redis hace fork BGSAVE internamente).
 REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
 REDIS_PORT="${REDIS_PORT:-6379}"
-if [ -n "${REDIS_PASSWORD:-}" ] && REDISCLI_AUTH="${REDIS_PASSWORD}" \
-    redis-cli -h "${REDIS_HOST}" -p "${REDIS_PORT}" ping >/dev/null 2>&1; then
+AUTH_REPLY=''
+if [ -n "${REDIS_PASSWORD:-}" ]; then
+  AUTH_REPLY="$(REDISCLI_AUTH="${REDIS_PASSWORD}" redis-cli \
+    -h "${REDIS_HOST}" -p "${REDIS_PORT}" --raw ping 2>&1 || true)"
+fi
+NOAUTH_REPLY="$(env -u REDISCLI_AUTH redis-cli \
+  -h "${REDIS_HOST}" -p "${REDIS_PORT}" --raw ping 2>&1 || true)"
+if [ "${AUTH_REPLY}" = 'PONG' ]; then
   export REDISCLI_AUTH="${REDIS_PASSWORD}"
-elif redis-cli -h "${REDIS_HOST}" -p "${REDIS_PORT}" ping >/dev/null 2>&1; then
+elif [ "${NOAUTH_REPLY}" = 'PONG' ]; then
   # Tolera una credencial histórica en backup/.env cuando el Redis local no
   # exige AUTH. La instancia permanece limitada a loopback/protected-mode.
   unset REDISCLI_AUTH
