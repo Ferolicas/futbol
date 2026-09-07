@@ -5,7 +5,6 @@ import { getCurrentUser } from '../../../../../lib/auth-pg';
 import { freeAnalysis } from '../../../../../lib/free-access';
 import { userHasActivePlan } from '../../../../../lib/require-active-plan';
 import { jsonError } from '../../../../../lib/api-error';
-import { safeLogValue } from '../../../../../lib/safe-log.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,7 +49,6 @@ export async function GET(request, props) {
       competitions: competitions.map(({ id, key, name, country }) => ({ id, key, name, country })),
     });
   } catch (error) {
-    console.error('[api/sports/fixtures]', safeLogValue(error));
     return jsonError(error);
   }
 }
