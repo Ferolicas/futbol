@@ -35,6 +35,8 @@ TABLE_COUNT="$(sudo -u postgres psql -XAtd "${DB_NAME}" -c "select count(*) from
 if [ "${TABLE_COUNT}" -eq 0 ]; then
   SCHEMA_DUMP="$(mktemp /tmp/cfanalisis-staging-schema.XXXXXX.dump)"
   trap 'rm -f "${SCHEMA_DUMP}"' EXIT INT TERM
+  chown postgres:postgres "${SCHEMA_DUMP}"
+  chmod 0600 "${SCHEMA_DUMP}"
   sudo -u postgres pg_dump --format=custom --schema-only --no-owner --no-privileges \
     --dbname=cfanalisis --file="${SCHEMA_DUMP}"
   sudo -u postgres pg_restore --dbname="${DB_NAME}" --role="${DB_ROLE}" \
