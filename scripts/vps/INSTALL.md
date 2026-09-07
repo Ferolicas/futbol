@@ -360,5 +360,5 @@ permanece en el crontab de root):
 
 ```bash
 sudo install -m 0644 ops/cron/cfanalisis-enterprise /etc/cron.d/cfanalisis-enterprise
-sudo systemctl reload cron
+sudo systemctl is-active cron
 ```

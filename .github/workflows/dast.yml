@@ -45,8 +45,10 @@ jobs:
         id: zap
         continue-on-error: true
         run: |
+          mkdir -p zap-output
+          chmod 0777 zap-output
           docker run --rm --network host \
-            -v "$PWD:/zap/wrk/:rw" \
+            -v "$PWD/zap-output:/zap/wrk/:rw" \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py -t http://127.0.0.1:3100 -m 3 -I \
             -r zap-report.html -J zap-report.json
@@ -56,9 +58,9 @@ jobs:
         with:
           name: zap-staging-${{ github.run_id }}
           path: |
-            zap-report.html
-            zap-report.json
-          if-no-files-found: warn
+            zap-output/zap-report.html
+            zap-output/zap-report.json
+          if-no-files-found: error
           retention-days: 30
       - name: Close tunnel
         if: always()
