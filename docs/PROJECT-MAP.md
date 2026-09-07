@@ -1083,6 +1083,9 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   solo en `cfanalisis_restore_drill` y publica evidencia/fecha a Prometheus.
 - El cleanup de MLB ya no destruye a los 30/60 días análisis y resultados que
   sirven de evidencia al motor; solo retira la caché regenerable de siete días.
+- La firma de sesión admite rotación sin cierre masivo: la clave actual firma y
+  `AUTH_JWT_SECRET_PREVIOUS` solo verifica cookies antiguas durante 30 días. El
+  rotador root conserva permisos, no imprime claves y redespliega el web.
 - SLO, incidentes, secretos, retención, desastre, staging y futura alta
   disponibilidad están formalizados en `docs/enterprise/`. Sin segunda máquina
   persiste el SPOF físico y no se declara HA/PITR que el VPS no puede garantizar.

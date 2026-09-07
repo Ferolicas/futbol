@@ -3,7 +3,7 @@
 | Secreto | Frecuencia | Efecto |
 |---|---:|---|
 | `WORKER_SECRET` | 90 días o incidente | coordinar web, worker y Prometheus |
-| `AUTH_JWT_SECRET` | 180 días o incidente | invalida sesiones salvo transición dual |
+| `AUTH_JWT_SECRET` | 180 días o incidente | transición dual durante 30 días |
 | Stripe/MP webhook secrets | anual o incidente | transición desde cada proveedor |
 | API deportivas/email | 180 días o incidente | sustituir y probar cuota/envío |
 | token del bot Telegram | 180 días o incidente | actualizar alertas, backups y worker |
@@ -28,3 +28,13 @@ sudo /apps/futbol/scripts/vps/rotate-telegram-token.sh
 
 El script solicita el valor con entrada oculta y coordina `/apps/backup/.env`,
 `/apps/scripts/health.env`, el `.env` del worker y Alertmanager sin imprimirlo.
+
+Para rotar la firma de sesión sin expulsar usuarios:
+
+```bash
+sudo /apps/futbol/scripts/vps/rotate-auth-jwt-secret.sh
+```
+
+La clave nueva firma todas las cookies y la anterior queda únicamente para
+verificación. Transcurridos 30 días debe retirarse
+`AUTH_JWT_SECRET_PREVIOUS` en una ventana normal de mantenimiento.

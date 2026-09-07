@@ -25,24 +25,28 @@ import { jwtVerify } from 'jose';
 
 const COOKIE_NAME = 'cf_session';
 
-function getJwtSecret() {
-  const raw = process.env.AUTH_JWT_SECRET || process.env.NEXTAUTH_SECRET;
-  if (!raw || raw.length < 32) return null;
-  return new TextEncoder().encode(raw);
+function getJwtSecrets() {
+  const current = process.env.AUTH_JWT_SECRET || process.env.NEXTAUTH_SECRET;
+  if (!current || current.length < 32) return [];
+  const values = [current];
+  const previous = process.env.AUTH_JWT_SECRET_PREVIOUS;
+  if (previous?.length >= 32 && previous !== current) values.push(previous);
+  return values.map(value => new TextEncoder().encode(value));
 }
 
 // Verifica el JWT de sesión (firma + expiry). Devuelve el payload {uid,sid}
 // o null. NO consulta la BD — Edge runtime no puede hablar con el VPS PG.
 async function verifySessionToken(token) {
   if (!token) return null;
-  const secret = getJwtSecret();
-  if (!secret) return null;
-  try {
-    const { payload } = await jwtVerify(token, secret, { algorithms: ['HS256'] });
-    return payload;
-  } catch {
-    return null;
+  for (const secret of getJwtSecrets()) {
+    try {
+      const { payload } = await jwtVerify(token, secret, { algorithms: ['HS256'] });
+      return payload;
+    } catch {
+      // Probar la clave anterior únicamente durante la ventana de transición.
+    }
   }
+  return null;
 }
 
 export async function proxy(request) {
