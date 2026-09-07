@@ -1,0 +1,9 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=""
+
+# PostgreSQL ya se ejecuta a las 03:00 desde el crontab historico del VPS.
+30 3 * * * root /apps/backup/redis_backup.sh >> /apps/backup/backup.log 2>&1
+17 */6 * * * root /apps/backup/offsite_backup_retry.sh >> /apps/backup/backup.log 2>&1
+30 4 1 * * root /apps/backup/restore_drill.sh --run >> /apps/backup/restore-drill-cron.log 2>&1
+45 4 1 * * root sudo -u postgres psql -Xv ON_ERROR_STOP=1 -d cfanalisis -f /apps/futbol/scripts/audit-data-retention.sql >> /var/log/cfanalisis-retention-audit.log 2>&1

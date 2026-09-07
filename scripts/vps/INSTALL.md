@@ -355,10 +355,10 @@ El staging queda en `127.0.0.1:3100`; Grafana en `127.0.0.1:3300` y Prometheus
 en `127.0.0.1:9090`. No añadir estos puertos a Caddy/UFW. Los accesos, SLO y
 procedimientos están en `docs/enterprise/`.
 
-Crons root:
+Instalar los crons complementarios (el backup PostgreSQL diario histórico
+permanece en el crontab de root):
 
-```cron
-15 3 * * * /apps/backup/redis_backup.sh >> /apps/backup/backup.log 2>&1
-17 */6 * * * /apps/backup/offsite_backup_retry.sh >> /apps/backup/offsite-retry.log 2>&1
-30 4 1 * * /apps/backup/restore_drill.sh --run >> /apps/backup/restore-drill.log 2>&1
+```bash
+sudo install -m 0644 ops/cron/cfanalisis-enterprise /etc/cron.d/cfanalisis-enterprise
+sudo systemctl reload cron
 ```
