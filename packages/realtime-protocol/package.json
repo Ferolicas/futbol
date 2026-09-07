@@ -10,9 +10,15 @@
       "types": "./index.d.ts",
       "import": "./index.js",
       "default": "./index.js"
+    },
+    "./auth": {
+      "types": "./auth.d.ts",
+      "import": "./auth.js",
+      "default": "./auth.js"
     }
   },
   "dependencies": {
+    "jose": "6.2.12",
     "zod": "^4.3.6"
   }
 }

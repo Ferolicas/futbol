@@ -1,13 +1,18 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import {
+  REALTIME_WS_PROTOCOL,
+  REALTIME_WS_TOKEN_PREFIX,
+} from '@cfanalisis/realtime-protocol';
 
 /**
  * Singleton de conexion WebSocket al worker en VPS.
  *
  * Una sola conexion por pestana (compartida entre componentes via el hook
  * useWorkerEvent). Maneja:
- *   - Autenticacion con NEXT_PUBLIC_WORKER_SECRET en la URL (query param).
+ *   - Autenticación con JWT de 5 minutos obtenido desde la sesión httpOnly.
+ *     El token viaja como subprotocolo WebSocket, nunca en la URL ni en logs.
  *   - Reconexion automatica con backoff exponencial 1s→2s→4s→8s→16s→30s.
  *   - Heartbeat ping cada 25s (la mayoria de proxies cortan a 30s sin
  *     trafico).
@@ -15,11 +20,8 @@ import { useEffect, useRef, useState } from 'react';
  */
 
 const WS_URL = process.env.NEXT_PUBLIC_WORKER_WS_URL;
-// C1 FIX: usar NEXT_PUBLIC_WS_TOKEN (token público solo-WS, DISTINTO de
-// WORKER_SECRET). Fallback transicional a NEXT_PUBLIC_WORKER_SECRET para no romper
-// el realtime antes de configurar el nuevo token. Una vez configurado
-// NEXT_PUBLIC_WS_TOKEN, el navegador deja de exponer el secreto admin.
-const WS_SECRET = process.env.NEXT_PUBLIC_WS_TOKEN || process.env.NEXT_PUBLIC_WORKER_SECRET;
+const TOKEN_ENDPOINT = '/api/realtime/token';
+const TOKEN_REFRESH_MARGIN_MS = 30_000;
 
 class WorkerSocket {
   constructor() {
@@ -31,7 +33,11 @@ class WorkerSocket {
     this.stateListeners = new Set();
     this.heartbeatTimer = null;
     this.reconnectTimer = null;
+    this.tokenRefreshTimer = null;
     this.shouldRun = false;
+    this.connecting = false;
+    this.accessToken = null;
+    this.accessTokenExpiresAt = 0;
   }
 
   setState(s) {
@@ -52,6 +58,7 @@ class WorkerSocket {
     this.shouldRun = false;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    if (this.tokenRefreshTimer) clearTimeout(this.tokenRefreshTimer);
     if (this.ws) {
       try { this.ws.close(1000, 'client-stop'); } catch {}
       this.ws = null;
@@ -59,29 +66,72 @@ class WorkerSocket {
     this.setState('disconnected');
   }
 
-  connect() {
-    if (!WS_URL || !WS_SECRET) {
-      console.warn('[ws] NEXT_PUBLIC_WORKER_WS_URL o NEXT_PUBLIC_WORKER_SECRET ausentes');
+  async getAccessToken() {
+    if (this.accessToken && Date.now() < this.accessTokenExpiresAt - TOKEN_REFRESH_MARGIN_MS) {
+      return this.accessToken;
+    }
+    const response = await fetch(TOKEN_ENDPOINT, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) throw new Error(`token_${response.status}`);
+    const data = await response.json();
+    const expiresAt = Date.parse(data?.expiresAt || '');
+    if (typeof data?.token !== 'string' || data.token.length < 80 || !Number.isFinite(expiresAt)) {
+      throw new Error('token_invalid');
+    }
+    this.accessToken = data.token;
+    this.accessTokenExpiresAt = expiresAt;
+    return data.token;
+  }
+
+  scheduleTokenRefresh() {
+    if (this.tokenRefreshTimer) clearTimeout(this.tokenRefreshTimer);
+    const delay = Math.max(1_000, this.accessTokenExpiresAt - Date.now() - TOKEN_REFRESH_MARGIN_MS);
+    this.tokenRefreshTimer = setTimeout(() => {
+      this.accessToken = null;
+      this.accessTokenExpiresAt = 0;
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.close(4001, 'token-refresh');
+      } else if (this.shouldRun) {
+        this.connect();
+      }
+    }, delay);
+  }
+
+  async connect() {
+    if (!WS_URL) {
+      console.warn('[ws] NEXT_PUBLIC_WORKER_WS_URL ausente');
       return;
     }
-    if (this.ws) {
-      try { this.ws.close(); } catch {}
-    }
+    if (!this.shouldRun || this.connecting || this.ws?.readyState === WebSocket.CONNECTING || this.ws?.readyState === WebSocket.OPEN) return;
+    this.connecting = true;
     this.setState('connecting');
 
-    const initialTopics = [...this.topics].join(',');
-    const url = `${WS_URL}?secret=${encodeURIComponent(WS_SECRET)}${
-      initialTopics ? `&topics=${encodeURIComponent(initialTopics)}` : ''
-    }`;
     let ws;
-    try { ws = new WebSocket(url); } catch (e) {
-      console.error('[ws] no se pudo crear WebSocket:', e?.message);
+    try {
+      const token = await this.getAccessToken();
+      if (!this.shouldRun) return;
+      const url = new URL(WS_URL, window.location.origin);
+      url.search = '';
+      url.hash = '';
+      ws = new WebSocket(url.toString(), [
+        REALTIME_WS_PROTOCOL,
+        `${REALTIME_WS_TOKEN_PREFIX}${token}`,
+      ]);
+    } catch (error) {
+      if (this.shouldRun) console.warn('[ws] autenticación o conexión no disponible:', error?.message);
       this.scheduleReconnect();
       return;
+    } finally {
+      this.connecting = false;
     }
     this.ws = ws;
+    let opened = false;
 
     ws.onopen = () => {
+      opened = true;
       this.attempt = 0;
       this.setState('connected');
       // `getSocket()` puede abrir la conexión antes de que los hooks alcancen a
@@ -92,6 +142,7 @@ class WorkerSocket {
         this.send({ type: 'subscribe', topic });
       }
       this.startHeartbeat();
+      this.scheduleTokenRefresh();
     };
 
     ws.onmessage = (ev) => {
@@ -110,9 +161,13 @@ class WorkerSocket {
       // pong / connected / error → ignoramos silenciosamente
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       this.stopHeartbeat();
       this.ws = null;
+      if (event.code === 4401 || !opened) {
+        this.accessToken = null;
+        this.accessTokenExpiresAt = 0;
+      }
       if (this.shouldRun) this.scheduleReconnect();
       else this.setState('disconnected');
     };
@@ -124,10 +179,14 @@ class WorkerSocket {
 
   scheduleReconnect() {
     this.setState('disconnected');
+    if (!this.shouldRun || this.reconnectTimer) return;
     const delays = [1000, 2000, 4000, 8000, 16000, 30000];
     const delay = delays[Math.min(this.attempt, delays.length - 1)];
     this.attempt++;
-    this.reconnectTimer = setTimeout(() => this.connect(), delay);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
   }
 
   startHeartbeat() {

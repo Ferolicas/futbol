@@ -16,6 +16,7 @@ import { bullConnection } from './redis.js';
 import { queues } from './queues.js';
 
 const PORT = Number(process.env.PORT || 8080);
+const HOST = process.env.WORKER_HOST || '127.0.0.1';
 
 // WORKER_ROLE define qué hace este proceso (Fase 1 — aislamiento):
 //   'realtime' → servidor HTTP/WS + pollers live (futbol-live, baseball-live)
@@ -34,8 +35,8 @@ async function main() {
   // colisiona y el realtime queda como único dueño del :8080 que ve Caddy.
   const app = HAS_SERVER ? buildServer() : null;
   if (app) {
-    await app.listen({ port: PORT, host: '0.0.0.0' });
-    logger.info({ port: PORT }, 'HTTP server listening');
+    await app.listen({ port: PORT, host: HOST });
+    logger.info({ host: HOST, port: PORT }, 'HTTP server listening');
   }
 
   // Workers de las colas que correspondan al rol.

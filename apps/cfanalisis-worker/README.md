@@ -29,9 +29,13 @@ cron-job.org  ──GET──▶  Vercel  /api/cron/*
                        Redis)
 ```
 
-- **HTTP server (Fastify, port 8080)** — receives enqueue webhooks from
+- **HTTP server (Fastify, `127.0.0.1:8080`)** — receives enqueue webhooks from
   Vercel, validates `Authorization: Bearer $WORKER_SECRET`, pushes a job to
-  the right BullMQ queue, returns 200 immediately.
+  the right BullMQ queue, returns 200 immediately. Caddy is the only public
+  ingress.
+- **WebSocket gateway** — accepts five-minute session JWTs in
+  `Sec-WebSocket-Protocol`; it never accepts `WORKER_SECRET` from a browser and
+  authorizes every subscription against the token's topic allowlist.
 - **BullMQ queues** — one per cron type (15 in total), backed by Redis on
   `127.0.0.1:6379` (local to the VPS). Job retries / backoff / cleanup
   configured in `src/queues.ts`.
@@ -80,11 +84,10 @@ exactly as before — the Vercel endpoint now enqueues instead of executing.
 Copy `.env.example` to `.env` and fill in. Required:
 
 - `WORKER_SECRET` — shared with Vercel (`WORKER_SECRET` env var there too).
+- `WORKER_HOST=127.0.0.1` — do not expose Fastify directly to the Internet.
 - `REDIS_HOST` / `REDIS_PORT` — local Redis for BullMQ (default 127.0.0.1:6379).
-- `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` — app cache.
-- `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — DB access.
+- `DATABASE_URL` — PostgreSQL through local PgBouncer.
 - `FOOTBALL_API_KEY`, `BZZOIRO_API_KEY` (baseball), `THE_ODDS_API_KEY`.
-- `PUSHER_APP_ID`, `PUSHER_KEY`, `PUSHER_SECRET`, `PUSHER_CLUSTER`.
 - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`.
 
 On the Vercel side, add:
@@ -155,8 +158,11 @@ pm2 save && pm2 startup
 
 ## Observability
 
-- `GET /health` — uptime + queue list.
-- `GET /queues/:name/status` — `waiting / active / completed / failed / delayed` counts.
+- `GET /health` — public minimal status and timestamp only.
+- `GET /queues/:name/status` — authenticated with `Authorization: Bearer
+  $WORKER_SECRET`; returns `waiting / active / completed / failed / delayed`.
+- `GET /admin/status` — authenticated operational detail (queues, DB/Redis,
+  memory and WebSocket clients).
 - Standard BullMQ events (`completed`, `failed`, `error`) are logged to stdout.
 - For a UI, point Bull Board or Arena at the same Redis on the VPS.
 

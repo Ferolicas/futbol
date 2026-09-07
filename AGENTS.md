@@ -47,6 +47,10 @@ toques nada”, “no subir” o equivalente.
 - No sustituir auth PG por Supabase: los nombres `supabase*` restantes son adaptadores de compatibilidad.
 - El checkout automático transporta solo un ID de plan validado y una intención opaca; jamás el precio.
 - `.env.local` contiene secretos LIVE y está fuera de Git.
+- El navegador nunca recibe `WORKER_SECRET`: `/api/realtime/token` emite un JWT
+  WS de cinco minutos y el worker autoriza cada topic por usuario/rol.
+- El worker HTTP/WS escucha solo en `127.0.0.1`; Caddy es la única entrada
+  pública. `/health` es mínimo y el detalle operativo exige `WORKER_SECRET`.
 - Antes de entregar cambios: `git diff --check` y `npm run build`.
 
 ## Gotchas

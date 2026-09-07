@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+export const REALTIME_WS_PROTOCOL = 'cfanalisis-realtime-v1';
+export const REALTIME_WS_TOKEN_PREFIX = 'cfjwt.';
+
 const NumericPairSchema = z.object({
   home: z.number().nullable().optional(),
   away: z.number().nullable().optional(),

@@ -6,8 +6,17 @@ import { supabaseAdmin } from '../../../lib/supabase';
 import { sendChatNotification } from '../../../lib/resend-email';
 import { triggerEvent } from '../../../lib/pusher';
 import { jsonError } from '../../../lib/api-error';
+import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
+
+const messageSchema = z.object({
+  message: z.string().trim().min(1).max(4000),
+  targetUserId: z.string().uuid().optional(),
+}).strict();
+const readSchema = z.object({
+  messageIds: z.array(z.string().uuid()).min(1).max(100),
+}).strict();
 
 // GET: Fetch chat messages
 export async function GET(request) {
@@ -16,7 +25,7 @@ export async function GET(request) {
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { data: profile } = await supabaseAdmin.from('user_profiles').select('role').eq('id', user.id).single();
-  const isAdmin = profile?.role === 'admin';
+  const isAdmin = ['admin', 'owner'].includes(profile?.role);
   const { searchParams } = new URL(request.url);
   const targetUserId = searchParams.get('userId');
 
@@ -62,11 +71,12 @@ export async function POST(request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { message, targetUserId } = await request.json();
-  if (!message?.trim()) return Response.json({ error: 'Message required' }, { status: 400 });
+  const parsed = messageSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return Response.json({ error: 'Invalid message' }, { status: 400 });
+  const { message, targetUserId } = parsed.data;
 
   const { data: profile } = await supabaseAdmin.from('user_profiles').select('role, name, email').eq('id', user.id).single();
-  const isAdmin = profile?.role === 'admin';
+  const isAdmin = ['admin', 'owner'].includes(profile?.role);
   const sender = isAdmin ? 'agent' : 'user';
   const userId = isAdmin && targetUserId ? targetUserId : user.id;
 
@@ -75,7 +85,7 @@ export async function POST(request) {
       user_id: userId,
       user_name: profile?.name || user.email,
       user_email: profile?.email || user.email,
-      message: message.trim(),
+      message,
       sender,
       read: false,
       created_at: new Date().toISOString(),
@@ -89,11 +99,11 @@ export async function POST(request) {
     // respuesta del POST; cada uno es un round-trip HTTP al worker).
     const ts = new Date().toISOString();
     const broadcasts = [
-      triggerEvent(`chat-${userId}`, 'new-message', { id: row.id, message: message.trim(), sender, created_at: ts }),
+      triggerEvent(`chat-${userId}`, 'new-message', { id: row.id, message, sender, created_at: ts }),
     ];
     if (sender === 'user') {
-      broadcasts.push(triggerEvent('chat-admin', 'new-message', { userId, userName: profile?.name, message: message.trim(), created_at: ts }));
-      sendChatNotification({ userName: profile?.name || user.email, userEmail: profile?.email || user.email, message: message.trim() }).catch(() => {});
+      broadcasts.push(triggerEvent('chat-admin', 'new-message', { userId, userName: profile?.name, message, created_at: ts }));
+      sendChatNotification({ userName: profile?.name || user.email, userEmail: profile?.email || user.email, message }).catch(() => {});
     }
     await Promise.all(broadcasts);
 
@@ -110,10 +120,20 @@ export async function PATCH(request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { messageIds } = await request.json();
-  if (!messageIds?.length) return Response.json({ success: true });
+  const parsed = readSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return Response.json({ error: 'Invalid message IDs' }, { status: 400 });
+  const { messageIds } = parsed.data;
 
-  const { error: readErr } = await supabaseAdmin.from('chat_messages').update({ read: true }).in('id', messageIds);
+  const { data: profile } = await supabaseAdmin
+    .from('user_profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+  const isAdmin = ['admin', 'owner'].includes(profile?.role);
+
+  let update = supabaseAdmin.from('chat_messages').update({ read: true }).in('id', messageIds);
+  if (!isAdmin) update = update.eq('user_id', user.id);
+  const { error: readErr } = await update;
   if (readErr) console.error('[chat:PATCH]', readErr.message);
   return Response.json({ success: true });
 }

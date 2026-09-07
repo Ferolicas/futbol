@@ -2,6 +2,11 @@ import Fastify from 'fastify';
 import type { FastifyRequest } from 'fastify';
 import os from 'os';
 import { execSync } from 'child_process';
+import { createHash, timingSafeEqual } from 'crypto';
+import {
+  readRealtimeTokenFromProtocols,
+  verifyRealtimeAccessToken,
+} from '@cfanalisis/realtime-protocol/auth';
 import { isValidQueue, queues, QUEUE_NAMES, type QueueName } from './queues.js';
 import { getErrors } from './errors-log.js';
 import { analysisDateKey, redisGet, pgQuery, bogotaToday } from './shared.js';
@@ -12,32 +17,37 @@ import { wsManager } from './ws/wsManager.js';
 import { runBaseballCalibration } from './jobs/calibration/baseball.js';
 
 const SECRET = process.env.WORKER_SECRET || '';
-// C1 FIX: token SOLO para el WebSocket de clientes (read-only realtime). DEBE ser
-// DISTINTO de WORKER_SECRET y es el único que viaja al navegador (NEXT_PUBLIC_WS_TOKEN).
-// Antes el navegador llevaba WORKER_SECRET → cualquiera lo extraía y llamaba
-// /admin, /enqueue, /broadcast. requireAuth (privilegiado) SIEMPRE exige WORKER_SECRET;
-// el WS acepta WS_PUBLIC_TOKEN. Mientras no se configure WS_PUBLIC_TOKEN, el WS cae a
-// WORKER_SECRET (transición) — configúralo para cerrar C1 del todo.
-const WS_TOKEN = process.env.WS_PUBLIC_TOKEN || '';
 
-if (!SECRET && process.env.NODE_ENV === 'production') {
-  throw new Error('[server] WORKER_SECRET must be set in production');
+if (process.env.NODE_ENV === 'production' && SECRET.length < 32) {
+  throw new Error('[server] WORKER_SECRET must contain at least 32 characters');
 }
 
 // Auth PRIVILEGIADA (admin/status, retry, calibrate, enqueue, broadcast): SIEMPRE
 // WORKER_SECRET (server-only, nunca expuesto al cliente).
+function secretEquals(supplied: string, expected: string): boolean {
+  if (!supplied || !expected) return false;
+  const left = createHash('sha256').update(supplied).digest();
+  const right = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(left, right);
+}
+
 function requireAuth(req: FastifyRequest): boolean {
   const auth = req.headers['authorization'];
   const token = typeof auth === 'string' ? auth.replace(/^Bearer\s+/i, '') : '';
-  return !SECRET || token === SECRET;
+  return secretEquals(token, SECRET);
 }
 
-// Auth del WebSocket de clientes: WS_PUBLIC_TOKEN si está configurado; si no,
-// fallback transicional a WORKER_SECRET para no romper el realtime antes de
-// configurar el nuevo token. NUNCA da acceso a los endpoints privilegiados.
-function wsAuthOk(token: string | undefined): boolean {
-  if (WS_TOKEN) return token === WS_TOKEN || token === SECRET; // transición
-  return !!SECRET && token === SECRET;
+function redactUrl(value: string | undefined): string | undefined {
+  if (!value) return value;
+  try {
+    const parsed = new URL(value, 'http://worker.local');
+    for (const key of ['secret', 'token', 'authorization', 'api_key', 'apikey']) {
+      if (parsed.searchParams.has(key)) parsed.searchParams.set(key, '[REDACTED]');
+    }
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return value.replace(/([?&](?:secret|token|authorization|api_key|apikey)=)[^&]*/gi, '$1[REDACTED]');
+  }
 }
 
 async function collectQueueOverview() {
@@ -295,10 +305,12 @@ export function buildServer() {
   // vars con typos, etc). Una linea por request — bajo costo, logger
   // ya filtra por LOG_LEVEL.
   app.addHook('onRequest', async (req) => {
+    const safeUrl = redactUrl(req.url);
+    const safeRawUrl = redactUrl(req.raw.url);
     req.log.info({
       method: req.method,
-      url: req.url,
-      raw: req.raw.url,
+      url: safeUrl,
+      raw: safeRawUrl,
       ip: req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || req.ip,
       upgrade: req.headers['upgrade'] || null,
     }, 'incoming');
@@ -312,12 +324,12 @@ export function buildServer() {
       ? Number(err.statusCode) || 500
       : 500;
     notifyError(
-      { source: 'fastify', name: `${req.method} ${route}`, extra: { url: req.url } },
+      { source: 'fastify', name: `${req.method} ${redactUrl(route)}`, extra: { url: redactUrl(req.url) } },
       error,
     ).catch(() => {});
     reply.code(statusCode).send({
       ok: false,
-      error: error.message,
+      error: statusCode >= 500 ? 'internal_error' : error.message,
     });
   });
 
@@ -327,20 +339,33 @@ export function buildServer() {
   app.register(async (instance) => {
     try {
       const ws = await import('@fastify/websocket');
-      await instance.register(ws.default ?? ws);
+      await instance.register(ws.default ?? ws, {
+        options: { maxPayload: 16 * 1024, perMessageDeflate: false },
+      });
       // @fastify/websocket v11 cambio la API: el handler recibe el WebSocket
       // directo como primer argumento (antes era { socket } envuelto). Si
       // se intenta usar conn.socket aqui, conn.socket === undefined y el
       // attach() peta con "Cannot read properties of undefined (reading 'on')".
-      instance.get('/ws', { websocket: true }, (socket, req) => {
-        const query = req.query as { secret?: string; topics?: string };
-        // C1 FIX: el WS usa wsAuthOk (WS_PUBLIC_TOKEN), no el secreto admin.
-        if (!wsAuthOk(query.secret)) {
-          try { socket.send(JSON.stringify({ type: 'error', code: 'unauthorized' })); } catch {}
+      const websocketAccess = new WeakMap<object, { topics: string[]; expiresAt: number }>();
+      instance.get('/ws', {
+        websocket: true,
+        preValidation: async (req, reply) => {
+          const token = readRealtimeTokenFromProtocols(req.headers['sec-websocket-protocol']);
+          const access = await verifyRealtimeAccessToken(token, SECRET);
+          if (!access) return reply.code(401).send({ error: 'unauthorized' });
+          websocketAccess.set(req, { topics: access.topics, expiresAt: access.expiresAt });
+        },
+      }, (socket, req) => {
+        const access = websocketAccess.get(req);
+        websocketAccess.delete(req);
+        if (!access) {
           try { socket.close(4401, 'unauthorized'); } catch {}
           return;
         }
-        wsManager.attach(socket, query.topics);
+        wsManager.attach(socket, {
+          allowedTopics: access.topics,
+          expiresAt: access.expiresAt,
+        });
       });
       logger.info('/ws registered');
     } catch (e) {
@@ -382,9 +407,10 @@ export function buildServer() {
     return { date, count: withLatency.length, events: withLatency };
   });
 
-  // /health — sin auth (lo usan BetterUptime, scripts locales, Caddy).
+  // /health — sin auth (lo usan BetterUptime, scripts locales, Caddy). La
+  // respuesta pública revela únicamente el estado agregado; la topología y
+  // métricas detalladas permanecen detrás de WORKER_SECRET en /admin/status.
   app.get('/health', async (_req, reply) => {
-    const startedAt = Date.now();
     const [db, redis, queueHealth] = await Promise.all([
       pingPostgres(),
       pingRedis(),
@@ -394,33 +420,21 @@ export function buildServer() {
         collection_error: error instanceof Error ? error.message : String(error),
       })),
     ]);
-    const totalMem = os.totalmem();
-    const freeMem  = os.freemem();
-    const usedMem  = totalMem - freeMem;
     const queueCollectionOk = !('collection_error' in queueHealth);
     const status = (db === 'ok' && redis === 'ok' && queueCollectionOk && queueHealth.issues.length === 0)
       ? 'ok'
       : 'degraded';
-    const body = {
-      status,
-      uptime: Math.round(process.uptime()),
-      db, redis,
-      queues: queueHealth.queues,
-      issues: queueHealth.issues,
-      ...('collection_error' in queueHealth ? { queue_collection_error: queueHealth.collection_error } : {}),
-      memory: {
-        used_mb:  Math.round(usedMem  / 1024 / 1024),
-        total_mb: Math.round(totalMem / 1024 / 1024),
-      },
-      ws_clients: wsManager.size(),
-      check_ms: Date.now() - startedAt,
-      timestamp: new Date().toISOString(),
-    };
-    // Devuelve 200 incluso degraded — BetterUptime decide su umbral.
-    return reply.code(200).send(body);
+    return reply
+      .header('Cache-Control', 'no-store')
+      .code(200)
+      .send({
+        status,
+        timestamp: new Date().toISOString(),
+      });
   });
 
   app.get('/queues/:name/status', async (req, reply) => {
+    if (!requireAuth(req)) return reply.code(401).send({ error: 'unauthorized' });
     const name = (req.params as { name: string }).name;
     if (!isValidQueue(name)) return reply.code(404).send({ error: 'unknown queue' });
     const q = queues[name];

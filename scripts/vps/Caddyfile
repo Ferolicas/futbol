@@ -75,8 +75,8 @@ worker.cfanalisis.com {
     }
     handle @ws {
         # Sin encode, sin transport timeouts cortos: paso directo al worker.
-        # Caddy preserva path y query string tal cual ("/ws?secret=…" llega
-        # intacto al backend), forwarding bidireccional de Upgrade headers.
+        # La credencial efímera viaja en Sec-WebSocket-Protocol, no en la URL.
+        # Caddy preserva los headers Upgrade y el subprotocolo de extremo a extremo.
         reverse_proxy localhost:8080
     }
 

@@ -14,12 +14,12 @@
   },
   "dependencies": {
     "@cfanalisis/realtime-protocol": "file:../../packages/realtime-protocol",
-    "@fastify/websocket": "^11.0.1",
+    "@fastify/websocket": "11.3.0",
     "@supabase/supabase-js": "^2.101.1",
     "@types/pg": "^8.20.0",
     "bullmq": "^5.34.0",
     "dotenv": "^16.4.5",
-    "fastify": "^5.1.0",
+    "fastify": "5.12.3",
     "ioredis": "^5.4.1",
     "pg": "^8.20.0",
     "pino": "^9.5.0",
@@ -31,5 +31,8 @@
     "pino-pretty": "^11.3.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "esbuild": "0.28.2"
   }
 }

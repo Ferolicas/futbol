@@ -50,6 +50,7 @@ Las creatividades listas para campañas se guardan en `public/marketing/`.
 | `POST /api/register` | `app/api/register/route.js` | Registro | Crea `users`, perfil y sesión |
 | `POST /api/auth/login` | `app/api/auth/login/route.js` | Login | Valida bcrypt y crea sesión |
 | `GET /api/auth/session` | `app/api/auth/session/route.js` | Provider | Devuelve usuario/perfil actual |
+| `GET /api/realtime/token` | `app/api/realtime/token/route.js` | Cliente WS autenticado | Emite JWT efímero con topics limitados por usuario/rol |
 | `POST /api/auth/logout` | `app/api/auth/logout/route.js` | UI | Revoca sesión y borra cookie |
 | `GET /api/detect-country` | `app/api/detect-country/route.js` | Home/planes | Resuelve país por cabecera/IP |
 | `GET /api/currency` | `app/api/currency/route.js` | Home/planes | Convierte los cinco planes |
@@ -522,6 +523,13 @@ el snapshot anterior por fixture, calcula exclusivamente los campos modificados
 y emite `fixture-delta` con `fixtureId`, secuencia monotónica, timestamp y
 `changes`. Worker y web validan el mismo contrato Zod/TypeScript de
 `packages/realtime-protocol`; un paquete atrasado o mal formado no pisa el estado.
+El WebSocket no comparte ningún secreto estático con el navegador. La sesión
+httpOnly pide a `/api/realtime/token` un JWT HS256 de cinco minutos; la
+credencial viaja en `Sec-WebSocket-Protocol`, no en la URL. El worker valida
+firma, emisor, audiencia, expiración y una lista cerrada de topics. Cada usuario
+solo puede escuchar su propio `chat-<userId>`; `chat-admin` queda reservado a
+roles `admin`/`owner`. Tres intentos de suscripción prohibida cierran el socket.
+Los mensajes de control están limitados a 4 KiB y el payload WebSocket a 16 KiB.
 El cliente WebSocket reenvía todos sus topics al abrir o reconectar. El dashboard
 usa esos eventos como fuente primaria; si no recibe eventos durante 50 s, su watchdog consulta
 solo el snapshot Redis mediante `GET /api/refresh-live`, con una única petición
@@ -688,11 +696,16 @@ del proveedor rompan React.
 | Redis | `LOCAL_REDIS_HOST`, `LOCAL_REDIS_PORT`, contraseñas opcionales |
 | Stripe | `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` |
 | Mercado Pago | `MP_ENV`, claves públicas/privadas y `MP_WEBHOOK_SECRET` |
-| App/worker | `NEXT_PUBLIC_APP_URL`, `WORKER_URL`, `CRON_SECRET`, secretos y URLs WS |
+| App/worker | `NEXT_PUBLIC_APP_URL`, `WORKER_URL`, `WORKER_SECRET` solo servidor, `CRON_SECRET` y `NEXT_PUBLIC_WORKER_WS_URL` |
 | Datos | `FOOTBALL_API_KEY`; `API_SPORTS_KEY` opcional (fallback a la anterior) y claves aislables `API_SPORTS_<PROVIDER>_KEY`/`API_NBA_KEY`/`API_BASKETBALL_KEY`/`API_BASEBALL_KEY`/`API_NFL_KEY`; presupuestos `API_SPORTS_<PROVIDER>_DAILY_BUDGET` |
 | Email/push | `RESEND_API_KEY`, `FROM_EMAIL`, VAPID |
 
 Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
+
+El proceso realtime escucha por defecto en `127.0.0.1:8080`; Caddy publica
+`worker.cfanalisis.com`. `/health` devuelve solo estado agregado y timestamp.
+Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
+`/admin/status` o rutas operativas protegidas por `WORKER_SECRET`.
 
 ## Gotchas vivos
 

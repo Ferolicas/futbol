@@ -2,8 +2,9 @@
  * Gestor de WebSocket nativo — reemplaza Pusher.
  *
  * Topology:
- *   El cliente abre wss://worker.cfanalisis.com/ws?secret=...&topics=t1,t2
- *   El servidor autentica (en server.ts) y llama a wsManager.attach(socket, topics).
+ *   El cliente abre wss://worker.cfanalisis.com/ws con un JWT efímero en
+ *   Sec-WebSocket-Protocol. El servidor valida firma, audiencia y expiración
+ *   antes de llamar a wsManager.attach(socket, access).
  *   El cliente puede ampliar/reducir suscripciones en runtime enviando:
  *     {"type":"subscribe","topic":"chat-<userId>"}
  *     {"type":"unsubscribe","topic":"chat-<userId>"}
@@ -40,12 +41,26 @@ const MAX_BUFFERED = 1_000_000; // 1MB
 // RT-1: cada 30s se pinguea a cada socket; el que no devolvió pong desde el
 // ciclo anterior se considera muerto y se termina.
 const HEARTBEAT_INTERVAL = 30_000;
+const MAX_CONTROL_MESSAGE_BYTES = 4_096;
+const MAX_TOPIC_VIOLATIONS = 3;
+
+type SocketAccess = {
+  topics: Set<string>;
+  allowedTopics: Set<string>;
+  expiresAt: number;
+  violations: number;
+};
+
+type AttachAccess = {
+  allowedTopics: string[];
+  expiresAt: number;
+};
 
 class WSManager {
   // topic → Set<socket>
   private subscriptions = new Map<string, Set<Socket>>();
-  // socket → Set<topic>   (para limpiar al cerrar)
-  private sockets = new Map<Socket, Set<string>>();
+  // socket → autorización y topics activos (para validar y limpiar al cerrar)
+  private sockets = new Map<Socket, SocketAccess>();
   // RT-1: sockets que respondieron al último ping (liveness). Presente = vivo.
   private alive = new Set<Socket>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -64,6 +79,12 @@ class WSManager {
     this.heartbeatTimer = setInterval(() => {
       // Snapshot: detach() muta this.sockets dentro del bucle.
       for (const socket of Array.from(this.sockets.keys())) {
+        const access = this.sockets.get(socket);
+        if (!access || access.expiresAt <= Date.now()) {
+          try { socket.close(4401, 'token-expired'); } catch {}
+          this.detach(socket);
+          continue;
+        }
         if (!this.alive.has(socket)) {
           try { socket.terminate?.(); } catch {}
           this.detach(socket);
@@ -89,13 +110,27 @@ class WSManager {
     return this.subscriptions.get(topic)?.size ?? 0;
   }
 
-  attach(socket: Socket, topicsCsv?: string) {
-    this.sockets.set(socket, new Set());
+  attach(socket: Socket, access: AttachAccess) {
+    if (!Number.isFinite(access.expiresAt) || access.expiresAt <= Date.now()) {
+      try { socket.close(4401, 'token-expired'); } catch {}
+      return;
+    }
+    this.sockets.set(socket, {
+      topics: new Set(),
+      allowedTopics: new Set(access.allowedTopics),
+      expiresAt: access.expiresAt,
+      violations: 0,
+    });
     // RT-1: nace vivo; cada 'pong' (respuesta al ping del servidor) lo re-marca.
     this.alive.add(socket);
     socket.on('pong', () => this.alive.add(socket));
 
     socket.on('message', (raw: Buffer | string) => {
+      if (Buffer.byteLength(raw.toString()) > MAX_CONTROL_MESSAGE_BYTES) {
+        try { socket.close(1009, 'message-too-large'); } catch {}
+        this.detach(socket);
+        return;
+      }
       let msg: any;
       try { msg = JSON.parse(raw.toString()); } catch { return; }
       if (!msg || typeof msg !== 'object') return;
@@ -111,27 +146,34 @@ class WSManager {
     socket.on('close', () => this.detach(socket));
     socket.on('error', () => this.detach(socket));
 
-    // Suscripciones iniciales pasadas por query param.
-    if (topicsCsv) {
-      for (const t of topicsCsv.split(',').map((s) => s.trim()).filter(Boolean)) {
-        this.subscribe(socket, t);
-      }
-    }
-
     // ACK al cliente para que sepa que la autenticacion paso.
     try {
       if (socket.readyState === OPEN) {
-        socket.send(JSON.stringify({ type: 'connected', ts: Date.now() }));
+        socket.send(JSON.stringify({ type: 'connected', ts: Date.now(), expiresAt: access.expiresAt }));
       }
     } catch {}
   }
 
-  subscribe(socket: Socket, topic: string) {
+  subscribe(socket: Socket, topic: string): boolean {
+    const access = this.sockets.get(socket);
+    if (!access || !access.allowedTopics.has(topic)) {
+      if (access) {
+        access.violations += 1;
+        try {
+          if (socket.readyState === OPEN) socket.send(JSON.stringify({ type: 'error', code: 'forbidden_topic' }));
+        } catch {}
+        if (access.violations >= MAX_TOPIC_VIOLATIONS) {
+          try { socket.close(4403, 'forbidden-topic'); } catch {}
+          this.detach(socket);
+        }
+      }
+      return false;
+    }
     let set = this.subscriptions.get(topic);
     if (!set) { set = new Set(); this.subscriptions.set(topic, set); }
     set.add(socket);
-    const stopics = this.sockets.get(socket);
-    if (stopics) stopics.add(topic);
+    access.topics.add(topic);
+    return true;
   }
 
   unsubscribe(socket: Socket, topic: string) {
@@ -140,14 +182,14 @@ class WSManager {
       set.delete(socket);
       if (set.size === 0) this.subscriptions.delete(topic);
     }
-    const stopics = this.sockets.get(socket);
-    if (stopics) stopics.delete(topic);
+    const access = this.sockets.get(socket);
+    if (access) access.topics.delete(topic);
   }
 
   detach(socket: Socket) {
-    const topics = this.sockets.get(socket);
-    if (topics) {
-      for (const t of topics) {
+    const access = this.sockets.get(socket);
+    if (access) {
+      for (const t of access.topics) {
         const set = this.subscriptions.get(t);
         if (set) {
           set.delete(socket);
