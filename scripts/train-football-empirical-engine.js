@@ -378,6 +378,12 @@ async function evaluateConfig(samples, config, split, baselineConfig) {
         if (i >= split) addCalibratedObservation('confirmed', observation);
       }
     }
+    // computeBaseMarkets resuelve buena parte del trabajo en microtareas. Un
+    // yield macrotask periódico permite que BullMQ renueve el lock del job y
+    // que los temporizadores de salud respiren durante las rejillas largas.
+    if ((i + 1) % 10 === 0) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
   }
   beginValidation();
   const calibratedMetric = (value, families, rawValue) => ({
@@ -555,6 +561,10 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
         trainScore: winner.score, validationScore: metricScore(winner.evaluated.validation),
         trials: trials.map((t) => ({ value: t.value, trainScore: t.score, validationScore: metricScore(t.evaluated.validation) })),
       });
+      console.log(
+        `[train-football-empirical:grid] ${parameter} ${previous}→${winner.value} `
+        + `(${steps.length}/${Object.keys(CONFIG_GRID).length})`,
+      );
     }
     // Recalcular una vez con la configuración completa final: el resultado del
     // último paso ya coincide, pero esto mantiene el contrato si cambia el orden.
