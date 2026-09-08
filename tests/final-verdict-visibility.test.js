@@ -17,12 +17,19 @@ test('fútbol exige el contrato íntegro v26 antes de servir recomendaciones', (
 test('las versiones nuevas no ocultan ni recalculan el análisis histórico', () => {
   const cache = read('lib/sanity-cache.js');
   const fixtures = read('app/api/fixtures/route.js');
+  const engine = read('lib/api-football.js');
   assert.match(cache, /getAnalyzedFixtureIds\(date, \{ historical = false \} = \{\}\)/);
   assert.match(cache, /historical \? LEGACY_DISPLAY_MIN_VERSION : MIN_CACHE_VERSION/);
   assert.match(cache, /getAnalyzedMatchesFull\(fixtureIds, \{ historical = false \} = \{\}\)/);
   assert.match(fixtures, /getAnalyzedFixtureIds\(d, \{ historical: isPastDate \}\)/);
   assert.match(fixtures, /\{ historical: isPastDate \}/);
   assert.match(fixtures, /if \(!isPastDate && fixtures\.length > 0 && needsTrigger\)/);
+  assert.match(cache, /preserveHistoricalCombinada/);
+  assert.match(cache, /historicalSnapshot: true/);
+  assert.match(engine, /kickoffMs <= Date\.now\(\)/);
+  assert.match(engine, /getCachedAnalysis\(fixtureId, date, \{ historical: true \}\)/);
+  assert.match(fixtures, /\.from\('combinada_dia'\)/);
+  assert.match(fixtures, /historicalDailySelections/);
 });
 
 test('el arranque regenera hoy y mañana con v26 sin ascender una caché antigua', () => {

@@ -831,7 +831,10 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   combinada queda vacía, nunca se promueve como pronóstico nuevo.
   La lista histórica consulta explícitamente ese umbral compatible y jamás
   dispara un reanálisis de partidos pasados: conserva el snapshot prepartido
-  original aunque aumente la versión vigente del motor.
+  original aunque aumente la versión vigente del motor. `analyzeMatch` también
+  corta antes de recalcular un fixture iniciado. Para jornadas pasadas,
+  `combinada_dia` es la fuente inmutable de Apuesta del día: sus opciones se
+  liquidan contra `match_results` sin volver a someterlas a reglas nuevas.
 - 2026-09-04: el resumen expandido de fútbol ya no apila Mercados,
   Estadísticas, Frecuencias, Jugadores y Veredicto final como acordeones. Una
   barra de pestañas horizontal gobierna un solo panel visible y las familias de

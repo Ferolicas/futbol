@@ -27,6 +27,13 @@ test('el EV se muestra como metadato secundario y no desplaza probabilidad ni cu
   assert.match(styles, /rgba\(203, 213, 225, \.55\)/);
 });
 
+test('una jornada pasada usa la Apuesta del día publicada y no la reconstruye con reglas nuevas', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../app/dashboard/page.js'), 'utf8');
+  assert.match(source, /historicalDailySelections/);
+  assert.match(source, /if \(isViewingPast\)/);
+  assert.match(source, /historicalSnapshot: true/);
+});
+
 test('el publicador recupera fiabilidad durable antes de aplicar las reglas Telegram', () => {
   const source = fs.readFileSync(path.join(__dirname, '../app/api/cron/publish-combinada/route.js'), 'utf8');
   assert.match(source, /combinada\.selectable \|\| combinada\.selections/);

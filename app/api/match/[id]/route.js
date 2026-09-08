@@ -26,6 +26,7 @@ export async function GET(request, props) {
   const { id } = params;
   const { searchParams } = new URL(request.url);
   const clientDate = searchParams.get('date');
+  const historical = !!clientDate && clientDate < new Date().toISOString().slice(0, 10);
 
   if (!id) {
     return Response.json({ error: 'fixture id required' }, { status: 400 });
@@ -44,7 +45,7 @@ export async function GET(request, props) {
     if (!/^\d+$/.test(id)) return Response.json({ error: 'Invalid id' }, { status: 400 });
     const [{ rows }, paidDocument, { rows: resultRows }] = await Promise.all([
       pgPool.query('SELECT fixture_id, analysis, combinada, live_stats FROM match_analysis WHERE fixture_id=$1', [id]),
-      getCachedAnalysis(id, clientDate),
+      getCachedAnalysis(id, clientDate, { historical }),
       pgPool.query(`SELECT fixture_id,status,goals,score,corners,yellow_cards,red_cards,
                            goal_scorers,card_events,created_at
                     FROM match_results WHERE fixture_id=$1`, [id]),
@@ -69,7 +70,7 @@ export async function GET(request, props) {
 
 
   try {
-    let analysis = await getCachedAnalysis(id, clientDate);
+    let analysis = await getCachedAnalysis(id, clientDate, { historical });
     // Regeneración perezosa: si la caché falta o quedó obsoleta (p.ej. tras subir
     // MIN_CACHE_VERSION), re-analizar al vuelo con el fixture cacheado del día en
     // vez de devolver "sin analizar". Así el motor nuevo se aplica al primer acceso.

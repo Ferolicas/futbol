@@ -22,6 +22,22 @@ export const dynamic = 'force-dynamic';
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN'];
 
+function dayInZone(value, timeZone) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(value));
+  } catch {
+    return new Date(value).toISOString().slice(0, 10);
+  }
+}
+
+function shiftIsoDate(value, days) {
+  const shifted = new Date(`${value}T12:00:00Z`);
+  shifted.setUTCDate(shifted.getUTCDate() + days);
+  return shifted.toISOString().slice(0, 10);
+}
+
 // Redis TTLs for cache layers (seconds)
 const ODDS_CACHE_TTL = 4 * 3600;       // 4 hours
 const STANDINGS_CACHE_TTL = 12 * 3600; // 12 hours
@@ -47,7 +63,9 @@ export async function GET(request) {
 
 
     // ===== PHASE 1: Load fixtures (Redis -> Supabase/API) =====
-    const isPastDate = date < todayStr;
+    // La frontera de histórico pertenece a la zona del usuario. A las 02:00
+    // UTC todavía puede ser “hoy” en Colombia aunque la fecha UTC ya cambió.
+    const isPastDate = date < dayInZone(new Date(), userTimezone);
 
     let fixtures = [];
     let fromCache = false;
@@ -460,7 +478,10 @@ export async function GET(request) {
         let globallyAnalyzed = [];
         let analyzedOdds = {};
         let analyzedData = {};
-        if (cachedAnalysisData?.globallyAnalyzed?.length > 0) {
+        // Un agregado de una versión nueva puede haber reconstruido una fecha
+        // pasada con el catálogo vacío. El histórico siempre vuelve a la fila
+        // prepartido durable y nunca confía en ese agregado mutable.
+        if (!isPastDate && cachedAnalysisData?.globallyAnalyzed?.length > 0) {
           globallyAnalyzed = cachedAnalysisData.globallyAnalyzed.filter(id => fixtureIdSet.has(id));
           analyzedOdds = Object.fromEntries(
             Object.entries(cachedAnalysisData.analyzedOdds || {})
@@ -592,6 +613,37 @@ export async function GET(request) {
       }
     }
 
+    // Apuesta del día histórica: `combinada_dia` es el snapshot realmente
+    // publicado. No se reconstruye aplicando hoy una política distinta a un
+    // partido ya finalizado.
+    let historicalDailySelections = [];
+    if (paidAccess && isPastDate) {
+      try {
+        const archiveDates = [shiftIsoDate(date, -1), date, shiftIsoDate(date, 1)];
+        const { data: publishedRows, error: publishedError } = await supabaseAdmin
+          .from('combinada_dia')
+          .select('fecha,selections,status')
+          .in('fecha', archiveDates);
+        if (publishedError) throw publishedError;
+        historicalDailySelections = (publishedRows || []).flatMap((row) =>
+          (Array.isArray(row.selections) ? row.selections : []).flatMap((match) => {
+            if (match?.kickoff && dayInZone(match.kickoff, userTimezone) !== date) return [];
+            return (Array.isArray(match?.options) ? match.options : []).map((option) => ({
+              ...option,
+              fixtureId: Number(match.fixtureId),
+              matchName: match.matchName || `${match.homeTeam || ''} vs ${match.awayTeam || ''}`.trim(),
+              homeTeam: match.homeTeam || null,
+              awayTeam: match.awayTeam || null,
+              kickoff: match.kickoff || null,
+              league: match.league || null,
+              historicalSnapshot: true,
+            }));
+          }));
+      } catch (historicalDailyError) {
+        console.error('[fixtures] historical daily snapshot:', historicalDailyError.message);
+      }
+    }
+
     // P6: filtrar selecciones de combinada con cuota < minOdds. Defensa en
     // profundidad — el frontend también filtra, pero si por alguna razón
     // el cliente no aplica el filtro (ej. consumidor externo de la API),
@@ -650,6 +702,7 @@ export async function GET(request) {
       analyzed: userAnalyzed,
       analyzedOdds: paidAccess ? analyzedOdds : {},
       analyzedData: paidAccess ? analyzedData : await freeFootballList(analyzedData, fixtures, initialLiveStats),
+      ...(paidAccess && isPastDate ? { historicalDailySelections } : {}),
       ...(!paidAccess ? { freeDailyResults: freeDailyResults({ sport: 'football', fixtures, analyzedData, liveStats: initialLiveStats }) } : {}),
       standings: responseStandings,
       initialLiveStats,

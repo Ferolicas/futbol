@@ -162,6 +162,7 @@ export function FootballDashboard({
   const [analyzedOdds, setAnalyzedOdds] = useState({});
   const { isFree } = useFreeAccess();
   const [freeDailyResults, setFreeDailyResults] = useState([]);
+  const [historicalDailySelections, setHistoricalDailySelections] = useState([]);
   const [analyzedData, setAnalyzedData] = useState({});
   const [standings, setStandings] = useState({});
   const [sortBy] = useState('time');
@@ -363,6 +364,7 @@ export function FootballDashboard({
     [tzReady, date, userTz],
   );
   const isViewingToday = date === todayInTz(userTz);
+  const isViewingPast = date < todayInTz(userTz);
   const { mutate: fixturesMutate } = useSWR(
     fixturesKey,
     fetcher,
@@ -430,6 +432,7 @@ export function FootballDashboard({
     setAnalyzedOdds(data.analyzedOdds || {});
     setAnalyzedData(data.analyzedData || {});
     setFreeDailyResults(data.freeDailyResults || []);
+    setHistoricalDailySelections(data.historicalDailySelections || []);
     setStandings(data.standings || {});
     if (data.error) console.warn('[fixtures] degradado:', data.error);
     setError(data.error ? 'Algunos datos podrían estar desactualizados.' : '');
@@ -1187,6 +1190,23 @@ export function FootballDashboard({
 
   const apuestaDelDia = useMemo(() => {
     if (isFree) return { selections: [...freeApuestaRecommendations, ...freeDailyResults], combinedProbability: 0 };
+    if (isViewingPast) {
+      if (!historicalDailySelections.length) return null;
+      const selections = historicalDailySelections.map((selection) => ({
+        ...selection,
+        probability: cap(selection.rawProbability ?? selection.probability),
+        priority: 0,
+        matchTime: selection.kickoff ? new Date(selection.kickoff) : null,
+      }));
+      return {
+        selections,
+        combinedProbability: selections.reduce(
+          (sum, selection) => sum + Number(selection.rawProbability ?? selection.probability),
+          0,
+        ) / selections.length,
+        historicalSnapshot: true,
+      };
+    }
     // Reglas:
     //  - Solo selecciones con probabilidad calibrada ≥90%, fiabilidad ≥90%
     //    y cuota real ≥1.20. EV: ≥8% entre 90–90,99%; ≥10% desde 91%.
@@ -1259,7 +1279,15 @@ export function FootballDashboard({
       selections: all,
       combinedProbability: +combinedProbability.toFixed(2),
     };
-  }, [analyzedData, fixtureById, isFree, freeApuestaRecommendations, freeDailyResults]);
+  }, [
+    analyzedData,
+    fixtureById,
+    isFree,
+    isViewingPast,
+    freeApuestaRecommendations,
+    freeDailyResults,
+    historicalDailySelections,
+  ]);
 
   const customCombinada = useMemo(() => {
     const all = [];
