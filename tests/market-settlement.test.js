@@ -79,6 +79,28 @@ test('fútbol con prórroga liquida los mercados ordinarios al marcador de 90 mi
   }).status, 'won');
 });
 
+test('fútbol liquida props de tiros y faltas con el hecho oficial del jugador', () => {
+  const game = football('FT', 2, 0);
+  const liveResult = {
+    status: { short: 'FT' },
+    player_stats: {
+      123: { stats: { shots_total: 4, shots_on: 2, fouls_committed: 1 } },
+    },
+  };
+  assert.equal(settleMarketSelection({
+    sport: 'football', game, liveResult,
+    selection: { id: 'shotsTotal-123-2.5', playerId: 123, _line: 2.5 },
+  }).status, 'won');
+  assert.equal(settleMarketSelection({
+    sport: 'football', game, liveResult,
+    selection: { id: 'shotsOn-123-2.5', playerId: 123, _line: 2.5 },
+  }).status, 'lost');
+  assert.equal(settleMarketSelection({
+    sport: 'football', game, liveResult,
+    selection: { id: 'fouls-123-0.5', playerId: 123, _line: 0.5 },
+  }).status, 'won');
+});
+
 test('béisbol liquida total, run line y primeras cinco entradas', () => {
   const game = {
     status: { short: 'FT' },

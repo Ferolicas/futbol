@@ -3,9 +3,11 @@
 //
 // No aprende una función opaca ni calibra/sube/baja probabilidades. Reproduce
 // cada predicción con cutoff anterior al partido y aprende los pesos de
-// localía, nivel del rival, fase y H2H según Brier + calibración
+// localía/estadio, nivel del rival, fase, H2H, árbitro, descanso y alineación
+// según Brier + calibración por horizonte
 // fuera de muestra. El candidato solo se activa si no empeora al campeón.
-// La actualidad es un contrato fijo 65/35 y no participa en la búsqueda.
+// La actualidad parte de 65/35 y aumenta de forma explicable cuando cambia la
+// plantilla; ese ajuste no participa en la rejilla de pesos contextuales.
 
 const pg = require('pg');
 const {
@@ -13,17 +15,20 @@ const {
   DEFAULT_ENGINE_CONFIG,
   normalizeEngineConfig,
   resetEngineConfigCache,
+  inferExpectedLineups,
 } = require('../lib/model-engine.js');
 
 // Rejilla pequeña y explicable. Cada valor es un peso sobre partidos reales;
 // nunca un ajuste directo de puntos porcentuales.
 const CONFIG_GRID = Object.freeze({
   venueBoost: [1.00, 1.08, 1.18, 1.28, 1.40],
+  stadiumBoost: [1.00, 1.04, 1.08, 1.14],
   opponentTierBoost: [1.00, 1.05, 1.10, 1.20, 1.30],
   phaseBoost: [1.00, 1.03, 1.06, 1.12, 1.20],
   h2hBoost: [1.00, 1.10, 1.22, 1.35, 1.50],
   refereeBoost: [1.00, 1.05, 1.10, 1.20, 1.30],
   lineupBoost: [1.00, 1.08, 1.18, 1.30, 1.50, 1.80, 2.20],
+  restBoost: [1.00, 1.05, 1.10, 1.20, 1.35],
 });
 const MARKET_KEY = '__empirical_engine__';
 const EPS = 1e-6;
@@ -109,6 +114,31 @@ function observations(markets, actual) {
       const hit = BOOL_ACTUAL[key](actual);
       if (hit != null) out.push({ family: key, prob: market.prob, chain: market.chain, hit });
       if (key === 'btts' && hit != null) out.push({ family: 'btts_no', prob: market.prob == null ? null : 1 - Number(market.prob), chain: market.chain, hit: 1 - hit });
+    } else if (market.kind === 'multi' && key === 'double_chance' && ['H', 'D', 'A'].includes(actual.result)) {
+      out.push({ family: 'dc_1x', prob: market['1X'], hit: actual.result !== 'A' ? 1 : 0 });
+      out.push({ family: 'dc_12', prob: market['12'], hit: actual.result !== 'D' ? 1 : 0 });
+      out.push({ family: 'dc_x2', prob: market.X2, hit: actual.result !== 'H' ? 1 : 0 });
+    } else if (market.kind === 'multi' && key === 'odd_even' && actual.ft_home != null && actual.ft_away != null) {
+      const even = (Number(actual.ft_home) + Number(actual.ft_away)) % 2 === 0 ? 1 : 0;
+      out.push({ family: 'goals_even', prob: market.even, hit: even });
+      out.push({ family: 'goals_odd', prob: market.odd, hit: 1 - even });
+    } else if (market.kind === 'multi' && key === 'handicap_home_asian' && actual.ft_home != null && actual.ft_away != null) {
+      const difference = Number(actual.ft_home) - Number(actual.ft_away);
+      for (const [suffix, hit] of Object.entries({ m0_5: difference >= 1, m1_5: difference >= 2, p0_5: difference >= 0, p1_5: difference >= -1 })) {
+        out.push({ family: `ah_home_${suffix}`, prob: market[suffix.replace('_', '.')], hit: hit ? 1 : 0 });
+      }
+    } else if (market.kind === 'multi' && key === 'handicap_home_eu' && actual.ft_home != null && actual.ft_away != null) {
+      const difference = Number(actual.ft_home) - Number(actual.ft_away);
+      out.push({ family: 'eh_home_m1', prob: market.m1, hit: difference >= 2 ? 1 : 0 });
+      out.push({ family: 'eh_home_p1', prob: market.p1, hit: difference >= 0 ? 1 : 0 });
+    } else if (market.kind === 'list' && key === 'exact_score' && actual.ft_home != null && actual.ft_away != null) {
+      const home = Number(actual.ft_home), away = Number(actual.ft_away), total = home + away;
+      for (const line of market.lines || []) {
+        out.push({ family: `cs_${String(line.score).replace('-', '_')}`, prob: line.prob, hit: line.score === `${home}-${away}` ? 1 : 0 });
+      }
+      for (const [bucket, probability] of Object.entries(market.totalProbabilities || {})) {
+        out.push({ family: `exact_goals_${bucket}`, prob: probability, hit: bucket === '7plus' ? (total >= 7 ? 1 : 0) : (total === Number(bucket) ? 1 : 0) });
+      }
     }
   }
   return out;
@@ -232,18 +262,55 @@ const configKeys = Object.keys(CONFIG_GRID);
 const sameConfig = (a, b) => configKeys.every((key) => Number(a?.[key]) === Number(b?.[key]));
 
 async function evaluateConfig(samples, config, split, baselineConfig) {
-  const metric = { train: emptyMetric(), validation: emptyMetric() };
+  const metric = {
+    train: emptyMetric(), validation: emptyMetric(),
+    trainEarly: emptyMetric(), validationEarly: emptyMetric(),
+    trainProbable: emptyMetric(), validationProbable: emptyMetric(),
+    trainConfirmed: emptyMetric(), validationConfirmed: emptyMetric(),
+  };
   for (let i = 0; i < samples.length; i++) {
     const sample = samples[i];
-    const markets = sameConfig(config, baselineConfig)
-      ? sample.baselineMarkets
-      : (await computeBaseMarkets(null, sample.ctx, { config, rawRows: sample.rawRows })).markets;
     const target = i < split ? metric.train : metric.validation;
-    for (const observation of observations(markets, sample.actual)) {
+    const earlyTarget = i < split ? metric.trainEarly : metric.validationEarly;
+    const probableTarget = i < split ? metric.trainProbable : metric.validationProbable;
+    const confirmedTarget = i < split ? metric.trainConfirmed : metric.validationConfirmed;
+    const earlyMarkets = sameConfig(config, baselineConfig)
+      ? sample.earlyBaselineMarkets
+      : (await computeBaseMarkets(null, sample.ctx, { config, rawRows: sample.earlyRawRows })).markets;
+    for (const observation of observations(earlyMarkets, sample.actual)) {
       addObservation(target, observation.family, observation.prob, observation.hit);
+      addObservation(earlyTarget, observation.family, observation.prob, observation.hit);
+    }
+    if (sample.probableRawRows) {
+      const probableMarkets = sameConfig(config, baselineConfig)
+        ? sample.probableBaselineMarkets
+        : (await computeBaseMarkets(null, sample.ctx, { config, rawRows: sample.probableRawRows })).markets;
+      for (const observation of observations(probableMarkets, sample.actual)) {
+        addObservation(target, observation.family, observation.prob, observation.hit);
+        addObservation(probableTarget, observation.family, observation.prob, observation.hit);
+      }
+    }
+    if (sample.confirmedRawRows) {
+      const confirmedMarkets = sameConfig(config, baselineConfig)
+        ? sample.confirmedBaselineMarkets
+        : (await computeBaseMarkets(null, sample.ctx, { config, rawRows: sample.confirmedRawRows })).markets;
+      for (const observation of observations(confirmedMarkets, sample.actual)) {
+        addObservation(target, observation.family, observation.prob, observation.hit);
+        addObservation(confirmedTarget, observation.family, observation.prob, observation.hit);
+      }
     }
   }
-  return { train: finishMetric(metric.train), validation: finishMetric(metric.validation) };
+  return {
+    train: finishMetric(metric.train),
+    validation: {
+      ...finishMetric(metric.validation),
+      horizons: {
+        early: finishMetric(metric.validationEarly),
+        probable: finishMetric(metric.validationProbable),
+        confirmed: finishMetric(metric.validationConfirmed),
+      },
+    },
+  };
 }
 
 async function loadActiveConfig(pool) {
@@ -269,7 +336,7 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
     const { rows } = await pool.query(
       `SELECT * FROM (
          SELECT m.fixture_id,m.home_team_id,m.away_team_id,m.competition_id,m.season,m.phase,m.kickoff,m.referee,
-                m.home_rank_before,m.away_rank_before,cs.n_teams,m.ft_home,m.ft_away,m.result,
+                m.home_rank_before,m.away_rank_before,cs.n_teams,m.venue_id,m.ft_home,m.ft_away,m.result,
                 t.corners_for,t.corners_against,t.shots_for,t.shots_against,t.sot_for,t.sot_against,
                 t.fouls_for,t.fouls_against,t.offsides_for,t.offsides_against,
                 t.yellow_for,t.yellow_against,t.red_for,t.red_against,t.gf_1h,t.ga_1h,t.gf_2h,t.ga_2h,
@@ -311,23 +378,61 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
       const ctx = {
         fixtureId: Number(row.fixture_id), homeTeamId: Number(row.home_team_id), awayTeamId: Number(row.away_team_id),
         competitionId: Number(row.competition_id), season: row.season == null ? null : Number(row.season),
-        phase: row.phase, referee: row.referee || null, nTeams: row.n_teams == null ? null : Number(row.n_teams),
+        phase: row.phase, referee: row.referee || null,
+        venueId: row.venue_id == null ? null : Number(row.venue_id),
+        nTeams: row.n_teams == null ? null : Number(row.n_teams),
         homeRank: row.home_rank_before == null ? null : Number(row.home_rank_before),
         awayRank: row.away_rank_before == null ? null : Number(row.away_rank_before), cutoff: new Date(row.kickoff),
       };
       try {
         const currentLineups = lineupsFor(row.fixture_id);
-        // Dos queries por fixture. Todas las configuraciones reutilizan después
-        // estas mismas filas, conservando el cutoff y evitando carga innecesaria.
-        // Si existe XI objetivo se suma una tercera consulta set-based para
-        // anotar similitud, también reutilizada por todas las configuraciones.
-        const result = await computeBaseMarkets(pool, ctx, {
+        // Se validan dos horizontes separados. El análisis temprano jamás ve
+        // el XI objetivo; el confirmado sí puede usar la alineación que habría
+        // estado disponible antes del partido. Ambos respetan cutoff=kickoff.
+        let earlyResult = await computeBaseMarkets(pool, ctx, {
           config: active.config,
           includeRawRows: true,
-          currentLineups,
+          currentLineups: null,
         });
-        if (Number(result.fixture?.lineupContext?.historicalRows || 0) > 0) lineupSamples++;
-        samples.push({ ctx, actual: row, rawRows: result.rawRows, baselineMarkets: result.markets });
+        const kickoffMs = new Date(row.kickoff).getTime();
+        const lastKickoff = (items) => items.reduce((latest, item) => Math.max(latest, new Date(item.kickoff).getTime()), 0);
+        const homePrevious = lastKickoff(earlyResult.rawRows?.homeRaw || []);
+        const awayPrevious = lastKickoff(earlyResult.rawRows?.awayRaw || []);
+        ctx.homeRestDays = homePrevious ? (kickoffMs - homePrevious) / 86400000 : null;
+        ctx.awayRestDays = awayPrevious ? (kickoffMs - awayPrevious) / 86400000 : null;
+        // Reusa las filas ya leídas para que el baseline incorpore el contexto
+        // de descanso exactamente como serving.
+        earlyResult = await computeBaseMarkets(null, ctx, {
+          config: active.config,
+          includeRawRows: true,
+          rawRows: earlyResult.rawRows,
+        });
+        const probableLineups = await inferExpectedLineups(pool, ctx).catch(() => []);
+        const probableResult = probableLineups.length
+          ? await computeBaseMarkets(pool, ctx, {
+            config: active.config,
+            includeRawRows: true,
+            currentLineups: probableLineups,
+          })
+          : null;
+        let confirmedResult = null;
+        if (currentLineups.length) {
+          confirmedResult = await computeBaseMarkets(pool, ctx, {
+            config: active.config,
+            includeRawRows: true,
+            currentLineups,
+          });
+          if (Number(confirmedResult.fixture?.lineupContext?.historicalRows || 0) > 0) lineupSamples++;
+        }
+        samples.push({
+          ctx, actual: row,
+          earlyRawRows: earlyResult.rawRows,
+          earlyBaselineMarkets: earlyResult.markets,
+          probableRawRows: probableResult?.rawRows || null,
+          probableBaselineMarkets: probableResult?.markets || null,
+          confirmedRawRows: confirmedResult?.rawRows || null,
+          confirmedBaselineMarkets: confirmedResult?.markets || null,
+        });
       } catch (error) {
         errors++;
         if (errors <= 5) console.error(`[train-football-empirical] fixture ${row.fixture_id}: ${error.message}`);
@@ -372,7 +477,16 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
     const candidateDaily90Gap = candidate.validation.daily90?.n ? candidate.validation.daily90.gap : null;
     const daily90NotWorse = candidateDaily90Gap == null || baselineDaily90Gap == null || candidateDaily90Gap <= baselineDaily90Gap + 1e-9;
     const eliteNotWorse = candidateEliteGap == null || baselineEliteGap == null || candidateEliteGap <= baselineEliteGap + 1e-9;
-    const notWorse = metricScore(candidate.validation) <= metricScore(baseline.validation) + 1e-9 && daily90NotWorse && eliteNotWorse;
+    const earlyNotWorse = metricScore(candidate.validation.horizons?.early)
+      <= metricScore(baseline.validation.horizons?.early) + 1e-9;
+    const confirmedHasSample = Number(candidate.validation.horizons?.confirmed?.n || 0) > 0;
+    const probableHasSample = Number(candidate.validation.horizons?.probable?.n || 0) > 0;
+    const probableNotWorse = !probableHasSample || metricScore(candidate.validation.horizons?.probable)
+      <= metricScore(baseline.validation.horizons?.probable) + 1e-9;
+    const confirmedNotWorse = !confirmedHasSample || metricScore(candidate.validation.horizons?.confirmed)
+      <= metricScore(baseline.validation.horizons?.confirmed) + 1e-9;
+    const notWorse = metricScore(candidate.validation) <= metricScore(baseline.validation) + 1e-9
+      && daily90NotWorse && eliteNotWorse && earlyNotWorse && probableNotWorse && confirmedNotWorse;
     const activates = active.version === 0 ? notWorse : (configChanged && notWorse);
     const shouldPersist = active.version === 0 || configChanged;
     const report = {
@@ -380,7 +494,8 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
       train: split, validation: samples.length - split,
       previousVersion: active.version, previousShare: active.config.currentShare,
       previousConfig: active.config, candidateShare: config.currentShare,
-      candidateConfig: config, configChanged, activates, daily90NotWorse, eliteNotWorse, steps,
+      candidateConfig: config, configChanged, activates, daily90NotWorse, eliteNotWorse,
+      earlyNotWorse, probableNotWorse, confirmedNotWorse, steps,
       baseline: baseline.validation, candidate: candidate.validation,
     };
 

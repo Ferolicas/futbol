@@ -106,6 +106,13 @@ Las migraciones viven en `scripts/`. Tablas clave:
   de reintentos; un error HTTP/rate-limit nunca se guarda como evidencia.
 - `prediction_models` + `market_segment_diagnostics`: pesos versionados del
   motor y validación fuera de muestra por mercado, dirección y línea exacta.
+- `prediction_runs` + `prediction_market_outputs`: ledger inmutable del cálculo
+  prepartido, versión, cutoff, contexto, probabilidades, cuotas, EV y decisión
+  de cada mercado.
+- `prediction_settlements`: historial append-only de liquidaciones; una
+  corrección posterior añade evidencia y nunca reescribe el pronóstico.
+- `prediction_data_quarantine`: hechos rechazados por invariantes de identidad,
+  por ejemplo un jugador atribuido a un equipo ajeno al fixture.
 
 El botón flotante `Arriba` no usa desplazamiento suave: en jornadas con cientos
 de partidos la medición dinámica del virtualizador podía interrumpir esa
@@ -266,58 +273,71 @@ entrada reconcilia con el total oficial.
 credencial cifrada de Telegram desde el workflow vivo. El chat personal se pasa
 al instalarlo y no se guarda en Git; los enlaces no transportan secretos.
 
-Una opción de fútbol entra en recomendaciones generales cuando su frecuencia
-ponderada real es de 80% o más, existe cuota real y la fiabilidad propia del
-mercado es de 90% o más; el constructor puede listar frecuencias desde 70%,
-siempre con la misma fiabilidad mínima. La Apuesta del Día visible en la app
-empieza en 75% de frecuencia, conserva la fiabilidad mínima de 90%, exige cuota
-real desde 1.20 y aplica su whitelist de mercados. Como puede mostrar varias
+Una opción de fútbol entra en recomendaciones generales cuando su probabilidad
+calibrada es de 80% o más, existe cuota real, la fiabilidad propia alcanza 90%,
+su familia/horizonte supera la validación temporal y el retorno esperado es al
+menos +5% por unidad. Cuando existe el par completo de cuotas se retira el
+margen de la casa y se exige además una ventaja de dos puntos frente a la
+probabilidad de mercado de-vig. El constructor puede evaluar líneas desde 70%
+con los mismos controles. La Apuesta del Día eleva el listón a 90% y +10% de EV,
+con cuota real desde 1.20 y su whitelist de mercados. Como puede mostrar varias
 líneas correlacionadas o incompatibles del mismo partido, es un catálogo y no
 un cupón: muestra cada cuota individual y nunca las multiplica en una cuota
-total ficticia. Las métricas fuera de
-muestra son únicamente diagnósticas: nunca cambian el porcentaje ni bloquean
-una frecuencia calculada. Los props de jugador siguen la misma regla cuando
-existe historial y una cuota atribuible. El constructor distingue únicamente
-entre recomendación estadística (≥80%) y dato estadístico seleccionable
-(≥70%), pero ambos requieren fiabilidad ≥90%. `lib/recommendation-policy.js`
-centraliza estos gates sin participar en ningún cálculo del motor.
-Todos los filtros, rankings y probabilidades conjuntas usan la frecuencia cruda;
-web, PNG y mensaje de Telegram muestran como máximo 95% para no comunicar una
-garantía. Un valor real de 99.75% se conserva como 99.75 internamente y se
-presenta como 95%.
+total ficticia. La selección manual admite un único mercado por fixture; sin
+una distribución conjunta o precio oficial de Bet Builder no se simula
+independencia. Los props de jugador siguen el mismo contrato por familia.
+`lib/recommendation-policy.js` centraliza estos gates.
+
+La frecuencia empírica cruda nunca se pierde: queda en estadísticas y ledger.
+La capa de serving calcula una probabilidad calibrada por familia y horizonte,
+pero falla cerrada con menos de 30 observaciones efectivas o un error superior
+al máximo entre cinco puntos y el intervalo de incertidumbre medido. Web, PNG y
+Telegram muestran como máximo 95% para no comunicar una garantía; el ledger
+conserva el valor completo, el valor calibrado y la razón de publicación o veto.
 
 ### Motor empírico de fútbol
 
 `lib/model-engine.js` cuenta directamente hechos de `model.team_match_stats`.
 Usa todos los partidos anteriores al kickoff sin mínimo ni máximo: una sola
-muestra real sirve y cero muestras produce “sin dato”. Temporada actual e
-histórico se calculan por separado; si ambos existen, la temporada actual pesa
-un 65% fijo y el histórico un 35%. El entrenamiento no puede rebajar ese reparto.
+muestra real sirve para la estadística y cero muestras produce “sin dato”. La
+publicación como recomendación tiene un gate independiente. Temporada actual e
+histórico se calculan por separado; si ambos existen, la actualidad parte de
+65/35 y puede subir de forma acotada hasta 85% cuando la continuidad real de la
+plantilla cae. El histórico no desaparece, pero tampoco aplasta un equipo que
+cambió materialmente.
 Cada equipo obtiene primero su propia frecuencia y fiabilidad; las dos señales
 del partido se ponderan después al 50/50, sin usar tasas globales de la liga ni
 permitir que el equipo con más partidos aplaste al que tiene menos.
-Localía, nivel del rival, fase, H2H, árbitro y similitud del XI son
+Localía, estadio, nivel del rival, fase, H2H, árbitro, descanso y similitud del XI son
 pesos sobre cumplimientos observados, nunca puntos añadidos/restados a una
 probabilidad. H2H se deduplica por fixture; el árbitro solo pondera tarjetas,
-faltas y rojas; el XI confirmado pondera alineaciones históricas reales.
+faltas y rojas. Antes de las alineaciones oficiales se infiere un XI probable
+con titulares de los cinco partidos anteriores al cutoff; cuando existe XI
+confirmado se usa exclusivamente en el horizonte confirmado. Ninguna variante
+usa la alineación o el resultado del partido objetivo durante el backtest.
 
 La fiabilidad de mercados over/under y booleanos es beta-binomial: expresa la
 probabilidad de que la tasa real supere el 70% dados los aciertos observados.
 El tamaño de la muestra por sí solo nunca vuelve fiable una frecuencia baja y
 una muestra de dos partidos puede informar, pero no superar el gate del 90%.
 
-Las medias descriptivas no se presentan como goles “esperados”: la interfaz
+Las distribuciones de goles se expanden dinámicamente hasta que la cola restante
+es despreciable (tope defensivo 50), se normalizan a 100% y conservan toda la
+masa. Marcador exacto y totales exactos se derivan de la matriz completa, no de
+un top-12 ni de un cajón artificial de seis goles. Las medias descriptivas no se presentan como goles “esperados”: la interfaz
 aclara que la media anotadora combinada y la frecuencia de superar una línea
 son medidas diferentes. Los mercados de “menos de” usan el complemento exacto
 del “más de”; no reciben ajustes artificiales y se recomiendan cuando su
-frecuencia cruda alcanza el umbral del producto. El walk-forward de su
-línea/dirección exacta permanece como diagnóstico auditable, no como bloqueo.
+probabilidad calibrada alcanza el umbral del producto. El walk-forward de su
+línea/dirección y familia exactas decide si el mercado puede publicarse.
 
 `scripts/train-football-empirical-engine.js` hace walk-forward nocturno sobre
 1.200 partidos: 70% para escoger pesos y 30% cronológico intocable para aceptar
-o rechazar el candidato y renovar el diagnóstico de cada familia exacta en las
-bandas general, alta, diaria-90 y élite-95. Un candidato peor queda inactivo; el
-campeón conserva producción y refresca sus métricas, que no actúan como gate.
+o rechazar el candidato y renovar el diagnóstico por familia en los horizontes
+early, XI probable y XI confirmado, además de las bandas general, alta,
+diaria-90 y élite-95. Un candidato peor queda inactivo; el campeón conserva
+producción. El ledger de predicciones realmente emitidas renueva después esas
+métricas sin reconstruir pronósticos a posteriori.
 `apps/cfanalisis-worker/src/jobs/futbol/retrain.js` ejecuta captura reciente →
 ingesta → perfiles → entrenamiento, falla si cualquier etapa queda incompleta
 y deja un sello Redis que comprueba el watchdog. `futbol-model-sync` conserva
@@ -363,6 +383,9 @@ línea real y el mínimo 1.20.
 La auditoría de mercados separa ahora cuota ofrecida, cuota inferior a 1.20,
 línea exacta no entregada y mercado sin adaptador; una celda vacía ya no se usa
 como sinónimo ambiguo de cualquiera de esos casos.
+Antes de escribir caché pública, el análisis prepartido se inserta en el ledger
+inmutable con hashes reproducibles. Si el kickoff ya llegó, se conservan las
+estadísticas y el Veredicto final, pero la recomendación se vacía.
 El cierre de resultados corre incrementalmente cada 15 minutos y solo consulta
 fixtures cuyo final estimado ya pasó; no vuelve a pedir partidos futuros. Si el
 realtime confirma un FT/AET/PEN, encola además un cierre durable dirigido e
@@ -391,12 +414,13 @@ rival, competición, pitcher/quarterback y alineación solo ponderan hechos
 observados semejantes. El reparto temporada actual/histórico es 65/35 fijo y
 cada participante obtiene primero su propia frecuencia; ambos lados pesan
 después 50/50 aunque tengan distinto número de partidos. Cuotas, Poisson,
-isotónica, priors y shrinkage no alteran
-el porcentaje. La frecuencia cruda se conserva para auditoría, filtros y
-cálculos; la presentación se limita a 95% sin escribir ese límite de vuelta en
-el motor. Una opción entra en recomendaciones por su propia frecuencia y cuota;
-la validación cronológica mide el motor, pero jamás oculta o transforma el
-resultado.
+isotónica, priors y shrinkage no alteran el porcentaje empírico. La frecuencia
+cruda se conserva para auditoría y la presentación se limita a 95% sin escribir
+ese límite de vuelta en el motor. La recomendación se calcula aparte:
+validación temporal de la misma familia, fiabilidad ≥90%, cuota Bet365 real,
+EV ≥5% y ventaja de-vig cuando existe el mercado complementario. Una familia
+insuficiente o mal calibrada permanece visible como estadística, pero no como
+apuesta recomendada.
 
 La fiabilidad usa posteriores beta-binomial separados por temporada e histórico
 y por participante. Sus medias y varianzas se combinan con los mismos pesos
@@ -467,10 +491,9 @@ Las fuentes y namespaces de identificadores también están separados:
   calendario, logos, marcador, boxscore y jugadores.
 
 Baloncesto y fútbol americano usan el mismo motor empírico de fútbol/MLB sobre
-sus tablas aisladas. Su catálogo público aplica exactamente la política de
-Baseball: solo publica una selección desde 65% de frecuencia cruda cuando la
-línea exacta existe en Bet365 y la cuota es al menos 1,20; la fiabilidad queda
-visible como evidencia, pero no añade un veto propio. El normalizador conserva
+sus tablas aisladas. Su catálogo público evalúa una selección desde 65% cuando
+la línea exacta existe en Bet365 y la cuota es al menos 1,20; solo la publica si
+supera además calibración temporal, fiabilidad y EV. El normalizador conserva
 ganador, total, total por equipo y hándicap de partido, mitades y cuartos con
 nombre e ID originales de mercado/selección. Una línea de otra casa,
 reconstruida o sin evidencia permanece fuera aunque el porcentaje sea alto.
@@ -500,8 +523,9 @@ probabilidad y la cuota decide solo empates. El refresco de cuotas de fútbol
 reconstruye también el veredicto para no conservar mercados retirados.
 
 `scripts/train-multisport-empirical-engine.js` realiza selección cronológica
-70/30 por deporte y guarda diagnósticos fuera de muestra sin recalibrar ni
-bloquear el porcentaje. `scripts/backfill-multisport-history.js` carga una temporada y una
+70/30 por deporte y guarda diagnósticos fuera de muestra. El cálculo empírico
+permanece íntegro; la capa de recomendación calibra o bloquea según esos
+diagnósticos. `scripts/backfill-multisport-history.js` carga una temporada y una
 o varias competiciones por ejecución (`--competition`; MLB usa rangos oficiales
 de 45 días y NCAA consultas diarias concurrentes; `minor` se rechaza).
 `scripts/backfill-mlb-inning-hits.js` completa el desglose oficial de hits de la
@@ -678,8 +702,11 @@ del proveedor rompan React.
 - `lib/payment-store.js`, `lib/payment-reconcile.js` y `lib/entitlements.js`: estado durable, recuperación y única regla de acceso.
 - `lib/telegram-daily-pick.js`: whitelist y selector determinista de la publicación diaria de Telegram.
 - `lib/model-engine.js`, `lib/model-to-scored.js` y
-  `lib/model-probabilities.js`: frecuencia empírica, diagnóstico cronológico y contrato
-  de probabilidades/combinadas. No añadir calibradores o priors al serving.
+  `lib/model-probabilities.js`: frecuencia empírica, calibración cronológica y
+  contrato de probabilidades/combinadas. La frecuencia cruda permanece
+  auditable; no eludir los gates de publicación.
+- `lib/prediction-math.cjs` y `lib/prediction-ledger.js`: normalización, de-vig,
+  EV, gates por familia, trazabilidad inmutable y calibración con liquidaciones.
 - `lib/football-api-client.cjs`: limitador distribuido y validación de respuestas
   de API-Football; toda nueva llamada al proveedor debe pasar por aquí.
 - `lib/mercadopago.js`: API, firma, PSE, recurrencia, cancelación y fallback EUR→COP.
@@ -755,9 +782,11 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   directorio de trabajo. Los fallos parciales se registran primero y
   `Verificar Baseball` marca después la ejecución como error; nunca volver a
   ocultarlos como `success`.
-- 2026-08-01: fútbol, MLB, NBA y NFL no usan calibración isotónica, shrinkage
-  ni mínimos de muestra en serving. `baseball-calibrate` queda solo como cola
-  de compatibilidad y responde `retired-empirical-engine`.
+- 2026-08-01: los motores empíricos de fútbol, MLB, NBA y NFL no usan isotónica
+  ni shrinkage dentro del cálculo crudo. Desde v25/v21, serving conserva esa
+  frecuencia y aplica por separado calibración y muestra mínima exclusivamente
+  para decidir si una recomendación puede publicarse. `baseball-calibrate`
+  queda como cola de compatibilidad y responde `retired-empirical-engine`.
 - 2026-08-01: no activar NBA/NFL ni el motor MLB nuevo antes de aplicar, con
   backup, `scripts/migrate-multisport-engines.sql`; el build no ejecuta DDL.
 - 2026-08-01: los cuatro productos API-Sports mantienen cuota y cortacircuito
@@ -783,6 +812,17 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   compacto de `/api/baseball/fixtures` debe
   conservar `analysis.finalVerdict`; omitirlo deja la tarjeta MLB sin los
   porcentajes que sí existen en `baseball_match_analysis`.
+- 2026-09-08: `FOOTBALL_CACHE_VERSION=25` y `MULTISPORT_CACHE_VERSION=21`
+  introducen el contrato de integridad predictiva. Toda recomendación exige
+  corte anterior al kickoff, fiabilidad, validación por familia/horizonte, cuota
+  real y EV; Apuesta del Día exige además 90% calibrado y EV ≥10%. El cálculo
+  crudo y Veredicto final permanecen intactos. `prediction_runs` registra antes
+  de publicar y `prediction_settlements` anexa resultados. Las combinadas solo
+  admiten un mercado por fixture y jamás multiplican mercados correlacionados
+  como independientes. Las distribuciones de goles conservan su cola completa;
+  el contexto distingue XI probable/confirmado, continuidad de plantilla,
+  descanso y estadio. Aplicar `scripts/migrate-prediction-integrity-v2.sql`
+  después de backup y antes de desplegar esta versión.
 - 2026-09-04: el resumen expandido de fútbol ya no apila Mercados,
   Estadísticas, Frecuencias, Jugadores y Veredicto final como acordeones. Una
   barra de pestañas horizontal gobierna un solo panel visible y las familias de
@@ -814,12 +854,14 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   la línea canónica que ve el cliente en Bet365; se conserva el valor original
   del proveedor solo como trazabilidad. La lista identifica Local/Visitante y
   transporta en `combinada.winProbabilities` exclusivamente el resumen liviano
-  de victoria, sin cargar el JSON completo de probabilidades. Las decisiones siguen usando
-  frecuencias ponderadas reales; el máximo 95% vive solo en presentación y los
-  diagnósticos nunca cambian ni bloquean una frecuencia calculada.
+  de victoria, sin cargar el JSON completo de probabilidades. En esa versión las
+  decisiones usaban frecuencias ponderadas reales y el máximo 95% vivía solo en
+  presentación. v25/v21 conserva la frecuencia, pero permite que el diagnóstico
+  bloquee su publicación como recomendación.
 - 2026-08-03: la Apuesta del Día del frontend y la publicación de Telegram son
-  productos independientes. El frontend admite frecuencia ≥75%, fiabilidad
-  ≥90% y cuota real ≥1.20. Telegram exige frecuencia y fiabilidad ≥80% por
+  productos independientes. Desde v25 el frontend exige probabilidad calibrada
+  ≥90%, fiabilidad ≥90%, cuota real ≥1.20 y EV ≥10%. Telegram exige además sus
+  umbrales editoriales de frecuencia y fiabilidad ≥80% por
   selección, cuota individual 1.20–1.60 y una cuota final 1.50–2.00 con
   probabilidad conjunta ≥80%; lee la evidencia durable `_scored` para no perder
   opciones válidas de fiabilidad 80–89% por el saneamiento público de 90%.
@@ -874,10 +916,9 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   Las llamadas a NBA/ESPN/API-Sports pertenecen a los schedulers y workers; no
   reintroducir fallback de proveedor en una visita del cliente.
 - 2026-08-02: los módulos multi-deporte se importan dinámicamente desde
-  `apps/cfanalisis-worker/src/shared.ts`. Todo cambio de ese runtime debe tocar
-  también su marcador de deploy mientras esos módulos no estén en `WORKER_RE`;
-  así GitHub Actions reconstruye y recarga PM2 en vez de conservar módulos
-  antiguos en memoria.
+  `apps/cfanalisis-worker/src/shared.ts`. Sus módulos JS/CJS y entrenadores
+  figuran en `WORKER_RE`; todo módulo compartido nuevo debe añadirse ahí para
+  que GitHub Actions reconstruya y recargue PM2.
 - 2026-08-02: nunca elevar `MULTISPORT_CACHE_VERSION` sin la guardia automática
   de cobertura. La API solo considera analizada una fila de la versión vigente;
   Baseball conserva bootstrap + reconciliación de 15 minutos, y el arranque

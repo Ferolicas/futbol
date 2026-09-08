@@ -13,11 +13,25 @@ const { buildBaseballApuestaDelDia, buildCustomBaseballCombinada } = require('..
 const { buildMultisportFinalVerdict, selectCompetitionAwareH2H, selectVerdictTeamHistory } = require('../lib/final-verdict.js');
 
 function probability(value) {
-  return { probability: Math.min(95, value * 100), rawProbability: value, evidence: { n: 10, hits: value * 10 } };
+  const n = 10000;
+  return { probability: Math.min(95, value * 100), rawProbability: value, evidence: { n, hits: Math.round(value * n) } };
 }
 
 function supportedProbability(value, n = 10000) {
   return { probability: Math.min(95, value * 100), rawProbability: value, evidence: { n, hits: Math.round(value * n) } };
+}
+
+// Los tests de publicación representan un modelo que ya superó un holdout
+// cronológico de su familia exacta. Un mercado sin este catálogo debe quedar
+// visible solo como estadística, nunca como recomendación.
+function calibratedPrediction(prediction) {
+  const validation = new Proxy({}, {
+    get(_target, key) {
+      if (typeof key === 'symbol') return undefined;
+      return { n: 2000, avgPred: 0.5, hitRate: 0.5 };
+    },
+  });
+  return { ...prediction, engine: { ...(prediction.engine || {}), validation: { validation } } };
 }
 
 const fixture = {
@@ -121,7 +135,7 @@ test('Baseball separa carreras, hits y mercados combinados del catálogo Bet365'
 
 test('Baseball publica solo selecciones cruzadas con Bet365 y cuota mínima 1.20', () => {
   const odds = normalizeApiSportsOdds(payload, fixture, { sport: 'baseball', bookmakers: ['Bet365'] });
-  const prediction = {
+  const prediction = calibratedPrediction({
     sport: 'baseball',
     moneyline: { home: probability(.74), away: probability(.26) },
     totals: { lines: {
@@ -139,9 +153,9 @@ test('Baseball publica solo selecciones cruzadas con Bet365 y cuota mínima 1.20
     },
     teamTotals: {
       home: { 3.5: { over: probability(.85), under: probability(.15) } },
-      away: { 4.5: { over: probability(.31), under: probability(.69) } },
+      away: { 4.5: { over: probability(.26), under: probability(.74) } },
     },
-  };
+  });
 
   const result = buildMultisportCombinada(prediction, odds, fixture);
 
@@ -151,6 +165,8 @@ test('Baseball publica solo selecciones cruzadas con Bet365 y cuota mínima 1.20
   assert.ok(result.selectable.every((selection) => selection.rawProbability >= 65));
   assert.ok(result.selectable.every((selection) => selection.bookmakerMarket));
   assert.ok(result.selectable.every((selection) => selection.bookmakerSelection));
+  assert.ok(result.selectable.every((selection) => selection.validationStatus === 'calibrated'));
+  assert.ok(result.selectable.every((selection) => selection.expectedValue >= 0.05));
   assert.ok(result.selectable.some((selection) => selection.id === 'total-8.5-under'));
   assert.ok(result.selectable.some((selection) => selection.id === 'first5-total-4.5-under'));
   assert.ok(result.selectable.some((selection) => selection.id === 'team-total-home-3.5-over'));
@@ -171,27 +187,27 @@ test('Baseball publica solo selecciones cruzadas con Bet365 y cuota mínima 1.20
 
 test('NBA y NFL aplican la misma política pública de Baseball', () => {
   const price = (odd, selectionName) => ({ odd, bookmaker: 'Bet365', selectionName, marketName: 'Mercado real' });
-  const prediction = {
+  const prediction = calibratedPrediction({
     sport: 'american_football',
     moneyline: {
-      home: supportedProbability(.65),
-      away: supportedProbability(.35),
+      home: supportedProbability(.74),
+      away: supportedProbability(.26),
     },
     totals: { lines: {
-      44.5: { over: supportedProbability(.70), under: supportedProbability(.30) },
+      44.5: { over: supportedProbability(.74), under: supportedProbability(.26) },
       48.5: { over: supportedProbability(.60), under: supportedProbability(.40) },
     } },
-    spreads: { home: { '-3.5': supportedProbability(.66) }, away: { '3.5': supportedProbability(.34) } },
-    teamTotals: { home: { 21.5: { over: supportedProbability(.68), under: supportedProbability(.32) } }, away: {} },
+    spreads: { home: { '-3.5': supportedProbability(.74) }, away: { '3.5': supportedProbability(.26) } },
+    teamTotals: { home: { 21.5: { over: supportedProbability(.74), under: supportedProbability(.26) } }, away: {} },
     periods: {
       firstHalf: {
         label: '1.ª mitad',
-        moneyline: { home: supportedProbability(.64), away: supportedProbability(.36), draw: supportedProbability(.03) },
-        totals: { 20.5: { over: supportedProbability(.67), under: supportedProbability(.33) } },
+        moneyline: { home: supportedProbability(.74), away: supportedProbability(.23), draw: supportedProbability(.03) },
+        totals: { 20.5: { over: supportedProbability(.74), under: supportedProbability(.26) } },
         spreads: { home: {}, away: {} }, teamTotals: { home: {}, away: {} },
       },
     },
-  };
+  });
   const odds = {
     moneyline: { home: price(1.80, 'Home'), away: price(2.10, 'Away') },
     totals: {
@@ -214,7 +230,7 @@ test('NBA y NFL aplican la misma política pública de Baseball', () => {
   assert.equal(result.selectableThreshold, 65);
   assert.equal(result.highlightThreshold, 65);
   assert.equal(result.dailyThreshold, 70);
-  assert.equal(result.minimumReliability, null);
+  assert.equal(result.minimumReliability, 90);
   assert.ok(result.selectable.every(selection => selection.rawProbability >= 65));
   assert.ok(result.selectable.every(selection => selection.bookmaker === 'Bet365'));
   assert.ok(result.selectable.some(selection => selection.id === 'handicap-home-m3_5'));
@@ -303,42 +319,42 @@ test('el veredicto multi-deporte publica solo Más de Bet365 con cuota 1.50 y el
 
 test('Baseball conserva todas las líneas exactas y cruza props por nombre de jugador', () => {
   const odds = normalizeApiSportsOdds(payload, fixture, { sport: 'baseball', bookmakers: ['Bet365'] });
-  const prediction = {
+  const prediction = calibratedPrediction({
     sport: 'baseball',
     moneyline: {}, totals: { lines: {} }, teamTotals: { home: {}, away: {} },
     spreads: { home: {}, away: {} }, statistics: {
       hits: {
-        total: { 18.5: { over: probability(.66), under: probability(.34) } },
+        total: { 18.5: { over: probability(.74), under: probability(.26) } },
         home: {}, away: { 6.5: { over: probability(.72), under: probability(.28) } },
         label: 'hits',
       },
     },
     periods: {
       inning1: {
-        label: '1.ª entrada', totals: { 0.5: { over: probability(.67), under: probability(.33) } },
+        label: '1.ª entrada', totals: { 0.5: { over: probability(.74), under: probability(.26) } },
         moneyline: {}, spreads: {}, run: {}, teamTotals: {},
       },
       first3: {
-        label: 'primeras 3 entradas', totals: { 2.5: { over: probability(.65), under: probability(.35) } },
+        label: 'primeras 3 entradas', totals: { 2.5: { over: probability(.74), under: probability(.26) } },
         moneyline: {}, spreads: {}, run: {}, teamTotals: {},
       },
     },
     specials: {
-      totalParity: { odd: probability(.66), even: probability(.34) },
+      totalParity: { odd: probability(.74), even: probability(.26) },
       teamParity: { home: {}, away: {} },
-      firstTeamScore: { home: probability(.70), away: probability(.30) },
-      lastTeamScore: { home: probability(.35), away: probability(.65) },
+      firstTeamScore: { home: probability(.74), away: probability(.26) },
+      lastTeamScore: { home: probability(.26), away: probability(.74) },
       extraInnings: { yes: probability(.10), no: probability(.90) },
-      highestScoring: { home: probability(.68), away: probability(.30), draw: probability(.02) },
-      correctScore: { '5:3': probability(.65) },
+      highestScoring: { home: probability(.74), away: probability(.24), draw: probability(.02) },
+      correctScore: { '5:3': probability(.74) },
       halfFull: {},
-      resultTotals: { 'Home/Over 8.5': probability(.65) },
+      resultTotals: { 'Home/Over 8.5': probability(.74) },
     },
-  };
+  });
   const lineSides = {
     0.5: { over: probability(.80), under: probability(.20) },
-    1.5: { over: probability(.65), under: probability(.35) },
-    5.5: { over: probability(.70), under: probability(.30) },
+    1.5: { over: probability(.74), under: probability(.26) },
+    5.5: { over: probability(.74), under: probability(.26) },
   };
   const playerProbabilities = {
     hits: [{ id: 10, name: 'Rafael Devers', lineSides }],
@@ -368,6 +384,7 @@ test('las combinadas descartan selecciones viejas o ajenas al catálogo Bet365 a
     id: 'total-8.5-under', category: 'total-8.5', marketLabel: 'Total de carreras',
     name: 'Menos de 8.5 carreras', probability: 91, rawProbability: 91.4,
     odd: 1.95, bookmaker: 'Bet365', bookmakerMarket: 'Over/Under', bookmakerSelection: 'Under 8.5',
+    validationStatus: 'calibrated', expectedValue: 0.75,
   };
   const game = {
     id: 99,
@@ -401,7 +418,7 @@ test('las combinadas descartan selecciones viejas o ajenas al catálogo Bet365 a
   // detrás no se publica por muy alto que sea su porcentaje.
   assert.equal(buildBaseballApuestaDelDia([game], { minProb: 90 }), null);
 
-  const respaldada = { ...canonical, reliability: 96.4, sampleN: 220, sampleHits: 201 };
+  const respaldada = { ...canonical, reliability: 96.4, sampleN: 220, sampleHits: 201, validationStatus: 'calibrated', expectedValue: 0.75 };
   const gameConMuestra = {
     ...game,
     analysis: { combinada: { selectable: [respaldada, { ...respaldada, id: 'bwin', bookmaker: 'Bwin' }] } },
@@ -416,6 +433,7 @@ test('la Apuesta del Día publica todo mercado desde 70% con fiabilidad 90%', ()
   const base = {
     marketLabel: 'Mercado', odd: 1.85, bookmaker: 'Bet365',
     bookmakerMarket: 'Over/Under', bookmakerSelection: 'Over 0.5',
+    validationStatus: 'calibrated', expectedValue: 0.20,
   };
   const selectable = [
     // Carreras del partido: entra.

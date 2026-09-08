@@ -317,12 +317,11 @@ export function BaseballDashboard({
   // Market selection (custom combinada)
   const toggleMarket = (fixtureId, marketKey, marketData) => {
     setSelectedMarkets(prev => {
-      const fixMarkets = { ...(prev[fixtureId] || {}) };
-      if (fixMarkets[marketKey]) delete fixMarkets[marketKey];
-      else fixMarkets[marketKey] = marketData;
       const next = { ...prev };
-      if (Object.keys(fixMarkets).length === 0) delete next[fixtureId];
-      else next[fixtureId] = fixMarkets;
+      if (prev[fixtureId]?.[marketKey]) delete next[fixtureId];
+      // Un único mercado por partido: MLB no entrega aquí una cuota SGP que
+      // permita valorar correctamente dependencias entre carreras/jugadores.
+      else next[fixtureId] = { [marketKey]: marketData };
       return next;
     });
   };

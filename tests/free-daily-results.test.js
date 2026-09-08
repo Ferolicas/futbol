@@ -8,8 +8,9 @@ for (const sport of ['football', 'baseball', 'basketball', 'american_football'])
     const fixtures = ['NS', 'LIVE', 'FT', 'FT', 'PST'].map((status, i) => {
       const id = i + 1;
       const selection = { id: football ? 'total_goals_over2_5' : 'total-2.5-over',
-        name: `Original pick ${id}`, probability: 81.36, rawProbability: 81.369,
+        name: `Original pick ${id}`, probability: 91.36, rawProbability: 91.369,
         odd: 1.4, confidence: 94, reliability: 94, bookmaker: 'Bet365', line: 2.5, side: 'over',
+        validationStatus: 'calibrated', expectedValue: 0.14, dailyEligible: true,
         sampleN: 300, evidence: 'SECRET-EVIDENCE', analysis: 'SECRET-ANALYSIS' };
       return { id, fixture: { id, date: '2020-01-01', status: { short: status } }, status: { short: status },
         teams: { home: { name: 'Home' }, away: { name: 'Away' } },
@@ -24,7 +25,7 @@ for (const sport of ['football', 'baseball', 'basketball', 'american_football'])
     assert.deepEqual(results.map(r => r.fixtureId), [3, 4]);
     assert.deepEqual(results.map(r => r.outcome.status), ['won', 'lost']);
     assert.ok(results.every(r => r.resultState.isFinal && !r.resultState.isLive));
-    assert.ok(results.every(r => r.rawProbability === 81.369));
+    assert.ok(results.every(r => r.rawProbability === 91.369));
     assert.ok(results.every(r => r.bookmaker === 'Bet365'));
     assert.doesNotMatch(JSON.stringify(results), /Original pick [125]|SECRET|sampleN|evidence|combinada/);
     assert.deepEqual(source, original, 'Pro source remains intact');
@@ -35,10 +36,11 @@ for (const sport of ['football', 'baseball', 'basketball', 'american_football'])
 test('only the original qualifying daily catalog is exposed after official closure', async () => {
   const { freeDailyResults } = await import('../lib/free-daily-results.js');
   const game = { fixture: { id: 9, status: { short: 'FT' } }, teams: { home: { name: 'A' }, away: { name: 'B' } } };
-  const selected = { id: 'total_corners_over8_5', name: 'Córners', probability: 89, confidence: 94, odd: 1.3, bookmaker: 'Bet365' };
+  const selected = { id: 'total_corners_over8_5', name: 'Córners', probability: 91, confidence: 94,
+    odd: 1.3, bookmaker: 'Bet365', validationStatus: 'calibrated', expectedValue: 0.157, dailyEligible: true };
   const source = { sport: 'football', fixtures: [game], analyzedData: { 9: { combinada: { source: 'context-engine', selectable: [
     selected, { ...selected, name: 'Low reliability', confidence: 89 },
-    { ...selected, name: 'Low probability', probability: 74 }, { ...selected, name: 'Low odds', odd: 1.1 },
+    { ...selected, name: 'Low probability', probability: 89 }, { ...selected, name: 'Low odds', odd: 1.1 },
   ] } } } };
   const results = freeDailyResults(source);
   assert.equal(results.length, 1);

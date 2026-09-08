@@ -203,7 +203,10 @@ test('el XI solo pondera partidos reales con titulares parecidos', async () => {
   assert.equal(result.homeRaw[1]._lineupSimilarity, 0.5);
   assert.equal(result.homeRaw[2]._lineupSimilarity, null);
   assert.equal(result.awayRaw[0]._lineupSimilarity, 1);
-  assert.deepEqual(result.context, { homeStarters: 2, awayStarters: 1, historicalRows: 3 });
+  assert.deepEqual(result.context, {
+    homeStarters: 2, awayStarters: 1, historicalRows: 3,
+    homeContinuity: .75, awayContinuity: 1, rosterContinuity: .875,
+  });
 });
 
 test('el árbitro pondera tarjetas reales pero no altera familias ajenas', async () => {
@@ -279,4 +282,57 @@ test('primer gol excluye partidos con goles cuando faltan eventos, pero cuenta u
   } });
   assert.equal(result.markets.first_goal_1h.n, 1);
   assert.equal(result.markets.first_goal_1h.prob, 0);
+});
+
+test('la matriz de goles conserva la cola superior y suma exactamente 100%', async () => {
+  const base = {
+    kickoff: new Date('2026-01-01T12:00:00Z'), season: 2026,
+    competition_id: 39, phase: 'regular', is_home: true,
+  };
+  const homeRaw = [
+    { ...base, fixture_id: 1, team_id: 1, opponent_id: 8, goals_for: 8, goals_against: 1, total_goals: 9, result: 'W' },
+    { ...base, fixture_id: 2, team_id: 1, opponent_id: 9, goals_for: 2, goals_against: 0, total_goals: 2, result: 'W' },
+  ];
+  const awayRaw = [
+    { ...base, fixture_id: 3, team_id: 2, opponent_id: 10, is_home: false, goals_for: 7, goals_against: 8, total_goals: 15, result: 'L' },
+    { ...base, fixture_id: 4, team_id: 2, opponent_id: 11, is_home: false, goals_for: 0, goals_against: 2, total_goals: 2, result: 'L' },
+  ];
+  const result = await computeBaseMarkets(null, {
+    fixtureId: 99, homeTeamId: 1, awayTeamId: 2, competitionId: 39,
+    season: 2026, phase: 'regular', nTeams: 20,
+    cutoff: new Date('2026-02-01T12:00:00Z'),
+  }, { config: DEFAULT_ENGINE_CONFIG, rawRows: { homeRaw, awayRaw } });
+  const exact = result.markets.exact_score;
+  assert.ok(exact.support.homeMax >= 8);
+  assert.ok(exact.support.awayMax >= 7);
+  assert.ok(exact.totalProbabilities['7plus'] > 0);
+  assert.ok(Math.abs(Object.values(exact.totalProbabilities).reduce((sum, value) => sum + value, 0) - 1) < 1e-12);
+  const oneXTwo = result.markets['1x2'];
+  assert.ok(Math.abs(oneXTwo.home + oneXTwo.draw + oneXTwo.away - 1) < 2e-6);
+});
+
+test('el estadio solo pondera hechos reales del mismo recinto', async () => {
+  const base = {
+    team_id: 1, opponent_id: 8, kickoff: new Date('2026-01-01T12:00:00Z'),
+    season: 2026, competition_id: 39, is_home: true, phase: 'regular',
+    goals_against: 0, result: 'W',
+  };
+  const result = await computeBaseMarkets(null, {
+    fixtureId: 99, homeTeamId: 1, awayTeamId: 2, competitionId: 39,
+    season: 2026, phase: 'regular', venueId: 55, nTeams: 20,
+    cutoff: new Date('2026-02-01T12:00:00Z'),
+  }, {
+    config: {
+      ...DEFAULT_ENGINE_CONFIG, venueBoost: 1, stadiumBoost: 2,
+      opponentTierBoost: 1, phaseBoost: 1, h2hBoost: 1,
+    },
+    rawRows: {
+      homeRaw: [
+        { ...base, fixture_id: 1, venue_id: 55, goals_for: 1, total_goals: 1 },
+        { ...base, fixture_id: 2, venue_id: 77, goals_for: 0, total_goals: 0, result: 'D' },
+      ],
+      awayRaw: [],
+    },
+  });
+  assert.equal(result.markets.goals_home.lines[0].prob, 0.615385);
 });

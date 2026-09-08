@@ -6,10 +6,10 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('fútbol conserva análisis v23 al añadir el veredicto v24', () => {
+test('fútbol exige el contrato íntegro v25 antes de servir recomendaciones', () => {
   const cache = read('lib/sanity-cache.js');
-  assert.match(cache, /FOOTBALL_CACHE_VERSION = 24/);
-  assert.match(cache, /MIN_CACHE_VERSION = 23/);
+  assert.match(cache, /FOOTBALL_CACHE_VERSION = 25/);
+  assert.match(cache, /MIN_CACHE_VERSION = 25/);
 });
 
 test('el resumen de fútbol transporta el veredicto hasta la tarjeta', () => {

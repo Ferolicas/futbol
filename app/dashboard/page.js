@@ -1188,7 +1188,8 @@ export function FootballDashboard({
   const apuestaDelDia = useMemo(() => {
     if (isFree) return { selections: [...freeApuestaRecommendations, ...freeDailyResults], combinedProbability: 0 };
     // Reglas:
-    //  - Solo selecciones con probabilidad ≥75%, fiabilidad ≥90% y cuota real ≥1.20
+    //  - Solo selecciones con probabilidad calibrada ≥90%, fiabilidad ≥90%,
+    //    cuota real ≥1.20 y EV ≥10%
     //  - SIN límite por partido: si un partido tiene 10 opciones que cumplen,
     //    se muestran las 10
     //  - Próximos se ven en Apuestas; en vivo/finalizados pasan a Resultados
@@ -1210,10 +1211,8 @@ export function FootballDashboard({
       const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
 
-      // selectable contiene todas las líneas calculadas desde 70%; leer solo
-      // selections impediría que el baremo visual de 75% tuviera efecto,
-      // porque ese subconjunto nace en 80%. La frontera pública ya recupera y
-      // exige la fiabilidad real >=90% también para caches v20.
+      // selectable contiene las líneas que ya superaron calibración, fiabilidad
+      // y EV. La Apuesta del Día aplica encima su margen de seguridad reforzado.
       const isEngine = data?.combinada?.source === 'context-engine';
       const selections = isEngine
         ? (data.combinada.selectable || data.combinada.selections || [])
@@ -1240,9 +1239,10 @@ export function FootballDashboard({
 
     if (all.length === 0) return null;
 
-    // Orden: priority desc (NS primero), después prob desc, después cuota desc
+    // Orden: próximos primero y, dentro del estado, mayor valor esperado.
     all.sort((a, b) =>
       b.priority - a.priority ||
+      Number(b.expectedValue || 0) - Number(a.expectedValue || 0) ||
       Number(b.rawProbability ?? b.probability) - Number(a.rawProbability ?? a.probability) ||
       (b.odd || 0) - (a.odd || 0)
     );
@@ -1263,7 +1263,10 @@ export function FootballDashboard({
   const customCombinada = useMemo(() => {
     const all = [];
     Object.entries(selectedMarkets).forEach(([fid, markets]) => {
-      Object.values(markets).forEach(m => all.push({ ...m, fixtureId: fid }));
+      // Defensa contra estado local antiguo: incluso si quedaron varias claves
+      // persistidas, solo una selección del fixture puede llegar al producto.
+      const market = Object.values(markets)[0];
+      if (market) all.push({ ...market, fixtureId: fid });
     });
     if (all.length === 0) return null;
     const co = all.reduce((a, m) => m.odd ? a * m.odd : a, 1);
@@ -1701,7 +1704,7 @@ function FootballCombinationPanel({
       {!customCombinada ? (
         <div className="combination-inline-empty">
           <strong>Combinada vacía</strong>
-          <span>Expande un partido y selecciona los mercados que quieras combinar.</span>
+          <span>Elige un mercado por partido. Al escoger otro del mismo encuentro, sustituirá al anterior.</span>
         </div>
       ) : (
         <div className="comb-builder">

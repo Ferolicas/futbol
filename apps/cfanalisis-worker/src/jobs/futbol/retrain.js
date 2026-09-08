@@ -31,6 +31,8 @@ import {
   buildModelTeamProfiles,
   buildModelPlayerProfiles,
   trainFootballEmpiricalEngine,
+  reconcileFootballPredictionSettlements,
+  refreshPredictionLedgerCalibration,
   redisSet,
 } from '../../shared.js';
 
@@ -102,6 +104,10 @@ export async function runFutbolRetrain(payload = {}) {
   const playerProfiles = playerIds.length ? await buildModelPlayerProfiles(pgPool, { playerIds, minN: 1 }) : { written: 0 };
   result.profiles = { teams: teamProfiles.written, players: playerProfiles.written };
 
+  // La liquidación se reconcilia cada noche contra el resultado durable. Si
+  // una llamada inmediata falló, el pronóstico no queda eternamente pendiente.
+  result.settlements = await reconcileFootballPredictionSettlements(fixtureIds);
+
   // 5) Entrenamiento real point-in-time. Un candidato malo queda registrado
   // inactivo y el campeón sigue sirviendo; nunca se degrada producción.
   result.training = await trainFootballEmpiricalEngine({
@@ -110,6 +116,7 @@ export async function runFutbolRetrain(payload = {}) {
     // intocables para validación. En VPS tarda ~5 min dentro del lock maratón.
     limit: Number(payload?.trainLimit) || 1200,
   });
+  result.ledgerCalibration = await refreshPredictionLedgerCalibration('football');
 
   console.log(
     `[futbol-retrain] OK · capturados=${result.capture?.fixturesDone ?? 0} · ` +

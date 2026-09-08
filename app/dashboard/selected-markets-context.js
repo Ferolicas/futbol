@@ -18,12 +18,14 @@ export default function SelectedMarketsProvider({ children }) {
   const toggleMarket = useCallback((fixtureId, market, matchName) => {
     setSelectedMarkets(prev => {
       const n = { ...prev };
-      n[fixtureId] = { ...(n[fixtureId] || {}) };
-      if (n[fixtureId][market.id]) {
-        delete n[fixtureId][market.id];
-        if (Object.keys(n[fixtureId]).length === 0) delete n[fixtureId];
+      const wasSelected = !!n[fixtureId]?.[market.id];
+      if (wasSelected) {
+        delete n[fixtureId];
       } else {
-        n[fixtureId][market.id] = { ...market, matchName };
+        // Sin una cuota Bet Builder oficial no se pueden multiplicar dos
+        // mercados del mismo partido como si fueran independientes. Elegir
+        // otra línea del fixture sustituye la anterior.
+        n[fixtureId] = { [market.id]: { ...market, matchName } };
       }
       return n;
     });

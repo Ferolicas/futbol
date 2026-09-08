@@ -42,6 +42,7 @@ import {
   pgPool,
   redisGet,
   redisSet,
+  settlePredictionFixture,
 } from '../../shared.js';
 import { mapPool } from '../../pool.js';
 
@@ -530,6 +531,25 @@ export async function runFinalize(payload = {}) {
       // full_data = payload entero → ningún campo/mercado se omite a mano.
       const { error } = await upsertMatchResult(date, match);
       if (error) throw new Error(`upsert: ${error.message || error}`);
+      try {
+        await settlePredictionFixture({
+          sport: 'football', fixtureId: fid, game: match,
+          liveResult: {
+            status: match.fixture?.status,
+            goals: match.goals,
+            score: match.score,
+            corners: r.actualsFull?.corners,
+            yellowCards: r.actualsFull?.yellowCards,
+            redCards: r.actualsFull?.redCards,
+            cards: r.actualsFull?.cards,
+            goalScorers: r.goalScorers,
+            cardEvents: r.cardEvents,
+          },
+        });
+      } catch (e) {
+        // El retrain nocturno lo reconcilia de nuevo desde match_results.
+        console.warn(`[futbol-finalize] prediction ledger ${fid}:`, e.message);
+      }
       // referee_stats (se conserva) — fallo aquí NO debe romper el finalize.
       try { await upsertRefereeStats(match, r, date); } catch (e) {
         console.warn(`[futbol-finalize] upsertRefereeStats ${fid}:`, e.message);

@@ -483,7 +483,7 @@ export default function MultisportDashboard({
 
   const combination = useMemo(() => {
     const selections = Object.entries(selectedMarkets).flatMap(([fixtureId, entries]) => (
-      Object.values(entries).map((entry) => ({ ...entry, fixtureId }))
+      Object.values(entries).slice(0, 1).map((entry) => ({ ...entry, fixtureId }))
     ));
     if (!selections.length) return null;
     const combinedOdd = selections.reduce((total, selection) => total * selection.odd, 1);
@@ -513,16 +513,15 @@ export default function MultisportDashboard({
   const togglePick = useCallback((game, pick) => {
     setSelectedMarkets((previous) => {
       const fixtureId = String(game.id);
-      const fixtureSelections = { ...(previous[fixtureId] || {}) };
-      if (fixtureSelections[pick.id]) delete fixtureSelections[pick.id];
-      else {
-        fixtureSelections[pick.id] = {
+      const alreadySelected = !!previous[fixtureId]?.[pick.id];
+      const fixtureSelections = alreadySelected ? {} : {
+        [pick.id]: {
           ...pick,
           probability: probability(pick),
           odd: oddValue(pick.odd),
           matchName: `${game.teams.home.name} vs ${game.teams.away.name}`,
-        };
-      }
+        },
+      };
       const next = { ...previous };
       if (Object.keys(fixtureSelections).length) next[fixtureId] = fixtureSelections;
       else delete next[fixtureId];

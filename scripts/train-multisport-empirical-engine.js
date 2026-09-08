@@ -1,8 +1,9 @@
 /* eslint-disable */
 // Entrenamiento walk-forward independiente para baseball, basketball y NFL.
 // Selecciona pesos solo en 70% cronológico; el 30% final compara configuraciones.
-// La salida no calibra, altera ni bloquea probabilidades: guarda pesos de
-// semejanza y métricas diagnósticas fuera de muestra.
+// El entrenamiento no altera la frecuencia empírica: guarda pesos de semejanza
+// y métricas fuera de muestra. La capa de publicación usa esas métricas para
+// calibrar y cerrar familias que todavía no pueden respaldarse.
 
 import pg from 'pg';
 import {

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-test('el frontend diario lee el catálogo selectable para poder incluir 75–79%', () => {
+test('el frontend diario lee el catálogo selectable y aplica el gate centralizado', () => {
   const source = fs.readFileSync(path.join(__dirname, '../app/dashboard/page.js'), 'utf8');
   assert.match(source, /data\.combinada\.selectable \|\| data\.combinada\.selections/);
   assert.match(source, /isFootballFrontendDailyPickEligible\(sel\)/);

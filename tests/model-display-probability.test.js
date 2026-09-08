@@ -17,6 +17,12 @@ test.before(async () => {
   ({ buildModelCombinada, buildCalculatedProbabilities, inspectMarketOdd } = await import('../lib/model-probabilities.js'));
 });
 
+const validatedFamily = (p, n = 500) => ({
+  [p >= .95 ? 'elite95' : p >= .90 ? 'daily90' : 'high']: {
+    n, avg_pred: p, avg_actual: p, gap: 0,
+  },
+});
+
 test('el diagnóstico de cuota distingue oferta, mínimo, línea ausente y mercado sin adaptador', () => {
   const odds = {
     allBookmakerOdds: [{
@@ -49,10 +55,11 @@ test('la presentación limita a 95% sin alterar la frecuencia del motor', () => 
   assert.equal(displayPct(100), 95);
 });
 
-test('la Apuesta del Día del frontend empieza en 75% y conserva fiabilidad 90%', () => {
-  assert.equal(FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY, 75);
+test('la Apuesta del Día exige 90% calibrado, fiabilidad 90% y margen EV', () => {
+  assert.equal(FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY, 90);
   assert.equal(isFootballFrontendDailyPickEligible({
-    rawProbability: 75, confidence: 90, odd: 1.20,
+    rawProbability: 90, confidence: 90, odd: 1.30,
+    expectedValue: .17, validationStatus: 'calibrated', dailyEligible: true,
   }), true);
   assert.equal(isFootballFrontendDailyPickEligible({
     rawProbability: 74.999, confidence: 99, odd: 2,
@@ -77,7 +84,7 @@ test('los mercados de jugador respetan el mismo contrato exacto', () => {
   assert.equal(selections[0].rawProbability, 94.96);
 });
 
-test('la validación fuera de muestra queda como diagnóstico y no altera ni bloquea', () => {
+test('la validación fuera de muestra calibra y autoriza solo con muestra suficiente', () => {
   const scored = modelToScored({
     goals_total: {
       kind: 'ou',
@@ -85,24 +92,18 @@ test('la validación fuera de muestra queda como diagnóstico y no altera ni blo
     },
   }, {
     validationFamilies: {
-      goals_total_over_0_5: { elite95: { n: 10, avg_pred: 0.95, avg_actual: 0.9, gap: 0.05 } },
+      goals_total_over_0_5: { elite95: { n: 100, avg_pred: 0.95, avg_actual: 0.9, gap: 0.05 } },
     },
   });
   const result = scored.total_goals_over0_5;
-  assert.equal(result.prob_final, 0.95);
+  assert.equal(result.prob_raw, 0.95);
+  assert.equal(result.prob_final, 0.925);
   assert.equal(result.recommended, true);
-  assert.deepEqual(result.validation, {
-    available: true,
-    family: 'goals_total_over_0_5',
-    band: 'elite95',
-    n: 10,
-    avgPred: 0.95,
-    avgActual: 0.9,
-    gap: 0.05,
-  });
+  assert.equal(result.validation.decision.status, 'calibrated');
+  assert.equal(result.validation.n, 100);
 });
 
-test('la falta de diagnóstico nunca oculta una frecuencia calculada', () => {
+test('la falta de diagnóstico conserva la estadística pero bloquea la recomendación', () => {
   const scored = modelToScored({
     goals_total: {
       kind: 'ou',
@@ -110,11 +111,9 @@ test('la falta de diagnóstico nunca oculta una frecuencia calculada', () => {
     },
   });
   assert.equal(scored.total_goals_over0_5.prob_final, 0.98);
-  assert.equal(scored.total_goals_over0_5.recommended, true);
-  assert.deepEqual(scored.total_goals_over0_5.validation, {
-    available: false,
-    family: 'goals_total_over_0_5',
-  });
+  assert.equal(scored.total_goals_over0_5.recommended, false);
+  assert.equal(scored.total_goals_over0_5.validation.available, false);
+  assert.equal(scored.total_goals_over0_5.validation.decision.status, 'unvalidated');
 });
 
 test('una sola observación puede producir 100% interno y mostrar 95%', () => {
@@ -126,7 +125,7 @@ test('una sola observación puede producir 100% interno y mostrar 95%', () => {
   });
   assert.equal(scored.total_corners_over0_5.prob_final, 1);
   assert.equal(displayPct(scored.total_corners_over0_5.prob_final * 100), 95);
-  assert.equal(scored.total_corners_over0_5.recommended, true);
+  assert.equal(scored.total_corners_over0_5.recommended, false);
 });
 
 test('over y under conservan la fiabilidad de su dirección exacta', () => {
@@ -143,13 +142,13 @@ test('over y under conservan la fiabilidad de su dirección exacta', () => {
   assert.equal(scored.btts_no.confidence, 0.97);
 });
 
-test('la combinada calcula con el valor crudo aunque visualmente muestre 95%', () => {
+test('el catálogo usa la probabilidad calibrada y no inventa una combinada del mismo partido', () => {
   const scored = modelToScored({
     goals_total: {
       kind: 'ou',
       lines: [{ line: 0.5, prob: 0.9975, n: 120, hits: 120, conf: 0.95, level: 'empirical' }],
     },
-  });
+  }, { validationFamilies: { goals_total_over_0_5: validatedFamily(.9975) } });
   const result = buildModelCombinada(
     scored,
     { overUnder: { Over_0_5: 1.5 } },
@@ -160,10 +159,11 @@ test('la combinada calcula con el valor crudo aunque visualmente muestre 95%', (
   );
   assert.equal(result.selections[0].probability, 95);
   assert.equal(result.selections[0].rawProbability, 99.75);
-  assert.equal(result.combinedProbability, 99.75);
+  assert.equal(result.combinedProbability, null);
+  assert.equal(result.correlationStatus, 'same-fixture-not-priced');
 });
 
-test('80% es el único umbral de producto para una recomendación general', () => {
+test('80% requiere además calibración de su familia', () => {
   const scored = modelToScored({
     goals_total: {
       kind: 'ou',
@@ -172,12 +172,15 @@ test('80% es el único umbral de producto para una recomendación general', () =
         { line: 2.5, prob: 0.7999, n: 5, hits: 4, level: 'empirical' },
       ],
     },
-  });
+  }, { validationFamilies: {
+    goals_total_over_1_5: validatedFamily(.8),
+    goals_total_over_2_5: validatedFamily(.7999),
+  } });
   assert.equal(scored.total_goals_over1_5.recommended, true);
   assert.equal(scored.total_goals_over2_5.recommended, false);
 });
 
-test('la combinada y la Apuesta del Día usan la frecuencia, no el diagnóstico', () => {
+test('una familia descalibrada queda fuera de recomendación y Apuesta del Día', () => {
   const scored = modelToScored({
     goals_total: {
       kind: 'ou',
@@ -196,10 +199,8 @@ test('la combinada y la Apuesta del Día usan la frecuencia, no el diagnóstico'
     {},
     null,
   );
-  assert.equal(result.selections.length, 1);
-  assert.equal(result.selections[0].probability, 90);
-  assert.equal(result.selections[0].rawProbability, 90);
-  assert.equal(result.selections[0].dailyEligible, true);
+  assert.equal(result.selections.length, 0);
+  assert.equal(result.selectable.length, 0);
 });
 
 test('un prop de jugador entra cuando su fiabilidad real llega al 90%', () => {
@@ -216,7 +217,9 @@ test('un prop de jugador entra cuando su fiabilidad real llega al 90%', () => {
       10: {
         player_id: 10,
         name: 'Jugador',
-        markets: { anytime_scorer: { prob: 0.9, n: 72, conf: 0.9 } },
+        markets: { anytime_scorer: { prob: 0.9, n: 72, conf: 0.9, validation: {
+          available: true, n: 500, avgPred: .9, avgActual: .9,
+        } } },
       },
     },
     {},
@@ -239,7 +242,11 @@ test('fiabilidad 90 filtra solo opciones de apuesta y conserva todas las frecuen
         { line: 2.5, prob: 0.95, n: 107, hits: 102, conf: 0.899999, level: 'empirical' },
       ],
     },
-  });
+  }, { validationFamilies: {
+    goals_total_over_0_5: validatedFamily(.7),
+    goals_total_over_1_5: validatedFamily(.8),
+    goals_total_over_2_5: validatedFamily(.95),
+  } });
   const descriptives = {
     homeAvg: { n: 8, goalsFor: 1.2, goalsAgainst: 1.1, coverage: {} },
     awayAvg: { n: 9, goalsFor: 1.3, goalsAgainst: 1.0, coverage: {} },
@@ -249,7 +256,7 @@ test('fiabilidad 90 filtra solo opciones de apuesta y conserva todas las frecuen
   const probabilities = buildCalculatedProbabilities(scored, descriptives, {});
   const result = buildModelCombinada(
     scored,
-    { overUnder: { Over_0_5: 1.3, Over_1_5: 1.5, Over_2_5: 1.9 } },
+    { overUnder: { Over_0_5: 2, Over_1_5: 1.5, Over_2_5: 1.9 } },
     { home: 'Local', away: 'Visitante' },
     {},
     probabilities,
@@ -282,12 +289,16 @@ test('un prop de jugador bajo 90% de fiabilidad no se publica aunque tenga proba
       10: {
         player_id: 10,
         name: 'Fiable',
-        markets: { anytime_scorer: { prob: 0.9, n: 72, conf: 0.9 } },
+        markets: { anytime_scorer: { prob: 0.9, n: 72, conf: 0.9, validation: {
+          available: true, n: 500, avgPred: .9, avgActual: .9,
+        } } },
       },
       11: {
         player_id: 11,
         name: 'Insuficiente',
-        markets: { anytime_scorer: { prob: 0.95, n: 71, conf: 0.899999 } },
+        markets: { anytime_scorer: { prob: 0.95, n: 71, conf: 0.899999, validation: {
+          available: true, n: 500, avgPred: .95, avgActual: .95,
+        } } },
       },
     },
     {},
@@ -304,33 +315,33 @@ test('la frontera pública rechaza caches sin fiabilidad y nunca redondea 89.999
   const sanitized = sanitizeFootballCombinada({
     source: 'context-engine',
     selections: [
-      { id: 'ok', confidence: 90, odd: 1.5, rawProbability: 80 },
+      { id: 'ok', confidence: 90, odd: 1.5, rawProbability: 80, expectedValue: .2, validationStatus: 'calibrated' },
       { id: 'low', confidence: 89.999, odd: 1.8, rawProbability: 95 },
       { id: 'legacy', odd: 1.9, rawProbability: 95 },
     ],
     selectable: [
-      { id: 'ok', confidence: 90, odd: 1.5, rawProbability: 80 },
+      { id: 'ok', confidence: 90, odd: 1.5, rawProbability: 80, expectedValue: .2, validationStatus: 'calibrated' },
       { id: 'legacy', odd: 1.9, rawProbability: 95 },
     ],
   });
 
   assert.deepEqual(sanitized.selections.map((selection) => selection.id), ['ok']);
   assert.deepEqual(sanitized.selectable.map((selection) => selection.id), ['ok']);
-  assert.equal(sanitized.combinedProbability, 80);
-  assert.equal(sanitized.combinedOdd, 1.5);
+  assert.equal(sanitized.combinedProbability, null);
+  assert.equal(sanitized.combinedOdd, null);
 
   const compatibleV20 = sanitizeFootballCombinada({
       source: 'context-engine',
       selections: [
-        { id: 'reliable-v20', confidence: 91, odd: 1.4, rawProbability: 82 },
+        { id: 'reliable-v20', confidence: 91, odd: 1.4, rawProbability: 82, expectedValue: .14, validationStatus: 'calibrated' },
         { id: 'low-v20', confidence: 89, odd: 1.5, rawProbability: 90 },
       ],
       selectable: [
-        { id: 'legacy-without-confidence', odd: 1.3, rawProbability: 75 },
+        { id: 'legacy-without-confidence', odd: 1.3, rawProbability: 75, expectedValue: .12 },
         { id: 'legacy-unknown', odd: 1.4, rawProbability: 95 },
       ],
     }, {
-      'legacy-without-confidence': { confidence: 0.92, n: 46 },
+      'legacy-without-confidence': { confidence: 0.92, n: 46, validation: { decision: { status: 'calibrated' } } },
     });
   assert.deepEqual(compatibleV20.selections.map((selection) => selection.id), ['reliable-v20']);
   assert.deepEqual(compatibleV20.selectable.map((selection) => selection.id), ['legacy-without-confidence', 'reliable-v20']);

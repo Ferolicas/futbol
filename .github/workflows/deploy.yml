@@ -143,7 +143,7 @@ jobs:
             # apps/cfanalisis-worker/src/shared.ts. Si cambia una lib que
             # el worker NO usa (ej lib/stripe.js, lib/zeptomail.js), no
             # disparamos restart del worker.
-            WORKER_RE='^(apps/cfanalisis-worker/|packages/realtime-protocol/|lib/(api-football|free-football-evidence|mlb-stats-api|combinada|baseball-model|baseball-calibration|baseball-features|baseball-ml|odds-api|redis|sanity-cache|supabase|supabase-cache|db|webpush|leagues|model-engine|model-ingest|model-profiles|model-impact|model-player-markets|model-probabilities|model-to-scored|meta-features|adn|h2h|market-labels|descriptive-stats)\.js$|scripts/(reenrich-baseball|train-baseball-meta-models)\.js$)'
+            WORKER_RE='^(apps/cfanalisis-worker/|packages/realtime-protocol/|lib/(api-football|free-football-evidence|mlb-stats-api|combinada|baseball-model|baseball-calibration|baseball-features|baseball-ml|odds-api|redis|sanity-cache|supabase|supabase-cache|db|webpush|leagues|model-engine|model-ingest|model-profiles|model-impact|model-player-markets|model-probabilities|model-to-scored|meta-features|adn|h2h|market-labels|descriptive-stats|prediction-ledger|market-settlement|recommendation-policy|multisport-analysis|multisport-empirical-engine|multisport-providers|multisport-config)\.js$|lib/(prediction-math|football-api-client|football-result-snapshot)\.cjs$|scripts/(reenrich-baseball|train-baseball-meta-models|train-football-empirical-engine|train-multisport-empirical-engine)\.js$)'
             if echo "$CHANGED" | grep -qE "$WORKER_RE"; then
               echo ""
               echo "▶ Worker changed — rebuilding worker"

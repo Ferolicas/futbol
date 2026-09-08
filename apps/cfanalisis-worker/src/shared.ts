@@ -52,12 +52,12 @@ const [
   _multisportProviders,
   _trainMultisport,
   _finalVerdict,
+  _predictionLedger,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
-  // Cliente compartido del proveedor. Hasta que el token CI permita ampliar
-  // WORKER_RE para `.cjs`, actualizar este marcador junto a cambios del cliente
-  // fuerza la recarga correcta del runtime (marker: result-snapshot-v1-durable-ui).
+  // Clientes compartidos del proveedor; deploy.yml incluye explícitamente sus
+  // extensiones `.cjs` para recargar el runtime cuando cambie el contrato.
   import(LIB + 'football-api-client.cjs'),
   import(LIB + 'football-result-snapshot.cjs'),
   import(LIB + 'supabase.js'),
@@ -77,14 +77,14 @@ const [
   import(LIB + 'model-player-markets.js'),
   import(LIB + 'model-probabilities.js'),
   import(SCRIPTS + 'train-football-empirical-engine.js'),
-  // Deploy marker: multisport v20 (política Baseball y veredicto oficial)
-  // + football cache v24. Estos módulos viven fuera del árbol TypeScript.
+  // Deploy marker: multisport v21 + football cache v25 (integridad predictiva).
   // These runtime imports live outside the TypeScript tree, so this file must
   // trigger a worker reload when their contract changes.
   import(LIB + 'multisport-analysis.js'),
   import(LIB + 'multisport-providers.js'),
   import(SCRIPTS + 'train-multisport-empirical-engine.js'),
   import(LIB + 'final-verdict.js'),
+  import(LIB + 'prediction-ledger.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -189,6 +189,9 @@ export const getSportGamesByDate = _multisportProviders.getSportGamesByDate;
 export const getSportGameDetails = _multisportProviders.getSportGameDetails;
 export const trainMultisportEmpiricalEngine = _trainMultisport.trainMultisportEmpiricalEngine;
 export const buildFootballFinalVerdict = _finalVerdict.buildFootballFinalVerdict;
+export const settlePredictionFixture = _predictionLedger.settlePredictionFixture;
+export const reconcileFootballPredictionSettlements = _predictionLedger.reconcileFootballPredictionSettlements;
+export const refreshPredictionLedgerCalibration = _predictionLedger.refreshPredictionLedgerCalibration;
 
 // lib/combinada.js
 export const buildCombinada = _combinada.buildCombinada;

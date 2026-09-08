@@ -44,6 +44,17 @@ toques nada”, “no subir” o equivalente.
 - No cambiar precios ni monedas fuera de `lib/stripe.js`.
 - Nunca confiar en plan, precio o estado de pago enviados por el cliente.
 - Free se filtra en servidor: una opción 60–70%, independiente de fiabilidad, solo con cuota real >=1.20 y casa identificada; esa opción visible aparece también en Apuesta del día y se puede añadir a la combinada. Antes del cierre, de las bloqueadas solo viaja la probabilidad y nunca sus etiquetas/IDs; después del final oficial se revelan nombre, cuota, casa y resultado.
+- `Veredicto final` es un producto descriptivo aislado: no se recalibra ni se
+  filtra por EV y sus opciones actuales no se modifican al cambiar el motor.
+- Las recomendaciones del motor fallan cerradas: exigen corte prepartido,
+  fiabilidad, validación temporal de su familia, cuota real y EV positivo. Las
+  estadísticas calculadas siguen visibles aunque una opción no sea publicable.
+- Nunca multiplicar mercados del mismo fixture como independientes. Solo una
+  selección por fixture puede entrar en una combinada normal; un Bet Builder
+  requiere probabilidad y cuota conjuntas oficiales.
+- Cada pronóstico publicable debe escribirse antes en el ledger inmutable con
+  versión, cutoff, hashes, evidencia y contexto; los resultados se anexan, no
+  sobrescriben el pronóstico original.
 - Un plan solo se activa después de confirmación del proveedor/webhook.
 - No sustituir auth PG por Supabase: los nombres `supabase*` restantes son adaptadores de compatibilidad.
 - El checkout automático transporta solo un ID de plan validado y una intención opaca; jamás el precio.
