@@ -350,7 +350,7 @@ async function evaluateConfig(samples, config, split, baselineConfig) {
     const earlyTarget = i < split ? metric.trainEarly : metric.validationEarly;
     const probableTarget = i < split ? metric.trainProbable : metric.validationProbable;
     const confirmedTarget = i < split ? metric.trainConfirmed : metric.validationConfirmed;
-    const earlyMarkets = sameConfig(config, baselineConfig)
+    const earlyMarkets = sameConfig(config, baselineConfig) && sample.earlyBaselineMarkets
       ? sample.earlyBaselineMarkets
       : (await computeBaseMarkets(null, sample.ctx, { config, rawRows: sample.earlyRawRows })).markets;
     for (const observation of observations(earlyMarkets, sample.actual)) {
@@ -359,7 +359,7 @@ async function evaluateConfig(samples, config, split, baselineConfig) {
       if (i >= split) addCalibratedObservation('early', observation);
     }
     if (sample.probableRawRows) {
-      const probableMarkets = sameConfig(config, baselineConfig)
+      const probableMarkets = sameConfig(config, baselineConfig) && sample.probableBaselineMarkets
         ? sample.probableBaselineMarkets
         : (await computeBaseMarkets(null, sample.ctx, { config, rawRows: sample.probableRawRows })).markets;
       for (const observation of observations(probableMarkets, sample.actual)) {
@@ -369,7 +369,7 @@ async function evaluateConfig(samples, config, split, baselineConfig) {
       }
     }
     if (sample.confirmedRawRows) {
-      const confirmedMarkets = sameConfig(config, baselineConfig)
+      const confirmedMarkets = sameConfig(config, baselineConfig) && sample.confirmedBaselineMarkets
         ? sample.confirmedBaselineMarkets
         : (await computeBaseMarkets(null, sample.ctx, { config, rawRows: sample.confirmedRawRows })).markets;
       for (const observation of observations(confirmedMarkets, sample.actual)) {
@@ -528,6 +528,16 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
     if (samples.length < 2) throw new Error(`muestra de entrenamiento insuficiente: ${samples.length}`);
     const split = Math.max(1, Math.min(samples.length - 1, Math.floor(samples.length * 0.70)));
     const baseline = await evaluateConfig(samples, active.config, split, active.config);
+
+    // A partir de aquí todas las configuraciones pueden reconstruirse desde
+    // `rawRows`. Mantener además tres árboles completos de mercados por cada
+    // uno de los 1.200 partidos duplicaba cientos de MB durante toda la rejilla
+    // y podía llevar V8 al límite de heap antes de persistir el entrenamiento.
+    for (const sample of samples) {
+      sample.earlyBaselineMarkets = null;
+      sample.probableBaselineMarkets = null;
+      sample.confirmedBaselineMarkets = null;
+    }
 
     // Descenso coordinado: cada dimensión se elige únicamente en train. El
     // conjunto validation no decide pesos; solo acepta/rechaza el candidato.
