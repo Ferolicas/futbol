@@ -6,10 +6,10 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('fútbol exige el contrato íntegro v26 antes de servir recomendaciones', () => {
+test('fútbol exige el contrato íntegro v27 antes de servir recomendaciones', () => {
   const cache = read('lib/sanity-cache.js');
-  assert.match(cache, /FOOTBALL_CACHE_VERSION = 26/);
-  assert.match(cache, /MIN_CACHE_VERSION = 26/);
+  assert.match(cache, /FOOTBALL_CACHE_VERSION = 27/);
+  assert.match(cache, /MIN_CACHE_VERSION = 27/);
   assert.match(cache, /LEGACY_DISPLAY_MIN_VERSION = 24/);
   assert.match(cache, /strict \? MIN_CACHE_VERSION : LEGACY_DISPLAY_MIN_VERSION/);
 });
@@ -34,7 +34,7 @@ test('las versiones nuevas no ocultan ni recalculan el análisis histórico', ()
   assert.match(fixtures, /historicalDailySelections/);
 });
 
-test('el arranque regenera hoy y mañana con v26 sin ascender una caché antigua', () => {
+test('el arranque regenera hoy y mañana con v27 sin ascender una caché antigua', () => {
   const scheduler = read('apps/cfanalisis-worker/src/schedulers.ts');
   const batch = read('apps/cfanalisis-worker/src/jobs/futbol/analyze-batch.js');
   const odds = read('apps/cfanalisis-worker/src/jobs/futbol/odds.js');

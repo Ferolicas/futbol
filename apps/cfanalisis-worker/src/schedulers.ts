@@ -183,7 +183,7 @@ export async function enqueueMultisportAnalysisBootstrap(): Promise<void> {
   const dates = [-3, -2, -1, 0, 1].map(shift);
   // El histórico conserva su cálculo descriptivo anterior sin volver a fingir
   // una predicción después del resultado. Hoy y mañana, en cambio, deben
-  // regenerarse con el contrato v25 para registrar cutoff, calibración y EV.
+  // regenerarse con el contrato vigente para registrar cutoff, calibración y EV.
   for (const date of dates.slice(0, 3)) {
     const jobId = `futbol-verdict-summary-v2-${date}`;
     await queues['futbol-analyze-batch'].add(

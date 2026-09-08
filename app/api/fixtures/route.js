@@ -193,7 +193,7 @@ export async function GET(request) {
     // la fecha solicitada. Una jornada que todavía es "hoy" puede contener
     // encuentros ya iniciados o almacenados bajo el día colombiano anterior.
     // Esos partidos deben conservar su snapshot prepartido v24+; solo los que
-    // aún no comienzan exigen el contrato vigente v26.
+    // aún no comienzan exigen el contrato vigente v27.
     const analysisNowMs = Date.now();
     const historicalFixtureIds = new Set(
       fixtures

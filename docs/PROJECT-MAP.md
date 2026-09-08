@@ -851,7 +851,8 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   70–79% contra la cohorte de 80% o más. El ledger puntúa la probabilidad
   calibrada que realmente se publicó, y la caché del motor se invalida también
   cuando solo cambian métricas. Tras desplegar debe ejecutarse `futbol-retrain`
-  y reanalizar la jornada para sustituir las salidas v26 afectadas.
+  `FOOTBALL_CACHE_VERSION=27` obliga a regenerar hoy y mañana sin alterar los
+  snapshots históricos v24+.
 - 2026-09-04: el resumen expandido de fútbol ya no apila Mercados,
   Estadísticas, Frecuencias, Jugadores y Veredicto final como acordeones. Una
   barra de pestañas horizontal gobierna un solo panel visible y las familias de
