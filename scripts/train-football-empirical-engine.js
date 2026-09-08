@@ -17,6 +17,10 @@ const {
   resetEngineConfigCache,
   inferExpectedLineups,
 } = require('../lib/model-engine.js');
+const {
+  calibrateProbability,
+  probabilityValidationBand,
+} = require('../lib/prediction-math.cjs');
 
 // Rejilla pequeña y explicable. Cada valor es un peso sobre partidos reales;
 // nunca un ajuste directo de puntos porcentuales.
@@ -147,6 +151,7 @@ function observations(markets, actual) {
 function emptyMetric() {
   return {
     n: 0, brierSum: 0, loglossSum: 0, absGapSum: 0,
+    selectable70N: 0, selectable70Pred: 0, selectable70Hits: 0,
     highN: 0, highPred: 0, highHits: 0,
     daily90N: 0, daily90Pred: 0, daily90Hits: 0,
     eliteN: 0, elitePred: 0, eliteHits: 0,
@@ -163,16 +168,19 @@ function addObservation(metric, family, p, hit) {
   metric.brierSum += (q - hit) ** 2;
   metric.loglossSum += -(hit * Math.log(q) + (1 - hit) * Math.log(1 - q));
   metric.absGapSum += Math.abs(q - hit);
+  if (q >= 0.70) { metric.selectable70N++; metric.selectable70Pred += q; metric.selectable70Hits += hit; }
   if (q >= 0.80) { metric.highN++; metric.highPred += q; metric.highHits += hit; }
   if (q >= 0.90) { metric.daily90N++; metric.daily90Pred += q; metric.daily90Hits += hit; }
   if (q >= 0.95) { metric.eliteN++; metric.elitePred += q; metric.eliteHits += hit; }
   const f = metric.byFamily[family] || (metric.byFamily[family] = {
     n: 0, pred: 0, hits: 0, brier: 0,
+    selectable70N: 0, selectable70Pred: 0, selectable70Hits: 0,
     highN: 0, highPred: 0, highHits: 0,
     daily90N: 0, daily90Pred: 0, daily90Hits: 0,
     eliteN: 0, elitePred: 0, eliteHits: 0,
   });
   f.n++; f.pred += q; f.hits += hit; f.brier += (q - hit) ** 2;
+  if (q >= 0.70) { f.selectable70N++; f.selectable70Pred += q; f.selectable70Hits += hit; }
   if (q >= 0.80) { f.highN++; f.highPred += q; f.highHits += hit; }
   if (q >= 0.90) { f.daily90N++; f.daily90Pred += q; f.daily90Hits += hit; }
   if (q >= 0.95) { f.eliteN++; f.elitePred += q; f.eliteHits += hit; }
@@ -183,6 +191,7 @@ function finishMetric(metric) {
   for (const [key, f] of Object.entries(metric.byFamily)) {
     families[key] = {
       n: f.n, avg_pred: f.pred / f.n, avg_actual: f.hits / f.n, brier: f.brier / f.n,
+      selectable70: f.selectable70N ? { n: f.selectable70N, avg_pred: f.selectable70Pred / f.selectable70N, avg_actual: f.selectable70Hits / f.selectable70N } : { n: 0 },
       high: f.highN ? { n: f.highN, avg_pred: f.highPred / f.highN, avg_actual: f.highHits / f.highN } : { n: 0 },
       daily90: f.daily90N ? { n: f.daily90N, avg_pred: f.daily90Pred / f.daily90N, avg_actual: f.daily90Hits / f.daily90N } : { n: 0 },
       elite95: f.eliteN ? { n: f.eliteN, avg_pred: f.elitePred / f.eliteN, avg_actual: f.eliteHits / f.eliteN } : { n: 0 },
@@ -193,10 +202,46 @@ function finishMetric(metric) {
     brier: metric.n ? metric.brierSum / metric.n : null,
     logloss: metric.n ? metric.loglossSum / metric.n : null,
     mean_abs_error: metric.n ? metric.absGapSum / metric.n : null,
+    selectable70: metric.selectable70N ? { n: metric.selectable70N, avg_pred: metric.selectable70Pred / metric.selectable70N, avg_actual: metric.selectable70Hits / metric.selectable70N, gap: Math.abs(metric.selectable70Pred - metric.selectable70Hits) / metric.selectable70N } : { n: 0 },
     high: metric.highN ? { n: metric.highN, avg_pred: metric.highPred / metric.highN, avg_actual: metric.highHits / metric.highN, gap: Math.abs(metric.highPred - metric.highHits) / metric.highN } : { n: 0 },
     daily90: metric.daily90N ? { n: metric.daily90N, avg_pred: metric.daily90Pred / metric.daily90N, avg_actual: metric.daily90Hits / metric.daily90N, gap: Math.abs(metric.daily90Pred - metric.daily90Hits) / metric.daily90N } : { n: 0 },
     elite95: metric.eliteN ? { n: metric.eliteN, avg_pred: metric.elitePred / metric.eliteN, avg_actual: metric.eliteHits / metric.eliteN, gap: Math.abs(metric.elitePred - metric.eliteHits) / metric.eliteN } : { n: 0 },
     families,
+  };
+}
+
+function calibrationEvidence(probability, family, calibrationFamilies) {
+  const metric = calibrationFamilies?.[family];
+  const band = probabilityValidationBand(probability);
+  const segment = band === 'all' ? metric : metric?.[band];
+  return {
+    available: !!segment,
+    family,
+    band,
+    n: Number(segment?.n || 0),
+    avgPred: segment?.avg_pred == null ? null : Number(segment.avg_pred),
+    avgActual: segment?.avg_actual == null ? null : Number(segment.avg_actual),
+  };
+}
+
+/** Ajusta validation con train y devuelve métricas realmente fuera de muestra. */
+function calibrateValidationObservations(trainMetric, validationMetric, validationObservations) {
+  const train = finishMetric(trainMetric);
+  const raw = finishMetric(validationMetric);
+  const calibratedMetric = emptyMetric();
+  for (const observation of validationObservations || []) {
+    const calibration = calibrationEvidence(
+      observation.prob,
+      observation.family,
+      train.families,
+    );
+    const probability = calibrateProbability(observation.prob, calibration);
+    addObservation(calibratedMetric, observation.family, probability, observation.hit);
+  }
+  return {
+    ...finishMetric(calibratedMetric),
+    calibrationFamilies: train.families,
+    raw,
   };
 }
 
@@ -219,6 +264,7 @@ async function upsertDiagnostics(pool, families) {
   for (const [family, fm] of Object.entries(families || {})) {
     const segments = [
       { name: 'validation', ...fm },
+      { name: 'validation-selectable70', ...fm.selectable70, brier: null },
       { name: 'validation-high', ...fm.high, brier: null },
       { name: 'validation-daily90', ...fm.daily90, brier: null },
       { name: 'validation-elite95', ...fm.elite95, brier: null },
@@ -268,6 +314,9 @@ async function evaluateConfig(samples, config, split, baselineConfig) {
     trainProbable: emptyMetric(), validationProbable: emptyMetric(),
     trainConfirmed: emptyMetric(), validationConfirmed: emptyMetric(),
   };
+  const validationObservations = {
+    all: [], early: [], probable: [], confirmed: [],
+  };
   for (let i = 0; i < samples.length; i++) {
     const sample = samples[i];
     const target = i < split ? metric.train : metric.validation;
@@ -280,6 +329,10 @@ async function evaluateConfig(samples, config, split, baselineConfig) {
     for (const observation of observations(earlyMarkets, sample.actual)) {
       addObservation(target, observation.family, observation.prob, observation.hit);
       addObservation(earlyTarget, observation.family, observation.prob, observation.hit);
+      if (i >= split) {
+        validationObservations.all.push(observation);
+        validationObservations.early.push(observation);
+      }
     }
     if (sample.probableRawRows) {
       const probableMarkets = sameConfig(config, baselineConfig)
@@ -288,6 +341,10 @@ async function evaluateConfig(samples, config, split, baselineConfig) {
       for (const observation of observations(probableMarkets, sample.actual)) {
         addObservation(target, observation.family, observation.prob, observation.hit);
         addObservation(probableTarget, observation.family, observation.prob, observation.hit);
+        if (i >= split) {
+          validationObservations.all.push(observation);
+          validationObservations.probable.push(observation);
+        }
       }
     }
     if (sample.confirmedRawRows) {
@@ -297,17 +354,26 @@ async function evaluateConfig(samples, config, split, baselineConfig) {
       for (const observation of observations(confirmedMarkets, sample.actual)) {
         addObservation(target, observation.family, observation.prob, observation.hit);
         addObservation(confirmedTarget, observation.family, observation.prob, observation.hit);
+        if (i >= split) {
+          validationObservations.all.push(observation);
+          validationObservations.confirmed.push(observation);
+        }
       }
     }
   }
+  const validation = calibrateValidationObservations(
+    metric.train,
+    metric.validation,
+    validationObservations.all,
+  );
   return {
     train: finishMetric(metric.train),
     validation: {
-      ...finishMetric(metric.validation),
+      ...validation,
       horizons: {
-        early: finishMetric(metric.validationEarly),
-        probable: finishMetric(metric.validationProbable),
-        confirmed: finishMetric(metric.validationConfirmed),
+        early: calibrateValidationObservations(metric.trainEarly, metric.validationEarly, validationObservations.early),
+        probable: calibrateValidationObservations(metric.trainProbable, metric.validationProbable, validationObservations.probable),
+        confirmed: calibrateValidationObservations(metric.trainConfirmed, metric.validationConfirmed, validationObservations.confirmed),
       },
     },
   };
@@ -551,7 +617,6 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
       } finally {
         client.release();
       }
-      resetEngineConfigCache();
     } else if (!dry) {
       report.version = active.version;
       const client = await pool.connect();
@@ -571,6 +636,10 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
         client.release();
       }
     }
+    // La caché contiene también métricas. Debe invalidarse aunque los pesos no
+    // cambien; de lo contrario el reanálisis inmediato seguiría usando durante
+    // cinco minutos la calibración anterior que acabamos de reemplazar.
+    if (!dry) resetEngineConfigCache();
     console.log(`[train-football-empirical] sample=${rows.length} processed=${samples.length} errors=${errors} · share ${active.config.currentShare}→${config.currentShare} · activate=${activates} · valBrier=${candidate.validation.brier?.toFixed(4)} · daily90=${candidate.validation.daily90?.avg_actual == null ? '—' : (candidate.validation.daily90.avg_actual * 100).toFixed(1) + '%'} · elite95=${candidate.validation.elite95?.avg_actual == null ? '—' : (candidate.validation.elite95.avg_actual * 100).toFixed(1) + '%'}`);
     return report;
   } finally {
@@ -585,4 +654,10 @@ if (require.main === module) {
     .catch((error) => { console.error('FATAL', error); process.exit(1); });
 }
 
-module.exports = { trainFootballEmpiricalEngine, probabilityForShare, observations, upsertDiagnostics };
+module.exports = {
+  trainFootballEmpiricalEngine,
+  probabilityForShare,
+  observations,
+  calibrateValidationObservations,
+  upsertDiagnostics,
+};

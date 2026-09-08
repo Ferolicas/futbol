@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-08 · Base: `1f6e98a` · Next 16, realtime granular y operación enterprise
+Actualizado: 2026-09-08 · Base: `02dfaff` · Next 16, realtime granular y operación enterprise
 
 ## Identidad y stack
 
@@ -275,11 +275,12 @@ al instalarlo y no se guarda en Git; los enlaces no transportan secretos.
 
 Una opción de fútbol entra en recomendaciones generales cuando su probabilidad
 calibrada es de 80% o más, existe cuota real, la fiabilidad propia alcanza 90%,
-su familia/horizonte supera la validación temporal y el retorno esperado es al
-menos +5% por unidad. Cuando existe el par completo de cuotas se retira el
-margen de la casa y se exige además una ventaja de dos puntos frente a la
-probabilidad de mercado de-vig. El constructor puede evaluar líneas desde 70%
-con los mismos controles. La Apuesta del Día eleva el listón a 90% y +10% de EV,
+su familia/horizonte supera la validación temporal. El constructor puede
+evaluar líneas desde 70% con los mismos controles. El EV no bloquea por debajo
+de 90%; entre 90–90,99% exige +8% y desde 91% exige +10%. Cuando existe el par
+completo de cuotas se conserva además la probabilidad de mercado de-vig como
+trazabilidad, sin usarla para recalcular la frecuencia del motor. La Apuesta
+del Día eleva el listón a 90% y aplica el tramo EV correspondiente,
 con cuota real desde 1.20 y su whitelist de mercados. Como puede mostrar varias
 líneas correlacionadas o incompatibles del mismo partido, es un catálogo y no
 un cupón: muestra cada cuota individual y nunca las multiplica en una cuota
@@ -289,7 +290,10 @@ independencia. Los props de jugador siguen el mismo contrato por familia.
 `lib/recommendation-policy.js` centraliza estos gates.
 
 La frecuencia empírica cruda nunca se pierde: queda en estadísticas y ledger.
-La capa de serving calcula una probabilidad calibrada por familia y horizonte,
+La capa de serving aplica una corrección aprendida solo en el 70% cronológico
+de entrenamiento y juzga el resultado contra el 30% posterior e intocable, por
+familia, línea y horizonte. El segmento se elige sobre la probabilidad ya
+calibrada (general, seleccionable-70, alta-80, diaria-90 o élite-95),
 pero falla cerrada con menos de 30 observaciones efectivas o un error superior
 al máximo entre cinco puntos y el intervalo de incertidumbre medido. Web, PNG y
 Telegram muestran como máximo 95% para no comunicar una garantía; el ledger
@@ -332,10 +336,11 @@ probabilidad calibrada alcanza el umbral del producto. El walk-forward de su
 línea/dirección y familia exactas decide si el mercado puede publicarse.
 
 `scripts/train-football-empirical-engine.js` hace walk-forward nocturno sobre
-1.200 partidos: 70% para escoger pesos y 30% cronológico intocable para aceptar
-o rechazar el candidato y renovar el diagnóstico por familia en los horizontes
-early, XI probable y XI confirmado, además de las bandas general, alta,
-diaria-90 y élite-95. Un candidato peor queda inactivo; el campeón conserva
+1.200 partidos: 70% para escoger pesos y aprender por familia únicamente la
+corrección de calibración; el 30% cronológico posterior permanece intocable y
+es el único que autoriza o rechaza la probabilidad ya corregida. Renueva el
+diagnóstico en los horizontes early, XI probable y XI confirmado, además de las
+bandas general, seleccionable-70, alta-80, diaria-90 y élite-95. Un candidato peor queda inactivo; el campeón conserva
 producción. El ledger de predicciones realmente emitidas renueva después esas
 métricas sin reconstruir pronósticos a posteriori.
 `apps/cfanalisis-worker/src/jobs/futbol/retrain.js` ejecuta captura reciente →
@@ -839,6 +844,14 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   corta antes de recalcular un fixture iniciado. Para jornadas pasadas,
   `combinada_dia` es la fuente inmutable de Apuesta del día: sus opciones se
   liquidan contra `match_results` sin volver a someterlas a reglas nuevas.
+- 2026-09-08: la calibración de fútbol separa formalmente ajuste y evaluación:
+  train aprende la corrección y validation mide su resultado, de modo que una
+  probabilidad corregida ya no queda bloqueada por el error de su cifra cruda.
+  Se añade el segmento acumulativo `selectable70` para no comparar opciones de
+  70–79% contra la cohorte de 80% o más. El ledger puntúa la probabilidad
+  calibrada que realmente se publicó, y la caché del motor se invalida también
+  cuando solo cambian métricas. Tras desplegar debe ejecutarse `futbol-retrain`
+  y reanalizar la jornada para sustituir las salidas v26 afectadas.
 - 2026-09-04: el resumen expandido de fútbol ya no apila Mercados,
   Estadísticas, Frecuencias, Jugadores y Veredicto final como acordeones. Una
   barra de pestañas horizontal gobierna un solo panel visible y las familias de

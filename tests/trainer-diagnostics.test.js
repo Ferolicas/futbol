@@ -30,6 +30,7 @@ test('el snapshot diagnóstico se reemplaza con una sola escritura set-based', a
   assert.match(calls[0].sql, /DELETE FROM market_segment_diagnostics/);
   assert.match(calls[1].sql, /jsonb_to_recordset/);
   const rows = JSON.parse(calls[1].params[0]);
-  assert.equal(rows.length, 8);
+  assert.equal(rows.length, 10);
+  assert.equal(rows.filter((row) => row.segment === 'validation-selectable70').length, 2);
   assert.equal(rows.filter((row) => row.segment === 'validation-daily90').length, 2);
 });

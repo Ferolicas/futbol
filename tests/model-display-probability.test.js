@@ -20,7 +20,7 @@ test.before(async () => {
 });
 
 const validatedFamily = (p, n = 500) => ({
-  [p >= .95 ? 'elite95' : p >= .90 ? 'daily90' : 'high']: {
+  [p >= .95 ? 'elite95' : p >= .90 ? 'daily90' : p >= .80 ? 'high' : 'selectable70']: {
     n, avg_pred: p, avg_actual: p, gap: 0,
   },
 });
@@ -116,8 +116,11 @@ test('la validación fuera de muestra calibra y autoriza solo con muestra sufici
       lines: [{ line: 0.5, prob: 0.95, n: 2, hits: 2, level: 'empirical' }],
     },
   }, {
+    calibrationFamilies: {
+      goals_total_over_0_5: { elite95: { n: 100, avg_pred: 0.95, avg_actual: 0.9 } },
+    },
     validationFamilies: {
-      goals_total_over_0_5: { elite95: { n: 100, avg_pred: 0.95, avg_actual: 0.9, gap: 0.05 } },
+      goals_total_over_0_5: { daily90: { n: 100, avg_pred: 0.925, avg_actual: 0.9, gap: 0.025 } },
     },
   });
   const result = scored.total_goals_over0_5;
@@ -126,6 +129,7 @@ test('la validación fuera de muestra calibra y autoriza solo con muestra sufici
   assert.equal(result.recommended, true);
   assert.equal(result.validation.decision.status, 'calibrated');
   assert.equal(result.validation.n, 100);
+  assert.equal(result.validation.calibration.band, 'elite95');
 });
 
 test('la falta de diagnóstico conserva la estadística pero bloquea la recomendación', () => {

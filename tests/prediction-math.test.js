@@ -9,8 +9,17 @@ const {
   offeredExpectedValue,
   assessValidation,
   calibrateProbability,
+  probabilityValidationBand,
   recommendationDecision,
 } = require('../lib/prediction-math.cjs');
+
+test('las bandas de validación coinciden exactamente con las fronteras comerciales', () => {
+  assert.equal(probabilityValidationBand(0.69999), 'all');
+  assert.equal(probabilityValidationBand(0.70), 'selectable70');
+  assert.equal(probabilityValidationBand(0.80), 'high');
+  assert.equal(probabilityValidationBand(0.90), 'daily90');
+  assert.equal(probabilityValidationBand(0.95), 'elite95');
+});
 
 test('normaliza una distribución y conserva exactamente toda la masa', () => {
   const distribution = normalizeDistribution({ home: 2, draw: 1, away: 1 });

@@ -25,10 +25,22 @@ test('la calibración del ledger separa familia, horizonte y bandas', async () =
   assert.equal(early.n, 2);
   assert.ok(Math.abs(early.avg_pred - 0.85) < 1e-12);
   assert.equal(early.avg_actual, 0.5);
+  assert.equal(early.selectable70.n, 2);
   assert.equal(early.high.n, 2);
   assert.equal(early.daily90.n, 1);
   assert.equal(confirmed.elite95.n, 1);
   assert.equal(groups.some((row) => row.family === 'ignored_push'), false);
+});
+
+test('el ledger valida la probabilidad publicada, no vuelve a puntuar la cruda', async () => {
+  const { predictionLedgerInternals } = await import('../lib/prediction-ledger.js');
+  const [group] = predictionLedgerInternals.aggregateLedgerCalibration([{
+    horizon: 'early', market_family: 'goals',
+    probability_raw: 0.95, probability_calibrated: 0.74, outcome: 'won',
+  }]);
+  assert.equal(group.avg_pred, 0.74);
+  assert.equal(group.selectable70.n, 1);
+  assert.equal(group.high.n, 0);
 });
 
 test('una muestra corta nunca reemplaza una calibración madura', async () => {

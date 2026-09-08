@@ -230,7 +230,10 @@ function playerStartXi(lineups) {
     });
     const lineups = analysis.lineups?.available ? analysis.lineups.data : null;
     const prediction = await predict(pool, ctx, { currentLineups: lineups });
-    const scored = modelToScored(prediction.markets, { validationFamilies: prediction.validationFamilies });
+    const scored = modelToScored(prediction.markets, {
+      calibrationFamilies: prediction.calibrationFamilies,
+      validationFamilies: prediction.validationFamilies,
+    });
     const descriptives = await buildModelDescriptives(pool, ctx);
     const probabilities = buildCalculatedProbabilities(scored, descriptives, analysis);
     const startXi = playerStartXi(analysis.lineups);
