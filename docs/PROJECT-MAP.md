@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-08 · Base: `02dfaff` · Next 16, realtime granular y operación enterprise
+Actualizado: 2026-09-08 · Base: `7588e7b` · Next 16, realtime granular y operación enterprise
 
 ## Identidad y stack
 
@@ -853,6 +853,13 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   cuando solo cambian métricas. Tras desplegar debe ejecutarse `futbol-retrain`
   `FOOTBALL_CACHE_VERSION=27` obliga a regenerar hoy y mañana sin alterar los
   snapshots históricos v24+.
+- 2026-09-08: todo escritor del agregado diario `analysis:v{versión}:{fecha}`
+  debe transportar `finalVerdict`. El análisis individual de PostgreSQL puede
+  estar completo y aun así la tarjeta mostrar el veredicto vacío si una ruta
+  de reanálisis sobrescribe `analyzedData` con un resumen incompleto. Tanto el
+  lote normal, el reanálisis forzado y `/api/analisis` conservan ahora el campo;
+  `verdictOnly` reconstruye el agregado existente sin recalcular probabilidades,
+  recomendaciones ni el motor.
 - 2026-09-04: el resumen expandido de fútbol ya no apila Mercados,
   Estadísticas, Frecuencias, Jugadores y Veredicto final como acordeones. Una
   barra de pestañas horizontal gobierna un solo panel visible y las familias de
