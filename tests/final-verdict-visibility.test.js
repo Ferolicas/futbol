@@ -51,11 +51,15 @@ test('el arranque regenera hoy y mañana con v27 sin ascender una caché antigua
 
 test('el resumen de fútbol transporta el veredicto hasta la tarjeta', () => {
   const cache = read('lib/sanity-cache.js');
-  const worker = read('apps/cfanalisis-worker/src/jobs/futbol/analyze-batch.js');
+  const batchWorker = read('apps/cfanalisis-worker/src/jobs/futbol/analyze-batch.js');
+  const forceWorker = read('apps/cfanalisis-worker/src/jobs/futbol/analyze-all-today.js');
+  const manualRoute = read('app/api/analisis/route.js');
   assert.match(cache, /finalVerdict: doc\.finalVerdict \|\| null/);
-  assert.match(worker, /finalVerdict: a\.finalVerdict \|\| null/);
-  assert.match(worker, /verdictOnly/);
-  assert.match(worker, /no modifica probabilidades, combinada ni motor/);
+  assert.match(batchWorker, /finalVerdict: a\.finalVerdict \|\| null/);
+  assert.match(forceWorker, /finalVerdict: a\.finalVerdict \|\| null/);
+  assert.match(manualRoute, /finalVerdict:\s+e\.finalVerdict \|\| null/);
+  assert.match(batchWorker, /verdictOnly/);
+  assert.match(batchWorker, /no modifica probabilidades, combinada ni motor/);
 });
 
 test('cada opción del veredicto identifica su porcentaje de probabilidad', () => {

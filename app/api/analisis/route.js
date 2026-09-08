@@ -99,6 +99,7 @@ export async function POST(request) {
                 const en = m._enriched || {};
                 return { r: en.result, s: en.score, gF: en.goalsFor, gA: en.goalsAgainst, op: en.opponentName, oL: en.opponentLogo, c: en.corners, y: en.yellowCards, rd: en.redCards };
               }),
+              finalVerdict:          e.finalVerdict || null,
               playerHighlights:       e.playerHighlights || null,
               referee:                e.referee || null,
               refereeStats:           e.refereeStats || null,

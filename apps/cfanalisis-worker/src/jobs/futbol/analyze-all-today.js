@@ -50,6 +50,7 @@ function buildSummary(a) {
     homePosition: a.homePosition, awayPosition: a.awayPosition,
     homeLastFive: compactLastFive(a.homeLastFive),
     awayLastFive: compactLastFive(a.awayLastFive),
+    finalVerdict: a.finalVerdict || null,
     playerHighlights: a.playerHighlights || null,
     referee: a.referee || null,
     refereeStats: a.refereeStats || null,
