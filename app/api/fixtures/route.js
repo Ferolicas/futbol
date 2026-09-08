@@ -423,7 +423,7 @@ export async function GET(request) {
     const startedMs = batchFlag?.startedAt ? Date.parse(batchFlag.startedAt) : 0;
     const startedStale = batchFlag?.started && (!startedMs || (Date.now() - startedMs) > STARTED_GRACE_MS);
     const needsTrigger = !batchFlag?.completed && (!batchFlag?.started || startedStale);
-    if (fixtures.length > 0 && needsTrigger) {
+    if (!isPastDate && fixtures.length > 0 && needsTrigger) {
       const triggerLockKey = `daily-trigger-lock:${date}`;
       const alreadyTriggered = await redisGet(triggerLockKey);
       if (!alreadyTriggered) {
@@ -490,11 +490,15 @@ export async function GET(request) {
         }
 
         if (datesToCheck.length > 0) {
-          const allIds = await Promise.all(datesToCheck.map(d => getAnalyzedFixtureIds(d)));
+          const allIds = await Promise.all(datesToCheck.map(d =>
+            getAnalyzedFixtureIds(d, { historical: isPastDate })));
           const haveSet = new Set(globallyAnalyzed);
           const extraIds = [...new Set(allIds.flat())].filter(id => fixtureIdSet.has(id) && !haveSet.has(id));
           if (extraIds.length > 0) {
-            const { analyzedOdds: extraOdds, analyzedData: extraData } = await getAnalyzedMatchesFull(extraIds);
+            const { analyzedOdds: extraOdds, analyzedData: extraData } = await getAnalyzedMatchesFull(
+              extraIds,
+              { historical: isPastDate },
+            );
             globallyAnalyzed = [...globallyAnalyzed, ...extraIds];
             analyzedOdds = { ...analyzedOdds, ...extraOdds };
             analyzedData = { ...analyzedData, ...extraData };

@@ -6,15 +6,26 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('fútbol exige el contrato íntegro v25 antes de servir recomendaciones', () => {
+test('fútbol exige el contrato íntegro v26 antes de servir recomendaciones', () => {
   const cache = read('lib/sanity-cache.js');
-  assert.match(cache, /FOOTBALL_CACHE_VERSION = 25/);
-  assert.match(cache, /MIN_CACHE_VERSION = 25/);
+  assert.match(cache, /FOOTBALL_CACHE_VERSION = 26/);
+  assert.match(cache, /MIN_CACHE_VERSION = 26/);
   assert.match(cache, /LEGACY_DISPLAY_MIN_VERSION = 24/);
   assert.match(cache, /strict \? MIN_CACHE_VERSION : LEGACY_DISPLAY_MIN_VERSION/);
 });
 
-test('el arranque regenera hoy y mañana con v25 sin ascender una caché antigua', () => {
+test('las versiones nuevas no ocultan ni recalculan el análisis histórico', () => {
+  const cache = read('lib/sanity-cache.js');
+  const fixtures = read('app/api/fixtures/route.js');
+  assert.match(cache, /getAnalyzedFixtureIds\(date, \{ historical = false \} = \{\}\)/);
+  assert.match(cache, /historical \? LEGACY_DISPLAY_MIN_VERSION : MIN_CACHE_VERSION/);
+  assert.match(cache, /getAnalyzedMatchesFull\(fixtureIds, \{ historical = false \} = \{\}\)/);
+  assert.match(fixtures, /getAnalyzedFixtureIds\(d, \{ historical: isPastDate \}\)/);
+  assert.match(fixtures, /\{ historical: isPastDate \}/);
+  assert.match(fixtures, /if \(!isPastDate && fixtures\.length > 0 && needsTrigger\)/);
+});
+
+test('el arranque regenera hoy y mañana con v26 sin ascender una caché antigua', () => {
   const scheduler = read('apps/cfanalisis-worker/src/schedulers.ts');
   const batch = read('apps/cfanalisis-worker/src/jobs/futbol/analyze-batch.js');
   const odds = read('apps/cfanalisis-worker/src/jobs/futbol/odds.js');

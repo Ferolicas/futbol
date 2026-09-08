@@ -17,6 +17,16 @@ test('la Apuesta del Día muestra cuotas individuales y no fabrica una cuota tot
   assert.doesNotMatch(source, /const combinedOdd\s*=\s*all\.reduce/);
 });
 
+test('el EV se muestra como metadato secundario y no desplaza probabilidad ni cuota', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../app/dashboard/page.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '../app/globals.css'), 'utf8');
+  assert.match(source, /className="daily-pick-ev"/);
+  assert.match(source, /className="mkt-ev"/);
+  assert.match(styles, /\.daily-pick-card-metrics \.daily-pick-ev/);
+  assert.match(styles, /\.mkt-ev/);
+  assert.match(styles, /rgba\(203, 213, 225, \.55\)/);
+});
+
 test('el publicador recupera fiabilidad durable antes de aplicar las reglas Telegram', () => {
   const source = fs.readFileSync(path.join(__dirname, '../app/api/cron/publish-combinada/route.js'), 'utf8');
   assert.match(source, /combinada\.selectable \|\| combinada\.selections/);

@@ -79,12 +79,14 @@ function mergeFootballLive(live, result) {
 
 async function footballResults(date, timeZone) {
   const dates = [shiftedDate(date, -1), date, shiftedDate(date, 1)];
-  const idLists = await Promise.all(dates.map((value) => getAnalyzedFixtureIds(value)));
+  const historical = date < todayInZone(timeZone);
+  const idLists = await Promise.all(dates.map((value) =>
+    getAnalyzedFixtureIds(value, { historical })));
   const ids = [...new Set(idLists.flat().map(Number).filter(Number.isFinite))];
   if (!ids.length) return [];
 
   const [{ analyzedData }, liveResponse, resultResponse] = await Promise.all([
-    getAnalyzedMatchesFull(ids),
+    getAnalyzedMatchesFull(ids, { historical }),
     supabaseAdmin.from('match_analysis')
       .select('fixture_id,live_stats,created_at')
       .in('fixture_id', ids)

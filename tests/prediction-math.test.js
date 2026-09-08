@@ -61,3 +61,20 @@ test('una recomendación exige validación y EV, no solo porcentaje', () => {
   assert.equal(accepted.eligible, true);
   assert.ok(accepted.expectedValue >= 0.05);
 });
+
+test('el decisor permite separar los controles económicos de los controles predictivos', () => {
+  const validation = { available: true, n: 500, avgPred: 0.8, avgActual: 0.8 };
+  const result = recommendationDecision({
+    probability: 0.8,
+    odd: 1.2,
+    reliability: 95,
+    validation,
+    marketFairProbability: 0.9,
+  }, {
+    enforceExpectedValue: false,
+    enforceMarketEdge: false,
+  });
+  assert.equal(result.eligible, true);
+  assert.ok(result.expectedValue < 0);
+  assert.ok(result.marketEdge < 0);
+});

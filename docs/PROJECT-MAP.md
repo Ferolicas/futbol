@@ -812,10 +812,14 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   compacto de `/api/baseball/fixtures` debe
   conservar `analysis.finalVerdict`; omitirlo deja la tarjeta MLB sin los
   porcentajes que sí existen en `baseball_match_analysis`.
-- 2026-09-08: `FOOTBALL_CACHE_VERSION=25` y `MULTISPORT_CACHE_VERSION=21`
+- 2026-09-08: `FOOTBALL_CACHE_VERSION=26` y `MULTISPORT_CACHE_VERSION=21`
   introducen el contrato de integridad predictiva. Toda recomendación exige
-  corte anterior al kickoff, fiabilidad, validación por familia/horizonte, cuota
-  real y EV; Apuesta del Día exige además 90% calibrado y EV ≥10%. El cálculo
+  corte anterior al kickoff, fiabilidad, validación por familia/horizonte y cuota
+  real. En fútbol el EV es informativo por debajo de 90%; entre 90–90,99% exige
+  EV ≥8% y desde 91% exige EV ≥10%. La política económica no modifica ni
+  recalibra probabilidades. En la interfaz el EV es texto secundario atenuado;
+  probabilidad y cuota mantienen la jerarquía visual y el orden prioriza la
+  probabilidad. El cálculo
   crudo y Veredicto final permanecen intactos. `prediction_runs` registra antes
   de publicar y `prediction_settlements` anexa resultados. Las combinadas solo
   admiten un mercado por fixture y jamás multiplican mercados correlacionados
@@ -823,8 +827,11 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   el contexto distingue XI probable/confirmado, continuidad de plantilla,
   descanso y estadio. Aplicar `scripts/migrate-prediction-integrity-v2.sql`
   después de backup y antes de desplegar esta versión. El arranque regenera con
-  v25 hoy y mañana; v24 solo puede leerse para visualización histórica y su
+  v26 hoy y mañana; desde v24 puede leerse para visualización histórica y su
   combinada queda vacía, nunca se promueve como pronóstico nuevo.
+  La lista histórica consulta explícitamente ese umbral compatible y jamás
+  dispara un reanálisis de partidos pasados: conserva el snapshot prepartido
+  original aunque aumente la versión vigente del motor.
 - 2026-09-04: el resumen expandido de fútbol ya no apila Mercados,
   Estadísticas, Frecuencias, Jugadores y Veredicto final como acordeones. Una
   barra de pestañas horizontal gobierna un solo panel visible y las familias de
@@ -861,8 +868,9 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   presentación. v25/v21 conserva la frecuencia, pero permite que el diagnóstico
   bloquee su publicación como recomendación.
 - 2026-08-03: la Apuesta del Día del frontend y la publicación de Telegram son
-  productos independientes. Desde v25 el frontend exige probabilidad calibrada
-  ≥90%, fiabilidad ≥90%, cuota real ≥1.20 y EV ≥10%. Telegram exige además sus
+  productos independientes. Desde v26 el frontend exige probabilidad calibrada
+  ≥90%, fiabilidad ≥90%, cuota real ≥1.20 y el tramo EV 8% para 90–90,99% o 10%
+  desde 91%. El catálogo general por debajo de 90% no se filtra por EV. Telegram exige además sus
   umbrales editoriales de frecuencia y fiabilidad ≥80% por
   selección, cuota individual 1.20–1.60 y una cuota final 1.50–2.00 con
   probabilidad conjunta ≥80%; lee la evidencia durable `_scored` para no perder

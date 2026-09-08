@@ -1188,8 +1188,8 @@ export function FootballDashboard({
   const apuestaDelDia = useMemo(() => {
     if (isFree) return { selections: [...freeApuestaRecommendations, ...freeDailyResults], combinedProbability: 0 };
     // Reglas:
-    //  - Solo selecciones con probabilidad calibrada ≥90%, fiabilidad ≥90%,
-    //    cuota real ≥1.20 y EV ≥10%
+    //  - Solo selecciones con probabilidad calibrada ≥90%, fiabilidad ≥90%
+    //    y cuota real ≥1.20. EV: ≥8% entre 90–90,99%; ≥10% desde 91%.
     //  - SIN límite por partido: si un partido tiene 10 opciones que cumplen,
     //    se muestran las 10
     //  - Próximos se ven en Apuestas; en vivo/finalizados pasan a Resultados
@@ -1211,8 +1211,8 @@ export function FootballDashboard({
       const homeTeam = fx?.teams?.home?.name || data.homeTeam || '';
       const awayTeam = fx?.teams?.away?.name || data.awayTeam || '';
 
-      // selectable contiene las líneas que ya superaron calibración, fiabilidad
-      // y EV. La Apuesta del Día aplica encima su margen de seguridad reforzado.
+      // selectable contiene líneas con calibración, fiabilidad y cuota real.
+      // Por debajo de 90% el EV es informativo; aquí se aplican sus tramos 8/10.
       const isEngine = data?.combinada?.source === 'context-engine';
       const selections = isEngine
         ? (data.combinada.selectable || data.combinada.selections || [])
@@ -1239,11 +1239,12 @@ export function FootballDashboard({
 
     if (all.length === 0) return null;
 
-    // Orden: próximos primero y, dentro del estado, mayor valor esperado.
+    // Orden: próximos primero y, dentro del estado, mayor probabilidad. El EV
+    // es información económica secundaria y solo desempata probabilidades.
     all.sort((a, b) =>
       b.priority - a.priority ||
-      Number(b.expectedValue || 0) - Number(a.expectedValue || 0) ||
       Number(b.rawProbability ?? b.probability) - Number(a.rawProbability ?? a.probability) ||
+      Number(b.expectedValue || 0) - Number(a.expectedValue || 0) ||
       (b.odd || 0) - (a.odd || 0)
     );
 
@@ -1691,6 +1692,9 @@ function ApuestaSelectionRail({ selections, averageProbability, fixtures }) {
               )}
               <span className="daily-pick-card-metrics">
                 <b style={{ color: probColor }}>{pct}%</b>
+                {sel.expectedValue != null && Number.isFinite(Number(sel.expectedValue)) && (
+                  <small className="daily-pick-ev">EV {Number(sel.expectedValue) >= 0 ? '+' : ''}{(Number(sel.expectedValue) * 100).toFixed(1)}%</small>
+                )}
                 {sel.odd != null && <em>@{Number(sel.odd).toFixed(2)}</em>}
               </span>
             </article>
@@ -2332,6 +2336,9 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                         <div className="mkt-nums">
                           <span className="mkt-pct">{cap(mkt.rawProbability ?? mkt.probability)}%</span>
                           {mkt.odd && <span className="mkt-odd">{mkt.odd.toFixed(2)}</span>}
+                          {mkt.expectedValue != null && Number.isFinite(Number(mkt.expectedValue)) && (
+                            <small className="mkt-ev">EV {Number(mkt.expectedValue) >= 0 ? '+' : ''}{(Number(mkt.expectedValue) * 100).toFixed(1)}%</small>
+                          )}
                           {bkLogo && <span className="mkt-bk" title={mkt.bookmaker}><img src={bkLogo} alt={mkt.bookmaker} className="bk-logo-lg" loading="lazy" decoding="async" onError={(e) => { e.target.style.display = 'none'; }} /></span>}
                           {checked && <span className="mkt-chk">&#10003;</span>}
                         </div>

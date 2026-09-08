@@ -6,7 +6,9 @@ const { calculateGoalTimingProbabilities } = require('../lib/descriptive-stats.j
 const {
   FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY,
   isFootballFrontendDailyPickEligible,
+  meetsFootballExpectedValuePolicy,
   meetsFootballReliability,
+  requiredFootballExpectedValue,
   sanitizeFootballCombinada,
 } = require('../lib/recommendation-policy.js');
 
@@ -55,11 +57,34 @@ test('la presentación limita a 95% sin alterar la frecuencia del motor', () => 
   assert.equal(displayPct(100), 95);
 });
 
-test('la Apuesta del Día exige 90% calibrado, fiabilidad 90% y margen EV', () => {
+test('el EV no filtra por debajo de 90% y usa tramos 8/10 desde esa frontera', () => {
+  assert.equal(requiredFootballExpectedValue(89.999), null);
+  assert.equal(requiredFootballExpectedValue(90), 0.08);
+  assert.equal(requiredFootballExpectedValue(90.999), 0.08);
+  assert.equal(requiredFootballExpectedValue(91), 0.10);
+  assert.equal(meetsFootballExpectedValuePolicy(80, -0.50), true);
+  assert.equal(meetsFootballExpectedValuePolicy(null, 0.50), false);
+  assert.equal(meetsFootballExpectedValuePolicy(101, 0.50), false);
+  assert.equal(meetsFootballExpectedValuePolicy(90, 0.07999), false);
+  assert.equal(meetsFootballExpectedValuePolicy(90, 0.08), true);
+  assert.equal(meetsFootballExpectedValuePolicy(90.999, 0.09), true);
+  assert.equal(meetsFootballExpectedValuePolicy(91, 0.09999), false);
+  assert.equal(meetsFootballExpectedValuePolicy(91, 0.10), true);
+});
+
+test('la Apuesta del Día exige 90% calibrado, fiabilidad 90% y el tramo EV correspondiente', () => {
   assert.equal(FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY, 90);
   assert.equal(isFootballFrontendDailyPickEligible({
-    rawProbability: 90, confidence: 90, odd: 1.30,
-    expectedValue: .17, validationStatus: 'calibrated', dailyEligible: true,
+    rawProbability: 90, confidence: 90, odd: 1.20,
+    expectedValue: .08, validationStatus: 'calibrated', dailyEligible: true,
+  }), true);
+  assert.equal(isFootballFrontendDailyPickEligible({
+    rawProbability: 91, confidence: 90, odd: 1.20,
+    expectedValue: .092, validationStatus: 'calibrated', dailyEligible: true,
+  }), false);
+  assert.equal(isFootballFrontendDailyPickEligible({
+    rawProbability: 92, confidence: 90, odd: 1.20,
+    expectedValue: .104, validationStatus: 'calibrated', dailyEligible: true,
   }), true);
   assert.equal(isFootballFrontendDailyPickEligible({
     rawProbability: 74.999, confidence: 99, odd: 2,
@@ -161,6 +186,27 @@ test('el catálogo usa la probabilidad calibrada y no inventa una combinada del 
   assert.equal(result.selections[0].rawProbability, 99.75);
   assert.equal(result.combinedProbability, null);
   assert.equal(result.correlationStatus, 'same-fixture-not-priced');
+});
+
+test('una opción calibrada inferior a 90% conserva su EV como dato pero no se filtra por él', () => {
+  const scored = modelToScored({
+    goals_total: {
+      kind: 'ou',
+      lines: [{ line: 2.5, prob: 0.8, n: 500, hits: 400, conf: 0.95, level: 'empirical' }],
+    },
+  }, { validationFamilies: { goals_total_over_2_5: validatedFamily(.8) } });
+  const result = buildModelCombinada(
+    scored,
+    { overUnder: { Over_2_5: 1.20 } },
+    { home: 'Local', away: 'Visitante' },
+    {},
+    {},
+    null,
+  );
+  assert.equal(result.selections.length, 1);
+  assert.equal(result.selectable.length, 1);
+  assert.ok(result.selectable[0].expectedValue < 0);
+  assert.equal(result.selectable[0].dailyEligible, false);
 });
 
 test('80% requiere además calibración de su familia', () => {
@@ -321,12 +367,14 @@ test('la frontera pública rechaza caches sin fiabilidad y nunca redondea 89.999
     ],
     selectable: [
       { id: 'ok', confidence: 90, odd: 1.5, rawProbability: 80, expectedValue: .2, validationStatus: 'calibrated' },
+      { id: 'quality-not-price', confidence: 94, odd: 1.2, rawProbability: 82, expectedValue: -.016, validationStatus: 'calibrated' },
+      { id: 'missing-ev', confidence: 94, odd: 1.4, rawProbability: 82, expectedValue: null, validationStatus: 'calibrated' },
       { id: 'legacy', odd: 1.9, rawProbability: 95 },
     ],
   });
 
   assert.deepEqual(sanitized.selections.map((selection) => selection.id), ['ok']);
-  assert.deepEqual(sanitized.selectable.map((selection) => selection.id), ['ok']);
+  assert.deepEqual(sanitized.selectable.map((selection) => selection.id), ['ok', 'quality-not-price']);
   assert.equal(sanitized.combinedProbability, null);
   assert.equal(sanitized.combinedOdd, null);
 
