@@ -314,10 +314,37 @@ async function evaluateConfig(samples, config, split, baselineConfig) {
     trainProbable: emptyMetric(), validationProbable: emptyMetric(),
     trainConfirmed: emptyMetric(), validationConfirmed: emptyMetric(),
   };
-  const validationObservations = {
-    all: [], early: [], probable: [], confirmed: [],
+  const calibrated = {
+    all: emptyMetric(), early: emptyMetric(), probable: emptyMetric(), confirmed: emptyMetric(),
+  };
+  let calibrationFamilies = null;
+  const beginValidation = () => {
+    if (calibrationFamilies) return;
+    calibrationFamilies = {
+      all: finishMetric(metric.train).families,
+      early: finishMetric(metric.trainEarly).families,
+      probable: finishMetric(metric.trainProbable).families,
+      confirmed: finishMetric(metric.trainConfirmed).families,
+    };
+  };
+  const addCalibratedObservation = (horizon, observation) => {
+    const allProbability = calibrateProbability(
+      observation.prob,
+      calibrationEvidence(observation.prob, observation.family, calibrationFamilies.all),
+    );
+    addObservation(calibrated.all, observation.family, allProbability, observation.hit);
+    const horizonProbability = calibrateProbability(
+      observation.prob,
+      calibrationEvidence(observation.prob, observation.family, calibrationFamilies[horizon]),
+    );
+    addObservation(calibrated[horizon], observation.family, horizonProbability, observation.hit);
   };
   for (let i = 0; i < samples.length; i++) {
+    // Las muestras están ordenadas cronológicamente. Cuando comienza la
+    // partición de validación, train ya está completo y sus familias pueden
+    // congelarse. Así calibramos cada observación una sola vez, sin retener en
+    // memoria cientos de miles de objetos para recorrerlos de nuevo al final.
+    if (i === split) beginValidation();
     const sample = samples[i];
     const target = i < split ? metric.train : metric.validation;
     const earlyTarget = i < split ? metric.trainEarly : metric.validationEarly;
@@ -329,10 +356,7 @@ async function evaluateConfig(samples, config, split, baselineConfig) {
     for (const observation of observations(earlyMarkets, sample.actual)) {
       addObservation(target, observation.family, observation.prob, observation.hit);
       addObservation(earlyTarget, observation.family, observation.prob, observation.hit);
-      if (i >= split) {
-        validationObservations.all.push(observation);
-        validationObservations.early.push(observation);
-      }
+      if (i >= split) addCalibratedObservation('early', observation);
     }
     if (sample.probableRawRows) {
       const probableMarkets = sameConfig(config, baselineConfig)
@@ -341,10 +365,7 @@ async function evaluateConfig(samples, config, split, baselineConfig) {
       for (const observation of observations(probableMarkets, sample.actual)) {
         addObservation(target, observation.family, observation.prob, observation.hit);
         addObservation(probableTarget, observation.family, observation.prob, observation.hit);
-        if (i >= split) {
-          validationObservations.all.push(observation);
-          validationObservations.probable.push(observation);
-        }
+        if (i >= split) addCalibratedObservation('probable', observation);
       }
     }
     if (sample.confirmedRawRows) {
@@ -354,26 +375,25 @@ async function evaluateConfig(samples, config, split, baselineConfig) {
       for (const observation of observations(confirmedMarkets, sample.actual)) {
         addObservation(target, observation.family, observation.prob, observation.hit);
         addObservation(confirmedTarget, observation.family, observation.prob, observation.hit);
-        if (i >= split) {
-          validationObservations.all.push(observation);
-          validationObservations.confirmed.push(observation);
-        }
+        if (i >= split) addCalibratedObservation('confirmed', observation);
       }
     }
   }
-  const validation = calibrateValidationObservations(
-    metric.train,
-    metric.validation,
-    validationObservations.all,
-  );
+  beginValidation();
+  const calibratedMetric = (value, families, rawValue) => ({
+    ...finishMetric(value),
+    calibrationFamilies: families,
+    raw: finishMetric(rawValue),
+  });
+  const validation = calibratedMetric(calibrated.all, calibrationFamilies.all, metric.validation);
   return {
     train: finishMetric(metric.train),
     validation: {
       ...validation,
       horizons: {
-        early: calibrateValidationObservations(metric.trainEarly, metric.validationEarly, validationObservations.early),
-        probable: calibrateValidationObservations(metric.trainProbable, metric.validationProbable, validationObservations.probable),
-        confirmed: calibrateValidationObservations(metric.trainConfirmed, metric.validationConfirmed, validationObservations.confirmed),
+        early: calibratedMetric(calibrated.early, calibrationFamilies.early, metric.validationEarly),
+        probable: calibratedMetric(calibrated.probable, calibrationFamilies.probable, metric.validationProbable),
+        confirmed: calibratedMetric(calibrated.confirmed, calibrationFamilies.confirmed, metric.validationConfirmed),
       },
     },
   };
@@ -659,5 +679,6 @@ module.exports = {
   probabilityForShare,
   observations,
   calibrateValidationObservations,
+  evaluateConfig,
   upsertDiagnostics,
 };

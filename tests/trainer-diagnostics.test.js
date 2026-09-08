@@ -1,7 +1,51 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { upsertDiagnostics } = require('../scripts/train-football-empirical-engine.js');
+const {
+  evaluateConfig,
+  upsertDiagnostics,
+} = require('../scripts/train-football-empirical-engine.js');
+const {
+  DEFAULT_ENGINE_CONFIG,
+  normalizeEngineConfig,
+} = require('../lib/model-engine.js');
+
+test('la validación incremental conserva calibración train→validation sin retener observaciones', async () => {
+  const markets = (probability) => ({
+    goals_total: {
+      kind: 'ou',
+      lines: [{ line: 0.5, prob: probability }],
+    },
+  });
+  const sample = (probability, homeGoals) => ({
+    ctx: {},
+    actual: { ft_home: homeGoals, ft_away: 0 },
+    earlyRawRows: {},
+    earlyBaselineMarkets: markets(probability),
+    probableRawRows: null,
+    probableBaselineMarkets: null,
+    confirmedRawRows: null,
+    confirmedBaselineMarkets: null,
+  });
+  const config = normalizeEngineConfig(DEFAULT_ENGINE_CONFIG);
+  const result = await evaluateConfig([
+    sample(0.8, 1),
+    sample(0.8, 0),
+    sample(0.8, 1),
+    sample(0.8, 1),
+  ], config, 2, config);
+
+  const over = result.validation.families.goals_total_over_0_5;
+  const rawOver = result.validation.raw.families.goals_total_over_0_5;
+  const trainOver = result.validation.calibrationFamilies.goals_total_over_0_5;
+  assert.equal(trainOver.n, 2);
+  assert.equal(trainOver.avg_actual, 0.5);
+  assert.equal(rawOver.avg_pred, 0.8);
+  assert.ok(Math.abs(over.avg_pred - 0.7941176470588236) < 1e-12);
+  assert.deepEqual(result.validation.horizons.early.families, result.validation.families);
+  assert.equal(result.validation.horizons.probable.n, 0);
+  assert.equal(result.validation.horizons.confirmed.n, 0);
+});
 
 test('el snapshot diagnóstico se reemplaza con una sola escritura set-based', async () => {
   const calls = [];
