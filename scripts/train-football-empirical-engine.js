@@ -513,11 +513,14 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
         samples.push({
           ctx, actual: row,
           earlyRawRows: earlyResult.rawRows,
-          earlyBaselineMarkets: earlyResult.markets,
+          // El baseline se reconstruye desde las mismas filas crudas. Retener
+          // además los árboles completos de mercados de los tres horizontes
+          // durante las 1.200 muestras duplicaba el heap sin aportar datos.
+          earlyBaselineMarkets: null,
           probableRawRows: probableResult?.rawRows || null,
-          probableBaselineMarkets: probableResult?.markets || null,
+          probableBaselineMarkets: null,
           confirmedRawRows: confirmedResult?.rawRows || null,
-          confirmedBaselineMarkets: confirmedResult?.markets || null,
+          confirmedBaselineMarkets: null,
         });
       } catch (error) {
         errors++;
@@ -528,16 +531,6 @@ async function trainFootballEmpiricalEngine({ pool: externalPool = null, limit =
     if (samples.length < 2) throw new Error(`muestra de entrenamiento insuficiente: ${samples.length}`);
     const split = Math.max(1, Math.min(samples.length - 1, Math.floor(samples.length * 0.70)));
     const baseline = await evaluateConfig(samples, active.config, split, active.config);
-
-    // A partir de aquí todas las configuraciones pueden reconstruirse desde
-    // `rawRows`. Mantener además tres árboles completos de mercados por cada
-    // uno de los 1.200 partidos duplicaba cientos de MB durante toda la rejilla
-    // y podía llevar V8 al límite de heap antes de persistir el entrenamiento.
-    for (const sample of samples) {
-      sample.earlyBaselineMarkets = null;
-      sample.probableBaselineMarkets = null;
-      sample.confirmedBaselineMarkets = null;
-    }
 
     // Descenso coordinado: cada dimensión se elige únicamente en train. El
     // conjunto validation no decide pesos; solo acepta/rechaza el candidato.
