@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-07 · Base: `e44df89` · Next 16, realtime granular y operación enterprise
+Actualizado: 2026-09-08 · Base: `1f6e98a` · Next 16, realtime granular y operación enterprise
 
 ## Identidad y stack
 
@@ -828,10 +828,14 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   descanso y estadio. Aplicar `scripts/migrate-prediction-integrity-v2.sql`
   después de backup y antes de desplegar esta versión. El arranque regenera con
   v26 hoy y mañana; desde v24 puede leerse para visualización histórica y su
-  combinada queda vacía, nunca se promueve como pronóstico nuevo.
+  combinada conserva exactamente el snapshot prepartido, marcado como histórico
+  y sin fabricar una cuota conjunta.
   La lista histórica consulta explícitamente ese umbral compatible y jamás
   dispara un reanálisis de partidos pasados: conserva el snapshot prepartido
-  original aunque aumente la versión vigente del motor. `analyzeMatch` también
+  original aunque aumente la versión vigente del motor. La compatibilidad se
+  decide por fixture y kickoff, no solo por la fecha de la pantalla: un partido
+  ya iniciado dentro de “hoy” o guardado bajo el día colombiano adyacente carga
+  v24+, mientras un partido futuro sigue exigiendo v26. `analyzeMatch` también
   corta antes de recalcular un fixture iniciado. Para jornadas pasadas,
   `combinada_dia` es la fuente inmutable de Apuesta del día: sus opciones se
   liquidan contra `match_results` sin volver a someterlas a reglas nuevas.

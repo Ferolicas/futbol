@@ -9,12 +9,14 @@ import { supabaseAdmin } from '../../../lib/supabase';
 import { filterFixturesByLocalDate } from '../../../lib/timezone';
 import { esTeam } from '../../../lib/team-names-es';
 import footballResultSnapshot from '../../../lib/football-result-snapshot.cjs';
+import fixtureAnalysisMode from '../../../lib/fixture-analysis-mode.cjs';
 
 const {
   buildDurableResultSnapshot,
   mergeDurableResultWithLive,
   mergeFixtureWithDurableResult,
 } = footballResultSnapshot;
+const { fixtureUsesHistoricalSnapshot } = fixtureAnalysisMode;
 
 const FT_STATS_FIELDS = ['corners', 'yellowCards', 'redCards', 'goalScorers', 'cardEvents', 'missedPenalties'];
 
@@ -187,6 +189,18 @@ export async function GET(request) {
 
     // ===== PHASE 2: Parallel middle section =====
     const fixtureIds = fixtures.map(f => f.fixture.id);
+    // La compatibilidad del análisis se decide por partido, no únicamente por
+    // la fecha solicitada. Una jornada que todavía es "hoy" puede contener
+    // encuentros ya iniciados o almacenados bajo el día colombiano anterior.
+    // Esos partidos deben conservar su snapshot prepartido v24+; solo los que
+    // aún no comienzan exigen el contrato vigente v26.
+    const analysisNowMs = Date.now();
+    const historicalFixtureIds = new Set(
+      fixtures
+        .filter(fixture => fixtureUsesHistoricalSnapshot(fixture, { isPastDate, nowMs: analysisNowMs }))
+        .map(fixture => Number(fixture.fixture?.id))
+        .filter(Number.isFinite),
+    );
     const leagueIds = fixtures.length > 0
       ? [...new Set(fixtures.map(f => f.league?.id).filter(Boolean))]
       : [];
@@ -482,14 +496,19 @@ export async function GET(request) {
         // pasada con el catálogo vacío. El histórico siempre vuelve a la fila
         // prepartido durable y nunca confía en ese agregado mutable.
         if (!isPastDate && cachedAnalysisData?.globallyAnalyzed?.length > 0) {
-          globallyAnalyzed = cachedAnalysisData.globallyAnalyzed.filter(id => fixtureIdSet.has(id));
+          // El agregado vigente solo es autoridad para partidos futuros. Los
+          // ya iniciados se recargan abajo como snapshots históricos para no
+          // ocultarlos al cruzar medianoche ni re-sanitizarlos con otra versión.
+          globallyAnalyzed = cachedAnalysisData.globallyAnalyzed
+            .map(Number)
+            .filter(id => fixtureIdSet.has(id) && !historicalFixtureIds.has(id));
           analyzedOdds = Object.fromEntries(
             Object.entries(cachedAnalysisData.analyzedOdds || {})
-              .filter(([id]) => fixtureIdSet.has(Number(id))),
+              .filter(([id]) => fixtureIdSet.has(Number(id)) && !historicalFixtureIds.has(Number(id))),
           );
           analyzedData = Object.fromEntries(
             Object.entries(cachedAnalysisData.analyzedData || {})
-              .filter(([id]) => fixtureIdSet.has(Number(id))),
+              .filter(([id]) => fixtureIdSet.has(Number(id)) && !historicalFixtureIds.has(Number(id))),
           );
         }
 
@@ -511,19 +530,32 @@ export async function GET(request) {
         }
 
         if (datesToCheck.length > 0) {
-          const allIds = await Promise.all(datesToCheck.map(d =>
-            getAnalyzedFixtureIds(d, { historical: isPastDate })));
-          const haveSet = new Set(globallyAnalyzed);
-          const extraIds = [...new Set(allIds.flat())].filter(id => fixtureIdSet.has(id) && !haveSet.has(id));
-          if (extraIds.length > 0) {
+          const [strictIdsByDate, historicalIdsByDate] = await Promise.all([
+            Promise.all(datesToCheck.map(d => getAnalyzedFixtureIds(d))),
+            historicalFixtureIds.size > 0
+              ? Promise.all(datesToCheck.map(d => getAnalyzedFixtureIds(d, { historical: true })))
+              : Promise.resolve([]),
+          ]);
+          const haveSet = new Set(globallyAnalyzed.map(Number));
+          const strictIds = [...new Set(strictIdsByDate.flat().map(Number))]
+            .filter(id => fixtureIdSet.has(id) && !historicalFixtureIds.has(id) && !haveSet.has(id));
+          const snapshotIds = [...new Set(historicalIdsByDate.flat().map(Number))]
+            .filter(id => fixtureIdSet.has(id) && historicalFixtureIds.has(id) && !haveSet.has(id));
+
+          const appendAnalysis = async (ids, historical) => {
+            if (ids.length === 0) return;
             const { analyzedOdds: extraOdds, analyzedData: extraData } = await getAnalyzedMatchesFull(
-              extraIds,
-              { historical: isPastDate },
+              ids,
+              { historical },
             );
-            globallyAnalyzed = [...globallyAnalyzed, ...extraIds];
+            globallyAnalyzed = [...globallyAnalyzed, ...ids];
             analyzedOdds = { ...analyzedOdds, ...extraOdds };
             analyzedData = { ...analyzedData, ...extraData };
-          }
+            ids.forEach(id => haveSet.add(id));
+          };
+
+          await appendAnalysis(strictIds, false);
+          await appendAnalysis(snapshotIds, true);
         }
 
         // `analysis:${date}` is the canonical, timezone-agnostic cache written

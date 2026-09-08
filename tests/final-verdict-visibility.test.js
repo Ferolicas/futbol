@@ -21,8 +21,10 @@ test('las versiones nuevas no ocultan ni recalculan el análisis histórico', ()
   assert.match(cache, /getAnalyzedFixtureIds\(date, \{ historical = false \} = \{\}\)/);
   assert.match(cache, /historical \? LEGACY_DISPLAY_MIN_VERSION : MIN_CACHE_VERSION/);
   assert.match(cache, /getAnalyzedMatchesFull\(fixtureIds, \{ historical = false \} = \{\}\)/);
-  assert.match(fixtures, /getAnalyzedFixtureIds\(d, \{ historical: isPastDate \}\)/);
-  assert.match(fixtures, /\{ historical: isPastDate \}/);
+  assert.match(fixtures, /fixtureUsesHistoricalSnapshot/);
+  assert.match(fixtures, /historicalFixtureIds/);
+  assert.match(fixtures, /getAnalyzedFixtureIds\(d, \{ historical: true \}\)/);
+  assert.match(fixtures, /appendAnalysis\(snapshotIds, true\)/);
   assert.match(fixtures, /if \(!isPastDate && fixtures\.length > 0 && needsTrigger\)/);
   assert.match(cache, /preserveHistoricalCombinada/);
   assert.match(cache, /historicalSnapshot: true/);
