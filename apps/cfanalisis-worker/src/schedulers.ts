@@ -181,9 +181,10 @@ export async function enqueueMultisportAnalysisBootstrap(): Promise<void> {
     return value.toISOString().slice(0, 10);
   };
   const dates = [-3, -2, -1, 0, 1].map(shift);
-  // El pase de fútbol es deliberadamente `verdictOnly`: conserva intacto el
-  // motor v23, completa el bloque aislado y reconstruye el resumen de tarjetas.
-  for (const date of dates) {
+  // El histórico conserva su cálculo descriptivo anterior sin volver a fingir
+  // una predicción después del resultado. Hoy y mañana, en cambio, deben
+  // regenerarse con el contrato v25 para registrar cutoff, calibración y EV.
+  for (const date of dates.slice(0, 3)) {
     const jobId = `futbol-verdict-summary-v2-${date}`;
     await queues['futbol-analyze-batch'].add(
       'verdict-repair',
@@ -191,6 +192,15 @@ export async function enqueueMultisportAnalysisBootstrap(): Promise<void> {
       { jobId },
     );
     logger.info({ queue: 'futbol-analyze-batch', jobId, date, cacheVersion: FOOTBALL_CACHE_VERSION }, 'football verdict repair bootstrap listo');
+  }
+  for (const date of dates.slice(3)) {
+    const jobId = `futbol-analysis-v${FOOTBALL_CACHE_VERSION}-${date}`;
+    await queues['futbol-analyze-batch'].add(
+      'analysis-bootstrap',
+      { date, bootstrap: true },
+      { jobId },
+    );
+    logger.info({ queue: 'futbol-analyze-batch', jobId, date, cacheVersion: FOOTBALL_CACHE_VERSION }, 'football analysis bootstrap listo');
   }
   for (const [sport, queueName] of [
     ['basketball', 'basketball-analyze'],

@@ -10,6 +10,23 @@ test('fútbol exige el contrato íntegro v25 antes de servir recomendaciones', (
   const cache = read('lib/sanity-cache.js');
   assert.match(cache, /FOOTBALL_CACHE_VERSION = 25/);
   assert.match(cache, /MIN_CACHE_VERSION = 25/);
+  assert.match(cache, /LEGACY_DISPLAY_MIN_VERSION = 24/);
+  assert.match(cache, /strict \? MIN_CACHE_VERSION : LEGACY_DISPLAY_MIN_VERSION/);
+});
+
+test('el arranque regenera hoy y mañana con v25 sin ascender una caché antigua', () => {
+  const scheduler = read('apps/cfanalisis-worker/src/schedulers.ts');
+  const batch = read('apps/cfanalisis-worker/src/jobs/futbol/analyze-batch.js');
+  const odds = read('apps/cfanalisis-worker/src/jobs/futbol/odds.js');
+  const lineups = read('apps/cfanalisis-worker/src/jobs/futbol/lineups.js');
+
+  assert.match(scheduler, /dates\.slice\(0, 3\)/);
+  assert.match(scheduler, /dates\.slice\(3\)/);
+  assert.match(scheduler, /`futbol-analysis-v\$\{FOOTBALL_CACHE_VERSION\}-\$\{date\}`/);
+  assert.match(scheduler, /'analysis-bootstrap'/);
+  assert.match(batch, /Number\(cached\.cacheVersion \|\| 0\) >= FOOTBALL_CACHE_VERSION/);
+  assert.match(odds, /getCachedAnalysis\(fixtureId, day\.date, \{ strict: true \}\)/);
+  assert.match(lineups, /getCachedAnalysis\(fixtureId, today, \{ strict: true \}\)/);
 });
 
 test('el resumen de fútbol transporta el veredicto hasta la tarjeta', () => {

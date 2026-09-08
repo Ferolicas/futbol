@@ -822,7 +822,9 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   como independientes. Las distribuciones de goles conservan su cola completa;
   el contexto distingue XI probable/confirmado, continuidad de plantilla,
   descanso y estadio. Aplicar `scripts/migrate-prediction-integrity-v2.sql`
-  después de backup y antes de desplegar esta versión.
+  después de backup y antes de desplegar esta versión. El arranque regenera con
+  v25 hoy y mañana; v24 solo puede leerse para visualización histórica y su
+  combinada queda vacía, nunca se promueve como pronóstico nuevo.
 - 2026-09-04: el resumen expandido de fútbol ya no apila Mercados,
   Estadísticas, Frecuencias, Jugadores y Veredicto final como acordeones. Una
   barra de pestañas horizontal gobierna un solo panel visible y las familias de

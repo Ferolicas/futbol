@@ -184,7 +184,7 @@ export async function runLineups(_payload = {}, _job = null) {
       if (photoIds.length) warmPlayerPhotos(photoIds).catch(() => {});
     } catch { /* nunca romper el job por el warm de fotos */ }
 
-    const existing = await getCachedAnalysis(fixtureId, today);
+    const existing = await getCachedAnalysis(fixtureId, today, { strict: true });
     if (existing) {
       let updatedAnalysis = {
         ...existing,

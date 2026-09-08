@@ -155,6 +155,14 @@ test('el dock inferior llega al borde y el header tapa el contenido al hacer scr
   assert.match(styles, /\.dashboard-topbar \{[\s\S]*#040e14 !important/);
 });
 
+test('la tarjeta desplegada permanece montada al cambiar de partido con las flechas', () => {
+  const football = read('app/dashboard/page.js');
+  assert.match(football, /import \{ defaultRangeExtractor, useWindowVirtualizer \} from '@tanstack\/react-virtual'/);
+  assert.match(football, /const expandedVirtualIndex = useMemo/);
+  assert.match(football, /rangeExtractor: extractMatchRange/);
+  assert.match(football, /\[\.\.\.visibleIndexes, expandedVirtualIndex\]\.sort/);
+});
+
 test('liga y deporte conservan media fila pero sus listas se abren más anchas', () => {
   const styles = read('app/globals.css');
   assert.match(styles, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\) !important/);

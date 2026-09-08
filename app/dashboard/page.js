@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import useSWR from 'swr';
-import { useWindowVirtualizer } from '@tanstack/react-virtual';
+import { defaultRangeExtractor, useWindowVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowRight,
   BarChart3,
@@ -1284,11 +1284,29 @@ export function FootballDashboard({
   // montar cientos de tarjetas hacía que Safari terminara recargando la pestaña.
   const matchListRef = useRef(null);
   const [matchListOffset, setMatchListOffset] = useState(0);
+  const expandedVirtualIndex = useMemo(
+    () => expandedMatch == null
+      ? -1
+      : sorted.findIndex(match => match.fixture.id === expandedMatch),
+    [expandedMatch, sorted],
+  );
+  const extractMatchRange = useCallback((range) => {
+    const visibleIndexes = defaultRangeExtractor(range);
+    if (expandedVirtualIndex < 0 || visibleIndexes.includes(expandedVirtualIndex)) {
+      return visibleIndexes;
+    }
+    // MatchFullscreen se crea desde la fila activa. Al avanzar con sus flechas,
+    // el destino puede quedar fuera del overscan del virtualizador: sin anclarlo
+    // React desmonta la capa hasta que un pequeño scroll vuelve a montar la fila.
+    // Conservamos solo ese índice adicional, sin perder la virtualización del resto.
+    return [...visibleIndexes, expandedVirtualIndex].sort((a, b) => a - b);
+  }, [expandedVirtualIndex]);
   const matchVirtualizer = useWindowVirtualizer({
     count: !loading ? sorted.length : 0,
     estimateSize: () => 310,
     overscan: 5,
     scrollMargin: matchListOffset,
+    rangeExtractor: extractMatchRange,
     getItemKey: index => sorted[index]?.fixture.id ?? index,
     // Al abrir una tarjeta su altura crece. Mantener fijo el scroll actual
     // evita que el virtualizador "compense" el cambio y saque la fila pulsada

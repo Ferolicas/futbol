@@ -113,7 +113,7 @@ export async function runOdds(payload = {}) {
       if (!Number.isFinite(kickoff) || timeUntilKickoffMs <= 0) continue;
       if (!force && !refreshIntervalMs(timeUntilKickoffMs, false)) continue;
 
-      const existing = await getCachedAnalysis(fixtureId, day.date);
+      const existing = await getCachedAnalysis(fixtureId, day.date, { strict: true });
       if (!existing?._scored || typeof existing._scored !== 'object') {
         noAnalysis += 1;
         continue;

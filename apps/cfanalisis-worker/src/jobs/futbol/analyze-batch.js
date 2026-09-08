@@ -23,6 +23,7 @@ import {
   analyzeMatch,
   buildFootballFinalVerdict,
   cacheAnalysis,
+  FOOTBALL_CACHE_VERSION,
   getCachedAnalysis,
   getCachedFixturesRaw,
   pgPool,
@@ -71,7 +72,7 @@ function buildSummary(a) {
   };
 }
 
-// Reparación aislada del nuevo producto. Lee el análisis v23/v24 existente,
+// Reparación aislada del producto descriptivo. Lee el análisis v24/v25 existente,
 // calcula solo `finalVerdict` cuando falta y reconstruye el resumen diario. No
 // llama `analyzeMatch`, no modifica probabilidades, combinada ni motor.
 async function runVerdictRepair(allFixtures, date, job) {
@@ -109,9 +110,14 @@ async function runVerdictRepair(allFixtures, date, job) {
         odds: analysis.odds,
       });
       analysis = { ...analysis, finalVerdict };
-      const persist = await cacheAnalysis(fixtureId, analysis);
-      if (!persist?.db) {
-        throw new Error(`no se pudo persistir el veredicto: ${persist?.error || 'error desconocido'}`);
+      // Una fila legacy se conserva solo para visualización histórica. No la
+      // ascendemos a v25 porque eso certificaría un cálculo que no nació en el
+      // ledger nuevo. Los análisis v25 sí persisten normalmente.
+      if (Number(cached.cacheVersion || 0) >= FOOTBALL_CACHE_VERSION) {
+        const persist = await cacheAnalysis(fixtureId, analysis);
+        if (!persist?.db) {
+          throw new Error(`no se pudo persistir el veredicto: ${persist?.error || 'error desconocido'}`);
+        }
       }
       generated++;
     } else {
