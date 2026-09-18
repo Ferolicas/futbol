@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "CF Análisis",
+    "slug": "cfanalisis",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "cfanalisis",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#03090f",
+    "ios": {
+      "bundleIdentifier": "com.cfanalisis.app",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.cfanalisis.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#03090f",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#03090f",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 120
+        }
+      ],
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "merchant.com.cfanalisis.app",
+          "enableGooglePay": true
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false,
+      "reactCompiler": false
+    },
+    "extra": {
+      "apiUrl": "https://cfanalisis.com",
+      "wsUrl": "wss://worker.cfanalisis.com/ws"
+    }
+  }
+}
