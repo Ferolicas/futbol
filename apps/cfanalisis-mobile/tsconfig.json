@@ -6,10 +6,23 @@
     "checkJs": false,
     "noUncheckedIndexedAccess": false,
     "paths": {
-      "@/*": ["./src/*"],
-      "@/assets/*": ["./assets/*"]
+      "@/*": [
+        "./src/*"
+      ],
+      "@/assets/*": [
+        "./assets/*"
+      ]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx", "**/*.js", ".expo/types/**/*.ts", "expo-env.d.ts"],
-  "exclude": ["node_modules", "android", "ios", "dist"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.js"
+  ],
+  "exclude": [
+    "node_modules",
+    "android",
+    "ios",
+    "dist"
+  ]
 }

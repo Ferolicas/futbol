@@ -50,7 +50,12 @@
     },
     "extra": {
       "apiUrl": "https://cfanalisis.com",
-      "wsUrl": "wss://worker.cfanalisis.com/ws"
-    }
+      "wsUrl": "wss://worker.cfanalisis.com/ws",
+      "router": {},
+      "eas": {
+        "projectId": "5d0b0714-40a9-4251-8519-781081caae98"
+      }
+    },
+    "owner": "ferolicas"
   }
 }
