@@ -6,7 +6,7 @@ import { useFonts, PlusJakartaSans_500Medium, PlusJakartaSans_600SemiBold, PlusJ
 import { JetBrainsMono_600SemiBold, JetBrainsMono_700Bold } from '@expo-google-fonts/jetbrains-mono';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { StripeProvider } from '@stripe/stripe-react-native';
+import { StripeProvider } from '@/lib/stripe';
 import { SWRConfig } from 'swr';
 import { AppState, type AppStateStatus } from 'react-native';
 import { AuthProvider } from '@/lib/auth-context';
@@ -29,7 +29,7 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.bg }}>
       <SafeAreaProvider>
-        <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY || 'pk_test_placeholder'} merchantIdentifier="merchant.com.cfanalisis.app" urlScheme="cfanalisis">
+        <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY}>
           <SWRConfig value={{
             provider: () => new Map(),
             isVisible: () => AppState.currentState === 'active',

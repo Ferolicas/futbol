@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useStripe } from '@stripe/stripe-react-native';
+import { stripeAvailable, useOptionalStripe } from '@/lib/stripe';
 import { Check, ChevronLeft, Globe, LockKeyhole, ShieldCheck, Sparkles } from 'lucide-react-native';
 import { AppText, Banner, Button, Card, Screen } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
@@ -33,7 +33,7 @@ export default function PlansScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ checkout?: string }>();
   const { isFree, refreshAccess } = useAccess();
-  const { initPaymentSheet, presentPaymentSheet } = useStripe();
+  const stripe = useOptionalStripe();
   const [prices, setPrices] = useState<any>(null);
   const [country, setCountry] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -85,9 +85,10 @@ export default function PlansScreen() {
     const planPrice = prices?.plans?.[planId];
     if (!planPrice) { setError('No se pudo calcular el precio para tu ubicación.'); return; }
 
-    // Colombia → Mercado Pago. El Brick de MP es web: abrimos el checkout de la
-    // web en el navegador del sistema (no WebView) con el mismo plan e intención.
-    if (country === 'CO') {
+    // Colombia → Mercado Pago (Brick web) y también cuando Stripe nativo no está
+    // disponible (Expo Go): abrimos el checkout de la web en el navegador del
+    // sistema (no WebView) con el mismo plan e intención.
+    if (country === 'CO' || !stripe) {
       const intent = randomUUID();
       const url = `${API_URL}/planes?checkout=${encodeURIComponent(planId)}&intent=${encodeURIComponent(intent)}`;
       try { await Linking.openURL(url); } catch { setError('No se pudo abrir el pago. Visita cfanalisis.com/planes.'); }
@@ -103,7 +104,7 @@ export default function PlansScreen() {
       if (data.active) { router.replace({ pathname: '/payment-status', params: { attempt: data.attemptId || attempt.id } }); return; }
       if (!data.clientSecret) throw new Error(data.error || 'Error al procesar el pago');
       const displayAmount = formatProviderAmount(data.amount, data.currency, fmtPrice(planId));
-      const init = await initPaymentSheet({
+      const init = await stripe.initPaymentSheet({
         paymentIntentClientSecret: data.clientSecret,
         merchantDisplayName: 'CF Análisis',
         returnURL: 'cfanalisis://payment-status',
@@ -113,7 +114,7 @@ export default function PlansScreen() {
         googlePay: { merchantCountryCode: country || 'ES', currencyCode: String(data.currency || 'eur').toUpperCase() },
       });
       if (init.error) throw new Error(init.error.message);
-      const result = await presentPaymentSheet();
+      const result = await stripe.presentPaymentSheet();
       if (result.error) {
         if (result.error.code === 'Canceled') { discardAttempt(attempt.key, data.attemptId || attempt.id); setSelected(null); return; }
         throw new Error(result.error.message);
@@ -145,7 +146,7 @@ export default function PlansScreen() {
           <AppText tone="muted">Todos los planes incluyen la plataforma completa. Solo cambia el periodo.</AppText>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Globe size={14} color={ready ? colors.accent : colors.muted} />
-            <AppText variant="caption" tone="secondary">{ready ? `Precio en ${prices?.currency || 'USD'} · Pago con ${country === 'CO' ? 'Mercado Pago' : 'Stripe'}` : 'Detectando país y moneda…'}</AppText>
+            <AppText variant="caption" tone="secondary">{ready ? `Precio en ${prices?.currency || 'USD'} · Pago con ${country === 'CO' ? 'Mercado Pago' : stripeAvailable ? 'Stripe' : 'Stripe (en el navegador)'}` : 'Detectando país y moneda…'}</AppText>
           </View>
         </View>
         {!isFree && <Banner tone="success" message="Tu cuenta ya tiene acceso Pro activo." />}
