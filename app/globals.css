@@ -11424,7 +11424,8 @@ input:checked + .cb-mark::after {
 
 .dashboard-account-meta small.is-success { color: #78edc2; }
 
-.dashboard-account-menu > button {
+.dashboard-account-menu > button,
+.dashboard-account-menu > a {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -11446,8 +11447,12 @@ input:checked + .cb-mark::after {
   outline: none;
 }
 
+.dashboard-account-menu > a { text-decoration: none; box-sizing: border-box; }
+
 .dashboard-account-menu > button.is-chat:hover,
-.dashboard-account-menu > button.is-chat:focus-visible {
+.dashboard-account-menu > button.is-chat:focus-visible,
+.dashboard-account-menu > a.is-install:hover,
+.dashboard-account-menu > a.is-install:focus-visible {
   border-color: rgba(94,230,177,.18);
   color: #83edc6;
   background: rgba(16,185,129,.09);
@@ -11468,8 +11473,10 @@ input:checked + .cb-mark::after {
   cursor: wait;
 }
 
-.dashboard-account-menu > button > span { flex: 1 1 auto; text-align: left; }
-.dashboard-account-menu > button > small {
+.dashboard-account-menu > button > span,
+.dashboard-account-menu > a > span { flex: 1 1 auto; text-align: left; }
+.dashboard-account-menu > button > small,
+.dashboard-account-menu > a > small {
   color: #83edc6;
   font-size: .57rem;
   font-weight: 800;

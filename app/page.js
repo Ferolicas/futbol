@@ -17,6 +17,8 @@ import {
   Target,
   Users,
 } from 'lucide-react';
+import AndroidIcon from '../components/AndroidIcon';
+import { ANDROID_APK_URL } from '../lib/app-download';
 import { useAuth } from '../components/providers';
 import BrandLogoMedia from '../components/BrandLogoMedia';
 import { createPurchaseIntent, purchaseRoute } from '../lib/purchase-flow';
@@ -354,9 +356,10 @@ export default function LandingPage() {
               <button className="btn-hero" onClick={() => router.push('/sign-up')}>
                 Empezar ahora <ArrowRight size={18} aria-hidden="true" />
               </button>
-              <button className="btn-hero-sec" onClick={() => goToScene(1, true)}>
-                Descubrir funciones
-              </button>
+              <a className="btn-hero-sec" href={ANDROID_APK_URL} download rel="noopener">
+                <AndroidIcon size={18} />
+                Instalar App
+              </a>
             </div>
             <div className="apple-hero-stats" aria-label="Resumen de cobertura">
               <div><strong>15+</strong><span>Ligas</span></div>

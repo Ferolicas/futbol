@@ -16,6 +16,8 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../components/providers';
 import { usePusherEvent } from '../../lib/use-pusher';
+import AndroidIcon from '../../components/AndroidIcon';
+import { ANDROID_APK_URL } from '../../lib/app-download';
 
 export default function ChatWidget() {
   const { user, supabase } = useAuth();
@@ -392,6 +394,11 @@ export default function ChatWidget() {
               <span>Chat</span>
               {unread > 0 && <small>{unread > 9 ? '9+' : unread} sin leer</small>}
             </button>
+            <a className="dashboard-account-action is-install" href={ANDROID_APK_URL} download rel="noopener" role="menuitem" onClick={() => setAccountOpen(false)}>
+              <AndroidIcon size={17} />
+              <span>Instalar app</span>
+              <small>Android</small>
+            </a>
             <button type="button" className="dashboard-account-action is-logout" onClick={signOut} disabled={loggingOut} role="menuitem">
               <LogOut size={17} aria-hidden="true" />
               <span>{loggingOut ? 'Cerrando sesión…' : 'Cerrar sesión'}</span>
