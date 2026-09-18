@@ -1,0 +1,30 @@
+{
+  "cli": { "version": ">= 16.0.0", "appVersionSource": "remote" },
+  "build": {
+    "base": {
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://cfanalisis.com",
+        "EXPO_PUBLIC_WS_URL": "wss://worker.cfanalisis.com/ws",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_live_51ThhkLPqKCVRshtBysX0RLujoUTxQoXwoNLlHslrlU9A7JMKm4XxxV7ETVWVGje1NpJIiRObHrGsWjqN0FF6d5Bs00GYboXIj3"
+      }
+    },
+    "development": {
+      "extends": "base",
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": { "buildType": "apk" }
+    },
+    "preview": {
+      "extends": "base",
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "ios": { "simulator": false }
+    },
+    "production": {
+      "extends": "base",
+      "autoIncrement": true,
+      "android": { "buildType": "app-bundle" }
+    }
+  },
+  "submit": { "production": {} }
+}
