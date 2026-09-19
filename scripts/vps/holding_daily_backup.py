@@ -127,13 +127,15 @@ def backup():
 
 def prune_releases(apply=False):
     # Only these known immutable release trees, never generic app/data directories.
+    if apply and not complete(ROOT / dt.date.today().isoformat()):
+        raise RuntimeError("Finish today's app backup before pruning releases")
     processes = json.loads(sp.check_output(['pm2', 'jlist']))
     for root, prefix in [(Path('/apps/futbol/.web-releases'), 'release-'),
                          (Path('/var/www/market-unity/releases'), '')]:
         if not root.exists():
             continue
         releases = [p for p in root.iterdir() if p.is_dir() and not p.is_symlink() and
-                    (p.name.startswith(prefix) if prefix else re.fullmatch(r'\d{8}T\d{6}Z', p.name))]
+                    (p.name.startswith(prefix) if prefix else re.fullmatch(r'\d{8}[A-Za-z0-9_-]*', p.name))]
         keep = set()
         pointer = root / 'current' if prefix else root.parent / 'current'
         if pointer.is_symlink():
@@ -149,18 +151,7 @@ def prune_releases(apply=False):
                         keep.add(release)
         if not keep or not all(p in releases for p in keep):
             raise RuntimeError('Cannot identify active release safely: '+str(root))
-        # Preserve the actual rollback runtime when recorded by the active release.
-        for active in list(keep):
-            previous = active / 'previous-runtime'
-            if previous.is_file():
-                path = Path(previous.read_text().strip()).resolve()
-                for release in releases:
-                    if path == release or release in path.parents:
-                        keep.add(release)
-        if len(keep) == 1:
-            others = sorted((p for p in releases if p not in keep), key=lambda p:p.stat().st_mtime)
-            if others:
-                keep.add(others[-1])
+        # Recovery history lives in the two daily app backups; keep only active runtimes.
         print('Preserve:', ', '.join(str(p) for p in sorted(keep)), flush=True)
         for path in sorted(set(releases)-keep):
             # A deployment may be building a candidate not yet pointed to by PM2.

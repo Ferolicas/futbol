@@ -28,8 +28,7 @@ redundancia**, sin copias integrales por cada cambio. El único job local es
   existente, con hoy y ayer. Los archivos de apps/configuración quedan locales;
   no se suben secretos sin cifrado configurado.
 - `restore_drill.sh --run` usa `postgres/cfanalisis.dump` del conjunto diario.
-- `holding-daily-backup prune-releases --apply` conserva la release activa y
-  su rollback previo en CF Análisis y Market Unity. Nunca elimina el runtime
+- `holding-daily-backup prune-releases --apply` conserva únicamente las releases activas, tras completar la copia diaria, en CF Análisis y Market Unity. Nunca elimina el runtime
   identificado por PM2 o el puntero `current`.
 
 En la migración del 19 de septiembre, el conjunto del 18 conserva el dump

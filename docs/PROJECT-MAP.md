@@ -1175,7 +1175,7 @@ El VPS usa `scripts/vps/holding_daily_backup.py` instalado como
 `/usr/local/sbin/holding-daily-backup`: conjunto diario único en
 `/var/backups/holding/YYYY-MM-DD/`, hoy y ayer, sin backups completos por
 cambio. Reutiliza la copia del mismo día y solo rota tras éxito. También
-limita releases de CF/Unity a activa y rollback. Ver
+limita releases de CF/Unity a las activas; el historial queda en las dos copias diarias. Ver
 `docs/enterprise/DISASTER-RECOVERY.md`. Incidente del 19: disco saturado por
 82 copias de PostgreSQL previas a cambios, series diarias duplicadas y
 releases sin rotación; PostgreSQL y PM2 se recuperaron tras liberar espacio.
