@@ -1,3 +1,9 @@
+> Política vigente desde 2026-09-19: usar únicamente
+> `holding_daily_backup.py` instalado en `/usr/local/sbin/holding-daily-backup`.
+> Una copia por día, hoy y ayer; no instalar los crons históricos separados
+> de PostgreSQL/Redis/envs descritos abajo. Ver
+> `docs/enterprise/DISASTER-RECOVERY.md` para instalación y recuperación actuales.
+
 # Instalación en el VPS (Arsys Ubuntu 24.04)
 
 Todos los archivos de `scripts/vps/` deben subirse al VPS. Esta guía agrupa los pasos manuales de los bloques 1, 2, 3 y 5.

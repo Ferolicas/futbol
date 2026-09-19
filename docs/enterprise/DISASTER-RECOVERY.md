@@ -8,12 +8,33 @@
 
 ## Copias
 
-- `pg_backup.sh`: dump lógico diario, validación con `pg_restore --list`, SHA-256,
-  7 días locales y 30 remotos.
-- `redis_backup.sh`: RDB diario validado, SHA-256, 7 días locales y 14 remotos.
-- `offsite_backup_retry.sh`: reintenta cada seis horas sin generar otro dump.
-- `restore_drill.sh --run`: restaura en `cfanalisis_restore_drill`, valida tablas
-  y elimina exclusivamente esa base efímera.
+Política del propietario (2026-09-19): **una copia diaria y un día de
+redundancia**, sin copias integrales por cada cambio. El único job local es
+`/usr/local/sbin/holding-daily-backup backup`, instalado desde
+`scripts/vps/holding_daily_backup.py` y ejecutado a las 03:00, hora de Madrid.
+
+- Destino: `/var/backups/holding/YYYY-MM-DD/`. Cada base PostgreSQL se guarda
+  una vez en `postgres/<base>.dump`; también se incluyen roles, Redis,
+  fuentes/assets/uploads/envs de todas las apps, configuración y Unity activo.
+- `COMPLETE.json` contiene hashes SHA-256 e inventario. No se retira la copia
+  anterior hasta completar la nueva. Si falla un día, se conserva la última
+  copia válida como redundancia. Repetir el comando el mismo día no duplica.
+- Se excluyen `node_modules`, `.next`, `.git`, cachés y releases históricas;
+  la recuperación de aplicaciones reinstala dependencias desde lockfiles y
+  compila. Las copias locales contienen secretos y son privadas de root.
+- Los wrappers `pg_backup.sh`, `redis_backup.sh` y `env_backup.sh` reutilizan
+  ese mismo job. No programar copias separadas `pg_dumpall` o por aplicación.
+- `offsite_backup_retry.sh` reintenta CF Análisis y Redis en el destino externo
+  existente, con hoy y ayer. Los archivos de apps/configuración quedan locales;
+  no se suben secretos sin cifrado configurado.
+- `restore_drill.sh --run` usa `postgres/cfanalisis.dump` del conjunto diario.
+- `holding-daily-backup prune-releases --apply` conserva la release activa y
+  su rollback previo en CF Análisis y Market Unity. Nunca elimina el runtime
+  identificado por PM2 o el puntero `current`.
+
+En la migración del 19 de septiembre, el conjunto del 18 conserva el dump
+PostgreSQL global y Redis existentes; no había una copia diaria de todas las
+apps del día 18. La primera copia consolidada de apps se crea el día 19.
 
 ## Recuperación total
 

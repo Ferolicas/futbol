@@ -34,6 +34,7 @@ chmod 700 $BACKUP_DIR $SCRIPTS_DIR
 
 # ── 2. Copiar scripts ───────────────────────────────────────────────────
 echo "▶ Copiando scripts de backup..."
+install -m 700 "$REPO/scripts/vps/holding_daily_backup.py" /usr/local/sbin/holding-daily-backup
 cp $REPO/scripts/vps/pg_backup.sh    $BACKUP_DIR/pg_backup.sh
 cp $REPO/scripts/vps/redis_backup.sh $BACKUP_DIR/redis_backup.sh
 cp $REPO/scripts/vps/env_backup.sh   $BACKUP_DIR/env_backup.sh
@@ -144,9 +145,8 @@ CRON_TMP=$(mktemp)
 crontab -l 2>/dev/null | grep -v -E '/apps/(backup|scripts)/' > $CRON_TMP || true
 cat >> $CRON_TMP <<EOF
 # ── cfanalisis Fase 5 backups + monitoring ──
-0 3 * * *   $BACKUP_DIR/pg_backup.sh    >> $BACKUP_DIR/backup.log 2>&1
-30 3 * * *  $BACKUP_DIR/redis_backup.sh >> $BACKUP_DIR/backup.log 2>&1
-0 4 * * 0   $BACKUP_DIR/env_backup.sh   >> $BACKUP_DIR/backup.log 2>&1
+0 3 * * * /usr/local/sbin/holding-daily-backup backup >> /var/log/holding-daily-backup.log 2>&1
+0 5 * * * /usr/local/sbin/holding-daily-backup prune-releases --apply >> /var/log/holding-release-prune.log 2>&1
 */5 * * * * $SCRIPTS_DIR/health_check.sh >> $SCRIPTS_DIR/health.log 2>&1
 EOF
 crontab $CRON_TMP
@@ -167,9 +167,8 @@ echo "✅ FASE 5 instalada"
 echo "=================================================="
 echo ""
 echo "Cron jobs activos:"
-echo "  03:00 UTC daily  → Postgres backup"
-echo "  03:30 UTC daily  → Redis backup"
-echo "  04:00 UTC sunday → .env + Caddyfile backup (cifrado GPG)"
+echo "  03:00 local daily → one holding backup (today + yesterday)"
+echo "  05:00 local daily → prune inactive releases"
 echo "  cada 5 min       → Health check"
 echo ""
 echo "Telegram bot envia:"

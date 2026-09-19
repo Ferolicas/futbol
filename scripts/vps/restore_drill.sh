@@ -16,7 +16,7 @@ if [ "${1:-}" != '--run' ]; then
   exit 2
 fi
 
-DUMP_FILE="$(find "${BACKUP_DIR}" -maxdepth 1 -type f -name 'backup_cfanalisis_*.dump' -printf '%T@ %p\n' | sort -nr | sed -n '1p' | cut -d' ' -f2-)"
+DUMP_FILE="$(find /var/backups/holding -maxdepth 3 -type f -name 'cfanalisis.dump' -printf '%T@ %p\n' | sort -nr | sed -n '1p' | cut -d' ' -f2-)"
 if [ -z "${DUMP_FILE}" ]; then
   echo 'No existe un dump PostgreSQL local' >&2
   exit 1
@@ -33,7 +33,7 @@ trap cleanup EXIT INT TERM
   cleanup
   sudo -u postgres createdb "${DRILL_DB}"
   sudo -u postgres /usr/lib/postgresql/17/bin/pg_restore \
-    --dbname="${DRILL_DB}" --no-owner --no-privileges --jobs=2 "${DUMP_FILE}"
+    --dbname="${DRILL_DB}" --no-owner --no-privileges < "${DUMP_FILE}"
   TABLES="$(sudo -u postgres psql -XAtd "${DRILL_DB}" -c "select count(*) from pg_catalog.pg_tables where schemaname not in ('pg_catalog','information_schema')")"
   if [ "${TABLES}" -lt 10 ]; then
     echo "FAIL: solo se restauraron ${TABLES} tablas" >&2

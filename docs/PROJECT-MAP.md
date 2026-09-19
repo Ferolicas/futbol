@@ -1168,3 +1168,14 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
 - SLO, incidentes, secretos, retención, desastre, staging y futura alta
   disponibilidad están formalizados en `docs/enterprise/`. Sin segunda máquina
   persiste el SPOF físico y no se declara HA/PITR que el VPS no puede garantizar.
+
+## Política de backups (2026-09-19)
+
+El VPS usa `scripts/vps/holding_daily_backup.py` instalado como
+`/usr/local/sbin/holding-daily-backup`: conjunto diario único en
+`/var/backups/holding/YYYY-MM-DD/`, hoy y ayer, sin backups completos por
+cambio. Reutiliza la copia del mismo día y solo rota tras éxito. También
+limita releases de CF/Unity a activa y rollback. Ver
+`docs/enterprise/DISASTER-RECOVERY.md`. Incidente del 19: disco saturado por
+82 copias de PostgreSQL previas a cambios, series diarias duplicadas y
+releases sin rotación; PostgreSQL y PM2 se recuperaron tras liberar espacio.
