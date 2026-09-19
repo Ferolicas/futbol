@@ -5,8 +5,8 @@
 | Caché de fixtures/calendario | 7 días; regenerable |
 | Análisis y resultados deportivos | se conservan para validar/entrenar modelos |
 | Errores realtime en Redis | 7 días o TTL específico |
-| Backups PostgreSQL | 7 días local, 30 días externo |
-| Backups Redis | 7 días local, 14 días externo |
+| Backups PostgreSQL | copia diaria única: hoy y anterior válida; sin duplicados por cambio |
+| Backups Redis | dentro del mismo conjunto diario: hoy y anterior válida |
 | Métricas Prometheus | 30 días |
 | Logs worker/Caddy | rotación local configurada, objetivo 14 días |
 | Sesiones expiradas | eliminables; no son historial comercial |

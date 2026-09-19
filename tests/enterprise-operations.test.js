@@ -36,14 +36,10 @@ test('staging no hereda secretos LIVE y solo escucha en loopback', () => {
   assert.match(deploy, /PORT: 3100/);
 });
 
-test('los backups se validan, tienen checksum y simulacro aislado', () => {
-  const postgres = read('scripts/vps/pg_backup.sh');
-  const redis = read('scripts/vps/redis_backup.sh');
+test('la copia diaria conserva redundancia y no duplica el mismo día', () => {
+  const { execFileSync } = require('node:child_process');
+  execFileSync('python3', ['tests/operations/holding_backup_test.py'], { cwd: root });
   const drill = read('scripts/vps/restore_drill.sh');
-  assert.match(postgres, /pg_restore --list/);
-  assert.match(postgres, /sha256sum/);
-  assert.match(redis, /redis-check-rdb/);
-  assert.match(redis, /sha256sum/);
   assert.match(drill, /DRILL_DB=cfanalisis_restore_drill/);
   assert.doesNotMatch(drill, /DRILL_DB=cfanalisis(?:\s|$)/);
 });

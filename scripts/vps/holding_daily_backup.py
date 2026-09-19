@@ -31,6 +31,9 @@ def complete(path):
     return (path / 'COMPLETE.json').is_file()
 
 def prune_sets(today):
+    # Rotate only after today's completed set; interrupted work is never a backup.
+    if not complete(ROOT / today):
+        raise RuntimeError('Cannot prune without a completed current backup')
     # Keep the previous good backup on a failed/missed day, never zero redundancy.
     previous = sorted(p for p in ROOT.iterdir() if p.is_dir() and
                       re.fullmatch(r'\d{4}-\d{2}-\d{2}', p.name) and
@@ -40,8 +43,8 @@ def prune_sets(today):
         keep.add(previous[-1].name)
     for p in ROOT.iterdir():
         if p.is_dir() and re.fullmatch(r'\d{4}-\d{2}-\d{2}', p.name) and p.name not in keep:
-            if complete(p):
-                print('Pruning verified expired set:', p, flush=True)
+            if p.name < today:
+                print('Pruning expired or interrupted set:', p, flush=True)
                 shutil.rmtree(p)
 
 def archive(target, roots, excludes=()):
@@ -64,8 +67,13 @@ def backup():
         prune_sets(today)
         return
     # A new set needs working space; never consume the last bytes on production.
-    if shutil.disk_usage(ROOT).free < 15 * 1024**3:
-        raise RuntimeError('Less than 15 GiB free; backup aborted before writing')
+    previous_sizes = []
+    for manifest_path in ROOT.glob('*/COMPLETE.json'):
+        data = json.loads(manifest_path.read_text())
+        previous_sizes.append(sum(f['bytes'] for f in data.get('files', {}).values()))
+    required = max(15 * 1024**3, int(max(previous_sizes, default=0) * 1.25) + 5 * 1024**3)
+    if shutil.disk_usage(ROOT).free < required:
+        raise RuntimeError('Insufficient backup headroom; aborted before writing')
     target.mkdir(mode=0o700, exist_ok=True)
     dbdir = target / 'postgres'
     dbdir.mkdir(mode=0o700, exist_ok=True)
