@@ -3,7 +3,7 @@ import { pgPool } from '../../../../lib/db';
 import { getUserProfile } from '../../../../lib/supabase-auth';
 import { jsonError } from '../../../../lib/api-error';
 import { settleMarketSelection } from '../../../../lib/market-settlement';
-import { buildMarketPerformance } from '../../../../lib/public-performance';
+import { buildMarketPerformance, loadLegacyMultisportRows } from '../../../../lib/public-performance';
 
 export const dynamic = 'force-dynamic';
 
@@ -122,7 +122,7 @@ export async function GET(request) {
         ) bam ON TRUE
         LEFT JOIN LATERAL (
           SELECT league_name,home_team,away_team FROM american_football_match_analysis
-          WHERE r.sport='american-football' AND fixture_id::text=r.fixture_id
+          WHERE r.sport='american_football' AND fixture_id::text=r.fixture_id
           ORDER BY updated_at DESC NULLS LAST LIMIT 1
         ) afm ON TRUE
       )
@@ -136,7 +136,18 @@ export async function GET(request) {
       [from, to, filters.league || null, filters.market || null, filters.team || null],
     ), pgPool.query(`SELECT min(kickoff) AS kickoff FROM prediction_runs`)]);
     const legacyRows = await legacyPublishedRows({ ...filters, from, to }, ledgerStartRows[0]?.kickoff || null);
-    const rows = [...legacyRows, ...ledgerRows].sort((left, right) =>
+    const legacyMultisport = (await loadLegacyMultisportRows({ from, to }, ledgerStartRows[0]?.kickoff || null, pgPool))
+      .filter((row) => !filters.league || row.league.toLocaleLowerCase('es').includes(filters.league.toLocaleLowerCase('es')))
+      .filter((row) => !filters.market || row.marketName.toLocaleLowerCase('es').includes(filters.market.toLocaleLowerCase('es')))
+      .filter((row) => !filters.team || `${row.homeTeam} ${row.awayTeam}`.toLocaleLowerCase('es').includes(filters.team.toLocaleLowerCase('es')))
+      .map((row) => ({
+        sport: row.sport, fixture_id: row.fixtureId, kickoff: row.kickoff,
+        market_key: row.marketName, market_family: row.marketName,
+        output: { name: row.marketName, probability: row.probability, odd: row.odd },
+        outcome: row.outcome, league: row.league, home_team: row.homeTeam, away_team: row.awayTeam,
+      }));
+    const normalizedLedgerRows = ledgerRows.map((row) => ({ ...row, sport: String(row.sport).replaceAll('_', '-') }));
+    const rows = [...legacyRows, ...legacyMultisport, ...normalizedLedgerRows].sort((left, right) =>
       new Date(left.kickoff) - new Date(right.kickoff) || String(left.fixture_id).localeCompare(String(right.fixture_id)));
     let won = 0;
     let settled = 0;

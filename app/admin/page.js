@@ -206,7 +206,7 @@ function MarketPerformanceRanking({ markets, className = '' }) {
       {markets.length ? <div className="market-performance-table">
         <div className="market-performance-row is-heading"><span>Mercado</span><span>Acierto</span><span>G / P</span><span>Muestra</span></div>
         {markets.map((market, index) => <div className={`market-performance-row is-${market.tendency}`} key={`${market.sport}-${market.marketName}`}>
-          <span><b>{index + 1}</b><span><strong>{market.marketName}</strong><small>{market.sport.replace('american-football', 'fútbol americano')}</small></span></span>
+          <span><b>{index + 1}</b><span><strong>{market.marketName}</strong><small>{market.sport.replace(/american[-_]football/, 'fútbol americano')}</small></span></span>
           <span><strong>{market.accuracy}%</strong><i><span style={{ width: `${market.accuracy}%` }} /></i></span>
           <span><b className="is-won">{market.won} G</b><b className="is-lost">{market.lost} P</b></span>
           <span>{market.decisive}{market.neutral ? <small> +{market.neutral} nulas</small> : null}</span>

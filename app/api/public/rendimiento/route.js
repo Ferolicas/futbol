@@ -11,6 +11,9 @@ const schema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   sport: z.enum(['football', 'baseball', 'basketball', 'american-football']).optional(),
+  league: z.string().trim().max(120).optional(),
+  market: z.string().trim().max(160).optional(),
+  team: z.string().trim().max(120).optional(),
   q: z.string().trim().max(80).optional(),
   page: z.coerce.number().int().min(1).max(10_000).default(1),
   pageSize: z.coerce.number().int().min(6).max(24).default(12),
@@ -34,7 +37,11 @@ function normalizedFilters(data) {
     from = start.toISOString().slice(0, 10);
     to = new Date().toISOString().slice(0, 10);
   }
-  return { from, to, sport: data.sport || null, query: data.q || '', page: data.page, pageSize: data.pageSize };
+  return {
+    from, to, sport: data.sport || null, query: data.q || '',
+    league: data.league || '', market: data.market || '', team: data.team || '',
+    page: data.page, pageSize: data.pageSize,
+  };
 }
 
 export async function GET(request) {
@@ -45,7 +52,7 @@ export async function GET(request) {
   if (!rate.success) return Response.json({ error: 'Demasiadas consultas. Inténtalo en un minuto.' }, { status: 429, headers: { 'Retry-After': '60' } });
   const filters = normalizedFilters(parsed.data);
   const fingerprint = crypto.createHash('sha256').update(JSON.stringify(filters)).digest('hex');
-  const cacheKey = `public-performance:v1:${fingerprint}`;
+  const cacheKey = `public-performance:v2:${fingerprint}`;
   try {
     const cached = await redisGet(cacheKey);
     if (cached) return Response.json(cached, { headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=300', 'X-Data-Cache': 'HIT' } });

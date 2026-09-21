@@ -34,7 +34,7 @@ test('la API pública está paginada, cacheada, limitada y separada del admin', 
   assert.match(api, /pageSize.*max\(24\)/s);
   assert.match(api, /day.*week.*fortnight.*month.*quarter.*semester.*year.*custom/s);
   assert.match(api, /value\.from > value\.to/);
-  assert.match(api, /public-performance:v1/);
+  assert.match(api, /public-performance:v2/);
   assert.match(api, /redisRateLimit\('public-performance'/);
   assert.match(api, /Cache-Control.*max-age=60/);
   assert.doesNotMatch(api, /getUserProfile|prediction-history/);
@@ -43,6 +43,30 @@ test('la API pública está paginada, cacheada, limitada y separada del admin', 
   assert.match(data, /r\.kickoff<now\(\)/);
   assert.match(data, /ps\.outcome IN \('won','lost','push','void'\)/);
   assert.doesNotMatch(data, /canonical_payload|response_tsr|model_version|feature_snapshot/);
+});
+
+test('el histórico multisport sólo incorpora picks Bet365 prepartido y los liquida con resultado oficial', async () => {
+  const { loadLegacyMultisportRows } = await import('../lib/public-performance.js');
+  const queries = [];
+  const pool = { query: async (sql) => {
+    queries.push(sql);
+    if (!sql.includes('baseball_match_analysis')) return { rows: [] };
+    return { rows: [{
+      fixture_id: '777', start_time: '2026-08-10T20:00:00Z', league_name: 'MLB',
+      home_team: 'Home', away_team: 'Away', home_score: 6, away_score: 4,
+      periods: { home: [1, 0, 2, 0, 1, 0, 0, 2, 0], away: [0, 1, 0, 1, 0, 0, 2, 0, 0] },
+      actual: { home: 6, away: 4 },
+      selection: { id: 'total-8.5-over', name: 'Más de 8.5 carreras', line: 8.5, side: 'over', odd: 1.8, bookmaker: 'Bet365', statisticalRecommendation: true },
+    }] };
+  } };
+  const rows = await loadLegacyMultisportRows({ sport: 'baseball' }, '2026-09-08T00:00:00Z', pool);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].sport, 'baseball');
+  assert.equal(rows[0].outcome, 'won');
+  assert.equal(rows[0].certified, false);
+  assert.match(queries[0], /a\.created_at<a\.start_time/);
+  assert.match(queries[0], /bet365/);
+  assert.match(queries[0], /finalized_at IS NOT NULL/);
 });
 
 test('la presentación diferencia expresamente el archivo no sellado', () => {

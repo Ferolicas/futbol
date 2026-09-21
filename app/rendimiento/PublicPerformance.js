@@ -51,7 +51,7 @@ function MetricSkeleton() {
 }
 
 export default function PublicPerformance() {
-  const [filters, setFilters] = useState({ preset: 'all', sport: '', q: '', from: '', to: '' });
+  const [filters, setFilters] = useState({ preset: 'all', sport: '', league: '', market: '', team: '', q: '', from: '', to: '' });
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -59,6 +59,7 @@ export default function PublicPerformance() {
   const query = useMemo(() => {
     const params = new URLSearchParams({ preset: filters.preset, page: String(page), pageSize: '12' });
     if (filters.sport) params.set('sport', filters.sport);
+    for (const key of ['league', 'market', 'team']) if (filters[key].trim()) params.set(key, filters[key].trim());
     if (filters.q.trim()) params.set('q', filters.q.trim());
     if (filters.preset === 'custom' && filters.from && filters.to) {
       params.set('from', filters.from);
@@ -113,6 +114,9 @@ export default function PublicPerformance() {
       <div className="public-performance-filters">
         <label><span>Periodo</span><select value={filters.preset} onChange={(event) => updateFilter('preset', event.target.value)}><option value="all">Todos los tiempos</option><option value="day">Hoy</option><option value="week">Últimos 7 días</option><option value="fortnight">Últimos 15 días</option><option value="month">Últimos 30 días</option><option value="quarter">Últimos 90 días</option><option value="semester">Últimos 6 meses</option><option value="year">Último año</option><option value="custom">Rango personalizado</option></select></label>
         <label><span>Deporte</span><select value={filters.sport} onChange={(event) => updateFilter('sport', event.target.value)}><option value="">Todos</option>{Object.entries(SPORTS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+        <label><span>Liga</span><input list="public-performance-leagues" value={filters.league} onChange={(event) => updateFilter('league', event.target.value)} placeholder="Todas" /><datalist id="public-performance-leagues">{(data?.options?.leagues || []).map((item) => <option value={item} key={item} />)}</datalist></label>
+        <label><span>Mercado</span><input list="public-performance-markets" value={filters.market} onChange={(event) => updateFilter('market', event.target.value)} placeholder="Todos" /><datalist id="public-performance-markets">{(data?.options?.markets || []).map((item) => <option value={item} key={item} />)}</datalist></label>
+        <label><span>Equipo</span><input list="public-performance-teams" value={filters.team} onChange={(event) => updateFilter('team', event.target.value)} placeholder="Todos" /><datalist id="public-performance-teams">{(data?.options?.teams || []).map((item) => <option value={item} key={item} />)}</datalist></label>
         <label className="public-performance-search"><span>Buscar</span><div><Search size={16} /><input value={filters.q} onChange={(event) => updateFilter('q', event.target.value)} maxLength={80} placeholder="Equipo, liga o mercado" /></div></label>
         {filters.preset === 'custom' && <><label><span>Desde</span><input type="date" value={filters.from} max={filters.to || undefined} onChange={(event) => updateFilter('from', event.target.value)} /></label><label><span>Hasta</span><input type="date" value={filters.to} min={filters.from || undefined} onChange={(event) => updateFilter('to', event.target.value)} /></label></>}
       </div>

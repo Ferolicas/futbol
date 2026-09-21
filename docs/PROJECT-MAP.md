@@ -456,7 +456,9 @@ Las fuentes y namespaces de identificadores también están separados:
 - MLB: MLB Stats oficial aporta calendario, live, boxscores, pitchers,
   alineaciones, props y logos. MiLB está fuera de la configuración activa porque
   no dispone del catálogo Bet365 contractual: no se pide su calendario, live,
-  análisis ni cuotas. API-Baseball se consulta solo para cuotas MLB. En MLB la
+  análisis ni cuotas. MLB Stats no trae cuotas: The Odds API consulta una sola
+  cartelera `baseball_mlb`, cacheada y cruzada localmente por equipos. Ya no se
+  consulta API-Baseball ni se gasta su cuota diaria para mapear IDs. En MLB la
   casa contractual es exclusivamente Bet365: el normalizador conserva ID y
   nombre original de mercado/selección y distingue de forma estricta carreras
   del partido/equipo, hándicaps, hits, 1.ª entrada, primeras 3/4,5/5/7 entradas
@@ -469,7 +471,8 @@ Las fuentes y namespaces de identificadores también están separados:
   línea Bet365 exacta y cuota ≥1,20. Los
   historiales completos sí se muestran aunque no exista cuota; solo entran en
   las opciones apostables cuando hay selección, jugador, línea y cuota Bet365
-  exactos. El pase principal de la jornada MLB corre a las 10:30 de
+  exactos. Si el feed no publica Bet365, se conserva la estadística pero no se
+  crea una recomendación apostable. El pase principal de la jornada MLB corre a las 10:30 de
   `America/Bogota`, cuando el proveedor ya suele haber publicado Bet365; diez
   minutos antes se actualiza la cartelera oficial. El detalle presenta las nueve entradas, tramos acumulados, hits,
   pitchers y todos los game logs del lineup. La cobertura de análisis es automática:
@@ -477,12 +480,11 @@ Las fuentes y namespaces de identificadores también están separados:
   `MULTISPORT_CACHE_VERSION` y procesa fixtures ausentes u obsoletos. Después
   de las 10:30 Colombia también trata como pendiente cualquier juego futuro del
   día cuyo análisis siga con `hasOdds=false`; reintenta solo esos IDs y se
-  detiene inmediatamente cuando ya existe una cuota real. El mapeo de jornada y
-  los snapshots vacíos de cuotas duran como máximo diez minutos, para no
-  congelar durante seis horas una publicación tardía de Bet365. El mapeo
-  `/games` de API-Baseball pide explícitamente `America/Bogota`: así los juegos
-  nocturnos que cruzan medianoche UTC siguen perteneciendo al día del cliente y
-  el plan gratuito no los rechaza erróneamente como una fecha futura.
+  detiene inmediatamente cuando ya existe una cuota real. Las carteleras con
+  Bet365 duran tres horas y la ausencia de esa casa se cachea treinta minutos,
+  evitando quemar créditos con la misma respuesta vacía. El límite diario por
+  defecto es 16 créditos, configurable con `THE_ODDS_DAILY_CREDIT_CAP`, para
+  respetar un plan de 500 créditos mensuales.
   El proceso heavy encola además la misma guardia al arrancar, con job idempotente
   por versión y día, de modo que subir el contrato de caché nunca deja la jornada
   visible esperando al cron nocturno. Una jornada local que detecte un hueco
@@ -763,7 +765,8 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   por la función oficial existente. El corte evita duplicar periodos y no altera
   ni vuelve a guardar aciertos o pérdidas.
 - 2026-09-21: `/rendimiento` no consume el endpoint admin. El agregado público
-  cuenta el archivo anterior, marcado siempre como no certificado, pero la lista
+  cuenta el archivo anterior de los cuatro deportes, exige creación prepartido,
+  Bet365 y resultado oficial, y lo marca siempre como no certificado. La lista
   paginada sólo entrega recomendaciones finalizadas con FreeTSA válido. No
   expone run IDs, fixture IDs, snapshots, modelos, JSON canónico ni TSR.
 - 2026-09-21: admin y `/rendimiento` agrupan cada mercado exacto por deporte y
@@ -773,6 +776,10 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   límite distribuido de 60 consultas/minuto/IP. El verificador RFC 3161 admite
   15 verificaciones/minuto/IP y cachea respuestas válidas; si Redis cae, ambos
   endpoints fallan cerrados antes de ejecutar SQL u OpenSSL.
+- 2026-09-21: The Odds API aporta una cartelera cacheada por deporte para MLB,
+  NBA, NFL y NCAA. El cruce de IDs se hace localmente y solo Bet365 se normaliza;
+  los feeds MLB/NBA/NFL siguen siendo autoridades de datos, no de cuotas. MLB
+  no cae de nuevo a API-Baseball, eliminando su consumo diario de mapeo.
 
 - 2026-08-14: `futbol-daily` persiste `startedBy` con el ID de BullMQ. El mismo
   job puede continuar en su siguiente intento después de una caída de API; un
@@ -939,10 +946,9 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
 - 2026-08-03: un análisis MLB de versión vigente no se considera terminado para
   la jornada actual si `data_quality.hasOdds=false`. El pase principal se hace a
   las 10:30 Colombia y la guardia de 15 minutos vuelve a consultar únicamente
-  partidos futuros sin cuotas; no bajar el umbral, inventar líneas ni volver a
-  cachear durante seis horas una respuesta vacía de API-Baseball. Toda consulta
-  de mapeo de MLB debe llevar `timezone=America/Bogota`; usar la fecha UTC deja
-  sin cuotas a los juegos nocturnos hasta que ya están por comenzar.
+  partidos futuros sin cuotas; no bajar el umbral ni inventar líneas. Desde el
+  21 de septiembre el catálogo se cruza localmente con The Odds API; la antigua
+  regla de mapeo con API-Baseball queda únicamente como antecedente histórico.
 - 2026-08-03: `baseball_match_results` es la autoridad visual de un juego ya
   iniciado. El poll de un minuto debe persistir también cuando no quede ningún
   live y debe cubrir ayer Colombia; emitir solo por WebSocket deja estados IN
