@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { SWRConfig } from 'swr';
 import { Eye, LockKeyhole, Sparkles, X } from 'lucide-react';
 import MarketOutcomeBadge from './MarketOutcomeBadge';
+import PredictionSealBadge from './PredictionSealBadge';
 
 const AccessContext = createContext({ isFree: false, openPlans: () => {} });
 export const useFreeAccess = () => useContext(AccessContext);
@@ -128,6 +129,7 @@ export function FreeRecommendations({ preview, selected = {}, onToggle = null })
     <span className="mkt-validation is-validated">{canSelect
       ? (pickSelected ? 'Añadida a tu combinada' : 'Toca para añadir a tu combinada')
       : 'Tu recomendación gratis'}</span>
+    <PredictionSealBadge seal={pick.seal} />
     {pick.outcome && <MarketOutcomeBadge outcome={pick.outcome} pendingLabel="Pendiente oficial" compact />}
     <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${pick.probability}%` }} /></div>
     <div className="mkt-nums"><strong className="mkt-pct">{pct(pick.probability)}</strong><span className="mkt-odd">@{pick.odd.toFixed(2)}</span><small>{pick.bookmaker}</small>{pickSelected && <span className="mkt-chk">&#10003;</span>}</div>

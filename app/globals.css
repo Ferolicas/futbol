@@ -13718,7 +13718,49 @@ input:checked + .cb-mark::after {
 }
 
 /* Panel administrativo: curva y detalle de la apuesta del día. */
+.prediction-seal-badge {
+  display: inline-flex; width: fit-content; align-items: center; padding: 4px 8px;
+  border: 1px solid rgba(94,230,177,.3); border-radius: 999px; color: #8af2cd;
+  background: rgba(94,230,177,.08); font-size: .57rem; font-weight: 850; cursor: pointer;
+}
+.prediction-seal-overlay { position: fixed; inset: 0; z-index: 12000; display: grid; place-items: center; padding: 18px; background: rgba(1,8,6,.78); backdrop-filter: blur(8px); }
+.prediction-seal-modal { position: relative; width: min(520px,100%); max-height: 88vh; overflow: auto; padding: 24px; border: 1px solid rgba(94,230,177,.25); border-radius: 20px; color: var(--t1); background: #071611; box-shadow: 0 24px 80px rgba(0,0,0,.55); }
+.prediction-seal-modal > small { color: #72dcb5; text-transform: uppercase; letter-spacing: .08em; }
+.prediction-seal-modal h3 { margin: 7px 36px 18px 0; font-size: 1.08rem; }
+.prediction-seal-close { position: absolute; top: 12px; right: 14px; border: 0; color: var(--t2); background: transparent; font-size: 1.7rem; cursor: pointer; }
+.prediction-seal-modal dl { display: grid; gap: 8px; margin: 0; }
+.prediction-seal-modal dl div { display: flex; justify-content: space-between; gap: 15px; padding: 10px; border-radius: 10px; background: rgba(255,255,255,.035); }
+.prediction-seal-modal dt { color: var(--t3); font-size: .72rem; }
+.prediction-seal-modal dd { margin: 0; text-align: right; font-size: .73rem; font-weight: 750; }
+.prediction-seal-modal .is-valid { color: #7aefc2; }
+.prediction-seal-note { color: var(--t3); font-size: .72rem; line-height: 1.5; }
+.prediction-seal-technical-button { width: 100%; min-height: 40px; border: 1px solid var(--brd); border-radius: 10px; color: #dff8ef; background: rgba(255,255,255,.045); font-weight: 800; cursor: pointer; }
+.prediction-seal-technical { display: grid; gap: 8px; margin-top: 12px; }
+.prediction-seal-technical code { overflow-wrap: anywhere; color: #9fb8b0; font-size: .62rem; }
+.prediction-seal-technical pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .62rem; }
+.prediction-seal-error { color: #fb7185; }
+.match-assistant-launcher { position: fixed; right: 16px; bottom: 76px; z-index: 900; display: flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 14px; border: 1px solid rgba(94,230,177,.35); border-radius: 999px; color: #06140f; background: #5ee6b1; box-shadow: 0 10px 35px rgba(0,0,0,.35); font-weight: 900; cursor: pointer; }
+.match-assistant { position: fixed; right: 14px; bottom: 72px; z-index: 1000; display: grid; grid-template-rows: auto minmax(180px,1fr) auto auto; width: min(390px,calc(100vw - 28px)); height: min(610px,calc(100dvh - 110px)); overflow: hidden; border: 1px solid rgba(94,230,177,.25); border-radius: 20px; color: var(--t1); background: #071611; box-shadow: 0 22px 70px rgba(0,0,0,.58); }
+.match-assistant > header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--brd); }
+.match-assistant > header span { display: flex; flex-direction: column; gap: 2px; }
+.match-assistant > header small { color: var(--t3); font-size: .58rem; text-transform: uppercase; }
+.match-assistant > header strong { font-size: .88rem; }
+.match-assistant > header button { border: 0; color: var(--t2); background: transparent; cursor: pointer; }
+.match-assistant-messages { display: flex; overflow-y: auto; flex-direction: column; gap: 8px; padding: 14px; }
+.match-assistant-message { max-width: 88%; padding: 9px 11px; border-radius: 12px; font-size: .75rem; line-height: 1.45; white-space: pre-wrap; }
+.match-assistant-message.is-assistant { align-self: flex-start; color: #dceae5; background: rgba(255,255,255,.055); }
+.match-assistant-message.is-user { align-self: flex-end; color: #06140f; background: #78e9bf; }
+.match-assistant-message.is-error { align-self: flex-start; color: #fecdd3; background: rgba(251,113,133,.12); }
+.match-assistant form { display: grid; grid-template-columns: 1fr 42px; gap: 7px; padding: 10px 12px; border-top: 1px solid var(--brd); }
+.match-assistant form input { min-width: 0; min-height: 42px; padding: 0 12px; border: 1px solid var(--brd); border-radius: 12px; color: var(--t1); background: rgba(255,255,255,.04); }
+.match-assistant form button { border: 0; border-radius: 12px; color: #06140f; background: #5ee6b1; cursor: pointer; }
+.match-assistant form button:disabled { opacity: .45; cursor: default; }
+.match-assistant > p { margin: 0; padding: 0 12px 10px; color: var(--t3); font-size: .57rem; }
+@media (max-width:520px) { .match-assistant-launcher span { display:none; } .match-assistant-launcher { width:46px; padding:0; justify-content:center; } .match-assistant { right:8px; bottom:66px; width:calc(100vw - 16px); } }
 .admin-daily-results { min-height: 55vh; }
+.admin-history-filters { display: grid; grid-template-columns: repeat(5,minmax(120px,1fr)); gap: 8px; margin-bottom: 14px; }
+.admin-history-filters label { display: flex; min-width: 0; flex-direction: column; gap: 5px; color: var(--t3); font-size: .62rem; font-weight: 750; }
+.admin-history-filters input,.admin-history-filters select { min-width: 0; min-height: 38px; padding: 0 10px; border: 1px solid var(--brd); border-radius: 10px; color: var(--t1); background: var(--bg-2); color-scheme: dark; }
 .admin-results-heading {
   display: flex;
   align-items: flex-end;
@@ -13838,6 +13880,7 @@ input:checked + .cb-mark::after {
   .admin-tab { flex: 0 0 auto; padding: 11px 15px; white-space: nowrap; }
   .admin-results-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-result-selections { grid-template-columns: minmax(0, 1fr); }
+  .admin-history-filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 
 @media (max-width: 520px) {
@@ -13846,6 +13889,7 @@ input:checked + .cb-mark::after {
   .admin-hits-chart { height: 205px; }
   .admin-results-chart-title { align-items: flex-start; flex-direction: column; }
   .admin-result-match > header { align-items: flex-start; }
+  .admin-history-filters { grid-template-columns: minmax(0,1fr); }
 }
 
 /* Panel deportivo único: liga y deporte comparten exactamente la fila. La

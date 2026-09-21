@@ -22,7 +22,7 @@ export default function AdminPanel() {
           Clientes Pendientes
         </button>
         <button className={`admin-tab ${tab === 'resultados' ? 'active' : ''}`} onClick={() => setTab('resultados')}>
-          Aciertos del día
+          Histórico de aciertos
         </button>
       </div>
 
@@ -36,11 +36,6 @@ export default function AdminPanel() {
 }
 
 /* ── DAILY PICK RESULTS ── */
-function localIsoDate() {
-  try { return new Date().toLocaleDateString('en-CA'); }
-  catch { return new Date().toISOString().slice(0, 10); }
-}
-
 function HitsCurve({ points = [] }) {
   const width = 760;
   const height = 230;
@@ -94,7 +89,7 @@ function HitsCurve({ points = [] }) {
 }
 
 function DailyResultsSection() {
-  const [date, setDate] = useState(localIsoDate);
+  const [filters, setFilters] = useState({ preset: 'all', from: '', to: '', league: '', market: '', team: '' });
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -102,15 +97,13 @@ function DailyResultsSection() {
   useEffect(() => {
     let cancelled = false;
     let running = false;
-    const timeZone = (() => {
-      try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Madrid'; }
-      catch { return 'Europe/Madrid'; }
-    })();
     const load = async () => {
       if (running) return;
       running = true;
       try {
-        const response = await fetch(`/api/admin/daily-pick-results?date=${date}&tz=${encodeURIComponent(timeZone)}`, { cache: 'no-store' });
+        const query = new URLSearchParams({ preset: filters.preset });
+        for (const key of ['from', 'to', 'league', 'market', 'team']) if (filters[key]) query.set(key, filters[key]);
+        const response = await fetch(`/api/admin/prediction-history?${query}`, { cache: 'no-store' });
         const json = await response.json();
         if (!response.ok) throw new Error(json.error || 'No se pudieron cargar los resultados');
         if (!cancelled) { setData(json); setError(''); }
@@ -125,21 +118,27 @@ function DailyResultsSection() {
     load();
     const interval = setInterval(load, 30_000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [date]);
+  }, [filters]);
 
   const totals = data?.totals || { won: 0, lost: 0, pending: 0, total: 0, accuracy: 0 };
   return (
     <section className="admin-daily-results">
       <header className="admin-results-heading">
         <div>
-          <small>Seguimiento oficial · actualización cada 30 segundos</small>
-          <h2>Aciertos de la apuesta del día</h2>
+          <small>Histórico completo · actualización cada 30 segundos</small>
+          <h2>Rendimiento desde el inicio de CF Análisis</h2>
         </div>
-        <label>
-          <span>Jornada</span>
-          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-        </label>
       </header>
+
+      <div className="admin-history-filters">
+        <label><span>Periodo</span><select value={filters.preset} onChange={(event) => setFilters((value) => ({ ...value, preset: event.target.value }))}>
+          <option value="all">Todos los tiempos</option><option value="day">Día</option><option value="week">Semana</option><option value="fortnight">15 días</option><option value="month">Mes</option><option value="quarter">Trimestre</option><option value="semester">Semestre</option><option value="year">Año</option><option value="custom">Rango suelto</option>
+        </select></label>
+        {filters.preset === 'custom' && <><label><span>Desde</span><input type="date" value={filters.from} onChange={(event) => setFilters((value) => ({ ...value, from: event.target.value }))} /></label><label><span>Hasta</span><input type="date" value={filters.to} onChange={(event) => setFilters((value) => ({ ...value, to: event.target.value }))} /></label></>}
+        <label><span>Liga</span><input list="admin-history-leagues" value={filters.league} onChange={(event) => setFilters((value) => ({ ...value, league: event.target.value }))} placeholder="Todas" /><datalist id="admin-history-leagues">{(data?.options?.leagues || []).map((item) => <option key={item} value={item} />)}</datalist></label>
+        <label><span>Mercado</span><input list="admin-history-markets" value={filters.market} onChange={(event) => setFilters((value) => ({ ...value, market: event.target.value }))} placeholder="Todos" /><datalist id="admin-history-markets">{(data?.options?.markets || []).map((item) => <option key={item} value={item} />)}</datalist></label>
+        <label><span>Equipo</span><input list="admin-history-teams" value={filters.team} onChange={(event) => setFilters((value) => ({ ...value, team: event.target.value }))} placeholder="Todos" /><datalist id="admin-history-teams">{(data?.options?.teams || []).map((item) => <option key={item} value={item} />)}</datalist></label>
+      </div>
 
       {error && <div className="warn" role="alert">{error}</div>}
       {loading && !data ? <p className="admin-results-loading">Cargando resultados oficiales…</p> : (
@@ -153,7 +152,7 @@ function DailyResultsSection() {
 
           <div className="admin-results-chart-card">
             <div className="admin-results-chart-title">
-              <span><small>Curva acumulada</small><strong>{totals.won} aciertos confirmados</strong></span>
+              <span><small>Curva histórica acumulada</small><strong>{totals.won} aciertos confirmados</strong></span>
               <em>{data?.updatedAt ? `Actualizado ${fmtTime(data.updatedAt)}` : ''}</em>
             </div>
             <HitsCurve points={data?.curve || []} />
@@ -161,7 +160,7 @@ function DailyResultsSection() {
 
           <div className="admin-result-match-list">
             {(data?.matches || []).length === 0 && (
-              <div className="admin-results-empty">Todavía no hay partidos en vivo o finalizados con opciones de la apuesta del día.</div>
+              <div className="admin-results-empty">No hay pronósticos liquidados que coincidan con estos filtros.</div>
             )}
             {(data?.matches || []).map((match) => {
               const matchWon = match.selections.filter((selection) => selection.outcome.status === 'won').length;
@@ -170,7 +169,7 @@ function DailyResultsSection() {
                 <article className="admin-result-match" key={`${match.sport}-${match.fixtureId}`}>
                   <header>
                     <span><small>{match.sport} · {match.league || 'Competición'}</small><strong>{match.matchName}</strong></span>
-                    <span className={match.isLive ? 'is-live' : 'is-final'}>{match.isLive ? 'EN VIVO' : 'FINALIZADO'}</span>
+                    <span className={match.isLive ? 'is-live' : 'is-final'}>{match.isLive ? 'EN VIVO' : match.isFinal ? 'FINALIZADO' : 'PENDIENTE'}</span>
                   </header>
                   <div className="admin-result-match-summary">
                     <b className="is-won">{matchWon} ganadas</b>

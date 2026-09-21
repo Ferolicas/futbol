@@ -127,6 +127,9 @@ const SCHEDULES: Sched[] = [
   // NFL conserva el respaldo existente; FBS/FCS usa su fuente pública y el
   // mismo smart-window. El intervalo evita trabajo continuo fuera de partidos.
   { queue: 'american-football-live', id: 'american-football-live-30m', every: 1_800_000 },
+  // Sellado externo desacoplado: lotes pequeños, un intento por tick y
+  // backoff durable en PostgreSQL si FreeTSA no está disponible.
+  { queue: 'prediction-seals', id: 'prediction-seals-2m', every: 120_000 },
 ];
 
 export async function registerSchedulers(): Promise<void> {

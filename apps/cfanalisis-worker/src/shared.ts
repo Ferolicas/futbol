@@ -53,6 +53,7 @@ const [
   _trainMultisport,
   _finalVerdict,
   _predictionLedger,
+  _predictionSeal,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
@@ -85,6 +86,7 @@ const [
   import(SCRIPTS + 'train-multisport-empirical-engine.js'),
   import(LIB + 'final-verdict.js'),
   import(LIB + 'prediction-ledger.js'),
+  import(LIB + 'prediction-seal.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -192,6 +194,7 @@ export const buildFootballFinalVerdict = _finalVerdict.buildFootballFinalVerdict
 export const settlePredictionFixture = _predictionLedger.settlePredictionFixture;
 export const reconcileFootballPredictionSettlements = _predictionLedger.reconcileFootballPredictionSettlements;
 export const refreshPredictionLedgerCalibration = _predictionLedger.refreshPredictionLedgerCalibration;
+export const processPendingPredictionSeals = _predictionSeal.processPendingPredictionSeals;
 
 // lib/combinada.js
 export const buildCombinada = _combinada.buildCombinada;

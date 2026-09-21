@@ -7,6 +7,7 @@ import SelectedMarketsProvider from './selected-markets-context';
 import DashboardHeader from './components/DashboardHeader';
 import ScrollToTopButton from './components/ScrollToTopButton';
 import { hasActiveEntitlement } from '../../lib/entitlements';
+import MatchAssistant from './components/MatchAssistant';
 
 export const metadata = {
   title: 'Dashboard - CFanalisis',
@@ -35,6 +36,7 @@ export default async function DashboardLayout({ children }) {
         </LiveStatsBridge>
       </SelectedMarketsProvider>
       <ScrollToTopButton />
+      <MatchAssistant />
     </div>
     </FreeAccessProvider>
   );

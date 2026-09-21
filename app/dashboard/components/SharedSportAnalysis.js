@@ -7,6 +7,7 @@ import { FreeRecommendations, LockedAnalysis } from './FreeAccessProvider';
 import BaseballResultStats from '../baseball/components/BaseballResultStats';
 import FinalVerdictPanel from './FinalVerdictPanel';
 import MarketOutcomeBadge from './MarketOutcomeBadge';
+import PredictionSealBadge from './PredictionSealBadge';
 import { marketResultState, settleMarketSelection } from '../../../lib/market-settlement';
 import { displayBettingText } from '../utils/display-betting-text';
 
@@ -61,7 +62,7 @@ export function SportAnalysisTabs({ game, sport, scoreLabel, selected = {}, onTo
           const probability = Math.min(95, Math.floor(Number(pick.rawProbability ?? pick.probability) * 100) / 100);
           const state = marketResultState({ sport, game, liveResult: game.liveResult });
           return <button className={`mkt ${selected[pick.id] ? 'on' : ''} ${probability >= 75 ? 'hi' : 'md'}`} key={pick.id} onClick={() => onToggle(pick)}>
-            <span className="mkt-name">{displayBettingText(pick.name || pick.pick)}</span><span className="mkt-validation is-validated">Recomendación estadística</span>
+            <span className="mkt-name">{displayBettingText(pick.name || pick.pick)}</span><span className="mkt-validation is-validated">Recomendación estadística</span><PredictionSealBadge seal={pick.seal} />
             <MarketOutcomeBadge outcome={settleMarketSelection({ sport, selection: pick, game, liveResult: game.liveResult })} pendingLabel={state.isLive ? 'En juego' : state.isFinal ? 'Pendiente oficial' : null} compact />
             <div className="mkt-bar"><div className="mkt-fill" style={{ width: `${probability}%` }} /></div><div className="mkt-nums"><span className="mkt-pct">{probability}%</span>{pick.odd && <span className="mkt-odd">{Number(pick.odd).toFixed(2)}</span>}{pick.reliability != null && <small>Fiab. {Number(pick.reliability).toFixed(1)}%</small>}<span className="mkt-bk">{pick.bookmaker}</span></div>
           </button>;

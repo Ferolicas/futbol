@@ -35,6 +35,7 @@ import { runBasketballAnalyze, runAmericanFootballAnalyze } from './jobs/multisp
 import { runBasketballLive, runAmericanFootballLive } from './jobs/multisport/live.js';
 import { runBasketballFinalize, runAmericanFootballFinalize } from './jobs/multisport/finalize.js';
 import { runBasketballRetrain, runAmericanFootballRetrain } from './jobs/multisport/retrain.js';
+import { runPredictionSeals } from './jobs/prediction-seals.js';
 
 const handlers: Record<QueueName, Processor> = {
   'futbol-fixtures':         async (job) => runFixtures(job.data),
@@ -77,6 +78,7 @@ const handlers: Record<QueueName, Processor> = {
   'american-football-live':       async (job) => runAmericanFootballLive(job.data),
   'american-football-finalize':   async (job) => runAmericanFootballFinalize(job.data),
   'american-football-retrain':    async (job) => runAmericanFootballRetrain(job.data),
+  'prediction-seals':             async () => runPredictionSeals(),
 };
 
 // Concurrency tuning per queue. Most are I/O bound (HTTP to API-Football,
@@ -117,6 +119,7 @@ const concurrency: Record<QueueName, number> = {
   'american-football-live':       1,
   'american-football-finalize':   1,
   'american-football-retrain':    1,
+  'prediction-seals':             1,
 };
 
 // Lock / stall tuning per queue.
@@ -180,6 +183,7 @@ const lockOpts: Record<QueueName, LockOpts> = {
   'american-football-live':       LIGHT,
   'american-football-finalize':   HEAVY,
   'american-football-retrain':    MARATHON,
+  'prediction-seals':             LIGHT,
 };
 
 export type WorkerRole = 'all' | 'realtime' | 'heavy';

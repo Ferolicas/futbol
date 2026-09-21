@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-08 · Base: `7588e7b` · Next 16, realtime granular y operación enterprise
+Actualizado: 2026-09-21 · Base: `0b7151f` · Next 16, sellado externo, asistente DB-only y operación enterprise
 
 ## Identidad y stack
 
@@ -39,6 +39,9 @@ Las creatividades listas para campañas se guardan en `public/marketing/`.
 | `/dashboard/baloncesto/analisis/[id]` | `app/dashboard/baloncesto/analisis/[id]/page.js` | Sesión (Free/Pro) | Análisis completo por mitades/cuartos, mercados Bet365 y veredicto |
 | `/dashboard/futbol-americano/analisis/[id]` | `app/dashboard/futbol-americano/analisis/[id]/page.js` | Sesión (Free/Pro) | Análisis completo por mitades/cuartos, mercados Bet365 y veredicto |
 | `/api/dashboard-search` | `app/api/dashboard-search/route.js` | Sesión (Free/Pro) | Búsqueda DB-only de equipos, ligas y partidos en los cuatro deportes |
+| `/api/verificar-pronostico/[id]` | `app/api/verificar-pronostico/[id]/route.js` | Pública | Recalcula SHA-512, Merkle y firma RFC 3161; oculta el contenido hasta el kickoff |
+| `/api/assistant/chat` | `app/api/assistant/chat/route.js` | Sesión (Free/Pro) | Chat Groq con herramientas locales de solo lectura sobre partidos/pronósticos existentes |
+| `/api/admin/prediction-history` | `app/api/admin/prediction-history/route.js` | Admin/owner | Histórico acumulado y filtros temporales/de liga/mercado/equipo sin recalcular resultados |
 | `/admin` | `app/admin/` | Admin/owner | Operación y clientes |
 | `/ferney` | `app/ferney/` | Privada | Auditoría del propietario |
 | `/ferney/informes` | `app/ferney/informes/` | Admin/owner | Informes interactivos móviles de fútbol y MLB |
@@ -111,6 +114,9 @@ Las migraciones viven en `scripts/`. Tablas clave:
   de cada mercado.
 - `prediction_settlements`: historial append-only de liquidaciones; una
   corrección posterior añade evidencia y nunca reescribe el pronóstico.
+- `prediction_seal_batches` + `prediction_seal_proofs`: JSON canónico por
+  recomendación, SHA-512, caminos Merkle y artefactos TSQ/TSR de FreeTSA. El
+  worker solo publica `sealed` después de verificar criptográficamente la TSR.
 - `prediction_data_quarantine`: hechos rechazados por invariantes de identidad,
   por ejemplo un jugador atribuido a un equipo ajeno al fixture.
 
@@ -731,6 +737,7 @@ del proveedor rompan React.
 | App/worker | `NEXT_PUBLIC_APP_URL`, `WORKER_URL`, `WORKER_SECRET` solo servidor, `CRON_SECRET` y `NEXT_PUBLIC_WORKER_WS_URL` |
 | Datos | `FOOTBALL_API_KEY`; `API_SPORTS_KEY` opcional (fallback a la anterior) y claves aislables `API_SPORTS_<PROVIDER>_KEY`/`API_NBA_KEY`/`API_BASKETBALL_KEY`/`API_BASEBALL_KEY`/`API_NFL_KEY`; presupuestos `API_SPORTS_<PROVIDER>_DAILY_BUDGET` |
 | Email/push | `RESEND_API_KEY`, `FROM_EMAIL`, VAPID |
+| Sellado/IA | `FREETSA_URL` opcional; `GROQ_API_KEY` solo servidor y `GROQ_MODEL` (por defecto `openai/gpt-oss-20b`) |
 
 Nunca documentar valores. Las `NEXT_PUBLIC_*` requieren rebuild.
 
@@ -740,6 +747,19 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
 `/admin/status` o rutas operativas protegidas por `WORKER_SECRET`.
 
 ## Gotchas vivos
+
+- 2026-09-21: el sellado externo es una capa posterior al ledger. La cola
+  `prediction-seals` hace backfill solo de recomendaciones prepartido aún
+  futuras, agrupa como máximo 16 hashes y reintenta sin bloquear análisis. La
+  verificación pública nunca entrega JSON, TSQ ni TSR antes del kickoff.
+- 2026-09-21: el asistente no importa ni invoca motores. Sus únicas acciones
+  son consultas SQL fijas de solo lectura y conserva en servidor tanto la clave
+  Groq como el catálogo premium. WebMCP registra la misma capacidad en clientes
+  compatibles, pero siempre cruza la API autenticada.
+- 2026-09-21: el gráfico admin usa el ledger desde su fecha inicial y completa
+  el tramo anterior con las selecciones publicadas en `combinada_dia`, liquidadas
+  por la función oficial existente. El corte evita duplicar periodos y no altera
+  ni vuelve a guardar aciertos o pérdidas.
 
 - 2026-08-14: `futbol-daily` persiste `startedBy` con el ID de BullMQ. El mismo
   job puede continuar en su siguiente intento después de una caída de API; un

@@ -4,6 +4,7 @@ import { getCurrentUser } from '../../../../../../lib/auth-pg';
 import { freeAnalysis } from '../../../../../../lib/free-access';
 import { userHasActivePlan } from '../../../../../../lib/require-active-plan';
 import { jsonError } from '../../../../../../lib/api-error';
+import { attachSealsToRecommendationContainer, sealedProofsForFixtures } from '../../../../../../lib/prediction-seal';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,11 @@ export async function GET(_request, props) {
     ]);
     if (!analysis.rows[0]) return Response.json({ error: 'Not analyzed yet' }, { status: 404 });
     const game = match.rows[0] || null;
+    const seals = await sealedProofsForFixtures(config.key, [params.id]).catch(() => new Map());
+    analysis.rows[0].combinada = attachSealsToRecommendationContainer(
+      analysis.rows[0].combinada,
+      seals.get(String(params.id)),
+    );
     return Response.json({
       success: true,
       analysis: paidAccess ? analysis.rows[0] : freeAnalysis(

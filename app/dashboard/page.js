@@ -56,6 +56,7 @@ import { displayBettingText } from './utils/display-betting-text';
 import { buildFootballProbabilityGroups } from './utils/probability-lines';
 import FinalVerdictPanel from './components/FinalVerdictPanel';
 import MarketOutcomeBadge from './components/MarketOutcomeBadge';
+import PredictionSealBadge from './components/PredictionSealBadge';
 import { marketResultState, settleMarketSelection } from '../../lib/market-settlement';
 import { resolveDailyPickView } from '../../lib/daily-pick-view';
 import { groupSavedCombinadaSelections } from '../../lib/saved-combinada';
@@ -2355,6 +2356,7 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                         <span className={`mkt-validation ${mkt.recommended ? 'is-validated' : 'is-reference'}`}>
                           {mkt.recommended ? 'Recomendación estadística' : 'Dato estadístico'}
                         </span>
+                        <PredictionSealBadge seal={mkt.seal} />
                         <MarketOutcomeBadge
                           outcome={outcome}
                           pendingLabel={resultState.isLive ? 'En juego' : resultState.isFinal ? 'Pendiente oficial' : null}

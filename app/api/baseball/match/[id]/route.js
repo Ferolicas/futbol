@@ -8,6 +8,7 @@ import { freeAnalysis } from '../../../../../lib/free-access';
 import { userHasActivePlan } from '../../../../../lib/require-active-plan';
 import { jsonError } from '../../../../../lib/api-error';
 import { MULTISPORT_CACHE_VERSION } from '../../../../../lib/multisport-analysis';
+import { attachSealsToRecommendationContainer, sealedProofsForFixtures } from '../../../../../lib/prediction-seal';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +37,11 @@ export async function GET(_request, props) {
     if (!analysisRes.data) {
       return Response.json({ error: 'Not analyzed yet' }, { status: 404 });
     }
+    const seals = await sealedProofsForFixtures('baseball', [fixtureId]).catch(() => new Map());
+    analysisRes.data.combinada = attachSealsToRecommendationContainer(
+      analysisRes.data.combinada,
+      seals.get(String(fixtureId)),
+    );
 
     const result = resultRes.data || null;
     const game = {

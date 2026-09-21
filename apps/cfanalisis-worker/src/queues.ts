@@ -45,6 +45,7 @@ export const QUEUE_NAMES = [
   'american-football-live',
   'american-football-finalize',
   'american-football-retrain',
+  'prediction-seals',
 ] as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[number];
@@ -117,6 +118,7 @@ const opts: Record<QueueName, JobsOptions> = {
   'american-football-live':       liveJobOpts,
   'american-football-finalize':   analyzeJobOpts,
   'american-football-retrain':    { ...defaultJobOpts, attempts: 2 },
+  'prediction-seals':             { ...defaultJobOpts, attempts: 1 },
 };
 
 export const queues: Record<QueueName, Queue> = Object.fromEntries(

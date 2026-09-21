@@ -19,6 +19,7 @@ import { userHasActivePlan } from '../../../../lib/require-active-plan';
 import { jsonError } from '../../../../lib/api-error';
 import { MULTISPORT_CACHE_VERSION } from '../../../../lib/multisport-analysis';
 import { enqueue } from '../../../../lib/worker-client';
+import { attachSealsToRecommendationContainer, sealedProofsForFixtures } from '../../../../lib/prediction-seal';
 
 export const dynamic = 'force-dynamic';
 
@@ -115,6 +116,10 @@ export async function GET(request) {
       user ? supabaseAdmin.from('baseball_user_favorites').select('fixture_id').eq('user_id', user.id) : Promise.resolve({ data: [] }),
     ]);
 
+    const seals = await sealedProofsForFixtures('baseball', allFids).catch(() => new Map());
+    for (const analysis of (analysesRes.data || [])) {
+      analysis.combinada = attachSealsToRecommendationContainer(analysis.combinada, seals.get(String(analysis.fixture_id)));
+    }
     const toNum = (v) => Number(v);
     const compactAnalysis = (analysis) => ({
       fixture_id: analysis.fixture_id,
