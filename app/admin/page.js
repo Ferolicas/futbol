@@ -158,6 +158,8 @@ function DailyResultsSection() {
             <HitsCurve points={data?.curve || []} />
           </div>
 
+          <MarketPerformanceRanking markets={data?.marketPerformance || []} className="admin-market-ranking" />
+
           <div className="admin-result-match-list">
             {(data?.matches || []).length === 0 && (
               <div className="admin-results-empty">No hay pronósticos liquidados que coincidan con estos filtros.</div>
@@ -193,6 +195,23 @@ function DailyResultsSection() {
           </div>
         </>
       )}
+    </section>
+  );
+}
+
+function MarketPerformanceRanking({ markets, className = '' }) {
+  return (
+    <section className={`market-performance-ranking ${className}`}>
+      <header><span><small>Mercados ganadores y perdedores</small><strong>Ranking por porcentaje de acierto</strong></span><em>{markets.length} mercados</em></header>
+      {markets.length ? <div className="market-performance-table">
+        <div className="market-performance-row is-heading"><span>Mercado</span><span>Acierto</span><span>G / P</span><span>Muestra</span></div>
+        {markets.map((market, index) => <div className={`market-performance-row is-${market.tendency}`} key={`${market.sport}-${market.marketName}`}>
+          <span><b>{index + 1}</b><span><strong>{market.marketName}</strong><small>{market.sport.replace('american-football', 'fútbol americano')}</small></span></span>
+          <span><strong>{market.accuracy}%</strong><i><span style={{ width: `${market.accuracy}%` }} /></i></span>
+          <span><b className="is-won">{market.won} G</b><b className="is-lost">{market.lost} P</b></span>
+          <span>{market.decisive}{market.neutral ? <small> +{market.neutral} nulas</small> : null}</span>
+        </div>)}
+      </div> : <p className="market-performance-empty">No hay mercados decididos para este periodo.</p>}
     </section>
   );
 }

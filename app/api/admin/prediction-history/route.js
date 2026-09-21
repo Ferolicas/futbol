@@ -3,6 +3,7 @@ import { pgPool } from '../../../../lib/db';
 import { getUserProfile } from '../../../../lib/supabase-auth';
 import { jsonError } from '../../../../lib/api-error';
 import { settleMarketSelection } from '../../../../lib/market-settlement';
+import { buildMarketPerformance } from '../../../../lib/public-performance';
 
 export const dynamic = 'force-dynamic';
 
@@ -129,7 +130,7 @@ export async function GET(request) {
       WHERE ($1::date IS NULL OR kickoff >= $1::date)
         AND ($2::date IS NULL OR kickoff < ($2::date + interval '1 day'))
         AND ($3::text IS NULL OR league ILIKE '%'||$3||'%')
-        AND ($4::text IS NULL OR COALESCE(market_family,market_key) ILIKE '%'||$4||'%')
+        AND ($4::text IS NULL OR concat_ws(' ',market_family,market_key,output->>'name',output->>'pick') ILIKE '%'||$4||'%')
         AND ($5::text IS NULL OR home_team ILIKE '%'||$5||'%' OR away_team ILIKE '%'||$5||'%')
       ORDER BY kickoff,fixture_id,market_key`,
       [from, to, filters.league || null, filters.market || null, filters.team || null],
@@ -152,7 +153,7 @@ export async function GET(request) {
     const lost = rows.filter((row) => row.outcome === 'lost').length;
     const pending = rows.filter((row) => !['won', 'lost'].includes(row.outcome)).length;
     const leagues = [...new Set(rows.map((row) => row.league).filter(Boolean))].sort();
-    const markets = [...new Set(rows.map((row) => row.market_family || row.market_key).filter(Boolean))].sort();
+    const markets = [...new Set(rows.map((row) => row.output?.name || row.output?.pick || row.market_family || row.market_key).filter(Boolean))].sort();
     const teams = [...new Set(rows.flatMap((row) => [row.home_team, row.away_team]).filter(Boolean))].sort();
     const groupedMatches = new Map();
     for (const row of rows.slice().reverse()) {
@@ -171,6 +172,7 @@ export async function GET(request) {
       scope: { preset: filters.preset, from, to },
       totals: { won, lost, pending, total: rows.length, accuracy: settled ? Math.round(won / settled * 10_000) / 100 : 0 },
       curve,
+      marketPerformance: buildMarketPerformance(rows),
       matches: [...groupedMatches.values()].map((match) => ({
         ...match,
         isLive: false,

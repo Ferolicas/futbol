@@ -1,13 +1,30 @@
 import { pgPool } from '../../../../lib/db';
 import { verifyStoredPredictionProof } from '../../../../lib/prediction-seal';
+import { redisGet, redisSet } from '../../../../lib/redis';
+import { clientIp, redisRateLimit } from '../../../../lib/ratelimit-redis';
 
 export const dynamic = 'force-dynamic';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export async function GET(_request, props) {
+export async function GET(request, props) {
   const { id } = await props.params;
   if (!UUID.test(id || '')) return Response.json({ error: 'Prueba no válida' }, { status: 400 });
+  const rate = await redisRateLimit('public-proof', clientIp(request), 15, 60, { failClosed: true });
+  if (!rate.available) return Response.json({ error: 'Verificación temporalmente no disponible' }, { status: 503 });
+  if (!rate.success) {
+    return Response.json({ error: 'Demasiadas verificaciones. Inténtalo en un minuto.' }, {
+      status: 429,
+      headers: { 'Retry-After': '60', 'Cache-Control': 'private, no-store' },
+    });
+  }
+  const cacheKey = `public-proof:v1:${id}`;
+  const cached = await redisGet(cacheKey);
+  if (cached && (!cached.contentRedacted || Date.now() < new Date(cached.kickoff).getTime())) {
+    return Response.json(cached, {
+      headers: { 'Cache-Control': cached.contentRedacted ? 'public, max-age=60' : 'public, max-age=3600, immutable', 'X-Proof-Cache': 'HIT' },
+    });
+  }
   const { rows } = await pgPool.query(
     `SELECT p.id,p.public_id,p.canonical_payload,p.content_hash,p.merkle_path,p.leaf_index,p.status,
             r.sport,r.fixture_id,r.kickoff,o.market_key,
@@ -44,7 +61,7 @@ export async function GET(_request, props) {
       responseTsrBase64: Buffer.from(row.response_tsr).toString('base64'),
     }),
   };
-  return Response.json({
+  const payload = {
     id: row.public_id,
     status: 'sealed',
     provider: row.provider,
@@ -55,5 +72,8 @@ export async function GET(_request, props) {
     checks: { canonicalHash: verification.hashValid, merkleInclusion: verification.merkleValid, rfc3161Signature: verification.tsaValid },
     contentRedacted,
     technical,
-  }, { headers: { 'Cache-Control': contentRedacted ? 'public, max-age=60' : 'public, max-age=3600, immutable' } });
+  };
+  const secondsToKickoff = Math.max(1, Math.floor((new Date(row.kickoff).getTime() - Date.now()) / 1000));
+  await redisSet(cacheKey, payload, contentRedacted ? Math.min(60, secondsToKickoff) : 3600);
+  return Response.json(payload, { headers: { 'Cache-Control': contentRedacted ? 'public, max-age=60' : 'public, max-age=3600, immutable', 'X-Proof-Cache': 'MISS' } });
 }

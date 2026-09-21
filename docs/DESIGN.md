@@ -183,6 +183,15 @@ La tipografía principal es Plus Jakarta Sans y los números/datos usan JetBrain
   el encuentro no haya terminado. Tras el final oficial se revelan con nombre,
   cuota, casa y sticker Ganada/Perdida; Pendiente oficial y Nula conservan el
   tratamiento neutro del resto de mercados.
+- Rendimiento público: `/rendimiento` es una superficie vertical independiente,
+  móvil primero, que reutiliza el petróleo, la retícula y el verde menta de la
+  marca. Separa visualmente el archivo histórico sin sello del periodo FreeTSA,
+  presenta la precisión acumulada y reserva las tarjetas detalladas a resultados
+  finalizados con prueba externa. Los filtros viven en una sola banda compacta,
+  la carga usa skeleton y la paginación conserva botones de al menos 40 px.
+  El ranking de mercados ordena el porcentaje de acierto descendente y conserva
+  visibles ganadas, perdidas y el tamaño de la muestra para evitar porcentajes
+  sin contexto.
 
 ## Motion y rendimiento
 

@@ -13,6 +13,7 @@ import {
   Layers3,
   PanelsTopLeft,
   Radio,
+  ShieldCheck,
   Sparkles,
   Target,
   Users,
@@ -360,6 +361,10 @@ export default function LandingPage() {
                 <AndroidIcon size={18} />
                 Instalar App
               </a>
+              <button className="btn-hero-sec" onClick={() => router.push('/rendimiento')}>
+                <ShieldCheck size={18} aria-hidden="true" />
+                Ver rendimiento
+              </button>
             </div>
             <div className="apple-hero-stats" aria-label="Resumen de cobertura">
               <div><strong>15+</strong><span>Ligas</span></div>
@@ -507,6 +512,7 @@ export default function LandingPage() {
                 <button onClick={() => router.push('/sign-in')}>Iniciar sesión</button>
                 <button onClick={() => goToScene(1, true)}>Funciones</button>
                 <button onClick={() => goToScene(FIRST_PLAN_SCENE, true)}>Precios</button>
+                <button onClick={() => router.push('/rendimiento')}>Rendimiento</button>
               </div>
             </footer>
           </div>

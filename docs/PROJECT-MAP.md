@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-21 · Base: `0b7151f` · Next 16, sellado externo, asistente DB-only y operación enterprise
+Actualizado: 2026-09-21 · Base: `1c23a86` · Next 16, transparencia pública, sellado externo y operación enterprise
 
 ## Identidad y stack
 
@@ -38,10 +38,12 @@ Las creatividades listas para campañas se guardan en `public/marketing/`.
 | `/dashboard/futbol-americano` | `app/dashboard/futbol-americano/page.js` | Sesión (Free/Pro) | Alias que redirige al panel único con fútbol americano activo |
 | `/dashboard/baloncesto/analisis/[id]` | `app/dashboard/baloncesto/analisis/[id]/page.js` | Sesión (Free/Pro) | Análisis completo por mitades/cuartos, mercados Bet365 y veredicto |
 | `/dashboard/futbol-americano/analisis/[id]` | `app/dashboard/futbol-americano/analisis/[id]/page.js` | Sesión (Free/Pro) | Análisis completo por mitades/cuartos, mercados Bet365 y veredicto |
+| `/rendimiento` | `app/rendimiento/` | No | Histórico finalizado, ranking de acierto por mercado y registro certificado FreeTSA paginado |
 | `/api/dashboard-search` | `app/api/dashboard-search/route.js` | Sesión (Free/Pro) | Búsqueda DB-only de equipos, ligas y partidos en los cuatro deportes |
 | `/api/verificar-pronostico/[id]` | `app/api/verificar-pronostico/[id]/route.js` | Pública | Recalcula SHA-512, Merkle y firma RFC 3161; oculta el contenido hasta el kickoff |
 | `/api/assistant/chat` | `app/api/assistant/chat/route.js` | Sesión (Free/Pro) | Chat Groq con herramientas locales de solo lectura sobre partidos/pronósticos existentes |
-| `/api/admin/prediction-history` | `app/api/admin/prediction-history/route.js` | Admin/owner | Histórico acumulado y filtros temporales/de liga/mercado/equipo sin recalcular resultados |
+| `/api/admin/prediction-history` | `app/api/admin/prediction-history/route.js` | Admin/owner | Histórico, filtros y ranking exacto de mercados sin recalcular resultados |
+| `GET /api/public/rendimiento` | `app/api/public/rendimiento/route.js` | Pública, limitada | Estadísticas y ranking de mercados finalizados más recomendaciones selladas paginadas, con caché Redis de cinco minutos |
 | `/admin` | `app/admin/` | Admin/owner | Operación y clientes |
 | `/ferney` | `app/ferney/` | Privada | Auditoría del propietario |
 | `/ferney/informes` | `app/ferney/informes/` | Admin/owner | Informes interactivos móviles de fútbol y MLB |
@@ -760,6 +762,17 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   el tramo anterior con las selecciones publicadas en `combinada_dia`, liquidadas
   por la función oficial existente. El corte evita duplicar periodos y no altera
   ni vuelve a guardar aciertos o pérdidas.
+- 2026-09-21: `/rendimiento` no consume el endpoint admin. El agregado público
+  cuenta el archivo anterior, marcado siempre como no certificado, pero la lista
+  paginada sólo entrega recomendaciones finalizadas con FreeTSA válido. No
+  expone run IDs, fixture IDs, snapshots, modelos, JSON canónico ni TSR.
+- 2026-09-21: admin y `/rendimiento` agrupan cada mercado exacto por deporte y
+  filtros activos. El porcentaje usa `ganadas / (ganadas + perdidas)`; push y
+  void aparecen como nulas en la muestra, sin modificar el denominador.
+- 2026-09-21: `/api/public/rendimiento` usa caché Redis de cinco minutos y
+  límite distribuido de 60 consultas/minuto/IP. El verificador RFC 3161 admite
+  15 verificaciones/minuto/IP y cachea respuestas válidas; si Redis cae, ambos
+  endpoints fallan cerrados antes de ejecutar SQL u OpenSSL.
 
 - 2026-08-14: `futbol-daily` persiste `startedBy` con el ID de BullMQ. El mismo
   job puede continuar en su siguiente intento después de una caída de API; un
