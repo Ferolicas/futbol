@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Globe2,
   Headphones,
+  KeyRound,
   LogOut,
   MessageCircle,
   Minimize2,
@@ -41,6 +42,14 @@ export default function ChatWidget() {
   const [sending, setSending] = useState(false);
   const [unread, setUnread] = useState(0);
   const [feedback, setFeedback] = useState('');
+  const [pwdModalOpen, setPwdModalOpen] = useState(false);
+  const [pwdCurrent, setPwdCurrent] = useState('');
+  const [pwdNew, setPwdNew] = useState('');
+  const [pwdConfirm, setPwdConfirm] = useState('');
+  const [pwdSaving, setPwdSaving] = useState(false);
+  const [pwdError, setPwdError] = useState('');
+  const [pwdSuccess, setPwdSuccess] = useState(false);
+  const pwdDialogRef = useRef(null);
 
   openRef.current = isOpen;
   useEffect(() => setMounted(true), []);
@@ -154,6 +163,77 @@ export default function ChatWidget() {
       await supabase?.auth.signOut();
     } finally {
       window.location.assign('/');
+    }
+  };
+
+  const openPasswordModal = () => {
+    setAccountOpen(false);
+    setPwdCurrent('');
+    setPwdNew('');
+    setPwdConfirm('');
+    setPwdError('');
+    setPwdSuccess(false);
+    setPwdModalOpen(true);
+  };
+
+  const closePasswordModal = useCallback(() => {
+    if (pwdSaving) return;
+    setPwdModalOpen(false);
+  }, [pwdSaving]);
+
+  useEffect(() => {
+    if (!pwdModalOpen) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const frame = window.requestAnimationFrame(() => {
+      pwdDialogRef.current?.querySelector('input')?.focus();
+    });
+    const onEscape = (event) => {
+      if (event.key === 'Escape') closePasswordModal();
+    };
+    document.addEventListener('keydown', onEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener('keydown', onEscape);
+    };
+  }, [pwdModalOpen, closePasswordModal]);
+
+  const submitPasswordChange = async (event) => {
+    event.preventDefault();
+    if (pwdSaving) return;
+    setPwdError('');
+
+    if (!pwdCurrent || !pwdNew || !pwdConfirm) {
+      setPwdError('Completa todos los campos');
+      return;
+    }
+    if (pwdNew !== pwdConfirm) {
+      setPwdError('Las contraseñas no coinciden');
+      return;
+    }
+    if (pwdNew.length < 8) {
+      setPwdError('La contraseña debe tener al menos 8 caracteres');
+      return;
+    }
+
+    setPwdSaving(true);
+    try {
+      const response = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: pwdCurrent, newPassword: pwdNew, confirmPassword: pwdConfirm }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'No se pudo cambiar la contraseña.');
+      setPwdSuccess(true);
+      setPwdCurrent('');
+      setPwdNew('');
+      setPwdConfirm('');
+    } catch (error) {
+      setPwdError(error.message || 'No se pudo cambiar la contraseña.');
+    } finally {
+      setPwdSaving(false);
     }
   };
 
@@ -399,6 +479,10 @@ export default function ChatWidget() {
               <span>Instalar app</span>
               <small>Android</small>
             </a>
+            <button type="button" className="dashboard-account-action is-password" onClick={openPasswordModal} role="menuitem">
+              <KeyRound size={17} aria-hidden="true" />
+              <span>Cambiar contraseña</span>
+            </button>
             <button type="button" className="dashboard-account-action is-logout" onClick={signOut} disabled={loggingOut} role="menuitem">
               <LogOut size={17} aria-hidden="true" />
               <span>{loggingOut ? 'Cerrando sesión…' : 'Cerrar sesión'}</span>
@@ -407,6 +491,73 @@ export default function ChatWidget() {
         )}
       </div>
       {mounted ? createPortal(panel, document.body) : null}
+      {mounted && pwdModalOpen ? createPortal(
+        <div className="password-modal-overlay" onClick={(event) => { if (event.target === event.currentTarget) closePasswordModal(); }}>
+          <section
+            className="password-modal-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="password-modal-title"
+            tabIndex={-1}
+            ref={pwdDialogRef}
+          >
+            <button type="button" className="password-modal-close" onClick={closePasswordModal} aria-label="Cerrar" disabled={pwdSaving}>
+              <ArrowLeft size={18} aria-hidden="true" style={{ transform: 'rotate(45deg)' }} />
+            </button>
+            <span className="password-modal-icon"><KeyRound size={22} aria-hidden="true" /></span>
+            <h2 id="password-modal-title">Cambiar contraseña</h2>
+
+            {pwdSuccess ? (
+              <>
+                <p className="password-modal-success">
+                  <CheckCircle2 size={18} aria-hidden="true" /> Contraseña actualizada correctamente.
+                </p>
+                <button type="button" className="chat-primary-action" onClick={closePasswordModal}>Listo</button>
+              </>
+            ) : (
+              <form onSubmit={submitPasswordChange}>
+                <label>
+                  <span>Contraseña actual</span>
+                  <input
+                    type="password"
+                    value={pwdCurrent}
+                    onChange={(event) => setPwdCurrent(event.target.value)}
+                    autoComplete="current-password"
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Nueva contraseña</span>
+                  <input
+                    type="password"
+                    value={pwdNew}
+                    onChange={(event) => setPwdNew(event.target.value)}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Confirmar nueva contraseña</span>
+                  <input
+                    type="password"
+                    value={pwdConfirm}
+                    onChange={(event) => setPwdConfirm(event.target.value)}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                </label>
+                {pwdError && <div className="chat-feedback is-error" role="alert">{pwdError}</div>}
+                <button type="submit" className="chat-primary-action" disabled={pwdSaving}>
+                  {pwdSaving ? 'Guardando…' : 'Guardar contraseña'}
+                </button>
+              </form>
+            )}
+          </section>
+        </div>,
+        document.body,
+      ) : null}
     </>
   );
 }
