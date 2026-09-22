@@ -163,6 +163,10 @@ test('Baseball publica solo selecciones cruzadas con Bet365 y cuota mínima 1.20
   assert.ok(result.selectable.every((selection) => selection.bookmaker === 'Bet365'));
   assert.ok(result.selectable.every((selection) => selection.odd >= 1.20));
   assert.ok(result.selectable.every((selection) => selection.rawProbability >= 65));
+  // prediction-ledger.js divide empiricalProbability una sola vez entre 100
+  // para guardar probability_raw en [0,1] (CHECK de la BD) — debe venir ya en
+  // escala 0-100, nunca 0-10000 (bug de doble multiplicación, 2026-09-08).
+  assert.ok(result.selectable.every((selection) => selection.empiricalProbability >= 0 && selection.empiricalProbability <= 100));
   assert.ok(result.selectable.every((selection) => selection.bookmakerMarket));
   assert.ok(result.selectable.every((selection) => selection.bookmakerSelection));
   assert.ok(result.selectable.every((selection) => selection.validationStatus === 'calibrated'));
