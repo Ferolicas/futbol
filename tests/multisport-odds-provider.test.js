@@ -30,7 +30,7 @@ test('API-Sports (mismo proveedor que ya trae Bet365 en fútbol) es la fuente PR
   const source = fs.readFileSync(new URL('../lib/multisport-providers.js', import.meta.url), 'utf8');
   const fnStart = source.indexOf('export async function getSportOdds');
   const mapping = source.indexOf('apiSportsFixtureIdFor(config.key', fnStart);
-  const featured = source.indexOf('const featured = await fetchMultisportBet365Event', fnStart);
+  const featured = source.indexOf('const featured = await tryFeaturedOdds', fnStart);
   assert.ok(fnStart > 0);
   assert.ok(mapping > fnStart, 'debe mapear el fixture de API-Sports dentro de getSportOdds');
   assert.ok(featured > mapping, 'The Odds API debe consultarse DESPUÉS de intentar API-Sports, no antes');
@@ -44,6 +44,17 @@ test('getSportOdds propaga emptyTtl a fetchMultisportBet365Event (no solo ttl)',
   const start = source.indexOf('const featured = await fetchMultisportBet365Event');
   const call = source.slice(start, source.indexOf('}).catch((error) => {', start));
   assert.match(call, /emptyTtl:\s*options\.emptyTtl/);
+});
+
+test('NCAA de fútbol americano nunca toca API-Sports partido a partido; si ESPN no trae cuota, cae a la cartelera completa de The Odds API en una sola llamada', () => {
+  const source = fs.readFileSync(new URL('../lib/multisport-providers.js', import.meta.url), 'utf8');
+  const ncaaStart = source.indexOf("if (/^espn-ncaa/.test");
+  const ncaaEnd = source.indexOf('// Los planes gratuitos de API-Sports', ncaaStart);
+  assert.ok(ncaaStart > 0);
+  assert.ok(ncaaEnd > ncaaStart);
+  const ncaaBlock = source.slice(ncaaStart, ncaaEnd);
+  assert.match(ncaaBlock, /tryFeaturedOdds\(config, game, options\)/, 'NCAA debe intentar The Odds API cuando ESPN no trae la cuota embebida');
+  assert.doesNotMatch(ncaaBlock, /apiSportsFixtureIdFor|getApiSportsOddsForGame/, 'NCAA jamás debe pasar por API-Sports partido a partido (100-150+ partidos por jornada)');
 });
 
 test('el cron de béisbol (cada 15 min) ya no fuerza un TTL de cuota más corto que su propio intervalo', () => {

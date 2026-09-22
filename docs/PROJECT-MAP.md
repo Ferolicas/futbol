@@ -1285,3 +1285,27 @@ repitiendo la misma llamada de cartelera completa en cada tick. Ahora dura
 ~20h una vez encontrada la cuota (`oddsTtl`) y reintenta cada 2h mientras no
 aparece (`oddsEmptyTtl`); el mapeo diario de IDs de API-Sports (`oddsMappingTtl`)
 pasó de 10 min a 6h por el mismo motivo.
+
+### Reintentos de cuota NFL y cuota NCAA fútbol americano (2026-09-22)
+
+`shouldRetryMissingBaseballOdds`/`selectGamesNeedingCurrentAnalysis` (antes
+sólo béisbol) ya son genéricos: `retryMissingOdds` funciona para cualquier
+deporte, y `minLeadMs` impide tocar un partido a menos de esa distancia de su
+propio kickoff, sin importar a qué hora corrió el cron. NFL tiene 3 pases
+nuevos (`american-football-analyze-pregame-06/10/14`, 6:00/10:00/14:00 hora
+Colombia) que sólo reintentan partidos con análisis pero sin cuota todavía,
+con `oddsRetryMinLeadMs=4h` — nunca reanalizan la jornada completa.
+
+NCAA fútbol americano (FBS/FCS) **nunca** pasa por API-Sports partido a
+partido (puede superar 100-150 partidos/sábado; agotaría el cupo diario
+compartido con NFL). Antes, si ESPN no traía la cuota embebida en su
+calendario, el partido quedaba sin cuota sin más intento. Ahora
+`tryFeaturedOdds` (helper compartido en `getSportOdds`, lib/multisport-providers.js)
+cae a la cartelera COMPLETA de NCAA vía The Odds API (`americanfootball_ncaaf`,
+ya mapeado en `multisportOddsKey`) — una sola llamada de 3 créditos cubre
+TODOS los partidos del día, sin importar cuántos haya. Como reutiliza los
+mismos 3 pases de reintento de NFL (misma jornada `american_football`), el
+costo máximo es 4 llamadas/día × 3 créditos = 12/día (~360/mes de 500,
+verificado con el usuario). En la práctica el cupo de The Odds API queda casi
+exclusivo para NCAA, porque béisbol/NBA/NFL ahora resuelven casi siempre por
+API-Sports y sólo caen ahí si esa falla.
