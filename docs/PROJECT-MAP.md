@@ -1248,3 +1248,40 @@ LÍNEA de apuesta, p.ej. "St. Louis Cardinals: más de 4.5 carreras" o "Ajax ·
 partidos ("más de 4.5 carreras", "1ª Parte — Córners a favor — Más de 4.5").
 No toca el dropdown de filtro "Mercado" (sigue listando nombres literales;
 sigue funcionando porque el texto agrupado es subcadena del literal).
+
+Además: `/rendimiento` gana la pestaña "Opciones ganadoras y perdedoras"
+(TODAS las recomendaciones individuales, no solo las selladas — cada una
+marca si tiene o no sello FreeTSA) delante de "Mercados ganadores y
+perdedores" (ahora con toggle de orden). Los nombres de mercado de fútbol en
+el ledger ya no muestran la clave interna cruda (ej. `ah_home_p1`):
+`footballOutputs` (prediction-ledger.js) guardaba la fila de `_scored` en vez
+del ítem de recomendación con el nombre; corregido hacia adelante y con
+fallback `marketLabel()` al leer filas ya persistidas (public-performance.js).
+
+## Cuotas multisport — API-Sports como fuente primaria (2026-09-22)
+
+Béisbol/basketball/NFL cambiaron su prioridad de cuotas: **API-Sports
+(API-Baseball/API-Basketball/API-NFL) es ahora la fuente PRIMARIA** en
+`getSportOdds` (lib/multisport-providers.js) — mismo proveedor que ya trae
+Bet365 en fútbol, 100 llamadas/día por deporte. The Odds API (the-odds-api.com,
+proveedor aparte, ~16 créditos/día compartidos entre 5 sport-keys) queda como
+respaldo secundario, solo si API-Sports no tenía la línea. El orden real:
+1) cuotas embebidas en el calendario ESPN de NCAA (protege ese cupo de una
+jornada que por sí sola lo agotaría), 2) API-Sports por partido (mapeo diario
+de IDs + cuotas del partido), 3) The Odds API.
+
+Ojo con NFL: a diferencia de MLB (MLB Stats, oficial e ilimitado) y NBA
+(`nba` provider, cupo separado del de cuotas), el fútbol americano **no tiene
+API oficial separada** — su calendario/marcador/estadísticas YA usan el mismo
+cupo `american_football` de API-Sports que ahora también sirve cuotas. En un
+domingo cargado el cupo podría agotarse por las estadísticas en vivo antes de
+llegar a las cuotas; el diseño falla seguro (las cuotas de ese día puntual no
+llegan, nunca se sacrifica el marcador/estadística en vivo, que se pide antes).
+
+Se corrigió también un bug de caché que agotaba el cupo compartido de The Odds
+API en ~1h: el cron de cobertura de béisbol (`baseball-coverage-15m`, cada 15
+min) pasaba un TTL de cuota de 10 min — más corto que su propio intervalo —
+repitiendo la misma llamada de cartelera completa en cada tick. Ahora dura
+~20h una vez encontrada la cuota (`oddsTtl`) y reintenta cada 2h mientras no
+aparece (`oddsEmptyTtl`); el mapeo diario de IDs de API-Sports (`oddsMappingTtl`)
+pasó de 10 min a 6h por el mismo motivo.
