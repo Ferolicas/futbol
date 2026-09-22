@@ -151,12 +151,13 @@ test('la tarjeta pendiente abre estado automático y conserva la evidencia en el
   assert.doesNotMatch(shared, /Generar análisis ahora/);
 });
 
-test('todos los consumidores operativos de Baseball solicitan exclusivamente MLB', () => {
-  assert.deepEqual(getMultisportConfig('baseball').competitions.map((competition) => competition.id), ['1']);
-  assert.deepEqual(Object.keys(MLB_SPORT_IDS), ['1']);
+test('los consumidores operativos de Baseball solicitan MLB y Triple-A (única MiLB con cuota Bet365 verificada), nunca AA/A+/A/Rookie', () => {
+  assert.deepEqual(getMultisportConfig('baseball').competitions.map((competition) => competition.id), ['1', '11']);
+  assert.deepEqual(Object.keys(MLB_SPORT_IDS), ['1', '11']);
 
   const leaguesRoute = fs.readFileSync(path.join(__dirname, '../app/api/baseball/leagues/route.js'), 'utf8');
-  assert.doesNotMatch(leaguesRoute, /id:\s*(11|12|13|14|16)\b/);
+  assert.match(leaguesRoute, /id:\s*11\b/);
+  assert.doesNotMatch(leaguesRoute, /id:\s*(12|13|14|16)\b/);
 });
 
 test('la lista de partidos no transporta el análisis pesado de jugadores y entradas', () => {

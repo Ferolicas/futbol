@@ -1309,3 +1309,60 @@ costo máximo es 4 llamadas/día × 3 créditos = 12/día (~360/mes de 500,
 verificado con el usuario). En la práctica el cupo de The Odds API queda casi
 exclusivo para NCAA, porque béisbol/NBA/NFL ahora resuelven casi siempre por
 API-Sports y sólo caen ahí si esa falla.
+
+## Dos bugs de escala críticos en multisport, activos desde 2026-09-08 (2026-09-22)
+
+`buildMultisportCombinada` (lib/multisport-analysis.js, usada por béisbol/NBA/
+NFL) tenía DOS bugs de escala numérica introducidos en el mismo commit que
+creó el ledger (e790e9c, "harden prediction integrity"):
+
+1. **`empiricalProbability` duplicaba el ×100`** (rawProbabilityValue ya
+   devuelve 0-100; se volvía a multiplicar): un 82% llegaba a
+   prediction-ledger.js como 8200, violando el CHECK `probability_raw<=1` de
+   `prediction_market_outputs` — la fila entera se perdía en CADA inserción.
+2. **`calibrateProbability(empiricalProbability, ...)` recibía 0-100 en vez de
+   0-1**: `clampProbability` fijaba cualquier valor >1 en 100%, así que la
+   probabilidad calibrada de TODO mercado salía siempre en 100% sin importar
+   el cálculo real del motor.
+
+Fútbol no se vio afectado (usa `buildModelCombinada`, código separado). Ambos
+corregidos y verificados en producción (partido real: de 100% en el 100% de
+~280 mercados a probabilidades creíbles acordes a las cuotas).
+
+**Consecuencia que sigue viva, no es un bug nuevo**: el criterio de
+publicación exige, además de probabilidad ≥65% y fiabilidad ≥90%, que el
+mercado tenga calibración real (`prediction_models.metrics.validation` para
+multisport / `metrics.candidate.horizons[horizon].families` para fútbol —
+MISMO mecanismo, `refreshPredictionLedgerCalibration` en prediction-ledger.js,
+solo que fútbol además segmenta por horizonte) con ≥30 observaciones
+liquidadas por familia exacta. Como los dos bugs de arriba impidieron
+prácticamente toda inserción/cálculo correcto en multisport desde el 8 de
+septiembre, ese catálogo de calibración está vacío para béisbol/NBA/NFL — el
+mecanismo está bien construido y conectado (`baseball/basketball/american-
+football-retrain-daily` ya lo llaman), solo necesita que se acumulen partidos
+liquidados reales desde ahora. No eliminar ni relajar sin decisión explícita:
+es la misma barrera que ya mantiene honestas las recomendaciones de fútbol.
+
+## MiLB: Triple-A añadida (resto de MiLB sigue fuera) (2026-09-22)
+
+Bet365 SÍ publica cuota real para Triple-A (sportId 11 en MLB Stats API):
+hándicap ±1.5 y una línea de total de carreras — confirmado por el usuario en
+Bet365, no asumido. El resto de MiLB (AA=12, A+=13, A=14, Rookie=16) sigue sin
+pedirse: sin verificación de que Bet365 las ofrezca.
+
+- `lib/multisport-config.js`: `competitions` de baseball gana la entrada
+  `{id:'11', key:'aaa', sportId:11}`. El calendario (`getSportGamesByDate`)
+  ya iteraba `config.competitions` genéricamente — no hizo falta tocar esa
+  parte.
+- `lib/mlb-stats-api.js`: `MLB_SPORT_IDS` gana `11: 'Triple-A'`.
+- `lib/multisport-providers.js` (`getSportOdds`): el bloqueo "solo MLB"
+  ahora permite `league.id` 1 y 11.
+- `lib/odds-api.js`: Triple-A tiene su PROPIO board en The Odds API
+  (`baseball_milb`, confirmado vía `fetchAvailableSports()` — llamada
+  gratuita, no gasta cupo), nunca comparte el de MLB. Añadido a
+  `FEATURED_MULTISPORT_KEYS` (cupo diario completo, no el reservado).
+  API-Sports se sigue intentando primero (barato, sin riesgo); si no
+  encuentra AAA ahí, cae al board de The Odds API igual que NCAA.
+- `app/api/baseball/leagues/route.js`: Triple-A visible en el filtro de liga.
+- `scripts/backfill-multisport-history.js`: quitado el bloqueo explícito que
+  impedía pedir MiLB por backfill.
