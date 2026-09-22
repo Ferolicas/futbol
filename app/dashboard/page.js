@@ -1,5 +1,6 @@
 'use client';
 import { useFreeAccess, FreeRecommendations, LockedAnalysis } from './components/FreeAccessProvider';
+import { DismissConfirmDialog, HiddenFixturesPanel } from './components/SharedSportAnalysis';
 
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -13,6 +14,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  EyeOff,
   Flag,
   Layers3,
   Save,
@@ -158,6 +160,11 @@ export function FootballDashboard({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [hidden, setHidden] = useState([]);
+  // Confirmación antes de ocultar (evita ocultar por error) + panel para
+  // recuperar lo ya ocultado. confirmDismissId = fixtureId pendiente de
+  // confirmar, null = sin diálogo abierto.
+  const [confirmDismissId, setConfirmDismissId] = useState(null);
+  const [showHiddenPanel, setShowHiddenPanel] = useState(false);
   const [favorites, setFavorites] = useState([]);
   const [analyzed, setAnalyzed] = useState([]);
   const [analyzedOdds, setAnalyzedOdds] = useState({});
@@ -865,6 +872,10 @@ export function FootballDashboard({
   };
 
   const hiddenSet = useMemo(() => new Set(hidden), [hidden]);
+  const hiddenFixtures = useMemo(
+    () => fixtures.filter(f => hiddenSet.has(f.fixture.id)),
+    [fixtures, hiddenSet],
+  );
   const favoritesSet = useMemo(() => new Set(favorites), [favorites]);
   const analyzedSet = useMemo(() => new Set(analyzed), [analyzed]);
   const fixtureById = useMemo(
@@ -967,6 +978,14 @@ export function FootballDashboard({
     }
   };
 
+  // El botón X solo ABRE la confirmación — dismissMatch (el que oculta de
+  // verdad) se dispara únicamente al confirmar en el diálogo. Evita ocultar
+  // un partido por un click accidental.
+  const requestDismiss = useCallback((e, fixtureId) => {
+    e.stopPropagation();
+    setConfirmDismissId(fixtureId);
+  }, []);
+
   // Unified dismiss: removes from both Partidos AND Analizados tabs.
   // Optimistic con rollback — si la persistencia falla, devolvemos la UI al
   // estado previo en vez de mentir al usuario (mismo patron que saveCombinada).
@@ -1015,6 +1034,32 @@ export function FootballDashboard({
       setError('No se pudo ocultar el partido — restaurado.');
     }
   }, [fixturesMutate, setSelectedMarkets]);
+
+  // Recuperar un partido ocultado por error (panel "Ocultos"). Mismo patrón
+  // optimista + rollback que dismissMatch, en sentido inverso.
+  const unhideMatch = useCallback(async (fixtureId) => {
+    const prevHidden = hiddenRef.current;
+    setHidden(prev => prev.filter(id => id !== fixtureId));
+    try {
+      fixturesMutate(prev => prev && ({
+        ...prev,
+        hidden: (prev.hidden || []).filter(id => id !== fixtureId),
+      }), { revalidate: false });
+    } catch {}
+    try {
+      const res = await fetch('/api/hidden', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fixtureId }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      console.error('[unhideMatch] rollback:', e.message);
+      setHidden(prevHidden);
+      try { fixturesMutate(); } catch {}
+      setError('No se pudo recuperar el partido.');
+    }
+  }, [fixturesMutate]);
 
   // Toggle favorite — optimistic update + persist + rollback si falla.
   //
@@ -1074,7 +1119,7 @@ export function FootballDashboard({
   }, [fixturesMutate]);
 
   // Keep backward-compatible aliases
-  const doHide = dismissMatch;
+  const doHide = requestDismiss;
   // Save current combinada (optimistic con rollback si falla en backend)
   const saveCombinada = async () => {
     if (!customCombinada || customCombinada.selections.length === 0) return;
@@ -1402,7 +1447,7 @@ export function FootballDashboard({
       selMarkets={selectedMarkets[m.fixture.id] || EMPTY_MARKETS}
       onToggleMarket={toggleAccordionMarket}
       onViewFull={openAnalysisModal}
-      onRemove={dismissMatch}
+      onRemove={requestDismiss}
       isFavorite={favoritesSet.has(m.fixture.id)}
       onFavorite={toggleFavorite}
       userTz={userTz}
@@ -1461,6 +1506,16 @@ export function FootballDashboard({
               saving={leagueFilterSaving}
             />
             <SportPicker value={activeSport} onChange={onSportChange} />
+            {hiddenFixtures.length > 0 && (
+              <button
+                type="button"
+                className="btn-hidden-panel"
+                onClick={() => setShowHiddenPanel(true)}
+                title="Ver y recuperar partidos ocultos"
+              >
+                <EyeOff size={15} aria-hidden="true" /> Ocultos ({hiddenFixtures.length})
+              </button>
+            )}
           </div>
         </div>
 
@@ -1628,6 +1683,28 @@ export function FootballDashboard({
     {/* MODAL: Análisis completo */}
     {analysisModalId && (
       <AnalysisModal id={analysisModalId} onClose={() => setAnalysisModalId(null)} />
+    )}
+
+    {/* Confirmación antes de ocultar — el click en la X ya no oculta directo */}
+    {confirmDismissId && (
+      <DismissConfirmDialog
+        fixture={fixtureById.get(confirmDismissId)}
+        onCancel={() => setConfirmDismissId(null)}
+        onConfirm={() => {
+          dismissMatch({ stopPropagation() {} }, confirmDismissId);
+          setConfirmDismissId(null);
+        }}
+      />
+    )}
+
+    {/* Panel: recuperar partidos ocultos */}
+    {showHiddenPanel && (
+      <HiddenFixturesPanel
+        fixtures={hiddenFixtures}
+        userTz={userTz}
+        onUnhide={unhideMatch}
+        onClose={() => setShowHiddenPanel(false)}
+      />
     )}
     </>
   );

@@ -1,6 +1,6 @@
 'use client';
 import { useFreeAccess } from '../components/FreeAccessProvider';
-import SharedSportCard from '../components/SharedSportAnalysis';
+import SharedSportCard, { DismissConfirmDialog, HiddenFixturesPanel } from '../components/SharedSportAnalysis';
 
 /**
  * Baseball Dashboard — paleta amarillo tierra (amber-500/700/300).
@@ -29,6 +29,7 @@ import {
   ArrowRight,
   BarChart3,
   ChevronDown,
+  EyeOff,
   Layers3,
   Trash2,
   X,
@@ -172,6 +173,9 @@ export function BaseballDashboard({
   const [expandedMatch, setExpandedMatch] = useState(null);
   const [error, setError] = useState('');
   const [analysisModalId, setAnalysisModalId] = useState(null);
+  // Confirmación antes de ocultar (X de la tarjeta) + panel para recuperar.
+  const [confirmDismissId, setConfirmDismissId] = useState(null);
+  const [showHiddenPanel, setShowHiddenPanel] = useState(false);
 
   // Custom combinada — manual selections by user
   const [selectedMarkets, setSelectedMarkets] = useState({});
@@ -258,6 +262,7 @@ export function BaseballDashboard({
         return ov ? { ...g, liveResult: { ...(g.liveResult || {}), ...ov } } : g;
       });
   const hidden = games.filter(g => g.isHidden).map(g => g.id);
+  const hiddenGames = games.filter(g => g.isHidden);
   const favorites = games.filter(g => g.isFavorite).map(g => g.id);
   const analyzed = games.filter(g => g.isAnalyzed).map(g => g.id);
   const loading = loadingFixtures && games.length === 0;
@@ -269,6 +274,13 @@ export function BaseballDashboard({
     onSharedDateChange?.(nextDate);
     setSelectedMarkets({});
     setExpandedMatch(null);
+  };
+
+  // El botón X solo ABRE la confirmación — dismissMatch (el que oculta de
+  // verdad) se dispara únicamente al confirmar en el diálogo.
+  const requestDismiss = (e, fixtureId) => {
+    e.stopPropagation();
+    setConfirmDismissId(fixtureId);
   };
 
   // Optimistic dismiss + favorite con rollback
@@ -290,6 +302,26 @@ export function BaseballDashboard({
       console.error('[baseball:hide] rollback:', err.message);
       fixturesMutate();
       setError('No se pudo ocultar el partido — restaurado.');
+    }
+  };
+
+  // Recuperar un partido ocultado por error (panel "Ocultos").
+  const unhideMatch = async (fixtureId) => {
+    fixturesMutate(prev => prev && ({
+      ...prev,
+      fixtures: prev.fixtures.map(g => g.id === fixtureId ? { ...g, isHidden: false } : g),
+    }), { revalidate: false });
+    try {
+      const res = await fetch('/api/baseball/hidden', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fixtureId, action: 'unhide' }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      console.error('[baseball:unhide] rollback:', err.message);
+      fixturesMutate();
+      setError('No se pudo recuperar el partido.');
     }
   };
 
@@ -434,6 +466,16 @@ export function BaseballDashboard({
             onChange={setLeagueFilter}
           />
           <SportPicker value={activeSport} onChange={onSportChange} />
+          {hiddenGames.length > 0 && (
+            <button
+              type="button"
+              className="btn-hidden-panel"
+              onClick={() => setShowHiddenPanel(true)}
+              title="Ver y recuperar partidos ocultos"
+            >
+              <EyeOff size={15} aria-hidden="true" /> Ocultos ({hiddenGames.length})
+            </button>
+          )}
         </div>
       </div>
 
@@ -495,7 +537,7 @@ export function BaseballDashboard({
                   expandedMatch={expandedMatch}
                   onExpand={(id) => setExpandedMatch(expandedMatch === id ? null : id)}
                   onFavorite={toggleFavorite}
-                  onDismiss={dismissMatch}
+                  onDismiss={requestDismiss}
                   onViewFull={setAnalysisModalId}
                   selectedMarkets={selectedMarkets}
                   onToggleMarket={toggleMarket}
@@ -523,6 +565,26 @@ export function BaseballDashboard({
 
       {analysisModalId && (
         <BaseballAnalysisModal id={analysisModalId} onClose={() => setAnalysisModalId(null)} />
+      )}
+
+      {confirmDismissId && (
+        <DismissConfirmDialog
+          fixture={{ teams: games.find(g => g.id === confirmDismissId)?.teams }}
+          onCancel={() => setConfirmDismissId(null)}
+          onConfirm={() => {
+            dismissMatch({ stopPropagation() {} }, confirmDismissId);
+            setConfirmDismissId(null);
+          }}
+        />
+      )}
+
+      {showHiddenPanel && (
+        <HiddenFixturesPanel
+          fixtures={hiddenGames.map(g => ({ fixture: { id: g.id, date: g.date }, teams: g.teams }))}
+          userTz={userTz}
+          onUnhide={unhideMatch}
+          onClose={() => setShowHiddenPanel(false)}
+        />
       )}
       </div>
       <DashboardStatusDock

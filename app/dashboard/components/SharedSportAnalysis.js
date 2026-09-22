@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowRight, BarChart3, Flag, Layers3, Scale } from 'lucide-react';
+import { ArrowRight, BarChart3, EyeOff, Flag, Layers3, RotateCcw, Scale, TriangleAlert, X } from 'lucide-react';
 import { HorizontalChoiceBar, MatchHeadCard, MatchFullscreen } from '../page';
 import { FreeRecommendations, LockedAnalysis } from './FreeAccessProvider';
 import BaseballResultStats from '../baseball/components/BaseballResultStats';
@@ -87,4 +87,55 @@ export default function SharedSportCard({ game, sport, scoreLabel, timeZone, exp
   return <><div className="acc-card">{head}</div>{expanded && <MatchFullscreen onStep={onStep} head={head} body={game.analysis
     ? <SportAnalysisTabs game={game} sport={sport} scoreLabel={scoreLabel} selected={selected} onToggle={onTogglePick} onViewFull={onViewFull} />
     : <p className="free-empty">El análisis se está preparando automáticamente.</p>} />}</>;
+}
+
+// Confirmación antes de ocultar un partido — el click en la X abre esto en
+// vez de ocultar directo (se ocultaban partidos por error sin poder deshacer).
+// Compartido por fútbol y béisbol (el mismo botón X de MatchHeadCard).
+export function DismissConfirmDialog({ fixture, onCancel, onConfirm }) {
+  const home = fixture?.teams?.home?.name || 'este partido';
+  const away = fixture?.teams?.away?.name;
+  return (
+    <div className="confirm-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="confirm-modal-dialog" role="alertdialog" aria-modal="true" aria-labelledby="dismiss-confirm-title">
+        <span className="confirm-modal-icon"><TriangleAlert size={22} aria-hidden="true" /></span>
+        <h2 id="dismiss-confirm-title">¿Ocultar este partido?</h2>
+        <p>{away ? <>Vas a ocultar <strong>{home} vs {away}</strong> de tu lista.</> : <>Vas a ocultar <strong>{home}</strong> de tu lista.</>} Podés recuperarlo después desde &quot;Ocultos&quot;.</p>
+        <div className="confirm-modal-actions">
+          <button type="button" className="confirm-modal-cancel" onClick={onCancel}>Cancelar</button>
+          <button type="button" className="confirm-modal-confirm" onClick={onConfirm}>Ocultar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Panel para ver y recuperar (des-ocultar) partidos previamente ocultados.
+export function HiddenFixturesPanel({ fixtures, userTz, onUnhide, onClose }) {
+  const tz = userTz || 'UTC';
+  return (
+    <div className="confirm-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="hidden-panel-dialog" role="dialog" aria-modal="true" aria-labelledby="hidden-panel-title">
+        <button type="button" className="hidden-panel-close" onClick={onClose} aria-label="Cerrar"><X size={18} aria-hidden="true" /></button>
+        <h2 id="hidden-panel-title"><EyeOff size={18} aria-hidden="true" /> Partidos ocultos</h2>
+        {fixtures.length === 0
+          ? <p className="hidden-panel-empty">No tenés partidos ocultos hoy.</p>
+          : (
+            <ul className="hidden-panel-list">
+              {fixtures.map((f) => (
+                <li key={f.fixture.id} className="hidden-panel-item">
+                  <div className="hidden-panel-teams">
+                    <span>{f.teams.home.name} vs {f.teams.away.name}</span>
+                    <small>{new Date(f.fixture.date).toLocaleString('es', { timeZone: tz, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small>
+                  </div>
+                  <button type="button" className="hidden-panel-restore" onClick={() => onUnhide(f.fixture.id)}>
+                    <RotateCcw size={14} aria-hidden="true" /> Recuperar
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+      </div>
+    </div>
+  );
 }
