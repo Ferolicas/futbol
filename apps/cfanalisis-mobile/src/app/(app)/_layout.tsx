@@ -3,6 +3,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { useAuth } from '@/lib/auth-context';
 import { useRealtimeLifecycle } from '@/lib/realtime/hooks';
 import { PlansModal } from '@/components/analysis/FreeAccess';
+import { ChangePasswordModal } from '@/components/account/ChangePasswordModal';
 import { colors } from '@/theme/tokens';
 
 export default function AppLayout() {
@@ -17,10 +18,12 @@ export default function AppLayout() {
         <Stack.Screen name="match/[sport]/[id]" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="search" options={{ presentation: 'modal', animation: 'fade' }} />
         <Stack.Screen name="chat" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="assistant" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         <Stack.Screen name="plans" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="payment-status" options={{ animation: 'fade' }} />
       </Stack>
       <PlansModal />
+      <ChangePasswordModal />
     </>
   );
 }

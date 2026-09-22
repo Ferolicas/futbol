@@ -3,12 +3,13 @@ import { Modal, Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronDown, LogOut, MessageCircle, Search, Sparkles } from 'lucide-react-native';
+import { ChevronDown, KeyRound, LogOut, MessageCircle, Search, Sparkles } from 'lucide-react-native';
 import { AppText } from '@/components/ui';
 import { UpgradeButton } from '@/components/analysis/FreeAccess';
 import { useAuth } from '@/lib/auth-context';
 import { useAccess } from '@/lib/access-context';
 import { assetUrl } from '@/lib/config';
+import { openPasswordModal } from '@/lib/password-modal-store';
 import { colors, radius } from '@/theme/tokens';
 
 /** Header autenticado: avatar con menú (chat, planes, salir), logo centrado y búsqueda. */
@@ -57,9 +58,17 @@ export function DashboardHeader() {
             <AppText variant="caption" tone="muted" numberOfLines={1}>{user?.email}</AppText>
             <AppText variant="caption" tone={isFree ? 'muted' : 'accent'}>{isFree ? 'Acceso gratis' : 'Acceso Pro activo'}</AppText>
           </View>
+          <Pressable style={styles.menuItem} onPress={() => { setMenuOpen(false); router.push('/assistant'); }}>
+            <Sparkles size={17} color={colors.accent} />
+            <AppText variant="label">Preguntar</AppText>
+          </Pressable>
           <Pressable style={styles.menuItem} onPress={() => { setMenuOpen(false); router.push('/chat'); }}>
             <MessageCircle size={17} color={colors.accent} />
             <AppText variant="label">Chat y soporte</AppText>
+          </Pressable>
+          <Pressable style={styles.menuItem} onPress={() => { setMenuOpen(false); openPasswordModal(); }}>
+            <KeyRound size={17} color={colors.accent} />
+            <AppText variant="label">Cambiar contraseña</AppText>
           </Pressable>
           {isFree && (
             <Pressable style={styles.menuItem} onPress={() => { setMenuOpen(false); router.push('/plans'); }}>
