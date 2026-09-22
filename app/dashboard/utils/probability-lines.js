@@ -33,7 +33,7 @@ export function probabilityLineItems(probObj, oddObj, namePrefix = '') {
 export function buildFootballProbabilityGroups(p, odds, homeTeam, awayTeam) {
   if (!p) return [];
   const o = odds || {};
-  const withOdd = (label, value, odd) => Number.isFinite(Number(value))
+  const withOdd = (label, value, odd) => (value != null && Number.isFinite(Number(value)))
     ? { label, value, odd: Number(odd) > 1 ? Number(odd) : null }
     : null;
   const choices = (probObj, oddObj, labels) => labels.map(([key, label]) => (
