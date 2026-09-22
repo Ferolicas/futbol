@@ -14042,6 +14042,15 @@ button.free-visible { cursor:pointer; text-align:left; }
 .public-performance-search svg { flex:0 0 auto; color:#718890; }
 .public-performance-search input { min-height:0; padding:0; border:0; outline:0; background:transparent; }
 .public-performance-filters input[type="date"] { padding:0 12px; color-scheme:dark; }
+.public-results-tablist { display:flex; flex-wrap:wrap; gap:8px; margin-top:28px; }
+.public-results-tablist button { min-height:40px; padding:0 16px; border:1px solid rgba(255,255,255,.09); border-radius:11px; background:#0b1820; color:#9aadb3; font:inherit; font-size:.76rem; font-weight:750; cursor:pointer; }
+.public-results-tablist button.is-active { border-color:rgba(94,230,177,.3); background:rgba(94,230,177,.1); color:#7ce6bf; }
+.public-results-tablist button:focus-visible { outline:2px solid #5ee6b1; outline-offset:2px; }
+.public-performance-outcome-filter { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0 18px; }
+.public-performance-outcome-filter button { min-height:34px; padding:0 13px; border:1px solid rgba(255,255,255,.08); border-radius:999px; background:rgba(255,255,255,.02); color:#8ba0a7; font:inherit; font-size:.7rem; font-weight:750; cursor:pointer; }
+.public-performance-outcome-filter button.is-active { border-color:rgba(94,230,177,.28); background:rgba(94,230,177,.1); color:#7ce6bf; }
+.public-performance-outcome-filter button:focus-visible { outline:2px solid #5ee6b1; outline-offset:2px; }
+.public-performance-unsealed { display:inline-flex; align-items:center; margin-top:6px; color:#6c8188; font-size:.66rem; font-weight:700; }
 .market-performance-ranking { margin-top:14px; padding:18px; border:1px solid rgba(255,255,255,.08); border-radius:18px; background:rgba(8,19,26,.84); box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 24px 70px rgba(0,0,0,.16); }
 .market-performance-ranking>header { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:13px; }
 .market-performance-ranking>header>span { display:flex; flex-direction:column; gap:3px; }
@@ -14103,7 +14112,7 @@ button.free-visible { cursor:pointer; text-align:left; }
 .public-performance-periods h2 { margin:13px 0 8px; color:#f1f8f7; font-family:var(--font-mono),monospace; font-size:2rem; }
 .public-performance-periods p { color:#9aacb1; font-size:.82rem; line-height:1.5; }
 .public-performance-periods small { display:block; margin-top:10px; color:#657a82; font-size:.68rem; line-height:1.45; }
-.public-performance-recommendations { margin-top:46px; }
+.public-performance-recommendations { margin-top:18px; }
 .public-performance-recommendations>header { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; padding-bottom:14px; border-bottom:1px solid rgba(255,255,255,.08); }
 .public-performance-recommendations>header p { color:#5ee6b1; font-size:.68rem; font-weight:850; letter-spacing:.12em; text-transform:uppercase; }
 .public-performance-recommendations>header h2 { margin-top:5px; color:#eff7f5; font-size:clamp(1.35rem,3vw,2rem); }

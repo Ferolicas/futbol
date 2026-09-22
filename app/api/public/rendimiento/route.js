@@ -15,6 +15,7 @@ const schema = z.object({
   market: z.string().trim().max(160).optional(),
   team: z.string().trim().max(120).optional(),
   q: z.string().trim().max(80).optional(),
+  outcome: z.enum(['won', 'lost']).optional(),
   page: z.coerce.number().int().min(1).max(10_000).default(1),
   pageSize: z.coerce.number().int().min(6).max(24).default(12),
 }).superRefine((value, context) => {
@@ -40,6 +41,7 @@ function normalizedFilters(data) {
   return {
     from, to, sport: data.sport || null, query: data.q || '',
     league: data.league || '', market: data.market || '', team: data.team || '',
+    outcome: data.outcome || null,
     page: data.page, pageSize: data.pageSize,
   };
 }
@@ -57,7 +59,7 @@ export async function GET(request) {
     const cached = await redisGet(cacheKey);
     if (cached) return Response.json(cached, { headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=300', 'X-Data-Cache': 'HIT' } });
     const performance = await getPublicPerformance(filters);
-    const payload = { ...performance, filters: { preset: parsed.data.preset, from: filters.from, to: filters.to, sport: filters.sport, query: filters.query }, updatedAt: new Date().toISOString() };
+    const payload = { ...performance, filters: { preset: parsed.data.preset, from: filters.from, to: filters.to, sport: filters.sport, query: filters.query, outcome: filters.outcome }, updatedAt: new Date().toISOString() };
     await redisSet(cacheKey, payload, 300);
     return Response.json(payload, { headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=300', 'X-Data-Cache': 'MISS' } });
   } catch (error) {

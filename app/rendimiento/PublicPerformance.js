@@ -56,17 +56,21 @@ export default function PublicPerformance() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [resultsTab, setResultsTab] = useState('individual');
+  const [outcomeFilter, setOutcomeFilter] = useState('');
+  const [marketSortAsc, setMarketSortAsc] = useState(false);
   const query = useMemo(() => {
     const params = new URLSearchParams({ preset: filters.preset, page: String(page), pageSize: '12' });
     if (filters.sport) params.set('sport', filters.sport);
     for (const key of ['league', 'market', 'team']) if (filters[key].trim()) params.set(key, filters[key].trim());
     if (filters.q.trim()) params.set('q', filters.q.trim());
+    if (outcomeFilter) params.set('outcome', outcomeFilter);
     if (filters.preset === 'custom' && filters.from && filters.to) {
       params.set('from', filters.from);
       params.set('to', filters.to);
     }
     return params.toString();
-  }, [filters, page]);
+  }, [filters, page, outcomeFilter]);
 
   useEffect(() => {
     if (filters.preset === 'custom' && (!filters.from || !filters.to)) {
@@ -90,7 +94,12 @@ export default function PublicPerformance() {
   }, [query]);
 
   const updateFilter = (key, value) => { setFilters((current) => ({ ...current, [key]: value })); setPage(1); };
+  const updateOutcome = (value) => { setOutcomeFilter(value); setPage(1); };
   const totals = data?.totals;
+  const sortedMarkets = useMemo(() => {
+    const list = data?.marketPerformance || [];
+    return marketSortAsc ? [...list].sort((left, right) => left.accuracy - right.accuracy) : list;
+  }, [data?.marketPerformance, marketSortAsc]);
   return <main className="public-performance-page">
     <div className="public-performance-ambient" aria-hidden="true"><span /><span /></div>
     <header className="public-performance-nav">
@@ -140,30 +149,44 @@ export default function PublicPerformance() {
           <article className="is-certified"><span><ShieldCheck size={15} /> Periodo FreeTSA</span><h2>{data.periods.certified.accuracy}%</h2><p>{data.periods.certified.total} recomendaciones finalizadas con sello externo verificable.</p><small>{data.coverage.certifiedSince ? `Certificación visible desde ${formatDate(data.coverage.certifiedSince)}` : 'Las primeras recomendaciones aparecerán aquí al finalizar oficialmente.'}</small></article>
         </div>
 
-        <section className="public-market-ranking market-performance-ranking">
+        <div className="public-results-tablist" role="tablist" aria-label="Resultados del motor">
+          <button type="button" role="tab" id="public-results-tab-individual" aria-selected={resultsTab === 'individual'} aria-controls="public-results-panel-individual" className={resultsTab === 'individual' ? 'is-active' : ''} onClick={() => setResultsTab('individual')}>Opciones ganadoras y perdedoras</button>
+          <button type="button" role="tab" id="public-results-tab-markets" aria-selected={resultsTab === 'markets'} aria-controls="public-results-panel-markets" className={resultsTab === 'markets' ? 'is-active' : ''} onClick={() => setResultsTab('markets')}>Mercados ganadores y perdedores</button>
+        </div>
+
+        {resultsTab === 'individual' && <section id="public-results-panel-individual" role="tabpanel" aria-labelledby="public-results-tab-individual" className="public-performance-recommendations">
+          <header><div><p>Recomendaciones individuales</p><h2>Todas las opciones del motor, ganadas y perdidas</h2></div><span>{data.pagination.totalItems} recomendaciones</span></header>
+          <p className="public-performance-disclosure">Incluye el archivo histórico y las recomendaciones con sello FreeTSA. Sólo las marcadas "Sellado externamente" tienen prueba verificable; el resto es archivo interno sin prueba externa.</p>
+          <div className="public-performance-outcome-filter" role="group" aria-label="Filtrar por resultado">
+            <button type="button" className={outcomeFilter === '' ? 'is-active' : ''} onClick={() => updateOutcome('')}>Todas</button>
+            <button type="button" className={outcomeFilter === 'won' ? 'is-active' : ''} onClick={() => updateOutcome('won')}>Ganadas</button>
+            <button type="button" className={outcomeFilter === 'lost' ? 'is-active' : ''} onClick={() => updateOutcome('lost')}>Perdidas</button>
+          </div>
+          {data.recommendations.length ? <div className="public-performance-list">{data.recommendations.map((item, index) => <article key={`${item.seal?.publicId || 'archivo'}-${item.kickoff}-${index}`}>
+            <div className="public-performance-pick-head"><span>{SPORTS[item.sport] || item.sport} · {item.league}</span><strong className={`is-${item.outcome}`}>{item.outcome === 'won' ? 'Ganada' : item.outcome === 'lost' ? 'Perdida' : 'Nula'}</strong></div>
+            <h3>{item.matchName}</h3><p>{item.marketName}</p>
+            <div className="public-performance-pick-data"><span><small>Probabilidad publicada</small><b>{Number(item.probability).toFixed(1)}%</b></span>{item.odd > 0 && <span><small>Cuota registrada</small><b>@{Number(item.odd).toFixed(2)}</b></span>}<span><small>Fecha</small><b>{formatDate(item.kickoff)}</b></span></div>
+            {item.certified ? <PredictionSealBadge seal={item.seal} /> : <span className="public-performance-unsealed">Archivo · sin sello externo</span>}
+          </article>)}</div> : <div className="public-performance-empty"><ShieldCheck size={30} /><h3>Sin recomendaciones para este filtro</h3><p>Ajusta el periodo o el resultado para ver más recomendaciones.</p></div>}
+          {data.pagination.totalPages > 1 && <nav className="public-performance-pagination" aria-label="Paginación de recomendaciones"><button onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={data.pagination.page <= 1}><ChevronLeft size={17} /> Anterior</button><span>Página {data.pagination.page} de {data.pagination.totalPages}</span><button onClick={() => setPage((value) => Math.min(data.pagination.totalPages, value + 1))} disabled={data.pagination.page >= data.pagination.totalPages}>Siguiente <ChevronRight size={17} /></button></nav>}
+        </section>}
+
+        {resultsTab === 'markets' && <section id="public-results-panel-markets" role="tabpanel" aria-labelledby="public-results-tab-markets" className="public-market-ranking market-performance-ranking">
           <header><span><small>Mercados ganadores y perdedores</small><strong>Mayor porcentaje de acierto del periodo</strong></span><em>{data.marketPerformance.length} mercados</em></header>
-          {data.marketPerformance.length ? <div className="market-performance-table">
+          <div className="public-performance-outcome-filter" role="group" aria-label="Ordenar mercados">
+            <button type="button" className={!marketSortAsc ? 'is-active' : ''} onClick={() => setMarketSortAsc(false)}>Más ganadora primero</button>
+            <button type="button" className={marketSortAsc ? 'is-active' : ''} onClick={() => setMarketSortAsc(true)}>Menos ganadora primero</button>
+          </div>
+          {sortedMarkets.length ? <div className="market-performance-table">
             <div className="market-performance-row is-heading"><span>Mercado</span><span>Acierto</span><span>G / P</span><span>Muestra</span></div>
-            {data.marketPerformance.map((market, index) => <div className={`market-performance-row is-${market.tendency}`} key={`${market.sport}-${market.marketName}`}>
+            {sortedMarkets.map((market, index) => <div className={`market-performance-row is-${market.tendency}`} key={`${market.sport}-${market.marketName}`}>
               <span><b>{index + 1}</b><span><strong>{market.marketName}</strong><small>{SPORTS[market.sport] || market.sport}</small></span></span>
               <span><strong>{market.accuracy}%</strong><i><span style={{ width: `${market.accuracy}%` }} /></i></span>
               <span><b className="is-won">{market.won} G</b><b className="is-lost">{market.lost} P</b></span>
               <span>{market.decisive}{market.neutral ? <small> +{market.neutral} nulas</small> : null}</span>
             </div>)}
           </div> : <p className="market-performance-empty">No hay mercados decididos para este periodo.</p>}
-        </section>
-
-        <section className="public-performance-recommendations">
-          <header><div><p>Registro certificado</p><h2>Recomendaciones finalizadas y selladas</h2></div><span>{data.pagination.totalItems} verificables</span></header>
-          <p className="public-performance-disclosure">Esta lista contiene exclusivamente recomendaciones con partido finalizado y sello FreeTSA emitido antes del inicio. El archivo previo sólo participa en las estadísticas generales.</p>
-          {data.recommendations.length ? <div className="public-performance-list">{data.recommendations.map((item, index) => <article key={`${item.seal.publicId}-${index}`}>
-            <div className="public-performance-pick-head"><span>{SPORTS[item.sport] || item.sport} · {item.league}</span><strong className={`is-${item.outcome}`}>{item.outcome === 'won' ? 'Ganada' : item.outcome === 'lost' ? 'Perdida' : 'Nula'}</strong></div>
-            <h3>{item.matchName}</h3><p>{item.marketName}</p>
-            <div className="public-performance-pick-data"><span><small>Probabilidad publicada</small><b>{Number(item.probability).toFixed(1)}%</b></span>{item.odd > 0 && <span><small>Cuota registrada</small><b>@{Number(item.odd).toFixed(2)}</b></span>}<span><small>Fecha</small><b>{formatDate(item.kickoff)}</b></span></div>
-            <PredictionSealBadge seal={item.seal} />
-          </article>)}</div> : <div className="public-performance-empty"><ShieldCheck size={30} /><h3>Registro certificado en formación</h3><p>Las recomendaciones ya selladas se mostrarán aquí automáticamente cuando sus partidos terminen oficialmente.</p></div>}
-          {data.pagination.totalPages > 1 && <nav className="public-performance-pagination" aria-label="Paginación de recomendaciones"><button onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={data.pagination.page <= 1}><ChevronLeft size={17} /> Anterior</button><span>Página {data.pagination.page} de {data.pagination.totalPages}</span><button onClick={() => setPage((value) => Math.min(data.pagination.totalPages, value + 1))} disabled={data.pagination.page >= data.pagination.totalPages}>Siguiente <ChevronRight size={17} /></button></nav>}
-        </section>
+        </section>}
       </>}
     </section>
     <footer className="public-performance-footer"><BrandLogoMedia className="public-performance-footer-logo" animated={false} /><p>Transparencia estadística y pruebas independientes. Ninguna estimación garantiza resultados futuros.</p><Link href="/sign-up">Explorar CF Análisis</Link></footer>

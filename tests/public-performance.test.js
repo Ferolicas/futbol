@@ -6,7 +6,7 @@ const path = require('node:path');
 process.env.DATABASE_URL ||= 'postgresql://test:test@127.0.0.1:1/cfanalisis_test';
 process.env.DATABASE_SSL ||= 'false';
 
-test('el histórico general incluye archivo previo, ranking por mercado y lista sólo de sellos finalizados', async () => {
+test('el histórico general incluye archivo previo, ranking por mercado y TODAS las recomendaciones individuales finalizadas', async () => {
   const { summarizePublicPerformance } = await import('../lib/public-performance.js');
   const seal = { status: 'sealed', publicId: '11111111-1111-4111-8111-111111111111', provider: 'FreeTSA', sealedAt: '2026-09-20T10:00:00Z' };
   const base = { sport: 'football', league: 'Liga', homeTeam: 'Local', awayTeam: 'Visitante', marketName: 'Más de 1.5', probability: 70, odd: 1.5 };
@@ -20,11 +20,29 @@ test('el histórico general incluye archivo previo, ranking por mercado y lista 
   assert.equal(result.periods.archive.total, 2);
   assert.equal(result.periods.archive.retroactivelySealed, false);
   assert.equal(result.periods.certified.total, 1);
-  assert.equal(result.recommendations.length, 1);
+  // 3 individuales (2 archivo sin sello + 1 sellada), la 'pending' queda fuera.
+  assert.equal(result.recommendations.length, 3);
+  assert.equal(result.pagination.totalItems, 3);
+  assert.equal(result.recommendations[0].certified, true);
   assert.equal(result.recommendations[0].seal.publicId, seal.publicId);
+  assert.equal(result.recommendations[1].certified, false);
+  assert.equal(result.recommendations[1].seal, null);
   assert.deepEqual(result.marketPerformance.map(({ marketName, won, lost, accuracy }) => ({ marketName, won, lost, accuracy })), [
     { marketName: 'Más de 1.5', won: 2, lost: 1, accuracy: 66.67 },
   ]);
+});
+
+test('el filtro outcome de summarizePublicPerformance sólo afecta la lista individual, no los totales', async () => {
+  const { summarizePublicPerformance } = await import('../lib/public-performance.js');
+  const base = { sport: 'football', league: 'Liga', homeTeam: 'Local', awayTeam: 'Visitante', marketName: 'Más de 1.5', probability: 70, odd: 1.5, certified: false };
+  const rows = [
+    { ...base, kickoff: '2026-05-14T10:00:00Z', outcome: 'won' },
+    { ...base, kickoff: '2026-05-15T10:00:00Z', outcome: 'lost' },
+  ];
+  const won = summarizePublicPerformance(rows, { page: 1, pageSize: 12, outcome: 'won' });
+  assert.equal(won.recommendations.length, 1);
+  assert.equal(won.recommendations[0].outcome, 'won');
+  assert.equal(won.totals.total, 2, 'los totales generales no deben filtrarse por outcome');
 });
 
 test('canonicalMarketName agrupa por mercado quitando el equipo, no la línea o el periodo', async () => {
@@ -109,9 +127,21 @@ test('el histórico multisport sólo incorpora picks Bet365 prepartido y los liq
 test('la presentación diferencia expresamente el archivo no sellado', () => {
   const page = fs.readFileSync(path.join(__dirname, '../app/rendimiento/PublicPerformance.js'), 'utf8');
   assert.match(page, /No se presentan como selladas retroactivamente/);
-  assert.match(page, /exclusivamente recomendaciones con partido finalizado y sello FreeTSA/);
+  assert.match(page, /Sólo las marcadas "Sellado externamente" tienen prueba verificable/);
   assert.match(page, /PredictionSealBadge/);
   assert.match(page, /Rango personalizado/);
   assert.match(page, /type="date"/);
   assert.match(page, /Mercados ganadores y perdedores/);
+});
+
+test('las pestañas de resultados van recomendaciones individuales primero, con filtro G/P y orden de mercados', () => {
+  const page = fs.readFileSync(path.join(__dirname, '../app/rendimiento/PublicPerformance.js'), 'utf8');
+  const individualTab = page.indexOf('Opciones ganadoras y perdedoras');
+  const marketsTab = page.indexOf('Mercados ganadores y perdedores');
+  assert.ok(individualTab > 0, 'debe existir la pestaña de opciones individuales');
+  assert.ok(marketsTab > individualTab, 'la pestaña de opciones individuales va antes que la de mercados');
+  assert.match(page, /role="tablist"/);
+  assert.match(page, /outcomeFilter === 'won'/);
+  assert.match(page, /outcomeFilter === 'lost'/);
+  assert.match(page, /marketSortAsc/);
 });

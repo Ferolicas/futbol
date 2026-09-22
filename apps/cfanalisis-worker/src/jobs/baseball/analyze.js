@@ -1,7 +1,9 @@
 /**
  * Baseball diario — motor empírico.
- * Datos/identidad/fotos: MLB Stats oficial. Cuotas: API-Baseball.
- * No carga Poisson, isotónica, meta-modelos ni The Odds API.
+ * Datos/identidad/fotos: MLB Stats oficial. Cuotas: API-Baseball (100
+ * llamadas/día, fuente primaria), con The Odds API como respaldo secundario
+ * (cupo mucho más chico, compartido con NBA/NCAAB/NFL/NCAAF).
+ * No carga Poisson, isotónica ni meta-modelos.
  */
 import {
   analyzeSportDate,
@@ -50,11 +52,20 @@ async function runCoverage(payload, job) {
         onlyMissingCurrent: true,
         retryMissingOdds: true,
         concurrency: 2,
-        // Bet365 publica líneas durante la mañana de Colombia. Un snapshot
-        // vacío no puede vivir seis horas: la guardia vuelve a comprobarlo en
-        // su siguiente tick y deja de hacerlo en cuanto aparecen cuotas.
-        oddsTtl: 10 * 60,
-        oddsMappingTtl: 10 * 60,
+        // Bet365 publica líneas durante la mañana de Colombia. Mientras no
+        // hay cuota (`oddsEmptyTtl`), la guardia reintenta cada 2 horas y deja
+        // de hacerlo en cuanto aparecen. Una vez encontrada (`oddsTtl`) dura
+        // casi el día: The Odds API resuelve la cartelera COMPLETA del día en
+        // una sola llamada (3 créditos) — un TTL corto aquí no gana frescura,
+        // solo repite la misma llamada cada 15 min y agota en ~1h el cupo
+        // diario compartido con NBA/NCAAB/NFL/NCAAF (16 créditos/día).
+        oddsTtl: 20 * 3600,
+        oddsEmptyTtl: 2 * 3600,
+        // Mapeo diario de IDs API-Baseball (fixture-by-date): la cartelera no
+        // cambia partido a partido — un TTL corto aquí repetía esa llamada en
+        // cada tick de 15 min y por sí solo se comía buena parte del cupo
+        // diario de 100 llamadas antes de pedir ninguna cuota.
+        oddsMappingTtl: 6 * 3600,
         // La guardia corre cada 15 min. Una fecha no puede retener la cola 20
         // min: si proveedor/DB se atasca, falla en 3 min y la siguiente pasada
         // vuelve a intentar únicamente lo que siga pendiente.
@@ -105,8 +116,12 @@ export async function runBaseballAnalyze(payload = {}, job = null) {
     force: payload.force === true,
     pregame: payload.pregame === true,
     concurrency: 2,
-    oddsTtl: 10 * 60,
-    oddsMappingTtl: 10 * 60,
+    // Ver comentario en runCoverage: TTL largo una vez hay cuota, reintento
+    // moderado mientras no la hay — nunca repetir la misma llamada de cartelera
+    // completa cada pocos minutos.
+    oddsTtl: 20 * 3600,
+    oddsEmptyTtl: 2 * 3600,
+    oddsMappingTtl: 6 * 3600,
   });
   await job?.updateProgress?.({ phase: result.ok ? 'complete' : 'failed', ...result, startedAt });
   await markLastRun(payload.pregame === true ? 'pregame' : 'daily', {

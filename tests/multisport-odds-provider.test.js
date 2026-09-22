@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
+process.env.DATABASE_URL ||= 'postgresql://test:test@127.0.0.1:1/cfanalisis_test';
+process.env.DATABASE_SSL ||= 'false';
+
 import { normalizeApiSportsOdds } from '../lib/api-sports-multisport.js';
 import { multisportProviderInternals } from '../lib/multisport-providers.js';
 
@@ -23,15 +26,37 @@ test('adapta una cartelera Bet365 de The Odds API sin modificar probabilidades d
   assert.deepEqual(odds.rawBookmakers, [{ id: 'bet365', name: 'Bet365' }]);
 });
 
-test('MLB deja de gastar API-Baseball para mapear IDs y falla cerrado sin Bet365', () => {
+test('API-Sports (mismo proveedor que ya trae Bet365 en fútbol) es la fuente PRIMARIA de cuotas para béisbol/basket/NFL, The Odds API queda como respaldo', () => {
   const source = fs.readFileSync(new URL('../lib/multisport-providers.js', import.meta.url), 'utf8');
-  const featuredStart = source.indexOf('const featured = await fetchMultisportBet365Event');
-  const baseballClosed = source.indexOf("if (config.key === 'baseball') return", featuredStart);
-  const legacyMapping = source.indexOf('apiSportsFixtureIdFor(config.key', featuredStart);
-  assert.ok(featuredStart > 0);
-  assert.ok(baseballClosed > featuredStart);
-  assert.ok(legacyMapping > baseballClosed, 'el retorno MLB debe ocurrir antes del mapeo API-Sports');
-  assert.match(source.slice(baseballClosed, legacyMapping), /sin-cuota-bet365/);
+  const fnStart = source.indexOf('export async function getSportOdds');
+  const mapping = source.indexOf('apiSportsFixtureIdFor(config.key', fnStart);
+  const featured = source.indexOf('const featured = await fetchMultisportBet365Event', fnStart);
+  assert.ok(fnStart > 0);
+  assert.ok(mapping > fnStart, 'debe mapear el fixture de API-Sports dentro de getSportOdds');
+  assert.ok(featured > mapping, 'The Odds API debe consultarse DESPUÉS de intentar API-Sports, no antes');
+  // Ya no existe el bloqueo especial de béisbol que impedía usar API-Baseball
+  // partido a partido y fallaba cerrado apenas The Odds API no respondía.
+  assert.doesNotMatch(source.slice(fnStart, featured), /if \(config\.key === 'baseball'\) return/);
+});
+
+test('getSportOdds propaga emptyTtl a fetchMultisportBet365Event (no solo ttl)', () => {
+  const source = fs.readFileSync(new URL('../lib/multisport-providers.js', import.meta.url), 'utf8');
+  const start = source.indexOf('const featured = await fetchMultisportBet365Event');
+  const call = source.slice(start, source.indexOf('}).catch((error) => {', start));
+  assert.match(call, /emptyTtl:\s*options\.emptyTtl/);
+});
+
+test('el cron de béisbol (cada 15 min) ya no fuerza un TTL de cuota más corto que su propio intervalo', () => {
+  const source = fs.readFileSync(
+    new URL('../apps/cfanalisis-worker/src/jobs/baseball/analyze.js', import.meta.url),
+    'utf8',
+  );
+  // La guardia de cobertura corre cada 15 min: un TTL de cuota menor a eso
+  // repite la misma llamada de cartelera completa en cada tick y agota en
+  // ~1h el cupo diario compartido con NBA/NCAAB/NFL/NCAAF.
+  assert.doesNotMatch(source, /oddsTtl:\s*10\s*\*\s*60\b/);
+  assert.match(source, /oddsTtl:\s*20\s*\*\s*3600/);
+  assert.match(source, /oddsEmptyTtl:\s*2\s*\*\s*3600/);
 });
 
 test('el presupuesto por defecto de The Odds API respeta aproximadamente 500 créditos mensuales', () => {
