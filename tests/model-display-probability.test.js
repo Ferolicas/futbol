@@ -72,28 +72,32 @@ test('el EV no filtra por debajo de 90% y usa tramos 8/10 desde esa frontera', (
   assert.equal(meetsFootballExpectedValuePolicy(91, 0.10), true);
 });
 
-test('la Apuesta del Día exige 90% calibrado, fiabilidad 90% y el tramo EV correspondiente', () => {
+test('la Apuesta del Día exige 90% de probabilidad, fiabilidad 90% y cuota real — nunca EV ni calibración general', () => {
   assert.equal(FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY, 90);
   assert.equal(isFootballFrontendDailyPickEligible({
-    rawProbability: 90, confidence: 90, odd: 1.20,
-    expectedValue: .08, validationStatus: 'calibrated', dailyEligible: true,
+    rawProbability: 90, confidence: 90, odd: 1.20, dailyEligible: true,
   }), true);
+  // EV insuficiente para el tramo 91-99% (antes exigía >=10%, ahora es solo
+  // un dato): sigue siendo elegible como Apuesta del Día.
   assert.equal(isFootballFrontendDailyPickEligible({
     rawProbability: 91, confidence: 90, odd: 1.20,
-    expectedValue: .092, validationStatus: 'calibrated', dailyEligible: true,
-  }), false);
-  assert.equal(isFootballFrontendDailyPickEligible({
-    rawProbability: 92, confidence: 90, odd: 1.20,
-    expectedValue: .104, validationStatus: 'calibrated', dailyEligible: true,
+    expectedValue: .001, dailyEligible: true,
   }), true);
   assert.equal(isFootballFrontendDailyPickEligible({
-    rawProbability: 74.999, confidence: 99, odd: 2,
+    rawProbability: 92, confidence: 90, odd: 1.20, dailyEligible: true,
+  }), true);
+  // validationStatus ya no participa — 'unvalidated'/ausente no bloquea.
+  assert.equal(isFootballFrontendDailyPickEligible({
+    rawProbability: 90, confidence: 90, odd: 1.20, dailyEligible: true, validationStatus: 'unvalidated',
+  }), true);
+  assert.equal(isFootballFrontendDailyPickEligible({
+    rawProbability: 74.999, confidence: 99, odd: 2, dailyEligible: true,
   }), false);
   assert.equal(isFootballFrontendDailyPickEligible({
-    rawProbability: 95, confidence: 89.999, odd: 2,
+    rawProbability: 95, confidence: 89.999, odd: 2, dailyEligible: true,
   }), false);
   assert.equal(isFootballFrontendDailyPickEligible({
-    rawProbability: 95, confidence: 99, odd: 1.19,
+    rawProbability: 95, confidence: 99, odd: 1.19, dailyEligible: true,
   }), false);
 });
 
@@ -109,7 +113,7 @@ test('los mercados de jugador respetan el mismo contrato exacto', () => {
   assert.equal(selections[0].rawProbability, 94.96);
 });
 
-test('la validación fuera de muestra calibra y autoriza solo con muestra suficiente', () => {
+test('la probabilidad publicada es 100% la del enfrentamiento — la calibración general queda solo como diagnóstico', () => {
   const scored = modelToScored({
     goals_total: {
       kind: 'ou',
@@ -119,20 +123,26 @@ test('la validación fuera de muestra calibra y autoriza solo con muestra sufici
     calibrationFamilies: {
       goals_total_over_0_5: { elite95: { n: 100, avg_pred: 0.95, avg_actual: 0.9 } },
     },
+    // El diagnóstico ahora se evalúa contra rawProbability (0.95 → banda
+    // elite95, no daily90): ya no depende de una probabilidad calibrada.
     validationFamilies: {
-      goals_total_over_0_5: { daily90: { n: 100, avg_pred: 0.925, avg_actual: 0.9, gap: 0.025 } },
+      goals_total_over_0_5: { elite95: { n: 100, avg_pred: 0.95, avg_actual: 0.925, gap: 0.025 } },
     },
   });
   const result = scored.total_goals_over0_5;
+  // prob_final YA NO se mezcla con el promedio general de la familia (antes
+  // 0.925) — se publica exactamente la del enfrentamiento (0.95).
   assert.equal(result.prob_raw, 0.95);
-  assert.equal(result.prob_final, 0.925);
+  assert.equal(result.prob_final, 0.95);
   assert.equal(result.recommended, true);
+  // El diagnóstico se sigue calculando (para /rendimiento), pero es
+  // meramente informativo: no altera prob_final ni "recommended".
   assert.equal(result.validation.decision.status, 'calibrated');
   assert.equal(result.validation.n, 100);
   assert.equal(result.validation.calibration.band, 'elite95');
 });
 
-test('la falta de diagnóstico conserva la estadística pero bloquea la recomendación', () => {
+test('la falta de diagnóstico general conserva la estadística y NO bloquea la recomendación', () => {
   const scored = modelToScored({
     goals_total: {
       kind: 'ou',
@@ -140,12 +150,12 @@ test('la falta de diagnóstico conserva la estadística pero bloquea la recomend
     },
   });
   assert.equal(scored.total_goals_over0_5.prob_final, 0.98);
-  assert.equal(scored.total_goals_over0_5.recommended, false);
+  assert.equal(scored.total_goals_over0_5.recommended, true);
   assert.equal(scored.total_goals_over0_5.validation.available, false);
   assert.equal(scored.total_goals_over0_5.validation.decision.status, 'unvalidated');
 });
 
-test('una sola observación puede producir 100% interno y mostrar 95%', () => {
+test('una sola observación puede producir 100% interno, mostrar 95% y sí recomendarse (la fiabilidad, no la validación general, es la que filtra después)', () => {
   const scored = modelToScored({
     corners_total: {
       kind: 'ou',
@@ -154,7 +164,7 @@ test('una sola observación puede producir 100% interno y mostrar 95%', () => {
   });
   assert.equal(scored.total_corners_over0_5.prob_final, 1);
   assert.equal(displayPct(scored.total_corners_over0_5.prob_final * 100), 95);
-  assert.equal(scored.total_corners_over0_5.recommended, false);
+  assert.equal(scored.total_corners_over0_5.recommended, true);
 });
 
 test('over y under conservan la fiabilidad de su dirección exacta', () => {
@@ -213,7 +223,7 @@ test('una opción calibrada inferior a 90% conserva su EV como dato pero no se f
   assert.equal(result.selectable[0].dailyEligible, false);
 });
 
-test('80% requiere además calibración de su familia', () => {
+test('recomendado es exactamente prob_final>=80%, la calibración de la familia ya no participa en la frontera', () => {
   const scored = modelToScored({
     goals_total: {
       kind: 'ou',
@@ -230,7 +240,7 @@ test('80% requiere además calibración de su familia', () => {
   assert.equal(scored.total_goals_over2_5.recommended, false);
 });
 
-test('una familia descalibrada queda fuera de recomendación y Apuesta del Día', () => {
+test('una familia descalibrada en general YA NO bloquea — la probabilidad y fiabilidad del enfrentamiento mandan', () => {
   const scored = modelToScored({
     goals_total: {
       kind: 'ou',
@@ -249,8 +259,9 @@ test('una familia descalibrada queda fuera de recomendación y Apuesta del Día'
     {},
     null,
   );
-  assert.equal(result.selections.length, 0);
-  assert.equal(result.selectable.length, 0);
+  assert.equal(result.selections.length, 1);
+  assert.equal(result.selectable.length, 1);
+  assert.equal(result.selections[0].probability, 90);
 });
 
 test('un prop de jugador entra cuando su fiabilidad real llega al 90%', () => {
@@ -378,7 +389,9 @@ test('la frontera pública rechaza caches sin fiabilidad y nunca redondea 89.999
   });
 
   assert.deepEqual(sanitized.selections.map((selection) => selection.id), ['ok']);
-  assert.deepEqual(sanitized.selectable.map((selection) => selection.id), ['ok', 'quality-not-price']);
+  // 'quality-not-price' (EV negativo) y 'missing-ev' (sin EV) ya no se
+  // filtran: los filtros económicos son informativos, no bloquean.
+  assert.deepEqual(sanitized.selectable.map((selection) => selection.id), ['ok', 'quality-not-price', 'missing-ev']);
   assert.equal(sanitized.combinedProbability, null);
   assert.equal(sanitized.combinedOdd, null);
 

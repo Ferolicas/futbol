@@ -1367,24 +1367,54 @@ pedirse: sin verificación de que Bet365 las ofrezca.
 - `scripts/backfill-multisport-history.js`: quitado el bloqueo explícito que
   impedía pedir MiLB por backfill.
 
-## Ledger de calibración multideporte: en pausa hasta 2026-11-22 (2026-09-22)
+## Calibración general y filtros económicos eliminados como bloqueantes — decisión de producto (2026-09-22)
 
-El requisito "unvalidated bloquea todo" (ver sección de los dos bugs de
-escala arriba) queda sin exigirse para béisbol/NBA/NFL hasta esa fecha —
-`MULTISPORT_LEDGER_WARMUP_UNTIL` en lib/multisport-analysis.js,
-`multisportLedgerCalibrationReady()`. Pasado eso vuelve a exigirse solo, sin
-intervención manual: se evalúa en cada análisis, no depende de un cron.
-`recommendationDecision` (prediction-math.cjs) gana el parámetro
-`enforceValidation` (default `true`, igual que `enforceExpectedValue`/
-`enforceMarketEdge`) — SOLO `buildMultisportCombinada` lo pasa en `false`
-durante la ventana; fútbol nunca lo toca, sigue exigiendo su ledger siempre
-(ya tiene historial real acumulado, a diferencia de multideporte).
+Medido en producción antes de tocar nada (a petición explícita del usuario):
+`calibrateProbability` mezclaba la probabilidad cruda del enfrentamiento con
+el promedio de acierto de la familia de mercado agregado entre TODOS los
+equipos (`avgPred`/`avgActual` del ledger, `strength = n/(n+100)`). Con
+muestra grande (n=787 en `goals_total_under_4_5`) el ajuste real medido fue de
++4.3 puntos promedio, hasta +12.4 puntos en `corners_total_under_11_5` — y
+`strength` CRECE con más muestra general, o sea que a más historial general
+MENOS pesa el equipo específico. Decisión: la probabilidad y la fiabilidad
+(posterior Beta-binomial) del motor empírico son SIEMPRE específicas del
+enfrentamiento — `computeMultisportEmpiricalPrediction`/`predict()` cuentan
+de `*_engine_team_stats`/`model.team_match_stats` filtrado por `team_id`
+exacto y H2H, nunca agregan entre equipos — y nada externo a esos dos
+equipos/jugadores puede corregir ese número ni bloquear su publicación.
 
-Aclaración importante (duda explícita del usuario): la probabilidad y la
-fiabilidad (posterior Beta-binomial) del motor empírico son SIEMPRE
-específicas del equipo/jugador — `computeMultisportEmpiricalPrediction`
-consulta `*_engine_team_stats WHERE team_id=$1`, nunca agrega entre equipos.
-El ledger que se pausa aquí es una capa ADICIONAL y distinta: agrupa por
-`market_family` (ej. "total_goals_over2_5") a través de TODOS los equipos,
-para verificar si el modelo en general ha acertado con ese TIPO de mercado —
-no reemplaza ni relaja la especificidad por equipo de la probabilidad base.
+Cambios (fútbol + béisbol/NBA/NFL, misma decisión para los tres deportes):
+
+- `recommendationDecision` (lib/prediction-math.cjs): ya NO puede bloquear
+  por `validation.eligible` (calibración general) ni por EV/market edge —
+  solo probabilidad, fiabilidad y cuota real (`odd>1`) entran en `reasons`.
+  `validation`/`expectedValue`/`marketEdge` se siguen calculando y
+  devolviendo (para /rendimiento y como dato para el apostador), pero son
+  puramente informativos. Se quitaron los parámetros `enforceValidation`/
+  `enforceExpectedValue`/`enforceMarketEdge` — ya no hacen falta, no hay nada
+  que activar/desactivar.
+- `lib/model-to-scored.js` (`entry()`, fútbol): `prob_final`/`prob_calibrated`
+  = `prob_raw` sin mezcla; `recommended` = solo `prob_raw>=REC_MIN_PROB(80%)`.
+- `lib/model-probabilities.js` (equipo/jugador/seleccionable): sin
+  `calibrateProbability`; sin `meetsFootballExpectedValuePolicy` en el
+  filtro de publicación. `dailyEligible` (Apuesta del Día) también se
+  limpió: ya no exige el tramo EV 8%/10%, solo `probabilidad>=90%`.
+- `lib/recommendation-policy.js`: `sanitizeFootballCombinada` (el saneador
+  que se re-aplica CADA VEZ que se sirve un análisis desde caché, en
+  `getCachedAnalysis`) ya no descarta por `validationStatus!=='calibrated'`
+  ni por EV — solo por fiabilidad, la única que puede bloquear.
+  `isFootballFrontendDailyPickEligible` (elegibilidad de la Apuesta del Día
+  en el frontend) igual: sin `validationStatus`, sin EV.
+- `lib/multisport-analysis.js`: sin `calibrateProbability` en `add()`; se
+  quitó por completo la ventana de arranque `MULTISPORT_LEDGER_WARMUP_UNTIL`
+  (ya no aplica, el mecanismo se elimina en vez de pausarse).
+
+`refreshPredictionLedgerCalibration`/`aggregateLedgerCalibration`
+(prediction-ledger.js) y las tablas que alimentan **no se tocan** — siguen
+corriendo en el reentreno diario. Su único consumidor ahora es `/rendimiento`
+(aciertos/fallos por familia de mercado, a nivel informativo): el usuario
+quiere ver ahí dónde acierta y falla más el modelo, pero eso no debe
+alimentar ni bloquear el cálculo — la autocalibración correcta ya ocurre
+sola: si un equipo deja de cumplir en una línea, su propia fiabilidad
+Beta-binomial baja y deja de recomendarse ahí, sin que un promedio general
+ajeno a ese equipo tenga que intervenir.

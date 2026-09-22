@@ -63,37 +63,33 @@ test('la calibración corrige gradualmente y nunca sale de 0..1', () => {
   assert.ok(Math.abs(calibrateProbability(1, { available: true, n: 1000, avgPred: 1, avgActual: 0 }) - (1 / 11)) < 1e-12);
 });
 
-test('una recomendación exige validación y EV, no solo porcentaje', () => {
+test('solo probabilidad, fiabilidad y cuota real bloquean — validación general y EV son informativos', () => {
   const validation = { available: true, n: 500, avgPred: 0.72, avgActual: 0.70 };
-  assert.equal(recommendationDecision({ probability: 0.7, odd: 1.2, reliability: 99, validation }).eligible, false);
+  // Cuota <=1 (o ausente) sí bloquea: no hay con qué cruzar la probabilidad.
+  assert.equal(recommendationDecision({ probability: 0.7, odd: 1, reliability: 99, validation }).eligible, false);
+  // EV bajo (cuota 1.2 con 70% de probabilidad) YA NO bloquea — se sigue
+  // publicando; el dato de EV queda disponible para que decida el apostador.
+  const lowEv = recommendationDecision({ probability: 0.7, odd: 1.2, reliability: 99, validation });
+  assert.equal(lowEv.eligible, true);
+  assert.ok(lowEv.expectedValue < 0.05);
   const accepted = recommendationDecision({ probability: 0.7, odd: 1.55, reliability: 99, validation });
   assert.equal(accepted.eligible, true);
   assert.ok(accepted.expectedValue >= 0.05);
 });
 
-test('enforceValidation:false ignora la calibración del ledger sin tocar probabilidad ni fiabilidad', () => {
+test('sin catálogo de calibración general (unvalidated) la recomendación se publica igual — nada externo al enfrentamiento bloquea', () => {
   const unvalidated = { available: false };
-  // Sin enforceValidation:false, "unvalidated" bloquea aunque probabilidad,
-  // fiabilidad, cuota y EV pasen de sobra.
-  const blocked = recommendationDecision({ probability: 0.9, odd: 1.55, reliability: 99, validation: unvalidated });
-  assert.equal(blocked.eligible, false);
-  assert.deepEqual(blocked.reasons, ['unvalidated']);
-  const bypassed = recommendationDecision(
-    { probability: 0.9, odd: 1.55, reliability: 99, validation: unvalidated },
-    { enforceValidation: false },
-  );
-  assert.equal(bypassed.eligible, true);
-  // La fiabilidad y la probabilidad no se relajan por el bypass: siguen
-  // bloqueando si no cumplen, el bypass es exclusivo de la calibración.
-  const stillBlockedByReliability = recommendationDecision(
-    { probability: 0.9, odd: 1.55, reliability: 50, validation: unvalidated },
-    { enforceValidation: false },
-  );
+  const result = recommendationDecision({ probability: 0.9, odd: 1.55, reliability: 99, validation: unvalidated });
+  assert.equal(result.eligible, true);
+  assert.equal(result.validation.status, 'unvalidated');
+  // La fiabilidad y la probabilidad SÍ siguen bloqueando — son las únicas
+  // que surgen del enfrentamiento específico.
+  const stillBlockedByReliability = recommendationDecision({ probability: 0.9, odd: 1.55, reliability: 50, validation: unvalidated });
   assert.equal(stillBlockedByReliability.eligible, false);
   assert.deepEqual(stillBlockedByReliability.reasons, ['reliability']);
 });
 
-test('el decisor permite separar los controles económicos de los controles predictivos', () => {
+test('EV negativo y market edge negativo son solo datos — nunca bloquean', () => {
   const validation = { available: true, n: 500, avgPred: 0.8, avgActual: 0.8 };
   const result = recommendationDecision({
     probability: 0.8,
@@ -101,9 +97,6 @@ test('el decisor permite separar los controles económicos de los controles pred
     reliability: 95,
     validation,
     marketFairProbability: 0.9,
-  }, {
-    enforceExpectedValue: false,
-    enforceMarketEdge: false,
   });
   assert.equal(result.eligible, true);
   assert.ok(result.expectedValue < 0);
