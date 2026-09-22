@@ -21,8 +21,8 @@ jobs:
           cache: npm
 
       - name: Install mobile dependencies
-	working-directory: apps/cfanalisis-mobile
-	run: npm ci
+        working-directory: apps/cfanalisis-mobile
+        run: npm ci
 
       - name: Prebuild iOS
         working-directory: apps/cfanalisis-mobile
