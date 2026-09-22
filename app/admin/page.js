@@ -551,7 +551,7 @@ function ActiveClientsSection() {
                     : Number(c.last_payment_amount) / 100).toLocaleString('es-ES', { maximumFractionDigits: 2 })}{' '}
                   {(c.last_payment_currency || '').toUpperCase()}
                 </span>
-                <span>{c.payment_provider === 'mercadopago' ? 'Mercado Pago' : `Estado Stripe: ${c.stripe_status || '—'}`}</span>
+                <span>{c.payment_provider === 'mercadopago' ? 'Mercado Pago' : c.payment_provider === 'stripe' ? 'Stripe' : '—'}</span>
               </div>
             )}
           </div>

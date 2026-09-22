@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { stripe, cancelStripeSubscription, isValidPlan, PLAN_IDS } from '../../../../lib/stripe';
+import { stripe, cancelStripeSubscription, isValidPlan, PLAN_IDS, PLANS } from '../../../../lib/stripe';
 import { cancelPreapproval } from '../../../../lib/mercadopago';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { getUserProfile } from '../../../../lib/supabase-auth';
@@ -32,54 +32,11 @@ export async function GET() {
   const active = users.filter(isActive);
   const pending = users.filter((u) => !isActive(u));
 
-  // Resolve next payment date from Stripe for each active user with customer_id
-  if (stripe) {
-    await Promise.all(
-      active.map(async (u) => {
-        if (u.payment_provider && u.payment_provider !== 'stripe') return;
-        if (!u.stripe_customer_id && !u.stripe_subscription_id) return;
-        try {
-          const live = u.stripe_subscription_id
-            ? await stripe.subscriptions.retrieve(u.stripe_subscription_id)
-            : (await stripe.subscriptions.list({
-                customer: u.stripe_customer_id,
-                status: 'all',
-                limit: 5,
-              })).data.find((s) => ['active', 'trialing', 'past_due'].includes(s.status));
-          const periodEnd = (live?.items?.data || [])
-            .map((item) => Number(item.current_period_end || 0))
-            .filter(Boolean)
-            .sort((a, b) => a - b)[0];
-          if (periodEnd) {
-            u.next_payment_at = new Date(periodEnd * 1000).toISOString();
-            u.subscription_id = live.id;
-            u.stripe_status = live.status;
-          } else {
-            // Fallback: most recent succeeded charge + 30 days
-            const customerId = u.stripe_customer_id
-              || (typeof live?.customer === 'string' ? live.customer : live?.customer?.id);
-            if (!customerId) return;
-            const charges = await stripe.charges.list({
-              customer: customerId,
-              limit: 10,
-            });
-            const lastPaid = charges.data
-              .filter((c) => c.status === 'succeeded' && !c.refunded)
-              .sort((a, b) => b.created - a.created)[0];
-            if (lastPaid) {
-              u.last_payment_at = new Date(lastPaid.created * 1000).toISOString();
-              u.last_payment_amount = lastPaid.amount;
-              u.last_payment_currency = lastPaid.currency;
-              u.next_payment_at = new Date(
-                (lastPaid.created + 30 * 24 * 3600) * 1000
-              ).toISOString();
-            }
-          }
-        } catch (e) {
-          console.error('[admin/clients] stripe lookup', u.email, e.message);
-        }
-      })
-    );
+  // Próximo pago: el mismo dato que decide el acceso real (entitlements.js),
+  // sin importar el proveedor. Antes solo se resolvía en vivo contra Stripe —
+  // Mercado Pago (la mayoría de los clientes reales) siempre quedaba vacío.
+  for (const u of active) {
+    u.next_payment_at = u.subscription_current_period_end || u.plan_expires_at || null;
   }
 
   return Response.json({
@@ -96,8 +53,6 @@ export async function GET() {
       last_payment_amount: u.last_payment_amount || null,
       last_payment_currency: u.last_payment_currency || null,
       next_payment_at: u.next_payment_at || null,
-      subscription_id: u.subscription_id || null,
-      stripe_status: u.stripe_status || null,
     })),
     pending: pending.map((u) => ({
       id: u.id,
@@ -165,13 +120,18 @@ export async function POST(request) {
 
   let update;
   if (action === 'set-plan') {
+    // Vencimiento real desde HOY según la duración del plan elegido — antes
+    // quedaba sin fecha (acceso permanente sin importar el plan asignado).
+    const now = new Date();
+    const periodEnd = new Date(now.getTime() + PLANS[plan].intervalSeconds * 1000).toISOString();
     update = {
       plan,
       subscription_status: 'active',
-      plan_expires_at: null,
-      subscription_current_period_end: null,
+      plan_expires_at: periodEnd,
+      subscription_current_period_end: periodEnd,
       cancel_at_period_end: false,
-      updated_at: new Date().toISOString(),
+      last_payment_at: now.toISOString(),
+      updated_at: now.toISOString(),
     };
   } else {
     // Revocar acceso solo DESPUES de que el proveedor confirme que no volvera a
