@@ -122,6 +122,25 @@ const SCHEDULES: Sched[] = [
   // ── Fútbol americano NFL + NCAA FBS/FCS ────────────────────────────
   { queue: 'american-football-fixtures', id: 'american-football-fixtures-daily', pattern: '15 1 * * *', tz: TZ },
   { queue: 'american-football-analyze', id: 'american-football-analyze-daily', pattern: '50 1 * * *', tz: TZ },
+  // Reintentos de cuota: NO reanalizan la jornada completa, sólo los partidos
+  // que ya tienen análisis pero siguen sin cuota Bet365 (Bet365 suele
+  // publicar NFL escalonado durante el día). `oddsRetryMinLeadMs` de 4h
+  // garantiza que ningún pase toque un partido a menos de esa distancia de
+  // su propio kickoff — el apostador siempre ve la recomendación con
+  // suficiente margen para entrar. Horario en hora Bogotá (coincide con el
+  // reloj real de los partidos NFL, nunca cruza medianoche como Madrid).
+  {
+    queue: 'american-football-analyze', id: 'american-football-analyze-pregame-06', pattern: '0 6 * * *', tz: BOGOTA_TZ,
+    data: { onlyMissingCurrent: true, retryMissingOdds: true, oddsRetryMinLeadMs: 4 * 3600_000 },
+  },
+  {
+    queue: 'american-football-analyze', id: 'american-football-analyze-pregame-10', pattern: '0 10 * * *', tz: BOGOTA_TZ,
+    data: { onlyMissingCurrent: true, retryMissingOdds: true, oddsRetryMinLeadMs: 4 * 3600_000 },
+  },
+  {
+    queue: 'american-football-analyze', id: 'american-football-analyze-pregame-14', pattern: '0 14 * * *', tz: BOGOTA_TZ,
+    data: { onlyMissingCurrent: true, retryMissingOdds: true, oddsRetryMinLeadMs: 4 * 3600_000 },
+  },
   { queue: 'american-football-finalize', id: 'american-football-finalize-daily', pattern: '15 8,11 * * *', tz: TZ },
   { queue: 'american-football-retrain', id: 'american-football-retrain-daily', pattern: '0 13 * * *', tz: TZ },
   // NFL conserva el respaldo existente; FBS/FCS usa su fuente pública y el

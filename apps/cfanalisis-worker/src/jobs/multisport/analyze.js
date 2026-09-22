@@ -8,7 +8,17 @@ async function run(sport, payload, job) {
   // NCAA puede superar 300 partidos en una jornada. Sus cuotas vienen en el
   // calendario y el motor usa PostgreSQL, de modo que seis tareas concurrentes
   // reducen la ventana sin multiplicar llamadas al proveedor.
-  const result = await analyzeSportDate(sport, date, { concurrency: 6, oddsTtl: 6 * 3600 });
+  // Pases de reintento (NFL): `onlyMissingCurrent`+`retryMissingOdds` sólo
+  // vuelven a tocar partidos que YA tienen análisis pero sin cuota todavía —
+  // `minLeadMs` (oddsRetryMinLeadMs) evita tocar un partido a menos de esa
+  // distancia de su propio kickoff, sin importar a qué hora corrió el cron.
+  const result = await analyzeSportDate(sport, date, {
+    concurrency: 6,
+    oddsTtl: 6 * 3600,
+    onlyMissingCurrent: payload.onlyMissingCurrent === true,
+    retryMissingOdds: payload.retryMissingOdds === true,
+    oddsRetryMinLeadMs: payload.oddsRetryMinLeadMs,
+  });
   await job?.updateProgress?.({ phase: result.ok ? 'complete' : 'failed', ...result, startedAt });
   if (!result.ok) throw new Error(`${sport} analyze incompleto: ${result.failed}/${result.total}`);
   await triggerEvent(`${sport}-analysis`, 'ready', { date, analyzed: result.analyzed, at: new Date().toISOString() });
