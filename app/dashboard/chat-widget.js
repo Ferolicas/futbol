@@ -43,7 +43,6 @@ export default function ChatWidget() {
   const [unread, setUnread] = useState(0);
   const [feedback, setFeedback] = useState('');
   const [pwdModalOpen, setPwdModalOpen] = useState(false);
-  const [pwdCurrent, setPwdCurrent] = useState('');
   const [pwdNew, setPwdNew] = useState('');
   const [pwdConfirm, setPwdConfirm] = useState('');
   const [pwdSaving, setPwdSaving] = useState(false);
@@ -168,7 +167,6 @@ export default function ChatWidget() {
 
   const openPasswordModal = () => {
     setAccountOpen(false);
-    setPwdCurrent('');
     setPwdNew('');
     setPwdConfirm('');
     setPwdError('');
@@ -204,7 +202,7 @@ export default function ChatWidget() {
     if (pwdSaving) return;
     setPwdError('');
 
-    if (!pwdCurrent || !pwdNew || !pwdConfirm) {
+    if (!pwdNew || !pwdConfirm) {
       setPwdError('Completa todos los campos');
       return;
     }
@@ -222,12 +220,11 @@ export default function ChatWidget() {
       const response = await fetch('/api/auth/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPassword: pwdCurrent, newPassword: pwdNew, confirmPassword: pwdConfirm }),
+        body: JSON.stringify({ newPassword: pwdNew, confirmPassword: pwdConfirm }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'No se pudo cambiar la contraseña.');
       setPwdSuccess(true);
-      setPwdCurrent('');
       setPwdNew('');
       setPwdConfirm('');
     } catch (error) {
@@ -516,16 +513,6 @@ export default function ChatWidget() {
               </>
             ) : (
               <form onSubmit={submitPasswordChange}>
-                <label>
-                  <span>Contraseña actual</span>
-                  <input
-                    type="password"
-                    value={pwdCurrent}
-                    onChange={(event) => setPwdCurrent(event.target.value)}
-                    autoComplete="current-password"
-                    required
-                  />
-                </label>
                 <label>
                   <span>Nueva contraseña</span>
                   <input

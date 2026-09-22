@@ -1,10 +1,14 @@
 // Cambiar contraseña — usuario con sesión activa (menú de cuenta).
-// Requiere la contraseña actual (bcrypt.compare en lib/auth-pg.changePassword)
-// y no toca las demás sesiones del usuario (a diferencia del reset por token).
-import { getCurrentUser, changePassword } from '../../../../lib/auth-pg';
+// Pide solo la nueva contraseña y su confirmación (sin contraseña actual),
+// igual que el resto de auth nativo en PG VPS (bcrypt directo).
+import bcrypt from 'bcryptjs';
+import { getCurrentUser } from '../../../../lib/auth-pg';
+import { pgQuery } from '../../../../lib/db';
 import { redisRateLimit, clientIp } from '../../../../lib/ratelimit-redis';
 
 export const dynamic = 'force-dynamic';
+
+const BCRYPT_ROUNDS = 10;
 
 export async function POST(request) {
   try {
@@ -19,9 +23,9 @@ export async function POST(request) {
       );
     }
 
-    const { currentPassword, newPassword, confirmPassword } = await request.json();
+    const { newPassword, confirmPassword } = await request.json();
 
-    if (!currentPassword || !newPassword || !confirmPassword) {
+    if (!newPassword || !confirmPassword) {
       return Response.json({ error: 'Completa todos los campos' }, { status: 400 });
     }
     if (newPassword !== confirmPassword) {
@@ -31,11 +35,8 @@ export async function POST(request) {
       return Response.json({ error: 'La contraseña debe tener al menos 8 caracteres' }, { status: 400 });
     }
 
-    const result = await changePassword(user.id, currentPassword, newPassword);
-    if (result.error) {
-      const status = result.error.code === 'INVALID_OLD' ? 400 : result.error.code === 'NOT_FOUND' ? 404 : 400;
-      return Response.json({ error: result.error.message }, { status });
-    }
+    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    await pgQuery('UPDATE public.users SET password_hash = $1 WHERE id = $2', [passwordHash, user.id]);
 
     return Response.json({ success: true });
   } catch (error) {
