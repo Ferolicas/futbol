@@ -27,6 +27,43 @@ test('el histórico general incluye archivo previo, ranking por mercado y lista 
   ]);
 });
 
+test('canonicalMarketName agrupa por mercado quitando el equipo, no la línea o el periodo', async () => {
+  const { canonicalMarketName } = await import('../lib/public-performance.js');
+  assert.equal(canonicalMarketName('St. Louis Cardinals: más de 4.5 carreras', 'St. Louis Cardinals', 'Cubs'), 'más de 4.5 carreras');
+  assert.equal(canonicalMarketName('Ajax · 1ª Parte — Córners a favor — Más de 4.5', 'Ajax', 'PSV'), '1ª Parte — Córners a favor — Más de 4.5');
+  assert.equal(canonicalMarketName('Ganador — Ajax', 'Ajax', 'PSV'), 'Ganador');
+  assert.equal(canonicalMarketName('Más de 1.5', 'Local', 'Visitante'), 'Más de 1.5');
+});
+
+test('buildMarketPerformance agrupa el mismo mercado entre distintos equipos', async () => {
+  const { buildMarketPerformance } = await import('../lib/public-performance.js');
+  const rows = [
+    { sport: 'baseball', outcome: 'won', homeTeam: 'St. Louis Cardinals', awayTeam: 'Cubs', marketName: 'St. Louis Cardinals: más de 4.5 carreras' },
+    { sport: 'baseball', outcome: 'lost', homeTeam: 'Yankees', awayTeam: 'Red Sox', marketName: 'Yankees: más de 4.5 carreras' },
+  ];
+  const result = buildMarketPerformance(rows);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].marketName, 'más de 4.5 carreras');
+  assert.equal(result[0].won, 1);
+  assert.equal(result[0].lost, 1);
+});
+
+test('getPublicPerformance nunca reporta desde antes de la versión vigente del motor', async () => {
+  const { getPublicPerformance, ENGINE_VERSION_SINCE } = await import('../lib/public-performance.js');
+  const calls = [];
+  const pool = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes('min(kickoff)')) return { rows: [{ kickoff: null }] };
+      return { rows: [] };
+    },
+  };
+  const result = await getPublicPerformance({ from: '2025-01-01', to: null, sport: null, query: '', league: '', market: '', team: '', page: 1, pageSize: 12 }, pool);
+  assert.equal(result.engineSince, ENGINE_VERSION_SINCE);
+  const ledgerCall = calls.find((call) => call.sql.includes('prediction_runs r'));
+  assert.equal(ledgerCall.params[0], ENGINE_VERSION_SINCE);
+});
+
 test('la API pública está paginada, cacheada, limitada y separada del admin', () => {
   const api = fs.readFileSync(path.join(__dirname, '../app/api/public/rendimiento/route.js'), 'utf8');
   const proof = fs.readFileSync(path.join(__dirname, '../app/api/verificar-pronostico/[id]/route.js'), 'utf8');

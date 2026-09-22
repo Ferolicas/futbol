@@ -1218,3 +1218,33 @@ limita releases de CF/Unity a las activas; el historial queda en las dos copias 
 `docs/enterprise/DISASTER-RECOVERY.md`. Incidente del 19: disco saturado por
 82 copias de PostgreSQL previas a cambios, series diarias duplicadas y
 releases sin rotación; PostgreSQL y PM2 se recuperaron tras liberar espacio.
+
+## /rendimiento — motor vigente, sólo Recomendación estadística, mercado sin equipo (2026-09-22)
+
+`lib/public-performance.js` expone `ENGINE_VERSION_SINCE` (`2026-09-08`, misma
+fecha del último bump real de `FOOTBALL_CACHE_VERSION`=27 y
+`MULTISPORT_CACHE_VERSION`=21): `getPublicPerformance` acota TODO filtro de
+tiempo (incluido "Todos los tiempos" y el rango personalizado) a partir de esa
+fecha — nunca reporta desempeño de una versión de motor retirada. Actualizar
+esta constante junto con el próximo bump real de cualquiera de las dos
+versiones; el frontend usa `data.engineSince` como `min` del selector de fecha.
+
+Bug corregido en `lib/prediction-ledger.js` (`recommendationById`): en fútbol,
+`is_recommendation` se marcaba `TRUE` con solo aparecer en el acordeón
+`combinada.selectable` (≥70%, que MEZCLA Recomendación estadística ≥80% con
+Dato estadístico 70–79%, cada ítem con su propio `.recommended`), en vez de
+comprobar ese flag. Ahora usa `combinada.selections` (ya filtrado a ≥80%) y,
+si falta, filtra `selectable` por `.recommended===true`. Para las filas ya
+persistidas con el flag viejo, `loadLedgerRows` en `public-performance.js`
+además exige `probability_calibrated>=0.80` en fútbol — la misma regla
+(`REC_MIN_PROB` en `model-to-scored.js`) — corrigiendo el histórico ya escrito
+sin reprocesar nada. baseball/basketball/american_football no tenían este bug
+(usan `statisticalRecommendation !== false` por ítem desde el inicio).
+
+`buildMarketPerformance` ahora agrupa por `canonicalMarketName(marketName,
+homeTeam, awayTeam)`: quita del texto ya calculado los nombres de equipo (la
+LÍNEA de apuesta, p.ej. "St. Louis Cardinals: más de 4.5 carreras" o "Ajax ·
+1ª Parte — Córners a favor — Más de 4.5"), dejando el MERCADO agrupable entre
+partidos ("más de 4.5 carreras", "1ª Parte — Córners a favor — Más de 4.5").
+No toca el dropdown de filtro "Mercado" (sigue listando nombres literales;
+sigue funcionando porque el texto agrupado es subcadena del literal).

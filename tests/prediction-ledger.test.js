@@ -43,6 +43,28 @@ test('el ledger valida la probabilidad publicada, no vuelve a puntuar la cruda',
   assert.equal(group.high.n, 0);
 });
 
+test('footballOutputs marca is_recommendation solo en la Recomendación estadística (≥80%), no en el Dato estadístico (70–79%) del mismo acordeón', async () => {
+  const { predictionLedgerInternals } = await import('../lib/prediction-ledger.js');
+  const analysis = {
+    _scored: {
+      home_goals_over2_5: { prob_raw: 0.82, prob_final: 0.82, confidence: 95, n: 40 },
+      home_corners_over4_5: { prob_raw: 0.74, prob_final: 0.74, confidence: 95, n: 40 },
+    },
+    combinada: {
+      selections: [{ id: 'home_goals_over2_5', odd: 1.5, bookmaker: 'Bet365' }],
+      selectable: [
+        { id: 'home_goals_over2_5', odd: 1.5, bookmaker: 'Bet365', recommended: true },
+        { id: 'home_corners_over4_5', odd: 1.4, bookmaker: 'Bet365', recommended: false },
+      ],
+    },
+  };
+  const outputs = predictionLedgerInternals.footballOutputs(analysis);
+  const recomendacion = outputs.find((o) => o.key === 'home_goals_over2_5');
+  const dato = outputs.find((o) => o.key === 'home_corners_over4_5');
+  assert.equal(recomendacion.recommended, true);
+  assert.equal(dato.recommended, false);
+});
+
 test('una muestra corta nunca reemplaza una calibración madura', async () => {
   const { predictionLedgerInternals } = await import('../lib/prediction-ledger.js');
   const mature = { goals: { n: 300, avg_pred: 0.8, avg_actual: 0.79 } };
