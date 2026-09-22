@@ -1,0 +1,63 @@
+name: Build Expo iOS IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+
+    env:
+      EXPO_PUBLIC_API_URL: https://cfanalisis.com
+      EXPO_PUBLIC_WS_URL: wss://worker.cfanalisis.com/ws
+      EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Prebuild iOS
+        working-directory: apps/cfanalisis-mobile
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Install pods
+        working-directory: apps/cfanalisis-mobile/ios
+        run: pod install
+
+      - name: Build unsigned app
+        working-directory: apps/cfanalisis-mobile/ios
+        run: |
+          WORKSPACE=$(find . -maxdepth 1 -name '*.xcworkspace' | head -1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            build
+
+      - name: Create IPA
+        working-directory: apps/cfanalisis-mobile/ios
+        run: |
+          APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry CFAnalisis.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CFAnalisis-iOS
+          path: apps/cfanalisis-mobile/ios/CFAnalisis.ipa	
