@@ -179,6 +179,18 @@ export default function ChatWidget() {
     setPwdModalOpen(true);
   };
 
+  // El asistente de chat ("Preguntar") no puede cambiar la contraseña — no
+  // ejecuta acciones, solo consulta. Pero sí puede señalar este enlace
+  // (?action=change-password) para abrir el modal real que ya existe acá.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('action') !== 'change-password') return;
+    openPasswordModal();
+    params.delete('action');
+    const query = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''));
+  }, []);
+
   const closePasswordModal = useCallback(() => {
     if (pwdSaving) return;
     setPwdModalOpen(false);

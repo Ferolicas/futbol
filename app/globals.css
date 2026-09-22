@@ -13754,6 +13754,8 @@ input:checked + .cb-mark::after {
 .match-assistant-message.is-assistant { align-self: flex-start; color: #dceae5; background: rgba(255,255,255,.055); }
 .match-assistant-message.is-user { align-self: flex-end; color: #06140f; background: #78e9bf; }
 .match-assistant-message.is-error { align-self: flex-start; color: #fecdd3; background: rgba(251,113,133,.12); }
+.match-assistant-link { display: inline-flex; align-items: center; gap: 4px; margin-top: 2px; color: #5ee6b1; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+.match-assistant-message.is-user .match-assistant-link { color: #06140f; }
 .match-assistant form { display: grid; grid-template-columns: 1fr 42px; gap: 7px; padding: 10px 12px; border-top: 1px solid var(--brd); }
 .match-assistant form input { min-width: 0; min-height: 42px; padding: 0 12px; border: 1px solid var(--brd); border-radius: 12px; color: var(--t1); background: rgba(255,255,255,.04); }
 .match-assistant form button { border: 0; border-radius: 12px; color: #06140f; background: #5ee6b1; cursor: pointer; }

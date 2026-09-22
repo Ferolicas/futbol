@@ -1,7 +1,25 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { MessageCircle, Send, X } from 'lucide-react';
+
+// Renderiza [texto](url) como enlace clicable — el asistente los usa para
+// ofrecer el análisis completo de un partido o una acción del dashboard
+// (ej. cambiar contraseña) sin poder ejecutarla él mismo.
+const LINK_RE = /\[([^\]]+)\]\((\/[^)\s]+)\)/g;
+function renderWithLinks(text) {
+  const parts = [];
+  let last = 0, match, key = 0;
+  LINK_RE.lastIndex = 0;
+  while ((match = LINK_RE.exec(text))) {
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    parts.push(<Link key={key++} href={match[2]} className="match-assistant-link">{match[1]}</Link>);
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts.length ? parts : text;
+}
 
 async function askAssistant(messages) {
   const response = await fetch('/api/assistant/chat', {
@@ -53,7 +71,7 @@ export default function MatchAssistant() {
     {open && <section className="match-assistant" role="dialog" aria-modal="false" aria-label="Asistente de CF Análisis">
       <header><span><small>Solo consulta datos existentes</small><strong>Asistente CF</strong></span><button type="button" onClick={() => setOpen(false)} aria-label="Cerrar"><X size={18} /></button></header>
       <div className="match-assistant-messages">
-        {messages.map((message, index) => <div key={index} className={`match-assistant-message is-${message.role}`}>{message.content}</div>)}
+        {messages.map((message, index) => <div key={index} className={`match-assistant-message is-${message.role}`}>{renderWithLinks(message.content)}</div>)}
         {busy && <div className="match-assistant-message is-assistant">Consultando datos guardados…</div>}
         <span ref={end} />
       </div>
