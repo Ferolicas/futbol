@@ -71,6 +71,28 @@ test('una recomendación exige validación y EV, no solo porcentaje', () => {
   assert.ok(accepted.expectedValue >= 0.05);
 });
 
+test('enforceValidation:false ignora la calibración del ledger sin tocar probabilidad ni fiabilidad', () => {
+  const unvalidated = { available: false };
+  // Sin enforceValidation:false, "unvalidated" bloquea aunque probabilidad,
+  // fiabilidad, cuota y EV pasen de sobra.
+  const blocked = recommendationDecision({ probability: 0.9, odd: 1.55, reliability: 99, validation: unvalidated });
+  assert.equal(blocked.eligible, false);
+  assert.deepEqual(blocked.reasons, ['unvalidated']);
+  const bypassed = recommendationDecision(
+    { probability: 0.9, odd: 1.55, reliability: 99, validation: unvalidated },
+    { enforceValidation: false },
+  );
+  assert.equal(bypassed.eligible, true);
+  // La fiabilidad y la probabilidad no se relajan por el bypass: siguen
+  // bloqueando si no cumplen, el bypass es exclusivo de la calibración.
+  const stillBlockedByReliability = recommendationDecision(
+    { probability: 0.9, odd: 1.55, reliability: 50, validation: unvalidated },
+    { enforceValidation: false },
+  );
+  assert.equal(stillBlockedByReliability.eligible, false);
+  assert.deepEqual(stillBlockedByReliability.reasons, ['reliability']);
+});
+
 test('el decisor permite separar los controles económicos de los controles predictivos', () => {
   const validation = { available: true, n: 500, avgPred: 0.8, avgActual: 0.8 };
   const result = recommendationDecision({

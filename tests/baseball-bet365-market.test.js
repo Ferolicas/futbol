@@ -194,6 +194,24 @@ test('Baseball publica solo selecciones cruzadas con Bet365 y cuota mínima 1.20
   )));
 });
 
+test('sin catálogo de calibración del ledger (escenario real de producción hoy), Baseball igual publica si probabilidad y fiabilidad cumplen', () => {
+  const odds = normalizeApiSportsOdds(payload, fixture, { sport: 'baseball', bookmakers: ['Bet365'] });
+  // Sin calibratedPrediction(): prediction.engine.validation queda vacío,
+  // igual que en producción mientras el ledger de multideporte no acumula
+  // las 30 liquidaciones por línea que exige refreshPredictionLedgerCalibration.
+  const prediction = {
+    sport: 'baseball',
+    moneyline: { home: probability(.74), away: probability(.26) },
+    totals: { lines: { 8.5: { over: probability(.10), under: probability(.90) } } },
+    spread: { homeMinus: probability(.20), awayPlus: probability(.80), awayMinus: probability(.10), homePlus: probability(.90) },
+    period: { moneyline: { home: probability(.84), away: probability(.12), draw: probability(.04) }, totals: {} },
+    teamTotals: { home: {}, away: {} },
+  };
+  const result = buildMultisportCombinada(prediction, odds, fixture);
+  assert.ok(result.selectable.length > 0, 'debe publicar aunque el ledger de calibración esté vacío (ventana de arranque hasta 2026-11-22)');
+  assert.ok(result.selectable.some((selection) => selection.id === 'ml-home'));
+});
+
 test('NBA y NFL aplican la misma política pública de Baseball', () => {
   const price = (odd, selectionName) => ({ odd, bookmaker: 'Bet365', selectionName, marketName: 'Mercado real' });
   const prediction = calibratedPrediction({

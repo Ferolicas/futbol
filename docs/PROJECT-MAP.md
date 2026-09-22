@@ -1366,3 +1366,25 @@ pedirse: sin verificación de que Bet365 las ofrezca.
 - `app/api/baseball/leagues/route.js`: Triple-A visible en el filtro de liga.
 - `scripts/backfill-multisport-history.js`: quitado el bloqueo explícito que
   impedía pedir MiLB por backfill.
+
+## Ledger de calibración multideporte: en pausa hasta 2026-11-22 (2026-09-22)
+
+El requisito "unvalidated bloquea todo" (ver sección de los dos bugs de
+escala arriba) queda sin exigirse para béisbol/NBA/NFL hasta esa fecha —
+`MULTISPORT_LEDGER_WARMUP_UNTIL` en lib/multisport-analysis.js,
+`multisportLedgerCalibrationReady()`. Pasado eso vuelve a exigirse solo, sin
+intervención manual: se evalúa en cada análisis, no depende de un cron.
+`recommendationDecision` (prediction-math.cjs) gana el parámetro
+`enforceValidation` (default `true`, igual que `enforceExpectedValue`/
+`enforceMarketEdge`) — SOLO `buildMultisportCombinada` lo pasa en `false`
+durante la ventana; fútbol nunca lo toca, sigue exigiendo su ledger siempre
+(ya tiene historial real acumulado, a diferencia de multideporte).
+
+Aclaración importante (duda explícita del usuario): la probabilidad y la
+fiabilidad (posterior Beta-binomial) del motor empírico son SIEMPRE
+específicas del equipo/jugador — `computeMultisportEmpiricalPrediction`
+consulta `*_engine_team_stats WHERE team_id=$1`, nunca agrega entre equipos.
+El ledger que se pausa aquí es una capa ADICIONAL y distinta: agrupa por
+`market_family` (ej. "total_goals_over2_5") a través de TODOS los equipos,
+para verificar si el modelo en general ha acertado con ese TIPO de mercado —
+no reemplaza ni relaja la especificidad por equipo de la probabilidad base.
