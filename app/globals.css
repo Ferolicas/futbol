@@ -13974,9 +13974,15 @@ input:checked + .cb-mark::after {
 .password-modal-icon { display:inline-flex; align-items:center; justify-content:center; width:44px; height:44px; margin-bottom:12px; border-radius:14px; background:rgba(16,185,129,.12); color:#67e8b7; }
 .password-modal-dialog h2 { color:#f5fbfa; font-weight:850; font-size:clamp(19px,5vw,22px); line-height:1.18; margin:0 0 16px; letter-spacing:-.5px; }
 .password-modal-dialog label { display:block; margin-bottom:12px; }
-.password-modal-dialog label span { display:block; margin-bottom:6px; color:#8b9ca8; font-size:12px; font-weight:700; }
-.password-modal-dialog input { width:100%; box-sizing:border-box; padding:11px 13px; border:1px solid rgba(255,255,255,.1); border-radius:11px; background:rgba(255,255,255,.03); color:#edf6f4; font:inherit; font-size:14px; }
+.password-modal-dialog label > span:first-child { display:block; margin-bottom:6px; color:#8b9ca8; font-size:12px; font-weight:700; }
+.password-modal-dialog input { width:100%; box-sizing:border-box; padding:11px 40px 11px 13px; border:1px solid rgba(255,255,255,.1); border-radius:11px; background:rgba(255,255,255,.03); color:#edf6f4; font:inherit; font-size:14px; }
 .password-modal-dialog input:focus-visible { outline:2px solid #f5e400; outline-offset:2px; }
+.password-modal-field { position:relative; display:block; }
+.password-modal-reveal { position:absolute; right:6px; top:50%; transform:translateY(-50%); display:flex; align-items:center; justify-content:center; width:30px; height:30px; border:0; border-radius:8px; background:transparent; color:#8b9ca8; cursor:pointer; }
+.password-modal-reveal:hover,.password-modal-reveal:focus-visible { color:#edf6f4; background:rgba(255,255,255,.06); }
+.password-modal-match { display:flex; align-items:center; gap:5px; margin-top:6px; font-size:11px; font-weight:700; }
+.password-modal-match.is-ok { color:#67e8b7; }
+.password-modal-match.is-bad { color:#fda4af; }
 .password-modal-success { display:flex; align-items:center; gap:8px; color:#67e8b7; font-size:13px; font-weight:700; margin:0 0 16px; }
 .free-locked-panel { position:relative; min-height:310px; border:1px solid #5ee6b125; border-radius:16px; overflow:hidden; margin:12px 0; background:#0d211a; }
 .free-placeholder { filter:blur(7px); user-select:none; padding:24px; opacity:.45; }

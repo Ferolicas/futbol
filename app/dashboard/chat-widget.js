@@ -5,6 +5,8 @@ import {
   ArrowLeft,
   CheckCircle2,
   ChevronDown,
+  Eye,
+  EyeOff,
   Globe2,
   Headphones,
   KeyRound,
@@ -12,6 +14,7 @@ import {
   MessageCircle,
   Minimize2,
   Send,
+  XCircle,
 } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -48,6 +51,7 @@ export default function ChatWidget() {
   const [pwdSaving, setPwdSaving] = useState(false);
   const [pwdError, setPwdError] = useState('');
   const [pwdSuccess, setPwdSuccess] = useState(false);
+  const [pwdReveal, setPwdReveal] = useState(false);
   const pwdDialogRef = useRef(null);
 
   openRef.current = isOpen;
@@ -171,6 +175,7 @@ export default function ChatWidget() {
     setPwdConfirm('');
     setPwdError('');
     setPwdSuccess(false);
+    setPwdReveal(false);
     setPwdModalOpen(true);
   };
 
@@ -515,25 +520,54 @@ export default function ChatWidget() {
               <form onSubmit={submitPasswordChange}>
                 <label>
                   <span>Nueva contraseña</span>
-                  <input
-                    type="password"
-                    value={pwdNew}
-                    onChange={(event) => setPwdNew(event.target.value)}
-                    autoComplete="new-password"
-                    minLength={8}
-                    required
-                  />
+                  <span className="password-modal-field">
+                    <input
+                      type={pwdReveal ? 'text' : 'password'}
+                      value={pwdNew}
+                      onChange={(event) => setPwdNew(event.target.value)}
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="password-modal-reveal"
+                      onClick={() => setPwdReveal((reveal) => !reveal)}
+                      aria-label={pwdReveal ? 'Ocultar contraseñas' : 'Mostrar contraseñas'}
+                      aria-pressed={pwdReveal}
+                    >
+                      {pwdReveal ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+                    </button>
+                  </span>
                 </label>
                 <label>
                   <span>Confirmar nueva contraseña</span>
-                  <input
-                    type="password"
-                    value={pwdConfirm}
-                    onChange={(event) => setPwdConfirm(event.target.value)}
-                    autoComplete="new-password"
-                    minLength={8}
-                    required
-                  />
+                  <span className="password-modal-field">
+                    <input
+                      type={pwdReveal ? 'text' : 'password'}
+                      value={pwdConfirm}
+                      onChange={(event) => setPwdConfirm(event.target.value)}
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="password-modal-reveal"
+                      onClick={() => setPwdReveal((reveal) => !reveal)}
+                      aria-label={pwdReveal ? 'Ocultar contraseñas' : 'Mostrar contraseñas'}
+                      aria-pressed={pwdReveal}
+                    >
+                      {pwdReveal ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+                    </button>
+                  </span>
+                  {pwdConfirm && (
+                    pwdNew === pwdConfirm ? (
+                      <small className="password-modal-match is-ok"><CheckCircle2 size={13} aria-hidden="true" /> Las contraseñas coinciden</small>
+                    ) : (
+                      <small className="password-modal-match is-bad"><XCircle size={13} aria-hidden="true" /> Las contraseñas no coinciden</small>
+                    )
+                  )}
                 </label>
                 {pwdError && <div className="chat-feedback is-error" role="alert">{pwdError}</div>}
                 <button type="submit" className="chat-primary-action" disabled={pwdSaving}>
