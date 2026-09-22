@@ -538,6 +538,7 @@ function ActiveClientsSection() {
               <span>Registro: {fmtDate(c.created_at)}</span>
             </div>
             <div className="admin-ticket-meta">
+              <span>Inicio del plan: {c.plan_started_at ? fmtDate(c.plan_started_at) : '—'}</span>
               <span>Último pago: {c.last_payment_at ? fmtDate(c.last_payment_at) : '—'}</span>
               <span style={{ color: c.next_payment_at ? 'var(--accent)' : 'var(--t3)', fontWeight: 600 }}>
                 Siguiente pago: {c.next_payment_at ? fmtDate(c.next_payment_at) : '—'}

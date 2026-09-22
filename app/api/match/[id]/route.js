@@ -2,7 +2,7 @@ import {
   getQuota, refreshLineups, refreshInjuries, fetchMatchStats, analyzeMatch,
   recomputeAnalysisWithConfirmedLineups,
 } from '../../../../lib/api-football';
-import { getCachedAnalysis, cacheAnalysis, getCachedFixtures } from '../../../../lib/sanity-cache';
+import { getCachedAnalysis, cacheAnalysis, getCachedFixtures, getCachedAnalysisByFixtureId } from '../../../../lib/sanity-cache';
 import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { getCurrentUser } from '../../../../lib/auth-pg';
@@ -95,6 +95,12 @@ export async function GET(request, props) {
       } catch (e) {
         console.error('[match:GET] lazy re-analyze failed:', e.message);
       }
+    }
+    // Último recurso: un partido ya analizado en una fecha distinta a hoy
+    // (buscador/enlace directo a un partido pasado) — ver comentario en
+    // getCachedAnalysisByFixtureId.
+    if (!analysis) {
+      analysis = await getCachedAnalysisByFixtureId(id).catch(() => null);
     }
     if (!analysis) {
       return Response.json({ error: 'Match not analyzed yet', notFound: true }, { status: 404 });

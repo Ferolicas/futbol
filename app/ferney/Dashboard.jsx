@@ -1290,7 +1290,7 @@ function ClientsModal({ onClose }) {
                           <span className="fw-badge cyan" style={{ marginLeft: 4 }}>{(u.plan || '—').toUpperCase()}</span>
                         </div>
                         <div className="fw-cli-email">
-                          {u.email} · próx. pago {u.next_payment_at ? fmtDateTime(u.next_payment_at) : '—'}
+                          {u.email} · inicio {u.plan_started_at ? fmtDateTime(u.plan_started_at) : '—'} · próx. pago {u.next_payment_at ? fmtDateTime(u.next_payment_at) : '—'}
                         </div>
                       </div>
                       <div className="fw-cli-controls">

@@ -23,7 +23,7 @@ export async function GET() {
 
   const { data: users, error } = await supabaseAdmin
     .from('user_profiles')
-    .select('id, email, name, role, plan, subscription_status, stripe_customer_id, stripe_subscription_id, payment_provider, mp_preapproval_id, plan_expires_at, subscription_current_period_end, cancel_at_period_end, last_payment_at, last_payment_amount, last_payment_currency, created_at, updated_at')
+    .select('id, email, name, role, plan, subscription_status, stripe_customer_id, stripe_subscription_id, payment_provider, mp_preapproval_id, plan_expires_at, subscription_current_period_end, cancel_at_period_end, plan_started_at, last_payment_at, last_payment_amount, last_payment_currency, created_at, updated_at')
     .order('created_at', { ascending: false });
   if (error) return jsonError(error);
 
@@ -49,6 +49,7 @@ export async function GET() {
       stripe_customer_id: u.stripe_customer_id,
       payment_provider: u.payment_provider,
       created_at: u.created_at,
+      plan_started_at: u.plan_started_at || null,
       last_payment_at: u.last_payment_at || null,
       last_payment_amount: u.last_payment_amount || null,
       last_payment_currency: u.last_payment_currency || null,
@@ -130,6 +131,7 @@ export async function POST(request) {
       plan_expires_at: periodEnd,
       subscription_current_period_end: periodEnd,
       cancel_at_period_end: false,
+      plan_started_at: now.toISOString(),
       last_payment_at: now.toISOString(),
       updated_at: now.toISOString(),
     };
@@ -173,6 +175,7 @@ export async function POST(request) {
       plan_expires_at: null,
       subscription_current_period_end: null,
       cancel_at_period_end: false,
+      plan_started_at: null,
       updated_at: new Date().toISOString(),
     };
   }
