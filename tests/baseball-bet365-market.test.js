@@ -175,6 +175,11 @@ test('Baseball publica solo selecciones cruzadas con Bet365 y cuota mínima 1.20
   assert.ok(result.selectable.some((selection) => selection.id === 'first5-total-4.5-under'));
   assert.ok(result.selectable.some((selection) => selection.id === 'team-total-home-3.5-over'));
   assert.ok(result.selectable.some((selection) => selection.id === 'ml-home'));
+  // calibrateProbability espera fracción 0-1: si se le pasa 0-100 sin dividir,
+  // clampProbability lo fija en 100% (rawProbability=100) sin importar la
+  // probabilidad real de entrada (74%). Bug de escala desde 2026-09-08.
+  const mlHome = result.selectable.find((selection) => selection.id === 'ml-home');
+  assert.ok(Math.abs(mlHome.rawProbability - 74) < 1, `ml-home.rawProbability debería ser ~74, fue ${mlHome.rawProbability}`);
   assert.ok(result.selectable.some((selection) => selection.id === 'team-total-away-4.5-under'));
   assert.ok(result.selectable.every((selection) => !selection.id.includes('18.5')));
   assert.ok(result.selectable.every((selection) => !selection.id.includes('12.5')));
