@@ -12,7 +12,8 @@
       "bundleIdentifier": "com.cfanalisis.app",
       "supportsTablet": false,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+	"CFBundleDisplayName": "CF Analisis"
       }
     },
     "android": {
