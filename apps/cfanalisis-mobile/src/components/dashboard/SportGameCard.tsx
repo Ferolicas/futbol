@@ -45,9 +45,12 @@ interface Props {
 export const SportGameCard = memo(function SportGameCard({ game, sport, timeZone, favorite, onFavorite, onDismiss, onOpen, liveLabel, selectedCount = 0 }: Props) {
   const match = useMemo(() => toHeadMatch(game), [game]);
   const analyzed = !!game.analysis;
+  // liveResult trae la caja de béisbol; basketball/NFL exponen los cuartos
+  // como game.periods (top-level), no anidados — se combinan las dos formas.
+  const liveStats = useMemo(() => ({ ...(game.liveResult || {}), periods: game.periods || game.liveResult?.periods || null }), [game.liveResult, game.periods]);
   return (
     <Pressable onPress={onOpen} style={({ pressed }) => [styles.wrap, pressed && { opacity: 0.9 }]}>
-      <MatchHeadCard match={match} userTz={timeZone} sport={sport} isFavorite={favorite} onFavorite={() => onFavorite(game.id)} onDismiss={onDismiss} liveLabel={liveLabel} liveStats={game.liveResult} />
+      <MatchHeadCard match={match} userTz={timeZone} sport={sport} isFavorite={favorite} onFavorite={() => onFavorite(game.id)} onDismiss={onDismiss} liveLabel={liveLabel} liveStats={liveStats} />
       <View style={styles.foot}>
         <AppText variant="kicker" size={9.5} tone={analyzed ? 'accent' : 'muted'}>{analyzed ? '✓ Analizado' : (game.analysisPending ? 'Análisis en preparación' : 'Sin análisis')}</AppText>
         {selectedCount > 0 && <AppText variant="caption" tone="accent">{selectedCount} sel.</AppText>}

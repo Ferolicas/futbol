@@ -82,7 +82,10 @@ export default function SharedSportCard({ game, sport, scoreLabel, timeZone, exp
   const status = { ...game.status, short: finished ? 'FT' : live ? '1H' : rawStatus };
   const match = { fixture: { id: game.id, date: game.date, status }, league: game.league || {}, teams: game.teams,
     goals: { home: game.scores?.home?.total ?? game.liveResult?.home_score, away: game.scores?.away?.total ?? game.liveResult?.away_score } };
-  const head = <div className="acc-head" onClick={onToggle}><MatchHeadCard sport={sport} match={match} userTz={timeZone} isFavorite={favorite} liveStats={game.liveResult}
+  // liveResult trae la caja de béisbol; basketball/NFL exponen los cuartos
+  // como game.periods (top-level), no anidados — se combinan las dos formas.
+  const cardLiveStats = { ...(game.liveResult || {}), periods: game.periods || game.liveResult?.periods || null };
+  const head = <div className="acc-head" onClick={onToggle}><MatchHeadCard sport={sport} match={match} userTz={timeZone} isFavorite={favorite} liveStats={cardLiveStats}
     onFavorite={onFavorite ? () => onFavorite(game.id) : null} onDismiss={onDismiss} />{!expanded && <div className="acc-indicator"><span className="chev-ico">▾</span></div>}</div>;
   return <><div className="acc-card">{head}</div>{expanded && <MatchFullscreen onStep={onStep} head={head} body={game.analysis
     ? <SportAnalysisTabs game={game} sport={sport} scoreLabel={scoreLabel} selected={selected} onToggle={onTogglePick} onViewFull={onViewFull} />

@@ -85,6 +85,52 @@ export function BaseballResultStats({ result, homeName = 'Local', awayName = 'Vi
   );
 }
 
+const QUARTER_LABELS = ['C1', 'C2', 'C3', 'C4'];
+
+/** Marcador por cuarto (NBA/NCAA) — mismo patrón que BaseballResultStats,
+ * con game.periods.home/away que ya captura nba-stats-api.js/espn-sports-api.js. */
+export function BasketballResultStats({ periods, homeName = 'Local', awayName = 'Visitante' }: { periods: any; homeName?: string; awayName?: string }) {
+  const home: any[] = Array.isArray(periods?.home) ? periods.home : [];
+  const away: any[] = Array.isArray(periods?.away) ? periods.away : [];
+  const count = Math.max(home.length, away.length);
+  if (!count) return null;
+  const teamLabel = (name: string, fallback: string) => {
+    const parts = String(name || fallback).trim().split(/\s+/).filter(Boolean);
+    if (parts.length <= 1) return (parts[0] || fallback).slice(0, 3).toUpperCase();
+    return parts.map((part) => part[0]).join('').slice(0, 3).toUpperCase();
+  };
+  const periodLabel = (index: number) => QUARTER_LABELS[index] || `OT${index - 3}`;
+  const total = (values: any[]) => values.reduce((sum, value) => sum + (Number(value) || 0), 0);
+  const cell = (value: React.ReactNode, key: string, head = false) => (
+    <View key={key} style={{ width: 34, alignItems: 'center' }}>
+      <AppText variant="mono" size={11} tone={head ? 'faint' : 'default'}>{value}</AppText>
+    </View>
+  );
+  return (
+    <Card padded={false} style={{ padding: 10 }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View style={{ gap: 4 }}>
+          <View style={styles.tableRow}>
+            <View style={{ width: 54 }} />
+            {Array.from({ length: count }, (_, i) => cell(periodLabel(i), `h${i}`, true))}
+            {cell('TOT', 'htot', true)}
+          </View>
+          {[
+            { key: 'home', name: homeName, fallback: 'LOC', values: home, color: '#67e8f9' },
+            { key: 'away', name: awayName, fallback: 'VIS', values: away, color: '#fcd34d' },
+          ].map((team) => (
+            <View key={team.key} style={styles.tableRow}>
+              <View style={{ width: 54 }}><AppText variant="mono" size={11} weight="bold" style={{ color: team.color }}>{teamLabel(team.name, team.fallback)}</AppText></View>
+              {Array.from({ length: count }, (_, i) => cell(valueOrDash(team.values[i]), `${team.key}-${i}`))}
+              {cell(total(team.values), `${team.key}-tot`)}
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+    </Card>
+  );
+}
+
 /** Frecuencias calculadas para béisbol, baloncesto y fútbol americano. */
 export function SportFrequencies({ probabilities, home, away, scoreLabel = 'puntos' }: { probabilities: any; home: string; away: string; scoreLabel?: string }) {
   const [active, setActive] = useState('score');

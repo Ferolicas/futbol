@@ -66,6 +66,7 @@ import { freeRecommendationForRail } from '../../lib/free-recommendation-rail';
 import { BaseballDashboard } from './baseball/page';
 import MultisportDashboard from './components/MultisportDashboard';
 import BaseballResultStats from './baseball/components/BaseballResultStats';
+import BasketballResultStats from './components/BasketballResultStats';
 import {
   leagueSelectionIncludes,
   normalizeLeagueSelection,
@@ -2061,6 +2062,10 @@ export function MatchHeadCard({ match, odds, data, standings, liveStats, userTz,
 
       {sport === 'baseball' && hasScore && liveStats && (
         <BaseballResultStats compact result={liveStats} homeName={match.teams.home.name} awayName={match.teams.away.name} />
+      )}
+
+      {sport === 'basketball' && hasScore && liveStats?.periods && (
+        <BasketballResultStats compact periods={liveStats.periods} homeName={match.teams.home.name} awayName={match.teams.away.name} />
       )}
 
       <GoalScorersGrid liveStats={liveStats} homeId={match.teams.home.id} />
