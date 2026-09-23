@@ -40,14 +40,39 @@ function ProbabilityPill({ label, value }) {
   return <span className="msa-pill"><small>{label}</small><b>{pct(value)}</b></span>;
 }
 
-function Ladder({ title, lines, label = 'puntos' }) {
+// Malla simétrica (línea + más%/menos%) en vez de la lista vertical infinita.
+function Mesh({ lines, label = 'puntos' }) {
   const entries = Object.entries(lines || {}).sort((left, right) => Number(left[0]) - Number(right[0]));
   if (!entries.length) return null;
   return (
-    <div className="msa-ladder">
-      {title && <h3>{title}</h3>}
+    <div className="msa-mesh">
       {entries.map(([line, values]) => (
-        <div key={line}><strong>{line} {label}</strong><ProbabilityPill label="Más" value={values?.over} /><ProbabilityPill label="Menos" value={values?.under} /></div>
+        <div key={line} className="msa-mesh-cell">
+          <strong>{line} {label}</strong>
+          <span className="over">Más {pct(values?.over)}</span>
+          <span className="under">Menos {pct(values?.under)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Una sola tarjeta por estadística: línea a la izquierda, columna por equipo
+// con su porcentaje a la derecha, en vez de 2-3 ladders sueltos.
+function CompareLadder({ title, homeLines, awayLines, homeName, awayName }) {
+  const allLines = [...new Set([...Object.keys(homeLines || {}), ...Object.keys(awayLines || {})])]
+    .map(Number).filter(Number.isFinite).sort((left, right) => left - right);
+  if (!allLines.length) return null;
+  return (
+    <div className="msa-compare">
+      {title && <h3>{title}</h3>}
+      <div className="msa-compare-head"><span /><span>{homeName}</span><span>{awayName}</span></div>
+      {allLines.map((line) => (
+        <div key={line} className="msa-compare-row">
+          <span>Línea {line}</span>
+          <b>{pct(homeLines?.[line]?.over)}</b>
+          <b>{pct(awayLines?.[line]?.over)}</b>
+        </div>
       ))}
     </div>
   );
@@ -58,13 +83,20 @@ function Expected({ value, homeName, awayName }) {
   return <div className="msa-expected"><span>{homeName}<b>{fmt(value.home)}</b></span><span>Total<b>{fmt(value.total)}</b></span><span>{awayName}<b>{fmt(value.away)}</b></span></div>;
 }
 
+// Columna por equipo (sin repetir el nombre en cada renglón).
 function Spreads({ values, homeName, awayName }) {
-  const rows = [
-    ...Object.entries(values?.home || {}).map(([line, value]) => ({ side: homeName, line, value })),
-    ...Object.entries(values?.away || {}).map(([line, value]) => ({ side: awayName, line, value })),
-  ];
-  if (!rows.length) return null;
-  return <div className="msa-pill-grid">{rows.map((row) => <ProbabilityPill key={`${row.side}-${row.line}`} label={`${row.side} ${Number(row.line) > 0 ? '+' : ''}${row.line}`} value={row.value} />)}</div>;
+  const homeEntries = Object.entries(values?.home || {}).sort((left, right) => Number(left[0]) - Number(right[0]));
+  const awayEntries = Object.entries(values?.away || {}).sort((left, right) => Number(left[0]) - Number(right[0]));
+  if (!homeEntries.length && !awayEntries.length) return null;
+  const Column = ({ name, entries }) => (
+    <div className="msa-spreads-col">
+      <h4>{name}</h4>
+      {entries.map(([line, value]) => (
+        <div key={line} className="msa-spreads-row"><span>{Number(line) > 0 ? '+' : ''}{line}</span><b>{pct(value)}</b></div>
+      ))}
+    </div>
+  );
+  return <div className="msa-spreads-cols"><Column name={homeName} entries={homeEntries} /><Column name={awayName} entries={awayEntries} /></div>;
 }
 
 function FullFrequencies({ prediction, homeName, awayName, scoreLabel }) {
@@ -80,11 +112,8 @@ function FullFrequencies({ prediction, homeName, awayName, scoreLabel }) {
           <ProbabilityPill label={`${awayName} gana`} value={prediction.moneyline?.away} />
         </div>
       </div>
-      <div className="msa-grid">
-        <Ladder title={`Total del partido`} lines={prediction.totals?.lines} label={scoreLabel} />
-        <Ladder title={homeName} lines={prediction.teamTotals?.home} label={scoreLabel} />
-        <Ladder title={awayName} lines={prediction.teamTotals?.away} label={scoreLabel} />
-      </div>
+      <div className="msa-block"><h3>Total del partido</h3><Mesh lines={prediction.totals?.lines} label={scoreLabel} /></div>
+      <CompareLadder title={`Total — ${scoreLabel}`} homeLines={prediction.teamTotals?.home} awayLines={prediction.teamTotals?.away} homeName={homeName} awayName={awayName} />
       <div className="msa-block"><h3>Hándicaps calculados</h3><Spreads values={prediction.spreads} homeName={homeName} awayName={awayName} /></div>
       {Object.entries(prediction.periods || {}).map(([key, period]) => (
         <div className="msa-block" key={key}>
@@ -95,23 +124,15 @@ function FullFrequencies({ prediction, homeName, awayName, scoreLabel }) {
             <ProbabilityPill label="Empate" value={period.moneyline?.draw} />
             <ProbabilityPill label={`${awayName} gana`} value={period.moneyline?.away} />
           </div>
-          <div className="msa-grid">
-            <Ladder title="Total" lines={period.totals} label={scoreLabel} />
-            <Ladder title={homeName} lines={period.teamTotals?.home} label={scoreLabel} />
-            <Ladder title={awayName} lines={period.teamTotals?.away} label={scoreLabel} />
-          </div>
+          <Mesh lines={period.totals} label={scoreLabel} />
+          <CompareLadder homeLines={period.teamTotals?.home} awayLines={period.teamTotals?.away} homeName={homeName} awayName={awayName} />
           <Spreads values={period.spreads} homeName={homeName} awayName={awayName} />
         </div>
       ))}
       {Object.entries(prediction.statistics || {}).map(([key, values]) => (
-        <div className="msa-block" key={key}>
-          <h3>{values.label || key}</h3>
+        <div key={key}>
           <Expected value={values.expected} homeName={homeName} awayName={awayName} />
-          <div className="msa-grid">
-            <Ladder title={homeName} lines={values.home} label={values.label || key} />
-            <Ladder title={awayName} lines={values.away} label={values.label || key} />
-            <Ladder title="Total" lines={values.total} label={values.label || key} />
-          </div>
+          <CompareLadder title={values.label || key} homeLines={values.home} awayLines={values.away} homeName={homeName} awayName={awayName} />
         </div>
       ))}
     </>

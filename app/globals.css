@@ -6716,6 +6716,22 @@ body.match-fs-open .float-bar-combinada {
 .msa-ladder { padding: 9px; border-radius: 9px; background: rgba(255,255,255,.018); border: 1px solid rgba(255,255,255,.05); min-width: 0; }
 .msa-ladder > div { display: grid; grid-template-columns: minmax(70px,.7fr) 1fr 1fr; gap: 5px; margin-top: 5px; align-items: center; }
 .msa-ladder > div > strong { color: var(--t2); font-size: .62rem; }
+.msa-mesh { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.msa-mesh-cell { min-width: 92px; padding: 7px 9px; border-radius: 9px; text-align: center; background: rgba(255,255,255,.025); border: 1px solid rgba(255,255,255,.06); }
+.msa-mesh-cell strong { display: block; color: var(--t2); font-size: .68rem; margin-bottom: 3px; }
+.msa-mesh-cell .over { display: block; color: #5ee6b1; font-size: .64rem; }
+.msa-mesh-cell .under { display: block; color: #fcd34d; font-size: .64rem; }
+.msa-compare { padding: 12px; margin-top: 9px; border-radius: 11px; background: rgba(0,0,0,.11); border: 1px solid rgba(255,255,255,.055); }
+.msa-compare > h3 { margin: 0 0 8px; color: var(--t2); font-size: .76rem; }
+.msa-compare-head { display: grid; grid-template-columns: minmax(60px,.7fr) 1fr 1fr; gap: 6px; margin-bottom: 5px; }
+.msa-compare-head span { text-align: center; color: var(--t2); font-size: .64rem; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msa-compare-row { display: grid; grid-template-columns: minmax(60px,.7fr) 1fr 1fr; gap: 6px; align-items: center; padding: 4px 0; }
+.msa-compare-row span { color: var(--t2); font-size: .68rem; }
+.msa-compare-row b { text-align: center; color: #5ee6b1; font: 800 .68rem JetBrains Mono,monospace; }
+.msa-spreads-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 7px; }
+.msa-spreads-col h4 { margin: 0 0 6px; color: #5ee6b1; font-size: .7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msa-spreads-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: .7rem; }
+.msa-spreads-row b { color: #5ee6b1; font: 800 .68rem JetBrains Mono,monospace; }
 
 @media (max-width: 560px) {
   .msa-page { padding: 12px 10px 60px; }
