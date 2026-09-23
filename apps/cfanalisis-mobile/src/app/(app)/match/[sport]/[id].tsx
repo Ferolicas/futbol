@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft, Zap } from 'lucide-react-native';
-import { AppText, Banner, Button, Card, Screen, SkeletonList, TeamLogo } from '@/components/ui';
+import { AlertTriangle, ChevronLeft, Zap } from 'lucide-react-native';
+import { AppText, Banner, Button, Card, ProgressBar, Screen, SkeletonList, TeamLogo } from '@/components/ui';
 import { MatchHeadCard } from '@/components/dashboard/MatchHeadCard';
 import { toHeadMatch } from '@/components/dashboard/SportGameCard';
 import { FinalVerdictPanel } from '@/components/analysis/FinalVerdictPanel';
 import { LockedAnalysis } from '@/components/analysis/FreeAccess';
 import { MarketButton } from '@/components/analysis/MarketButton';
 import { PlayersBlock, ProbBlock, footballMarkets, hasPlayerHighlights } from '@/components/analysis/FootballAnalysisTabs';
-import { BaseballResultStats, SportFrequencies } from '@/components/analysis/SportAnalysisTabs';
+import { BaseballResultStats } from '@/components/analysis/SportAnalysisTabs';
 import { api, ApiError } from '@/lib/api';
 import { useAccess } from '@/lib/access-context';
 import { useSelectedMarkets } from '@/lib/selected-markets';
@@ -39,6 +39,308 @@ function Header({ onBack, title }: { onBack: () => void; title: string }) {
     <View style={styles.topbar}>
       <Pressable onPress={onBack} style={styles.back} accessibilityLabel="Volver"><ChevronLeft size={18} color={colors.text} /><AppText variant="label">Volver</AppText></Pressable>
       <AppText variant="kicker" tone="muted">{title}</AppText>
+    </View>
+  );
+}
+
+function StatBar({ label, value }: { label: string; value: number }) {
+  return (
+    <View style={{ gap: 3, marginBottom: 6 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+        <AppText variant="caption" tone="secondary">{label}</AppText>
+        <AppText variant="mono" size={12} tone="accent">{value}%</AppText>
+      </View>
+      <ProgressBar value={value} />
+    </View>
+  );
+}
+
+/** Mismas bajas del once titular que la web (BajasSection): refresca vía
+ * la misma acción del endpoint /api/match/[id]. */
+function InjuriesSection({ id, filteredInjuries, allInjuries, onRefreshed }: { id: string; filteredInjuries: any[]; allInjuries: any[]; onRefreshed: (injuries: any) => void }) {
+  const [refreshing, setRefreshing] = useState(false);
+  const hasData = Array.isArray(allInjuries) && allInjuries.length > 0;
+  const filtered = filteredInjuries || [];
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      const data = await api.post<any>(`/api/match/${id}`, { action: 'refresh-injuries' });
+      if (data.injuries) onRefreshed(data.injuries);
+    } catch {} finally { setRefreshing(false); }
+  };
+
+  if (!hasData) {
+    return (
+      <Card style={{ alignItems: 'center', gap: 10 }}>
+        <AppText tone="muted">Sin bajas confirmadas aún</AppText>
+        <Button title={refreshing ? 'Actualizando…' : 'Actualizar bajas'} loading={refreshing} variant="secondary" onPress={refresh} />
+      </Card>
+    );
+  }
+  if (filtered.length === 0) {
+    return (
+      <Card style={{ alignItems: 'center', gap: 10 }}>
+        <Banner tone="success" message="Once titular sin bajas confirmadas" />
+        <Button title={refreshing ? 'Actualizando…' : 'Actualizar bajas'} loading={refreshing} variant="secondary" onPress={refresh} />
+      </Card>
+    );
+  }
+  return (
+    <View style={{ gap: 10 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <AlertTriangle size={16} color={colors.error} />
+        <AppText tone="error" weight="bold">{filtered.length} baja{filtered.length > 1 ? 's' : ''} en el once titular</AppText>
+      </View>
+      {filtered.map((inj: any, i: number) => (
+        <Card key={i} tone="error" style={{ gap: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TeamLogo src={inj.team?.logo} name={inj.team?.name} size={18} />
+            <AppText variant="caption" tone="muted">{inj.team?.name}</AppText>
+          </View>
+          <AppText variant="label" weight="bold">{inj.player?.name}</AppText>
+          <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+            <AppText variant="caption" tone="error">{inj.player?.type}</AppText>
+            <AppText variant="caption" tone="warning">{inj.player?.reason || 'N/A'}</AppText>
+          </View>
+        </Card>
+      ))}
+      <Button title={refreshing ? 'Actualizando…' : 'Actualizar bajas'} loading={refreshing} variant="secondary" onPress={refresh} />
+    </View>
+  );
+}
+
+/** XI titular + suplentes, con botón de actualizar si aún no está disponible
+ * (mismo action=refresh-lineups del endpoint que usa la web). */
+function LineupsSection({ id, lineups, onRefreshed }: { id: string; lineups: any; onRefreshed: (lineups: any) => void }) {
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
+
+  const refresh = async () => {
+    setRefreshing(true); setError('');
+    try {
+      const data = await api.post<any>(`/api/match/${id}`, { action: 'refresh-lineups' });
+      if (data.lineups) onRefreshed(data.lineups);
+      if (data.lineups && !data.lineups.available) setError('Alineaciones aún no publicadas');
+    } catch (cause: any) { setError(cause?.message || 'Error al actualizar alineaciones'); }
+    finally { setRefreshing(false); }
+  };
+
+  if (!lineups?.available) {
+    return (
+      <Card tone="warning" style={{ alignItems: 'center', gap: 10 }}>
+        <AlertTriangle size={28} color={colors.warning} />
+        <AppText weight="bold">Alineaciones no disponibles aún</AppText>
+        <Button title={refreshing ? 'Actualizando…' : 'Actualizar alineaciones'} loading={refreshing} onPress={refresh} />
+        {error ? <AppText variant="caption" tone="error">{error}</AppText> : null}
+      </Card>
+    );
+  }
+  return (
+    <View style={{ gap: 10 }}>
+      {lineups.data.map((team: any, index: number) => (
+        <Card key={index} style={{ gap: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TeamLogo src={team.team?.logo} name={team.team?.name} size={24} />
+            <AppText variant="label" weight="bold" style={{ flex: 1 }}>{team.team?.name}</AppText>
+            <AppText variant="mono" size={12} tone="accent">{team.formation}</AppText>
+          </View>
+          <AppText variant="caption" tone="muted">DT: {team.coach?.name || 'N/A'}</AppText>
+          <AppText variant="caption" tone="secondary" weight="bold">Titulares</AppText>
+          {(team.startXI || []).map((pl: any, i: number) => (
+            <View key={i} style={styles.playerRow}>
+              <AppText variant="mono" size={11} tone="muted" style={{ width: 26 }}>{pl.player?.number}</AppText>
+              <AppText variant="caption" style={{ flex: 1 }} numberOfLines={1}>{pl.player?.name}</AppText>
+              <AppText variant="caption" tone="faint">{pl.player?.pos}</AppText>
+            </View>
+          ))}
+          {(team.substitutes || []).length > 0 && (
+            <>
+              <AppText variant="caption" tone="secondary" weight="bold" style={{ marginTop: 6 }}>Suplentes</AppText>
+              {team.substitutes.map((pl: any, i: number) => (
+                <View key={i} style={[styles.playerRow, { opacity: 0.7 }]}>
+                  <AppText variant="mono" size={11} tone="faint" style={{ width: 26 }}>{pl.player?.number}</AppText>
+                  <AppText variant="caption" tone="faint" style={{ flex: 1 }} numberOfLines={1}>{pl.player?.name}</AppText>
+                  <AppText variant="caption" tone="faint">{pl.player?.pos}</AppText>
+                </View>
+              ))}
+            </>
+          )}
+        </Card>
+      ))}
+      <Button title={refreshing ? 'Actualizando…' : 'Actualizar alineaciones'} loading={refreshing} variant="secondary" onPress={refresh} />
+    </View>
+  );
+}
+
+/** Estadísticas por equipo (goles/tarjetas/córners ≥50%) — mismo p.perTeam que la web. */
+function PerTeamStatsSection({ perTeam, homeTeam, awayTeam }: { perTeam: any; homeTeam: string; awayTeam: string }) {
+  const labels: Record<string, Record<string, string>> = {
+    goals: { over05: '+0.5', over15: '+1.5', over25: '+2.5' },
+    cards: { over05: '+0.5', over15: '+1.5', over25: '+2.5', over35: '+3.5' },
+    corners: { over05: '+0.5', over15: '+1.5', over25: '+2.5', over35: '+3.5', over45: '+4.5', over55: '+5.5' },
+  };
+  const catLabel: Record<string, string> = { goals: 'Goles', cards: 'Tarjetas', corners: 'Córners' };
+  const renderTeam = (data: any, name: string) => (
+    <Card style={{ flex: 1, gap: 8 }}>
+      <AppText variant="kicker" tone="muted" numberOfLines={1}>{name}</AppText>
+      {['goals', 'cards', 'corners'].map((cat) => {
+        const catData = data?.[cat];
+        if (!catData) return null;
+        const entries = Object.entries<number>(catData).filter(([, prob]) => prob >= 50);
+        if (!entries.length) return null;
+        return (
+          <View key={cat}>
+            <AppText variant="caption" tone="secondary" weight="bold">{catLabel[cat]}</AppText>
+            {entries.map(([key, prob]) => <StatBar key={key} label={labels[cat]?.[key] || key} value={Math.round(prob)} />)}
+          </View>
+        );
+      })}
+    </Card>
+  );
+  return <View style={{ flexDirection: 'row', gap: 8 }}>{renderTeam(perTeam?.home, homeTeam)}{renderTeam(perTeam?.away, awayTeam)}</View>;
+}
+
+/** Probabilidad de gol por periodo de 15' — mismo goalTiming que la web. */
+function GoalTimingSection({ goalTiming, homeTeam, awayTeam }: { goalTiming: any; homeTeam: string; awayTeam: string }) {
+  const periods = ['0-15', '15-30', '30-45', '45-60', '60-75', '75-90'];
+  const at = (data: any[], i: number) => cap(data?.[i]?.probability || 0);
+  return (
+    <View style={{ gap: 10 }}>
+      {[['Combinado', goalTiming.combined], [homeTeam, goalTiming.home], [awayTeam, goalTiming.away]].map(([label, data]: any) => (
+        <Card key={label} style={{ gap: 6 }}>
+          <AppText variant="kicker" tone="muted" numberOfLines={1}>{label}</AppText>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            {periods.map((p, i) => {
+              const value = at(data, i);
+              return (
+                <View key={p} style={{ alignItems: 'center', minWidth: 46 }}>
+                  <AppText variant="caption" tone="faint">{p}&apos;</AppText>
+                  <AppText variant="mono" size={12} weight="bold" style={{ color: value >= 70 ? colors.accent : value >= 50 ? colors.warning : colors.muted }}>{value}%</AppText>
+                </View>
+              );
+            })}
+          </View>
+        </Card>
+      ))}
+    </View>
+  );
+}
+
+const MSF_PERIOD_LABELS: Record<string, string> = {
+  firstHalf: 'Primera mitad', secondHalf: 'Segunda mitad', quarter1: 'Primer cuarto', quarter2: 'Segundo cuarto',
+  quarter3: 'Tercer cuarto', quarter4: 'Cuarto cuarto', first3: 'Primeras 3 entradas', first4_5: 'Primeras 4,5 entradas',
+  first5: 'Primeras 5 entradas', first7: 'Primeras 7 entradas',
+};
+const msfProb = (entry: any): number | null => {
+  const raw = Number(entry?.rawProbability);
+  if (Number.isFinite(raw)) return raw <= 1 ? raw * 100 : raw;
+  const value = Number(entry?.probability ?? entry);
+  return Number.isFinite(value) ? value : null;
+};
+const msfPct = (entry: any) => { const v = msfProb(entry); return v == null ? '—' : `${Math.min(95, v).toFixed(2).replace(/\.00$/, '')}%`; };
+const msfFmt = (value: any) => value == null || !Number.isFinite(Number(value)) ? '—' : Number(value).toFixed(2);
+
+function MsfPill({ label, value }: { label: string; value: any }) {
+  if (msfProb(value) == null) return null;
+  return <View style={styles.msfPill}><AppText variant="caption" tone="muted">{label}</AppText><AppText variant="mono" size={12} weight="bold" tone="accent">{msfPct(value)}</AppText></View>;
+}
+function MsfLadder({ title, lines, label = 'puntos' }: { title?: string; lines: any; label?: string }) {
+  const entries = Object.entries(lines || {}).sort((l, r) => Number(l[0]) - Number(r[0]));
+  if (!entries.length) return null;
+  return (
+    <Card style={{ flex: 1, gap: 6, minWidth: 140 }}>
+      {title ? <AppText variant="kicker" tone="muted" numberOfLines={1}>{title}</AppText> : null}
+      {entries.map(([line, values]: any) => (
+        <View key={line} style={{ gap: 4 }}>
+          <AppText variant="caption" tone="secondary" weight="bold">{line} {label}</AppText>
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            <MsfPill label="Más" value={values?.over} />
+            <MsfPill label="Menos" value={values?.under} />
+          </View>
+        </View>
+      ))}
+    </Card>
+  );
+}
+function MsfExpected({ value, homeName, awayName }: { value: any; homeName: string; awayName: string }) {
+  if (!value || !Object.values(value).some((v) => v != null)) return null;
+  return (
+    <View style={{ flexDirection: 'row', gap: 8 }}>
+      {[[homeName, value.home], ['Total', value.total], [awayName, value.away]].map(([label, v]: any) => (
+        <Card key={label} style={{ flex: 1, alignItems: 'center', gap: 2 }}>
+          <AppText variant="caption" tone="muted" numberOfLines={1}>{label}</AppText>
+          <AppText variant="mono" size={16} weight="bold" tone="accent">{msfFmt(v)}</AppText>
+        </Card>
+      ))}
+    </View>
+  );
+}
+function MsfSpreads({ values, homeName, awayName }: { values: any; homeName: string; awayName: string }) {
+  const rows = [
+    ...Object.entries(values?.home || {}).map(([line, value]) => ({ side: homeName, line, value })),
+    ...Object.entries(values?.away || {}).map(([line, value]) => ({ side: awayName, line, value })),
+  ];
+  if (!rows.length) return null;
+  return <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>{rows.map((row) => <MsfPill key={`${row.side}-${row.line}`} label={`${row.side} ${Number(row.line) > 0 ? '+' : ''}${row.line}`} value={row.value} />)}</View>;
+}
+
+/** Frecuencias calculadas completas (baseball/basketball/NFL): mismo
+ * documento que MultisportAnalysisPage.js en la web — moneyline, totales,
+ * hándicaps y CADA periodo/estadística con su propio desglose, no solo el
+ * resumen simplificado que usa la tarjeta del dashboard. */
+function MultisportFullFrequencies({ prediction, homeName, awayName, scoreLabel }: { prediction: any; homeName: string; awayName: string; scoreLabel: string }) {
+  if (!prediction) return <AppText tone="muted">Todavía no hay frecuencias calculadas.</AppText>;
+  return (
+    <View style={{ gap: 14 }}>
+      <Card style={{ gap: 10 }}>
+        <AppText variant="kicker" tone="muted">Resultado y proyección general</AppText>
+        <MsfExpected value={prediction.expected} homeName={homeName} awayName={awayName} />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+          <MsfPill label={`${homeName} gana`} value={prediction.moneyline?.home} />
+          <MsfPill label="Empate" value={prediction.moneyline?.draw} />
+          <MsfPill label={`${awayName} gana`} value={prediction.moneyline?.away} />
+        </View>
+      </Card>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <MsfLadder title="Total del partido" lines={prediction.totals?.lines} label={scoreLabel} />
+        <MsfLadder title={homeName} lines={prediction.teamTotals?.home} label={scoreLabel} />
+        <MsfLadder title={awayName} lines={prediction.teamTotals?.away} label={scoreLabel} />
+      </View>
+      {prediction.spreads && (
+        <Card style={{ gap: 8 }}>
+          <AppText variant="kicker" tone="muted">Hándicaps calculados</AppText>
+          <MsfSpreads values={prediction.spreads} homeName={homeName} awayName={awayName} />
+        </Card>
+      )}
+      {Object.entries<any>(prediction.periods || {}).map(([key, period]) => (
+        <Card key={key} style={{ gap: 10 }}>
+          <AppText variant="kicker" tone="muted">{period.label || MSF_PERIOD_LABELS[key] || key}</AppText>
+          <MsfExpected value={period.expected} homeName={homeName} awayName={awayName} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            <MsfPill label={`${homeName} gana`} value={period.moneyline?.home} />
+            <MsfPill label="Empate" value={period.moneyline?.draw} />
+            <MsfPill label={`${awayName} gana`} value={period.moneyline?.away} />
+          </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <MsfLadder title="Total" lines={period.totals} label={scoreLabel} />
+            <MsfLadder title={homeName} lines={period.teamTotals?.home} label={scoreLabel} />
+            <MsfLadder title={awayName} lines={period.teamTotals?.away} label={scoreLabel} />
+          </View>
+          <MsfSpreads values={period.spreads} homeName={homeName} awayName={awayName} />
+        </Card>
+      ))}
+      {Object.entries<any>(prediction.statistics || {}).map(([key, values]) => (
+        <Card key={key} style={{ gap: 10 }}>
+          <AppText variant="kicker" tone="muted">{values.label || key}</AppText>
+          <MsfExpected value={values.expected} homeName={homeName} awayName={awayName} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <MsfLadder title={homeName} lines={values.home} label={values.label || key} />
+            <MsfLadder title={awayName} lines={values.away} label={values.label || key} />
+            <MsfLadder title="Total" lines={values.total} label={values.label || key} />
+          </View>
+        </Card>
+      ))}
     </View>
   );
 }
@@ -106,7 +408,6 @@ function FootballDetail({ id, date }: { id: string; date?: string }) {
   const matchName = `${a.homeTeam} vs ${a.awayTeam}`;
   const resultState = marketResultState({ sport: 'football', game: match, liveResult: liveStats });
   const pendingLabel = resultState.isLive ? 'En juego' : resultState.isFinal ? 'Pendiente oficial' : null;
-  const lineups = a.lineups?.available ? a.lineups.data : null;
 
   return (
     <View style={{ padding: 16, gap: 18 }}>
@@ -120,27 +421,13 @@ function FootballDetail({ id, date }: { id: string; date?: string }) {
         )) : <AppText tone="muted">Todavía no hay opciones que cumplan los criterios de recomendación.</AppText>}
       </Section>
 
-      {lineups && (
-        <Section title="XI Alineación titular">
-          {lineups.map((team: any, index: number) => (
-            <Card key={index} style={{ gap: 6 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <TeamLogo src={team.team?.logo} name={team.team?.name} size={24} />
-                <AppText variant="label" weight="bold" style={{ flex: 1 }}>{team.team?.name}</AppText>
-                <AppText variant="mono" size={12} tone="accent">{team.formation}</AppText>
-              </View>
-              <AppText variant="caption" tone="muted">DT: {team.coach?.name || 'N/A'}</AppText>
-              {(team.startXI || []).map((pl: any, i: number) => (
-                <View key={i} style={styles.playerRow}>
-                  <AppText variant="mono" size={11} tone="muted" style={{ width: 26 }}>{pl.player?.number}</AppText>
-                  <AppText variant="caption" style={{ flex: 1 }} numberOfLines={1}>{pl.player?.name}</AppText>
-                  <AppText variant="caption" tone="faint">{pl.player?.pos}</AppText>
-                </View>
-              ))}
-            </Card>
-          ))}
-        </Section>
-      )}
+      <Section title="Bajas en el titular habitual">
+        <InjuriesSection id={String(id)} filteredInjuries={a.filteredInjuries} allInjuries={a.injuries} onRefreshed={(injuries) => setAnalysis((prev: any) => ({ ...prev, injuries }))} />
+      </Section>
+
+      <Section title="XI Alineación titular">
+        <LineupsSection id={String(id)} lineups={a.lineups} onRefreshed={(lineups) => setAnalysis((prev: any) => ({ ...prev, lineups }))} />
+      </Section>
 
       {p && (
         <Section title="Estadísticas calculadas">
@@ -157,6 +444,18 @@ function FootballDetail({ id, date }: { id: string; date?: string }) {
             <Card style={{ flex: 1, gap: 4 }}><AppText variant="kicker" tone="muted">Córners</AppText><AppText variant="mono" size={18} tone="cyan">{p.cornerAvg ?? '—'}</AppText><AppText variant="caption" tone="faint">Total combinado</AppText></Card>
             <Card style={{ flex: 1, gap: 4 }}><AppText variant="kicker" tone="muted">Tarjetas</AppText><AppText variant="mono" size={18} tone="warning">{p.cardAvg ?? '—'}</AppText><AppText variant="caption" tone="faint">Amarillas promedio</AppText></Card>
           </View>
+        </Section>
+      )}
+
+      {p?.perTeam && (
+        <Section title="Estadísticas por equipo">
+          <PerTeamStatsSection perTeam={p.perTeam} homeTeam={a.homeTeam} awayTeam={a.awayTeam} />
+        </Section>
+      )}
+
+      {p?.goalTiming && (
+        <Section title="Probabilidad de gol por periodo">
+          <GoalTimingSection goalTiming={p.goalTiming} homeTeam={a.homeTeam} awayTeam={a.awayTeam} />
         </Section>
       )}
 
@@ -271,7 +570,7 @@ function BaseballDetail({ id }: { id: string }) {
         </Section>
       )}
       <Section title="Frecuencias calculadas · análisis completo" hint="Incluye todos los periodos y líneas calculadas, aunque la casa no ofrezca cuota.">
-        <SportFrequencies probabilities={probs} home={homeName} away={awayName} scoreLabel="carreras" />
+        <MultisportFullFrequencies prediction={probs?.evidence || probs} homeName={homeName} awayName={awayName} scoreLabel="carreras" />
       </Section>
       <FinalVerdictPanel verdict={a?.analysis?.finalVerdict} homeName={homeName} awayName={awayName} />
     </View>
@@ -314,7 +613,7 @@ function MultisportDetail({ sport, id }: { sport: string; id: string }) {
         )) : <AppText tone="muted">Bet365 no tiene ahora una línea exacta que cumpla ambos criterios. El análisis estadístico completo permanece visible.</AppText>}
       </Section>
       <Section title="Frecuencias calculadas · análisis completo" hint="Incluye todos los periodos y líneas calculadas, aunque la casa no ofrezca cuota. Estas cifras no se convierten por sí solas en recomendaciones.">
-        <SportFrequencies probabilities={analysis?.probabilities} home={homeName} away={awayName} scoreLabel={scoreLabel} />
+        <MultisportFullFrequencies prediction={analysis?.probabilities?.evidence || analysis?.probabilities} homeName={homeName} awayName={awayName} scoreLabel={scoreLabel} />
       </Section>
       <FinalVerdictPanel verdict={analysis?.analysis?.finalVerdict} homeName={homeName} awayName={awayName} />
     </View>
@@ -345,4 +644,5 @@ const styles = StyleSheet.create({
   back: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: colors.border },
   playerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 3 },
   lastRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: colors.border },
+  msfPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 9, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: colors.border },
 });
