@@ -18,7 +18,6 @@ import {
   Flag,
   Layers3,
   Save,
-  Scale,
   Sparkles,
   Trash2,
   X,
@@ -2354,7 +2353,6 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
       .some((key) => Array.isArray(highlights?.[key]) && highlights[key].length > 0);
     return [
       (data?.access === 'free' || markets.length > 0) && { key: 'markets', label: 'Mercados para tu combinada', count: data?.access === 'free' ? (data.freePreview?.selection ? 1 : 0) : markets.length, icon: Layers3, color: '#5ee6b1' },
-      (data?.access === 'free' || data?.calculatedProbabilities) && { key: 'stats', label: 'Estadísticas calculadas', icon: Scale, color: '#f97316' },
       (data?.access === 'free' || data?.calculatedProbabilities) && { key: 'probs', label: 'Frecuencias calculadas', icon: BarChart3, color: '#2dd4bf' },
       hasPlayers && { key: 'players', label: 'Jugadores destacados', icon: Sparkles, color: '#fbbf24' },
       { key: 'verdict', label: 'Veredicto final', icon: Flag, color: '#f5e400' },
@@ -2466,21 +2464,6 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
                   })}
                     </div>
                   </div>
-                </section>
-              )}
-
-              {resolvedAnalysisTab === 'stats' && data.calculatedProbabilities && (
-                <section
-                  id={`${analysisTabPrefix}-panel-stats`}
-                  role="tabpanel"
-                  aria-labelledby={`${analysisTabPrefix}-tab-stats`}
-                  className="analysis-tab-panel"
-                >
-                  <AccordionStatsBlock
-                    probabilities={data.calculatedProbabilities}
-                    homeTeam={match.teams.home.name}
-                    awayTeam={match.teams.away.name}
-                  />
                 </section>
               )}
 
@@ -2769,79 +2752,6 @@ function LiveStatsBar({ stats }) {
   );
 }
 
-// ===================== CALCULATED STATS TAB =====================
-
-function AccordionStatsBlock({ probabilities: p, homeTeam, awayTeam }) {
-  const [activeGroup, setActiveGroup] = useState('goals');
-  const ccd = p?.cornerCardData || {};
-  const fmt = (value) => (value == null || Number.isNaN(value)
-    ? '—'
-    : (typeof value === 'number' ? value.toFixed(2) : value));
-  const groups = [
-    { key: 'goals', label: 'Goles', color: '#4ade80' },
-    { key: 'corners', label: 'Córners', color: '#22d3ee' },
-    { key: 'cards', label: 'Tarjetas', color: '#fbbf24' },
-  ];
-
-  const Cell = ({ label, value, color }) => (
-    <div className="analysis-stat-row">
-      <span>{label}</span>
-      <strong style={{ color: color || 'var(--t1)' }}>{fmt(value)}</strong>
-    </div>
-  );
-  const StatCard = ({ title, accent, children }) => (
-    <article className="analysis-stat-card" style={{ '--stat-accent': accent }}>
-      <h4>{title}</h4>
-      {children}
-    </article>
-  );
-
-  return (
-    <div className="analysis-tab-stack">
-      <HorizontalChoiceBar
-        items={groups}
-        active={activeGroup}
-        onChange={setActiveGroup}
-        label="Filtrar estadísticas calculadas"
-        variant="filters"
-      />
-      <div className="subacc-data-grid">
-        {activeGroup === 'goals' && (
-          <>
-            <StatCard title={`Goles — ${homeTeam}`} accent="#22d3ee">
-              <Cell label="Prom. anotados" value={p.homeGoals?.avgScored} color="#4ade80" />
-              <Cell label="Prom. recibidos" value={p.homeGoals?.avgConceded} color="#f87171" />
-              <Cell label="Prom. vs rival H2H" value={p.h2hGoals?.homeAvg} color="#67e8f9" />
-            </StatCard>
-            <StatCard title={`Goles — ${awayTeam}`} accent="#f472b6">
-              <Cell label="Prom. anotados" value={p.awayGoals?.avgScored} color="#4ade80" />
-              <Cell label="Prom. recibidos" value={p.awayGoals?.avgConceded} color="#f87171" />
-              <Cell label="Prom. vs rival H2H" value={p.h2hGoals?.awayAvg} color="#f472b6" />
-            </StatCard>
-          </>
-        )}
-        {activeGroup === 'corners' && (
-          <StatCard title="Córners (últimos 5)" accent="#22d3ee">
-            <Cell label={`${homeTeam} a favor`} value={ccd.homeCornersAvg} />
-            <Cell label={`${homeTeam} en contra`} value={ccd.homeCornersAgainstAvg} />
-            <Cell label={`${awayTeam} a favor`} value={ccd.awayCornersAvg} />
-            <Cell label={`${awayTeam} en contra`} value={ccd.awayCornersAgainstAvg} />
-            <Cell label="Total combinado" value={p.cornerAvg} color="#4ade80" />
-          </StatCard>
-        )}
-        {activeGroup === 'cards' && (
-          <StatCard title="Tarjetas (últimos 5)" accent="#fbbf24">
-            <Cell label={`${homeTeam} amarillas`} value={ccd.homeYellowsAvg} />
-            <Cell label={`${homeTeam} rojas`} value={ccd.homeRedsAvg} />
-            <Cell label={`${awayTeam} amarillas`} value={ccd.awayYellowsAvg} />
-            <Cell label={`${awayTeam} rojas`} value={ccd.awayRedsAvg} />
-            <Cell label="Total amarillas prom." value={p.cardAvg} color="#fbbf24" />
-          </StatCard>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ===================== CALCULATED FREQUENCIES TAB =====================
 

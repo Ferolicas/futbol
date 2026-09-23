@@ -11,17 +11,18 @@ test('el resumen de fútbol usa pestañas accesibles en lugar de subacordeones',
   assert.match(dashboard, /role=\{isTabs \? 'tablist'/);
   assert.match(dashboard, /role="tabpanel"/);
   assert.match(dashboard, /label: 'Mercados para tu combinada'/);
-  assert.match(dashboard, /label: 'Estadísticas calculadas'/);
   assert.match(dashboard, /label: 'Frecuencias calculadas'/);
   assert.match(dashboard, /label: 'Jugadores destacados'/);
   assert.match(dashboard, /label: 'Veredicto final'/);
   assert.doesNotMatch(dashboard, /function SubAccordion/);
+  // Redundante con "Frecuencias calculadas" (mismo dato, más profundo) — se eliminó del todo.
+  assert.doesNotMatch(dashboard, /label: 'Estadísticas calculadas'/);
+  assert.doesNotMatch(dashboard, /function AccordionStatsBlock/);
 });
 
 test('las subcategorías son filtros horizontales y Goles aparece primero', () => {
   const dashboard = read('app/dashboard/page.js');
   const styles = read('app/globals.css');
-  assert.match(dashboard, /useState\('goals'\)/);
   assert.match(dashboard, /useState\('goles'\)/);
   assert.match(dashboard, /variant="filters"/);
   assert.match(styles, /\.analysis-choice-scroll[\s\S]*overflow-x: auto/);

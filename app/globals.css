@@ -10355,6 +10355,16 @@ input:checked + .cb-mark::after {
 .ap2-h2h-num { font-size:2.2rem; font-weight:700; margin-bottom:4px; }
 .ap2-h2h-label { font-size:.75rem; color:rgba(255,255,255,.6); }
 .ap2-stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; }
+.ap2-goals-card { border-radius:16px; padding:20px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); }
+.ap2-goals-title { text-align:center; font-weight:700; font-size:1rem; margin-bottom:14px; }
+.ap2-goals-cols { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+.ap2-goals-col-right { text-align:right; }
+.ap2-goals-col-right .ap2-stat-row { flex-direction:row-reverse; }
+.ap2-goals-team { font-weight:700; font-size:.95rem; margin-bottom:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ap2-goals-divider { height:1px; background:rgba(255,255,255,.08); margin:18px 0; }
+.ap2-total-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.ap2-total-item { display:flex; flex-direction:column; align-items:center; gap:4px; }
+.ap2-total-item span { font-size:.75rem; color:rgba(255,255,255,.6); }
 .ap2-stat-inner { border-radius:16px; padding:20px; }
 .ap2-stat-row {
   display:flex; justify-content:space-between; align-items:center;

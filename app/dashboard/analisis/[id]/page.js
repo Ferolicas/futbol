@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronLeft, Zap, AlertTriangle, TrendingUp, Trophy, Star,
-  Users, BarChart3, Percent, History, Scale, Target, Crosshair,
+  Users, BarChart3, Percent, History, Target, Crosshair,
   ChevronDown, Clock, Flag, Check,
 } from 'lucide-react';
 import { selectBookmakerOdds, BOOKMAKER_LOGOS, TIMEZONE_TO_COUNTRY } from '../../../../lib/bookmakers';
@@ -741,61 +741,14 @@ function PaidAnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, on
           ══════════════════════════════════════════ */}
           {p && (
             <GlassSection title="Estadísticas calculadas" icon={<BarChart3 size={22} style={{ color: '#f97316' }} />} sectionKey="stats" collapsed={collapsed} toggle={toggleSection} delay={.6}>
-              <div className="ap2-stats-grid">
-                <StatCard
-                  title={`Goles — ${a.homeTeam}`}
-                  accentColor="rgba(0,212,255,.1)"
-                  borderColor="rgba(0,212,255,.2)"
-                  items={[
-                    { label: 'Prom. anotados', value: p.homeGoals.avgScored, color: '#4ade80' },
-                    { label: 'Prom. recibidos', value: p.homeGoals.avgConceded, color: '#f87171' },
-                    { label: 'Prom. vs rival (H2H)', value: p.h2hGoals?.homeAvg, color: '#67e8f9' },
-                  ]}
-                />
-                <StatCard
-                  title={`Goles — ${a.awayTeam}`}
-                  accentColor="rgba(236,72,153,.1)"
-                  borderColor="rgba(236,72,153,.2)"
-                  items={[
-                    { label: 'Prom. anotados', value: p.awayGoals.avgScored, color: '#4ade80' },
-                    { label: 'Prom. recibidos', value: p.awayGoals.avgConceded, color: '#f87171' },
-                    { label: 'Prom. vs rival (H2H)', value: p.h2hGoals?.awayAvg, color: '#f472b6' },
-                  ]}
-                />
-                <StatCard
-                  title="Córners (últimos 5)"
-                  accentColor="rgba(34,197,94,.1)"
-                  borderColor="rgba(34,197,94,.2)"
-                  items={[
-                    { label: `${a.homeTeam} a favor`, value: p.cornerCardData?.homeCornersAvg ?? '—' },
-                    { label: `${a.homeTeam} en contra`, value: p.cornerCardData?.homeCornersAgainstAvg ?? '—' },
-                    { label: `${a.awayTeam} a favor`, value: p.cornerCardData?.awayCornersAvg ?? '—' },
-                    { label: `${a.awayTeam} en contra`, value: p.cornerCardData?.awayCornersAgainstAvg ?? '—' },
-                    { label: 'Total combinado', value: p.cornerAvg, color: '#4ade80' },
-                  ]}
-                />
-                <StatCard
-                  title="Tarjetas (últimos 5)"
-                  accentColor="rgba(245,158,11,.1)"
-                  borderColor="rgba(245,158,11,.2)"
-                  items={[
-                    { label: `${a.homeTeam} amarillas`, value: p.cornerCardData?.homeYellowsAvg ?? '—' },
-                    { label: `${a.homeTeam} rojas`, value: p.cornerCardData?.homeRedsAvg ?? '—' },
-                    { label: `${a.awayTeam} amarillas`, value: p.cornerCardData?.awayYellowsAvg ?? '—' },
-                    { label: `${a.awayTeam} rojas`, value: p.cornerCardData?.awayRedsAvg ?? '—' },
-                    { label: 'Total amarillas prom.', value: p.cardAvg, color: '#fbbf24' },
-                  ]}
-                />
-              </div>
-            </GlassSection>
-          )}
-
-          {/* ══════════════════════════════════════════
-              SECCIÓN 6B — ESTADÍSTICAS POR EQUIPO
-          ══════════════════════════════════════════ */}
-          {p?.perTeam && (
-            <GlassSection title="Estadísticas por equipo" icon={<Scale size={22} style={{ color: '#3b82f6' }} />} sectionKey="perteam" collapsed={collapsed} toggle={toggleSection} delay={.65}>
-              <PerTeamSection perTeam={p.perTeam} homeTeam={a.homeTeam} awayTeam={a.awayTeam} homeLogo={a.homeLogo} awayLogo={a.awayLogo} />
+              <GoalsSummaryCard
+                homeTeam={a.homeTeam}
+                awayTeam={a.awayTeam}
+                homeGoals={p.homeGoals}
+                awayGoals={p.awayGoals}
+                cornerAvg={p.cornerAvg}
+                cardAvg={p.cardAvg}
+              />
             </GlassSection>
           )}
 
@@ -1458,20 +1411,35 @@ function ProbBar({ label, value, delay = 0 }) {
 // ══════════════════════════════════════════
 // STAT CARD
 // ══════════════════════════════════════════
-function StatCard({ title, items, accentColor, borderColor }) {
+function GoalsSummaryCard({ homeTeam, awayTeam, homeGoals, awayGoals, cornerAvg, cardAvg }) {
+  const fmt = (value) => (value == null || Number.isNaN(value) ? '—' : value);
   return (
-    <motion.div
-      className="ap2-stat-inner"
-      style={{ background: accentColor || 'rgba(255,255,255,.05)', border: `1px solid ${borderColor || 'rgba(255,255,255,.1)'}` }}
-      whileHover={{ scale: 1.02 }}
-    >
-      <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 14 }}>{title}</div>
-      {items.map((item, i) => (
-        <div key={i} className="ap2-stat-row">
-          <span style={{  color: 'white', fontSize: '.875rem' }}>{item.label}</span>
-          <strong style={{ fontSize: '1.1rem', color: item.color || '#f1f5f9' }}>{item.value}</strong>
+    <motion.div className="ap2-goals-card" whileHover={{ scale: 1.01 }}>
+      <div className="ap2-goals-title">Goles</div>
+      <div className="ap2-goals-cols">
+        <div className="ap2-goals-col">
+          <div className="ap2-goals-team">{homeTeam}</div>
+          <div className="ap2-stat-row"><span style={{ color: 'white' }}>Anotados</span><strong style={{ color: '#4ade80' }}>{fmt(homeGoals?.avgScored)}</strong></div>
+          <div className="ap2-stat-row"><span style={{ color: 'white' }}>Recibidos</span><strong style={{ color: '#f87171' }}>{fmt(homeGoals?.avgConceded)}</strong></div>
         </div>
-      ))}
+        <div className="ap2-goals-col ap2-goals-col-right">
+          <div className="ap2-goals-team">{awayTeam}</div>
+          <div className="ap2-stat-row"><span style={{ color: 'white' }}>Anotados</span><strong style={{ color: '#4ade80' }}>{fmt(awayGoals?.avgScored)}</strong></div>
+          <div className="ap2-stat-row"><span style={{ color: 'white' }}>Recibidos</span><strong style={{ color: '#f87171' }}>{fmt(awayGoals?.avgConceded)}</strong></div>
+        </div>
+      </div>
+      <div className="ap2-goals-divider" />
+      <div className="ap2-goals-title">Total combinado</div>
+      <div className="ap2-total-row">
+        <div className="ap2-total-item">
+          <strong style={{ fontSize: '1.1rem', color: '#4ade80' }}>{fmt(cornerAvg)}</strong>
+          <span>Corners</span>
+        </div>
+        <div className="ap2-total-item">
+          <strong style={{ fontSize: '1.1rem', color: '#fbbf24' }}>{fmt(cardAvg)}</strong>
+          <span>Tarjetas</span>
+        </div>
+      </div>
     </motion.div>
   );
 }
@@ -1948,57 +1916,6 @@ function PlayerGroupList({ title, hint, players, metric, totalKey, unit, accentB
     </div>
   );
 }
-
-// ══════════════════════════════════════════
-// PER-TEAM SECTION
-// ══════════════════════════════════════════
-// P8: memo — solo re-render cuando cambia perTeam.
-const PerTeamSection = memo(function PerTeamSection({ perTeam, homeTeam, awayTeam, homeLogo, awayLogo }) {
-  const thresholdLabels = {
-    goals: { over05: '+0.5', over15: '+1.5', over25: '+2.5' },
-    cards: { over05: '+0.5', over15: '+1.5', over25: '+2.5', over35: '+3.5' },
-    corners: { over05: '+0.5', over15: '+1.5', over25: '+2.5', over35: '+3.5', over45: '+4.5', over55: '+5.5' },
-  };
-  const categoryLabels = { goals: 'Goles', cards: 'Tarjetas', corners: 'Corners' };
-  const categoryColors = { goals: '#4ade80', cards: '#fbbf24', corners: '#60a5fa' };
-  const categories = ['goals', 'cards', 'corners'];
-
-  function renderTeamColumn(teamData, teamName, teamLogo, accentBg, accentBorder) {
-    return (
-      <motion.div
-        className="ap2-inner"
-        style={{ background: accentBg, border: `1px solid ${accentBorder}` }}
-        whileHover={{ scale: 1.01 }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <TeamLogo src={teamLogo} name={teamName} size={26} />
-          <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{teamName}</span>
-        </div>
-        {categories.map(cat => {
-          const catData = teamData?.[cat];
-          if (!catData) return null;
-          const entries = Object.entries(catData)
-            .filter(([, prob]) => prob >= 50)
-            .map(([key, prob]) => ({ label: thresholdLabels[cat]?.[key] || key, prob }));
-          if (entries.length === 0) return null;
-          return (
-            <div key={cat} style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: '.78rem', fontWeight: 700, color: categoryColors[cat], textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>{categoryLabels[cat]}</div>
-              {entries.map((e, i) => <ProbBar key={i} label={e.label} value={e.prob} />)}
-            </div>
-          );
-        })}
-      </motion.div>
-    );
-  }
-
-  return (
-    <div className="ap2-perteam-grid">
-      {renderTeamColumn(perTeam.home, homeTeam, homeLogo, 'rgba(0,212,255,.07)', 'rgba(0,212,255,.2)')}
-      {renderTeamColumn(perTeam.away, awayTeam, awayLogo, 'rgba(236,72,153,.07)', 'rgba(236,72,153,.2)')}
-    </div>
-  );
-});
 
 // ══════════════════════════════════════════
 // GOAL TIMING SECTION
