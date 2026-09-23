@@ -8,9 +8,10 @@ import { AppText } from '@/components/ui';
 import { UpgradeButton } from '@/components/analysis/FreeAccess';
 import { useAuth } from '@/lib/auth-context';
 import { useAccess } from '@/lib/access-context';
-import { assetUrl } from '@/lib/config';
 import { openPasswordModal } from '@/lib/password-modal-store';
 import { colors, radius } from '@/theme/tokens';
+
+const LOGO_ANIMATED = require('../../../assets/logo-animated.webp');
 
 /** Header autenticado: avatar con menú (chat, planes, salir), logo centrado y búsqueda. */
 export function DashboardHeader() {
@@ -38,11 +39,11 @@ export function DashboardHeader() {
         <ChevronDown size={14} color={colors.muted} />
       </Pressable>
 
-      {/* Mismo logo que la cabecera del dashboard web (BrandLogoMedia,
-          animated=false ahí también): el isotipo completo, sin ícono+texto
-          por separado. */}
-      <View style={styles.brand}>
-        <Image source={{ uri: assetUrl('/logo-metalizado-alpha-fast.webp') || undefined }} style={styles.logo} contentFit="contain" accessibilityLabel="CF Análisis" />
+      {/* Mismo logo animado que el header web (logo-metalizado-alpha), como
+          WebP animado local: expo-image no reproduce AVIF animado en Android.
+          Centrado a la altura de la fila (avatar/lupa), no pegado abajo. */}
+      <View style={[styles.brand, { top: insets.top + 6 }]}>
+        <Image source={LOGO_ANIMATED} style={styles.logo} contentFit="contain" autoplay accessibilityLabel="CF Análisis" />
       </View>
 
       <View style={styles.actions}>
@@ -85,11 +86,13 @@ export function DashboardHeader() {
 }
 
 const styles = StyleSheet.create({
-  bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingBottom: 8, backgroundColor: colors.surfaceStrong, borderBottomWidth: 1, borderBottomColor: colors.border },
+  bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingBottom: 12, backgroundColor: colors.surfaceStrong, borderBottomWidth: 1, borderBottomColor: colors.border },
   account: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, paddingRight: 6, borderRadius: radius.pill },
   avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
-  brand: { position: 'absolute', left: 0, right: 0, bottom: 10, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, pointerEvents: 'none' },
-  logo: { width: 128, height: 128 * (288 / 512) },
+  // Misma altura que la fila de botones (36): el logo (72) sobresale igual
+  // arriba y abajo, así su centro queda alineado con el avatar y la lupa.
+  brand: { position: 'absolute', left: 0, right: 0, height: 36, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', pointerEvents: 'none' },
+  logo: { width: 116, height: 116 * (288 / 512) },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   iconBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: colors.border },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' },

@@ -12,7 +12,7 @@ interface ChatMessage { role: 'user' | 'assistant' | 'error'; content: string }
 const SPORT_PATH_RE: Array<[RegExp, string]> = [
   [/^\/dashboard\/baseball\/analisis\/(\d+)/, 'baseball'],
   [/^\/dashboard\/baloncesto\/analisis\/(\d+)/, 'basketball'],
-  [/^\/dashboard\/futbol-americano\/analisis\/(\d+)/, 'american-football'],
+  [/^\/dashboard\/futbol-americano\/analisis\/(\d+)/, 'american_football'],
   [/^\/dashboard\/analisis\/(\d+)/, 'football'],
 ];
 
@@ -35,12 +35,20 @@ export default function AssistantScreen() {
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
   }, []);
 
+  // El asistente es una pantalla modal: cualquier acción de un enlace se
+  // ejecuta DESPUÉS de cerrarla. Antes el modal de contraseña se abría detrás
+  // (invisible) y al cerrar "Preguntar" quedaba encima bloqueando los toques.
+  const closeThen = (action: () => void) => {
+    if (router.canGoBack()) router.back();
+    setTimeout(action, 450);
+  };
+
   const handleLink = (url: string) => {
     for (const [re, sport] of SPORT_PATH_RE) {
       const match = url.match(re);
-      if (match) { router.push({ pathname: '/match/[sport]/[id]', params: { sport, id: match[1] } }); return; }
+      if (match) { closeThen(() => router.push({ pathname: '/match/[sport]/[id]', params: { sport, id: match[1] } })); return; }
     }
-    if (url.includes('action=change-password')) { openPasswordModal(); return; }
+    if (url.includes('action=change-password')) { closeThen(openPasswordModal); return; }
   };
 
   const submit = async () => {

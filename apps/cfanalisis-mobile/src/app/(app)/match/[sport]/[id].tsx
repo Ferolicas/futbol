@@ -5,6 +5,7 @@ import { Image } from 'expo-image';
 import { Activity, AlertTriangle, ChartColumn, ChevronLeft, Clock, History, Layers, ListOrdered, Percent, RefreshCw, Scale, Sigma, Sparkles, Star, Target, TrendingUp, Trophy, Users, Zap } from 'lucide-react-native';
 import { AppText, Banner, Button, Card, Screen, SkeletonList, TeamLogo } from '@/components/ui';
 import { MatchHeadCard } from '@/components/dashboard/MatchHeadCard';
+import { FormationPitch, PlayerFace } from '@/components/analysis/FormationPitch';
 import { AccordionSection, CompareTable, ExpectedRow, Grid, KeyValue, OverUnderTable, Panel, ProbTile, SpreadColumns, StatTile, SubAccordion, numText, pctText, prob } from '@/components/analysis/FullAnalysisKit';
 import { FinalVerdictPanel } from '@/components/analysis/FinalVerdictPanel';
 import { LockedAnalysis } from '@/components/analysis/FreeAccess';
@@ -117,6 +118,7 @@ function LineupsSection({ id, lineups, onRefreshed }: { id: string; lineups: any
   }
   return (
     <View style={{ gap: 10 }}>
+      <FormationPitch teams={lineups.data} />
       {lineups.data.map((team: any, index: number) => (
         <Card key={index} style={{ gap: 6 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -129,6 +131,7 @@ function LineupsSection({ id, lineups, onRefreshed }: { id: string; lineups: any
           {(team.startXI || []).map((pl: any, i: number) => (
             <View key={i} style={styles.playerRow}>
               <AppText variant="mono" size={11} tone="muted" style={{ width: 26 }}>{pl.player?.number}</AppText>
+              <PlayerFace id={pl.player?.id} size={24} ring={index === 0 ? 'rgba(0,212,255,0.45)' : 'rgba(236,72,153,0.45)'} />
               <AppText variant="caption" style={{ flex: 1 }} numberOfLines={1}>{pl.player?.name}</AppText>
               <AppText variant="caption" tone="faint">{pl.player?.pos}</AppText>
             </View>
@@ -139,6 +142,7 @@ function LineupsSection({ id, lineups, onRefreshed }: { id: string; lineups: any
               {team.substitutes.map((pl: any, i: number) => (
                 <View key={i} style={[styles.playerRow, { opacity: 0.7 }]}>
                   <AppText variant="mono" size={11} tone="faint" style={{ width: 26 }}>{pl.player?.number}</AppText>
+                  <PlayerFace id={pl.player?.id} size={24} ring={index === 0 ? 'rgba(0,212,255,0.35)' : 'rgba(236,72,153,0.35)'} />
                   <AppText variant="caption" tone="faint" style={{ flex: 1 }} numberOfLines={1}>{pl.player?.name}</AppText>
                   <AppText variant="caption" tone="faint">{pl.player?.pos}</AppText>
                 </View>
