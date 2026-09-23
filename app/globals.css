@@ -14265,3 +14265,123 @@ button.free-visible { cursor:pointer; text-align:left; }
   .public-performance-skeleton span { animation:none; }
   .public-performance-list>article,.public-performance-back,.public-performance-cta { transition:none; }
 }
+
+/* ===== Análisis completo (fak-*): misma maqueta que la app móvil ===== */
+.fak-page { min-height: 100vh; padding: 0 0 60px; color: #edf6f4; background: #03090f; }
+.fak-page.is-embedded { min-height: 0; padding-bottom: 24px; background: transparent; }
+.fak-topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px; border-bottom: 1px solid rgba(255,255,255,.085); background: rgba(3,9,15,.92); backdrop-filter: blur(10px); }
+.fak-back { display: inline-flex; align-items: center; gap: 4px; padding: 7px 12px; border: 1px solid rgba(255,255,255,.085); border-radius: 999px; color: #edf6f4; background: rgba(255,255,255,.05); font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
+.fak-kicker { color: #8fa1aa; font-size: .64rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fak-doc { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 820px; margin: 0 auto; padding: 12px; box-sizing: border-box; }
+.fak-round { margin: 0; color: #8fa1aa; font-size: .74rem; text-align: center; }
+.fak-section { overflow: hidden; border: 1px solid rgba(255,255,255,.085); border-radius: 16px; background: #0b1720; }
+.fak-section-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 13px 14px; border: 0; color: #edf6f4; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.fak-section-icon { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 10px; }
+.fak-section-title { flex: 1; min-width: 0; font-size: .95rem; font-weight: 700; }
+.fak-count { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 22px; padding: 0 6px; border-radius: 11px; color: #5ee6b1; background: rgba(94,230,177,.14); font: 600 .7rem 'JetBrains Mono', monospace; }
+.fak-chev { flex: 0 0 auto; color: #8fa1aa; transition: transform .2s; }
+.fak-chev.is-open { transform: rotate(180deg); }
+.fak-section-body { display: flex; flex-direction: column; gap: 12px; padding: 0 12px 14px; }
+.fak-hint { margin: 0; color: #8fa1aa; font-size: .74rem; line-height: 1.45; }
+.fak-sub { overflow: hidden; border: 1px solid rgba(94,230,177,.14); border-radius: 12px; }
+.fak-sub-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; border: 0; color: #5ee6b1; background: rgba(94,230,177,.04); font: inherit; text-align: left; cursor: pointer; }
+.fak-sub-title { flex: 1; min-width: 0; overflow: hidden; font-size: .82rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.fak-sub-head small { color: #8fa1aa; font-size: .7rem; }
+.fak-sub-body { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
+.fak-panel { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px; border: 1px solid rgba(255,255,255,.085); border-radius: 12px; background: rgba(255,255,255,.025); }
+.fak-grid { display: grid; gap: 8px; }
+.fak-grid > * { min-width: 0; }
+.fak-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 0; min-height: 58px; padding: 8px 6px; border: 1px solid rgba(255,255,255,.085); border-radius: 8px; background: rgba(255,255,255,.035); text-align: center; box-sizing: border-box; height: 100%; }
+.fak-tile small { max-width: 100%; overflow: hidden; color: #8fa1aa; font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
+.fak-tile strong { font: 700 1rem 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+.fak-tile em { color: #5f707a; font-size: .66rem; font-style: normal; }
+.fak-table { overflow: hidden; border: 1px solid rgba(255,255,255,.085); border-radius: 8px; }
+.fak-tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: center; gap: 6px; padding: 7px 10px; border-top: 1px solid rgba(255,255,255,.085); font-size: .72rem; }
+.fak-tr.is-head { border-top: 0; color: #5f707a; background: rgba(255,255,255,.04); }
+.fak-tr.is-head > span:not(:first-child) { text-align: center; }
+.fak-tr.is-single, .fak-tr.is-pair { grid-template-columns: minmax(0, 1fr) auto; }
+.fak-tr .is-team { overflow: hidden; color: #c4d2d4; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.fak-tr.is-single .is-team { text-align: left !important; }
+.fak-line { overflow: hidden; color: #edf6f4; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.fak-line small { color: #5f707a; font-weight: 500; }
+.fak-tr b { font: 600 .76rem 'JetBrains Mono', monospace; text-align: center; font-variant-numeric: tabular-nums; }
+.fak-tr.is-pair b { text-align: right; }
+.fak-tr b.is-over { color: #5ee6b1; }
+.fak-tr b.is-under { color: #fbbf24; }
+.fak-kv { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.085); font-size: .74rem; }
+.fak-kv span { min-width: 0; overflow: hidden; color: #c4d2d4; text-overflow: ellipsis; white-space: nowrap; }
+.fak-kv b { font: 700 .76rem 'JetBrains Mono', monospace; }
+.fak-h2h-row { display: grid; grid-template-columns: 62px minmax(0, 1fr) 54px minmax(0, 1fr); align-items: center; gap: 6px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.085); font-size: .74rem; }
+.fak-h2h-row small { color: #5f707a; }
+.fak-h2h-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fak-h2h-row .is-home { text-align: right; }
+.fak-h2h-row b { color: #5ee6b1; font: 700 .78rem 'JetBrains Mono', monospace; text-align: center; }
+.fak-hero { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid rgba(94,230,177,.32); border-radius: 16px; background: rgba(94,230,177,.06); text-align: center; }
+.fak-hero-teams { display: flex; align-items: center; gap: 10px; }
+.fak-hero-side { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+.fak-hero-side small { color: #5f707a; font-size: .6rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.fak-hero-side img { width: 40px; height: 40px; object-fit: contain; }
+.fak-hero-logo-fallback { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; color: #5ee6b1; background: rgba(94,230,177,.14); font-weight: 800; }
+.fak-hero-side strong { font-size: .84rem; line-height: 1.3; }
+.fak-hero-side b { color: #5ee6b1; font: 700 1.75rem 'JetBrains Mono', monospace; }
+.fak-hero-side em { color: #5ee6b1; font-size: .72rem; font-style: normal; }
+.fak-vs { color: #5f707a; font-size: .66rem; font-weight: 800; letter-spacing: .08em; }
+.fak-hero time { color: #8fa1aa; font-size: .74rem; }
+.fak-badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.fak-badges span { padding: 3px 9px; border: 1px solid; border-radius: 999px; font-size: .68rem; font-weight: 700; }
+.fak-market { display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: 100%; padding: 12px; border: 1px solid rgba(255,255,255,.085); border-radius: 12px; color: #edf6f4; background: rgba(255,255,255,.03); font: inherit; text-align: left; box-sizing: border-box; }
+button.fak-market { cursor: pointer; }
+.fak-market.is-on { border-color: #5ee6b1; background: rgba(94,230,177,.14); }
+.fak-market-name { font-size: .84rem; line-height: 1.35; }
+.fak-market > small { color: #8fa1aa; font-size: .7rem; }
+.fak-market > small.is-accent { color: #5ee6b1; }
+.fak-bar { display: block; height: 6px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.07); }
+.fak-bar > span { display: block; height: 100%; border-radius: inherit; }
+.fak-market-nums { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: .7rem; }
+.fak-market-nums b { font: 700 .86rem 'JetBrains Mono', monospace; }
+.fak-market-nums b.is-odd { color: #f5e400; font-weight: 600; }
+.fak-market-nums small { color: #5f707a; }
+.fak-market-nums small.is-cyan { color: #22d3ee; }
+.fak-market-nums small.is-bk { margin-left: auto; color: #8fa1aa; }
+.fak-check { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; color: #03221a; background: #5ee6b1; }
+.fak-empty { margin: 0; color: #8fa1aa; font-size: .8rem; line-height: 1.5; }
+.fak-heat { display: flex; flex-direction: column; gap: 8px; }
+.fak-heat-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
+.fak-heat-row > small { color: #5f707a; font-size: .68rem; text-align: center; }
+.fak-heat-cell { display: flex; align-items: center; justify-content: center; height: 32px; border-radius: 7px; font: 700 .72rem 'JetBrains Mono', monospace; }
+.fak-last-row { display: grid; grid-template-columns: 20px 38px minmax(0, 1fr) 34px 34px; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.085); font-size: .74rem; }
+.fak-last-row .fak-result { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 6px; color: #03221a; font: 700 .64rem 'JetBrains Mono', monospace; }
+.fak-last-row .is-score { font-family: 'JetBrains Mono', monospace; }
+.fak-last-row .is-opp { overflow: hidden; color: #c4d2d4; text-overflow: ellipsis; white-space: nowrap; }
+.fak-last-row .is-c, .fak-last-row .is-t { font: 600 .68rem 'JetBrains Mono', monospace; text-align: right; }
+.fak-last-row .is-c { color: #22d3ee; }
+.fak-last-row .is-t { color: #fbbf24; }
+.fak-lineup-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 3px 0; font-size: .74rem; }
+.fak-lineup-row .is-num { color: #8fa1aa; font-family: 'JetBrains Mono', monospace; }
+.fak-lineup-row .is-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fak-lineup-row .is-pos { color: #5f707a; }
+.fak-lineup-head { display: flex; align-items: center; gap: 8px; }
+.fak-lineup-head img { width: 24px; height: 24px; object-fit: contain; }
+.fak-lineup-head strong { flex: 1; min-width: 0; overflow: hidden; font-size: .84rem; text-overflow: ellipsis; white-space: nowrap; }
+.fak-lineup-head b { color: #5ee6b1; font: 600 .76rem 'JetBrains Mono', monospace; }
+.fak-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 42px; padding: 0 16px; border: 1px solid rgba(94,230,177,.32); border-radius: 12px; color: #5ee6b1; background: rgba(94,230,177,.08); font: inherit; font-size: .82rem; font-weight: 700; cursor: pointer; }
+.fak-btn:disabled { opacity: .55; cursor: not-allowed; }
+.fak-btn.is-primary { color: #03221a; background: #5ee6b1; }
+.fak-notice { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 14px; border: 1px solid rgba(255,255,255,.085); border-radius: 16px; background: #0b1720; text-align: center; }
+.fak-notice.is-warning { border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.14); }
+.fak-notice.is-success { border-color: rgba(94,230,177,.32); background: rgba(94,230,177,.06); color: #5ee6b1; }
+.fak-injury { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid rgba(251,113,133,.35); border-radius: 12px; background: rgba(251,113,133,.14); }
+.fak-injury-team { display: flex; align-items: center; gap: 8px; color: #8fa1aa; font-size: .72rem; }
+.fak-injury-team img { width: 18px; height: 18px; object-fit: contain; }
+.fak-combo-row { display: grid; grid-template-columns: minmax(0, 1fr) 62px 52px; align-items: center; gap: 8px; padding: 10px; border-radius: 8px; background: rgba(94,230,177,.06); }
+.fak-combo-row small { display: block; overflow: hidden; color: #8fa1aa; font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
+.fak-combo-row strong { font-size: .82rem; }
+.fak-combo-row b { font: 700 .8rem 'JetBrains Mono', monospace; text-align: right; }
+.fak-player { display: flex; align-items: center; gap: 8px; }
+.fak-player img { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; background: rgba(255,255,255,.05); }
+.fak-player strong { display: block; overflow: hidden; font-size: .8rem; text-overflow: ellipsis; white-space: nowrap; }
+.fak-player small, .fak-muted { color: #8fa1aa; font-size: .7rem; }
+.fak-faint { color: #5f707a; font-size: .7rem; line-height: 1.4; }
+.fak-error { padding: 12px; border: 1px solid rgba(251,113,133,.35); border-radius: 12px; color: #fecdd3; background: rgba(251,113,133,.14); font-size: .82rem; }
+.fak-doc .analysis-tab-stack { min-width: 0; }
+@media (min-width: 760px) { .fak-doc { padding: 20px 16px; gap: 14px; } }

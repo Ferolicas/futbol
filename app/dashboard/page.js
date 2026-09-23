@@ -2755,7 +2755,7 @@ function LiveStatsBar({ stats }) {
 
 // ===================== CALCULATED FREQUENCIES TAB =====================
 
-function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
+export function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
   const [activeGroup, setActiveGroup] = useState('goles');
 
   // TODO el cálculo de categorías se memoiza:
@@ -2820,7 +2820,7 @@ function AccordionProbBlock({ probabilities: p, odds, homeTeam, awayTeam }) {
 // uno por partido). Sin las animaciones motion del analisis — el acordeon
 // se abre/cierra muchas veces durante la sesion, animar todo seria pesado.
 
-function AccordionPlayersBlock({ highlights }) {
+export function AccordionPlayersBlock({ highlights }) {
   const [activeGroup, setActiveGroup] = useState('scorers');
 
   const groups = useMemo(() => {

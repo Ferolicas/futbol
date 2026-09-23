@@ -3,25 +3,30 @@ import { useFreeAccess, LockedAnalysis } from '../../../components/FreeAccessPro
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
-import Image from 'next/image';
+import { Activity, ChartColumn, Clock, History, Layers3, ListOrdered, RefreshCw, Sigma, Sparkles, Target, Users } from 'lucide-react';
 import DashboardBuffer from '../../../components/DashboardBuffer';
 import BaseballResultStats from '../../components/BaseballResultStats';
 import { displayBettingText } from '../../../utils/display-betting-text';
 import { BASEBALL_RECOMMENDATION_MIN_PROBABILITY } from '../../../../../lib/recommendation-policy';
+import { marketResultState, settleMarketSelection } from '../../../../../lib/market-settlement';
 import FinalVerdictPanel from '../../../components/FinalVerdictPanel';
+import {
+  AccordionSection, CompareTable, DocPage, Grid, H2HTable, KeyValue, MarketCard, MoneylineTiles, OverUnderTable,
+  Panel, ProbTile, SpreadColumns, SportHero, StatTile, SubAccordion, capPct, numText, pctText, prob,
+} from '../../../components/FullAnalysisKit';
 
-const cap = (v) => {
-  const value = Math.max(0, Math.min(100, Number(v) || 0));
-  if (value >= 95) return 95;
-  return Math.floor((value + 1e-9) * 100) / 100;
-};
-// Normaliza decimales largos (ej. 6.680412371134021) a 2 decimales legibles.
-const fmt = (v, decimals = 2) => (v == null || Number.isNaN(Number(v)) ? '—' : Number(v).toFixed(decimals));
 const isBet365Market = (market) => String(market?.bookmaker || '').normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '') === 'bet365'
+  .replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '') === 'bet365'
   && Number(market?.odd) >= 1.20
   && Number(market?.rawProbability ?? market?.probability) >= BASEBALL_RECOMMENDATION_MIN_PROBABILITY;
+
+const PERIOD_LABELS = Object.freeze({
+  first3: 'Primeras 3 entradas', first4_5: 'Primeras 4,5 entradas', first5: 'Primeras 5 entradas', first7: 'Primeras 7 entradas',
+});
+const PLAYER_CATEGORY_LABELS = Object.freeze({
+  hits: 'Hits', homeRuns: 'Jonrones', totalBases: 'Bases totales', rbis: 'Carreras impulsadas', runs: 'Carreras anotadas',
+  walks: 'Bases por bolas', stolenBases: 'Bases robadas', strikeouts: 'Ponches del lanzador', battingStrikeouts: 'Ponches del bateador',
+});
 
 export function BaseballAnalysisExperience(props) {
   const { isFree } = useFreeAccess();
@@ -49,6 +54,7 @@ function PaidBaseballAnalysisExperience({ fixtureId, embedded = false, onClose }
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed');
       setData(json);
+      setError('');
     } catch (e) {
       setError(e.message);
     } finally {
@@ -72,25 +78,14 @@ function PaidBaseballAnalysisExperience({ fixtureId, embedded = false, onClose }
     }
   };
 
-  if (loading) {
-    return <DashboardBuffer compact={embedded} />;
-  }
+  if (loading && !data) return <DashboardBuffer compact={embedded} />;
 
   if (error && !data) {
     return (
-      <div style={{ maxWidth: 800, margin: '0 auto', padding: 24 }}>
-        <button onClick={closeOrBack} style={backBtn}>← Volver</button>
-        <div style={{
-          marginTop: 24, padding: 16, borderRadius: 10,
-          background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
-          color: '#fca5a5',
-        }}>
-          {error}
-        </div>
-        <button onClick={handleAnalyze} disabled={analyzing} style={{ ...primaryBtn, marginTop: 16 }}>
-          {analyzing ? 'Analizando...' : 'Generar análisis ahora'}
-        </button>
-      </div>
+      <DocPage onBack={closeOrBack} title="Béisbol · análisis completo" embedded={embedded}>
+        <div className="fak-error">{error}</div>
+        <button type="button" className="fak-btn" onClick={handleAnalyze} disabled={analyzing}>{analyzing ? 'Analizando...' : 'Generar análisis ahora'}</button>
+      </DocPage>
     );
   }
 
@@ -104,172 +99,147 @@ function PaidBaseballAnalysisExperience({ fixtureId, embedded = false, onClose }
     .sort((left, right) => Number(right.rawProbability ?? right.probability) - Number(left.rawProbability ?? left.probability)
       || Number(right.odd) - Number(left.odd));
   const highlighted = (Array.isArray(combinada?.selections) ? combinada.selections : []).filter(isBet365Market);
+  const homeName = a?.home_team || 'Local';
+  const awayName = a?.away_team || 'Visitante';
+  const game = { id: Number(fid), teams: { home: { name: homeName }, away: { name: awayName } }, status: { short: result?.status || a?.status }, liveResult: result, analysis: a };
+  const state = marketResultState({ sport: 'baseball', game, liveResult: result });
+  const badges = dq ? [
+    [`Calidad: ${dq.score}%`, dq.score >= 75 ? '#10b981' : dq.score >= 50 ? '#f59e0b' : '#ef4444'],
+    ...(dq.hasOdds ? [['Cuotas Bet365', '#22d3ee']] : []),
+    ...(dq.hasH2H ? [['H2H', '#8b5cf6']] : []),
+    ...(dq.hasHomeStats && dq.hasAwayStats ? [['Stats', '#10b981']] : []),
+    ...(dq.hasPitcherMatchup ? [['Pitcher', '#f59e0b']] : []),
+    ...(dq.hasPlayerHighlights ? [['Players', '#a78bfa']] : []),
+  ] : [];
+  const periods = Object.entries(probs?.periods || {}).filter(([key]) => !/^inning\d+$/.test(key));
+  const innings = Object.entries(probs?.innings || {}).sort((l, r) => Number(l[0]) - Number(r[0]));
+  const statistics = Object.entries(probs?.statistics || {});
+  const pitchers = probs?.pitchers || a?.analysis?.pitcherMatchup;
+  const hasPitchers = !!(pitchers?.home || pitchers?.away);
+  const expected = probs?.expected;
 
   return (
-    <div className={`baseball-analysis-page ${embedded ? 'is-embedded' : ''}`} style={{ maxWidth: 1100, margin: '0 auto', padding: '0 16px 60px', color: '#e2e8f0' }}>
-      {!embedded && <button onClick={closeOrBack} style={backBtn}>← Volver</button>}
-
-      {/* Header */}
-      <motion.div
-        className="baseball-analysis-hero"
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        style={{
-          background: 'rgba(94,230,177,0.05)', border: '1px solid rgba(94,230,177,0.18)',
-          borderRadius: 14, padding: 18, marginTop: 16, marginBottom: 16,
-        }}
-      >
-        <div style={{ fontSize: '.75rem', color: '#94a3b8', fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>
-          Baseball · {a?.country} · {a?.league_name}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-          <TeamHeader name={a?.home_team} score={result?.home_score} side="LOCAL" probability={probs?.moneyline?.home} />
-          <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#64748b' }}>VS</div>
-          <TeamHeader name={a?.away_team} score={result?.away_score} side="VISITANTE" probability={probs?.moneyline?.away} />
-        </div>
-        {a?.start_time && (
-          <div style={{ marginTop: 10, fontSize: '.85rem', color: '#64748b', fontFamily: 'JetBrains Mono, monospace' }}>
-            {new Date(a.start_time).toLocaleString('es-ES')}
-          </div>
-        )}
-        {dq && (
-          <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <Badge label={`Calidad: ${dq.score}%`} color={dq.score >= 75 ? '#10b981' : dq.score >= 50 ? '#f59e0b' : '#ef4444'} />
-            {dq.hasOdds && <Badge label="Cuotas Bet365" color="#22d3ee" />}
-            {dq.hasH2H && <Badge label="H2H" color="#8b5cf6" />}
-            {dq.hasHomeStats && dq.hasAwayStats && <Badge label="Stats" color="#10b981" />}
-            {dq.hasPitcherMatchup && <Badge label="Pitcher" color="#f59e0b" />}
-            {dq.hasPlayerHighlights && <Badge label="Players" color="#a78bfa" />}
-          </div>
-        )}
-      </motion.div>
+    <DocPage onBack={closeOrBack} title="Béisbol · análisis completo" embedded={embedded}>
+      <SportHero kicker={`Béisbol · ${a?.country || ''} · ${a?.league_name || ''}`} homeName={homeName} awayName={awayName} homeScore={result?.home_score} awayScore={result?.away_score} homeProb={probs?.moneyline?.home} awayProb={probs?.moneyline?.away} startTime={a?.start_time} badges={badges} />
 
       {result?.home_score != null && result?.away_score != null && (
-        <Section title={result.status === 'FT' ? 'Resultado oficial MLB' : 'Estadísticas en vivo MLB'} accent="#22d3ee">
-          <BaseballResultStats
-            result={result}
-            homeName={a?.home_team || 'Local'}
-            awayName={a?.away_team || 'Visitante'}
-          />
-        </Section>
+        <AccordionSection title={result.status === 'FT' ? 'Resultado oficial MLB' : 'Estadísticas en vivo MLB'} icon={Activity} accent="#22d3ee">
+          <BaseballResultStats result={result} homeName={homeName} awayName={awayName} />
+        </AccordionSection>
       )}
 
-      {/* Combinada highlight */}
-      {highlighted.length > 0 && combinada.combinedProbability >= 60 && (
-        <Section title="Combinada Bet365 del partido" accent="#5ee6b1">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {highlighted.map((s, i) => (
-              <div key={i} style={{
-                display: 'grid', gridTemplateColumns: '1fr auto auto', alignItems: 'center', gap: 10,
-                padding: '10px 12px', borderRadius: 8,
-                background: 'rgba(94,230,177,0.06)',
-              }}>
-                <span style={{ minWidth: 0 }}>
-                  <small style={{ display: 'block', color: '#94a3b8', marginBottom: 2 }}>{s.marketLabel || s.market}</small>
-                  <strong style={{ fontSize: '.9rem', lineHeight: 1.35 }}>{displayBettingText(s.pick || s.name)}</strong>
-                </span>
-                <span style={{ color: '#10b981', fontWeight: 700 }}>{cap(s.rawProbability ?? s.probability)}%</span>
-                <span style={{ color: '#f5e400', fontFamily: 'JetBrains Mono, monospace' }}>@{Number(s.odd).toFixed(2)}</span>
-              </div>
-            ))}
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '12px 14px', marginTop: 6, borderRadius: 10,
-              background: 'rgba(94,230,177,0.12)',
-              border: '1px solid rgba(94,230,177,0.3)',
-            }}>
-              <span style={{ fontWeight: 800, color: '#5ee6b1' }}>Probabilidad combinada</span>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <span style={{ fontSize: '1.3rem', fontWeight: 800, color: '#5ee6b1' }}>{cap(combinada.combinedProbability)}%</span>
-                {combinada.combinedOdd && <span style={{ fontSize: '1.3rem', fontWeight: 800, color: '#22d3ee', fontFamily: 'JetBrains Mono, monospace' }}>@{combinada.combinedOdd}</span>}
-              </div>
+      {highlighted.length > 0 && Number(combinada?.combinedProbability) >= 60 && (
+        <AccordionSection title="Combinada Bet365 del partido" icon={Layers3} count={highlighted.length}>
+          {highlighted.map((s, i) => (
+            <div key={i} className="fak-combo-row">
+              <span><small>{s.marketLabel || s.market}</small><strong>{displayBettingText(s.pick || s.name)}</strong></span>
+              <b style={{ color: '#5ee6b1' }}>{capPct(s.rawProbability ?? s.probability)}%</b>
+              <b style={{ color: '#f5e400' }}>@{Number(s.odd).toFixed(2)}</b>
             </div>
-          </div>
-        </Section>
+          ))}
+          <Grid columns={2}>
+            <StatTile label="Probabilidad combinada" value={`${capPct(combinada.combinedProbability)}%`} />
+            <StatTile label="Cuota combinada" value={combinada.combinedOdd ? `@${combinada.combinedOdd}` : '—'} color="#22d3ee" />
+          </Grid>
+        </AccordionSection>
       )}
 
-      <Section title="Opciones disponibles en Bet365">
-        {markets.length > 0 ? (
-          <div style={{ display: 'grid', gap: 8 }}>
-            {markets.map((market) => (
-              <article key={market.id} style={{
-                display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center',
-                padding: '11px 12px', borderRadius: 9, background: 'rgba(255,255,255,.03)',
-                border: '1px solid rgba(94,230,177,.12)',
-              }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3, flexWrap: 'wrap' }}>
-                    <span style={{ padding: '2px 6px', borderRadius: 999, background: '#f5e400', color: '#10241e', fontSize: '.58rem', fontWeight: 900 }}>BET365</span>
-                    <small style={{ color: '#94a3b8' }}>{market.marketLabel || market.market}</small>
-                  </div>
-                  <strong style={{ fontSize: '.88rem', lineHeight: 1.35 }}>{displayBettingText(market.name)}</strong>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: 'JetBrains Mono, monospace' }}>
-                  <strong style={{ color: '#5ee6b1' }}>{cap(market.rawProbability ?? market.probability)}%</strong>
-                  <strong style={{ color: '#f5e400' }}>@{Number(market.odd).toFixed(2)}</strong>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div style={{ color: '#94a3b8', fontSize: '.84rem', lineHeight: 1.5 }}>
-            No se publica ninguna recomendación: Bet365 no ofrece ahora una línea compatible con probabilidad mínima del {BASEBALL_RECOMMENDATION_MIN_PROBABILITY}% y cuota mínima de 1,20.
-          </div>
-        )}
-      </Section>
+      <AccordionSection title="Opciones disponibles en Bet365" icon={Layers3} count={markets.length} hint={`Línea exacta de Bet365, probabilidad mínima del ${BASEBALL_RECOMMENDATION_MIN_PROBABILITY}% y cuota mínima de 1,20.`}>
+        {markets.length ? markets.map((m) => (
+          <MarketCard key={m.id} name={m.name || m.pick} probability={Number(m.rawProbability ?? m.probability)} odd={m.odd} bookmaker={m.bookmaker} reliability={m.reliability} validation={m.marketLabel || m.market}
+            outcome={settleMarketSelection({ sport: 'baseball', selection: m, game, liveResult: result })} pendingLabel={state.isLive ? 'En juego' : state.isFinal ? 'Pendiente oficial' : null} />
+        )) : <p className="fak-empty">Bet365 no tiene ahora una línea exacta que cumpla ambos criterios. El análisis estadístico completo permanece visible.</p>}
+      </AccordionSection>
 
-      {probs && (
-        <CompleteBaseballAnalysis
-          probabilities={probs}
-          homeName={a?.home_team || 'Local'}
-          awayName={a?.away_team || 'Visitante'}
-        />
-      )}
-
-      <FinalVerdictPanel
-        verdict={a?.analysis?.finalVerdict}
-        homeName={a?.home_team || 'Local'}
-        awayName={a?.away_team || 'Visitante'}
-      />
-
-      {/* H2H */}
-      {a?.analysis?.h2h?.length > 0 && (
-        <Section title="Últimos enfrentamientos (H2H)">
-          <div style={{ display: 'grid', gap: 6 }}>
-            {a.analysis.h2h.slice(0, 6).map((h, i) => {
-              const hsc = h.scores?.home?.total ?? h.scores?.home;
-              const asc = h.scores?.away?.total ?? h.scores?.away;
+      {hasPitchers && (
+        <AccordionSection title="Lanzadores abridores" icon={Target} accent="#fbbf24">
+          <Grid columns={2}>
+            {['home', 'away'].map((side) => {
+              const pitcher = pitchers?.[side];
               return (
-                <div key={i} style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '6px 10px', borderRadius: 6,
-                  background: 'rgba(255,255,255,0.03)',
-                  fontSize: '.85rem',
-                }}>
-                  <span style={{ flex: 1, color: '#cbd5e1' }}>{h.teams?.home?.name}</span>
-                  <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#5ee6b1' }}>
-                    {hsc} – {asc}
-                  </span>
-                  <span style={{ flex: 1, textAlign: 'right', color: '#cbd5e1' }}>{h.teams?.away?.name}</span>
-                  <span style={{ fontSize: '.7rem', color: '#64748b', minWidth: 80, textAlign: 'right' }}>
-                    {h.date ? new Date(h.date).toLocaleDateString('es-ES') : ''}
-                  </span>
-                </div>
+                <Panel key={side} title={side === 'home' ? homeName : awayName}>
+                  <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '.84rem' }}>{pitcher?.name || 'Por confirmar'}</strong>
+                  <KeyValue label="ERA" value={numText(pitcher?.stats?.era)} />
+                  <KeyValue label="WHIP" value={numText(pitcher?.stats?.whip)} />
+                  <KeyValue label="K/9" value={numText(pitcher?.stats?.k9)} />
+                  <KeyValue label="IP" value={numText(pitcher?.stats?.ip, 1)} />
+                  <KeyValue label="Prob. de ganar" value={pctText(probs?.moneyline?.[side] ?? combinada?.winProbabilities?.[side])} />
+                </Panel>
               );
             })}
-          </div>
-        </Section>
+          </Grid>
+        </AccordionSection>
       )}
 
-      {/* Re-analizar quitado — el re-analisis manual va por /ferney
-          'Analizar baseball' (admin), y el cron diario re-analiza solo
-          cuando age>6h o cache_version<MIN. El boton aqui invitaba a
-          consumir API gratuita sin necesidad. Refresh sigue para releer
-          BD por si el cron actualizo en segundo plano. */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 24 }}>
-        <button onClick={fetchData} style={primaryBtn}>↻ Refrescar</button>
-      </div>
-    </div>
+      <BaseballPlayers players={probs?.players} />
+
+      {probs && (
+        <AccordionSection title="Análisis estadístico completo" icon={Sigma} hint="Todo lo calculado con los antecedentes reales; las cuotas solo determinan qué opciones pasan a la sección apostable.">
+          {expected && (
+            <Grid columns={3}>
+              <StatTile label={homeName} value={numText(expected.lambdaHome)} sub="carreras" />
+              <StatTile label="Total" value={numText(expected.totalRuns)} color="#22d3ee" sub="carreras" />
+              <StatTile label={awayName} value={numText(expected.lambdaAway)} sub="carreras" />
+            </Grid>
+          )}
+          <MoneylineTiles moneyline={probs.moneyline} homeName={homeName} awayName={awayName} />
+          <Panel title="Total de carreras"><OverUnderTable lines={probs.totals?.lines} /></Panel>
+          <Panel title="Carreras por equipo"><CompareTable homeLines={probs.teamTotals?.home} awayLines={probs.teamTotals?.away} homeName={homeName} awayName={awayName} /></Panel>
+          {probs.runLines && <Panel title="Hándicaps de carreras"><SpreadColumns values={probs.runLines} homeName={homeName} awayName={awayName} /></Panel>}
+        </AccordionSection>
+      )}
+
+      {periods.length > 0 && (
+        <AccordionSection title="Tramos acumulados del partido" icon={Clock} accent="#818cf8" count={periods.length}>
+          {periods.map(([key, period], index) => (
+            <SubAccordion key={key} title={period.label || PERIOD_LABELS[key] || key} defaultOpen={index === 0}>
+              <MoneylineTiles moneyline={period.moneyline} homeName={homeName} awayName={awayName} />
+              <OverUnderTable lines={period.totals} />
+            </SubAccordion>
+          ))}
+        </AccordionSection>
+      )}
+
+      {innings.length > 0 && (
+        <AccordionSection title="Análisis entrada por entrada" icon={ListOrdered} accent="#2dd4bf" count={innings.length} hint="Las nueve entradas se calculan con el historial real disponible, aunque Bet365 no tenga cuota para esa entrada.">
+          {innings.map(([inning, values], index) => (
+            <SubAccordion key={inning} title={`${inning}.ª entrada`} meta={`media ${numText(values.expected?.total)}`} defaultOpen={index === 0}>
+              <Grid columns={2}>
+                <ProbTile label="Habrá carrera" value={values.run?.yes} />
+                <ProbTile label="Sin carrera" value={values.run?.no} color="#fbbf24" />
+                <ProbTile label={`${homeName} anota`} value={values.teamTotals?.home?.['0.5']?.over} />
+                <ProbTile label={`${awayName} anota`} value={values.teamTotals?.away?.['0.5']?.over} />
+              </Grid>
+              <OverUnderTable lines={values.totals} />
+            </SubAccordion>
+          ))}
+        </AccordionSection>
+      )}
+
+      {statistics.length > 0 && (
+        <AccordionSection title="Estadísticas de equipos" icon={ChartColumn} accent="#f97316" count={statistics.length}>
+          {statistics.map(([key, values], index) => (
+            <SubAccordion key={key} title={values.label || key} defaultOpen={index < 2}>
+              <CompareTable homeLines={values.home} awayLines={values.away} homeName={homeName} awayName={awayName} />
+            </SubAccordion>
+          ))}
+        </AccordionSection>
+      )}
+
+      <BaseballSpecials specials={probs?.specials} homeName={homeName} awayName={awayName} />
+
+      {a?.analysis?.h2h?.length > 0 && (
+        <AccordionSection title="Últimos enfrentamientos (H2H)" icon={History} accent="#a855f7" count={Math.min(6, a.analysis.h2h.length)}>
+          <H2HTable rows={a.analysis.h2h.slice(0, 6).map((h) => ({ date: h.date, home: h.teams?.home?.name, away: h.teams?.away?.name, hs: h.scores?.home?.total ?? h.scores?.home, as: h.scores?.away?.total ?? h.scores?.away }))} />
+        </AccordionSection>
+      )}
+
+      <FinalVerdictPanel verdict={a?.analysis?.finalVerdict} homeName={homeName} awayName={awayName} />
+
+      {/* Re-analizar manual va por /ferney (admin); aquí solo se relee la BD
+          por si el cron actualizó en segundo plano. */}
+      <button type="button" className="fak-btn" onClick={fetchData} disabled={loading}><RefreshCw size={15} aria-hidden="true" /> Refrescar</button>
+    </DocPage>
   );
 }
 
@@ -277,441 +247,64 @@ export default function BaseballAnalysisPage() {
   return <BaseballAnalysisExperience />;
 }
 
-// =====================================================================
-// SUB COMPONENTS
-// =====================================================================
-function Section({ title, children, accent }) {
-  return (
-    <motion.section
-      className="baseball-analysis-section"
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      style={{
-        background: 'rgba(255,255,255,0.02)',
-        border: '1px solid rgba(255,255,255,0.06)',
-        borderRadius: 14, padding: 16, marginBottom: 14,
-      }}
-    >
-      <h2 style={{
-        margin: '0 0 12px', fontSize: '.95rem', fontWeight: 800,
-        color: accent || '#5ee6b1', letterSpacing: '.3px',
-      }}>{title}</h2>
-      {children}
-    </motion.section>
-  );
-}
-
-const PLAYER_CATEGORY_LABELS = Object.freeze({
-  hits: 'Hits',
-  homeRuns: 'Jonrones',
-  totalBases: 'Bases totales',
-  rbis: 'Carreras impulsadas',
-  runs: 'Carreras anotadas',
-  walks: 'Bases por bolas',
-  stolenBases: 'Bases robadas',
-  strikeouts: 'Ponches del lanzador',
-  battingStrikeouts: 'Ponches del bateador',
-});
-
-function probabilityText(value) {
-  return value == null || !Number.isFinite(Number(value)) ? '—' : `${cap(value)}%`;
-}
-
-function ProbabilityPill({ label, value, tone = '#5ee6b1', probability = true }) {
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-      padding: '5px 8px', borderRadius: 8, background: 'rgba(255,255,255,.035)',
-      border: '1px solid rgba(255,255,255,.07)', minWidth: 0,
-    }}>
-      <small style={{ color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</small>
-      <strong style={{ color: tone, fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap' }}>
-        {probability ? probabilityText(value) : (value == null ? '—' : value)}
-      </strong>
-    </span>
-  );
-}
-
-function ProbabilityLadder({ title, lines }) {
-  const entries = Object.entries(lines || {}).sort((left, right) => Number(left[0]) - Number(right[0]));
-  if (!entries.length) return null;
-  return (
-    <div style={{ minWidth: 0 }}>
-      {title && <h3 style={{ margin: '0 0 7px', color: '#cbd5e1', fontSize: '.78rem' }}>{title}</h3>}
-      <div style={{ display: 'grid', gap: 5 }}>
-        {entries.map(([line, values]) => {
-          const n = values?.evidence?.over?.n ?? values?.evidence?.under?.n;
-          return (
-            <div key={line} style={{
-              display: 'grid', gridTemplateColumns: 'minmax(52px,.55fr) 1fr 1fr', gap: 5,
-              alignItems: 'center', padding: '5px 7px', borderRadius: 8,
-              background: 'rgba(255,255,255,.025)', border: '1px solid rgba(255,255,255,.05)',
-            }}>
-              <span style={{ color: '#e2e8f0', fontSize: '.72rem', fontWeight: 800 }}>
-                Línea {line}{n ? <small style={{ display: 'block', color: '#64748b', fontWeight: 500 }}>n={n}</small> : null}
-              </span>
-              <ProbabilityPill label="Más" value={values?.over} />
-              <ProbabilityPill label="Menos" value={values?.under} tone="#fcd34d" />
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function RunLines({ runLines, homeName, awayName }) {
-  const homeEntries = Object.entries(runLines?.home || {}).sort((left, right) => Number(left[0]) - Number(right[0]));
-  const awayEntries = Object.entries(runLines?.away || {}).sort((left, right) => Number(left[0]) - Number(right[0]));
-  if (!homeEntries.length && !awayEntries.length) return null;
-  const Column = ({ name, entries }) => (
-    <div style={{ minWidth: 0 }}>
-      <h4 style={{ margin: '0 0 6px', color: '#5ee6b1', fontSize: '.76rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</h4>
-      <div style={{ display: 'grid', gap: 5 }}>
-        {entries.map(([line, value]) => (
-          <div key={line} style={{
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
-            padding: '6px 9px', borderRadius: 8, background: 'rgba(255,255,255,.025)', border: '1px solid rgba(255,255,255,.07)',
-          }}>
-            <span style={{ color: '#e2e8f0', fontSize: '.76rem', fontWeight: 700 }}>{Number(line) > 0 ? '+' : ''}{line}</span>
-            <strong style={{ color: '#5ee6b1', fontFamily: 'JetBrains Mono, monospace' }}>{probabilityText(value)}</strong>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-  return (
-    <div>
-      <h3 style={{ margin: '0 0 7px', color: '#cbd5e1', fontSize: '.78rem' }}>Hándicaps de carreras calculados</h3>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14 }}>
-        <Column name={homeName} entries={homeEntries} />
-        <Column name={awayName} entries={awayEntries} />
-      </div>
-    </div>
-  );
-}
-
-function PeriodAnalysis({ periods, homeName, awayName }) {
-  const rows = Object.entries(periods || {}).filter(([key]) => !/^inning\d+$/.test(key));
+/** Bateadores y lanzadores: un acordeón por categoría (las 2 primeras abiertas). */
+function BaseballPlayers({ players }) {
+  const rows = Object.entries(players || {}).filter(([, entries]) => Array.isArray(entries) && entries.length);
   if (!rows.length) return null;
   return (
-    <Section title="Tramos acumulados del partido">
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(250px,1fr))', gap: 10 }}>
-        {rows.map(([key, period]) => (
-          <article key={key} style={{ padding: 11, borderRadius: 10, background: 'rgba(94,230,177,.035)', border: '1px solid rgba(94,230,177,.12)' }}>
-            <h3 style={{ margin: '0 0 8px', color: '#5ee6b1', fontSize: '.82rem', textTransform: 'capitalize' }}>{period.label || key}</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 5, marginBottom: 8 }}>
-              <ProbabilityPill label={homeName} value={period.moneyline?.home} />
-              <ProbabilityPill label="Empate" value={period.moneyline?.tie} tone="#fcd34d" />
-              <ProbabilityPill label={awayName} value={period.moneyline?.away} />
-            </div>
-            <ProbabilityLadder title="Carreras totales" lines={period.totals} />
-          </article>
-        ))}
-      </div>
-    </Section>
+    <AccordionSection title="Bateadores y lanzadores" icon={Users} accent="#a78bfa" count={rows.length} hint="Cada porcentaje sale del registro partido a partido del jugador. Este bloque no depende de que exista una cuota.">
+      {rows.map(([category, entries], index) => (
+        <SubAccordion key={category} title={PLAYER_CATEGORY_LABELS[category] || category} meta={`${entries.length} jugadores`} defaultOpen={index < 2}>
+          {entries.map((player) => (
+            <Panel key={`${category}-${player.id || player.name}`}>
+              <div className="fak-player">
+                {player.photo && <img src={player.photo} alt="" loading="lazy" />}
+                <span style={{ minWidth: 0 }}>
+                  <strong>{player.name}</strong>
+                  <small>{player.teamName || 'MLB'} · media {numText(player.mean)} · {player.history?.length || 0} partidos</small>
+                </span>
+              </div>
+              <OverUnderTable lines={Object.fromEntries(Object.entries(player.lineSides || {}).map(([line, sides]) => [line, { over: sides.over?.probability, under: sides.under?.probability }]))} />
+              {player.history?.length > 0 && <p className="fak-faint" style={{ margin: 0 }}>Últimos registros: {player.history.slice(-10).reverse().join(' · ')}</p>}
+            </Panel>
+          ))}
+        </SubAccordion>
+      ))}
+    </AccordionSection>
   );
 }
 
-function InningsAnalysis({ innings, homeName, awayName }) {
-  const rows = Object.entries(innings || {}).sort((left, right) => Number(left[0]) - Number(right[0]));
-  if (!rows.length) return null;
-  return (
-    <Section title="Análisis entrada por entrada">
-      <p style={{ margin: '0 0 12px', color: '#94a3b8', fontSize: '.78rem', lineHeight: 1.55 }}>
-        Las nueve entradas se calculan con el historial real disponible. Se muestran aunque Bet365 no tenga una cuota para esa entrada.
-      </p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(235px,1fr))', gap: 8 }}>
-        {rows.map(([inning, values]) => (
-          <article key={inning} style={{ padding: 10, borderRadius: 10, background: 'rgba(255,255,255,.025)', border: '1px solid rgba(255,255,255,.07)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline', marginBottom: 7 }}>
-              <strong style={{ color: '#5ee6b1', fontSize: '.82rem' }}>{inning}.ª entrada</strong>
-              <small style={{ color: '#64748b' }}>media {values.expected?.total == null ? '—' : Number(values.expected.total).toFixed(2)}</small>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, marginBottom: 7 }}>
-              <ProbabilityPill label="Habrá carrera" value={values.run?.yes} />
-              <ProbabilityPill label="Sin carrera" value={values.run?.no} tone="#fcd34d" />
-              <ProbabilityPill label={`${homeName} anota`} value={values.teamTotals?.home?.['0.5']?.over} />
-              <ProbabilityPill label={`${awayName} anota`} value={values.teamTotals?.away?.['0.5']?.over} />
-            </div>
-            <ProbabilityLadder lines={values.totals} />
-          </article>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-// Una sola tarjeta por estadística: columna izquierda con la línea, columna
-// derecha con el nombre de cada equipo y su porcentaje debajo — reemplaza los
-// 3 ladders sueltos (local/visitante/total) que se veían como desorden.
-function TeamComparisonCard({ title, homeLines, awayLines, homeName, awayName }) {
-  const allLines = [...new Set([...Object.keys(homeLines || {}), ...Object.keys(awayLines || {})])]
-    .map(Number).filter(Number.isFinite).sort((left, right) => left - right);
-  if (!allLines.length) return null;
-  return (
-    <article style={{ padding: 11, borderRadius: 10, background: 'rgba(255,255,255,.025)', border: '1px solid rgba(255,255,255,.07)', minWidth: 0 }}>
-      {title && <h3 style={{ margin: '0 0 8px', color: '#5ee6b1', fontSize: '.82rem', textTransform: 'capitalize' }}>{title}</h3>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(52px,.6fr) 1fr 1fr', gap: 6, marginBottom: 6 }}>
-        <span />
-        <span style={{ textAlign: 'center', fontSize: '.68rem', fontWeight: 800, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{homeName}</span>
-        <span style={{ textAlign: 'center', fontSize: '.68rem', fontWeight: 800, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{awayName}</span>
-      </div>
-      <div style={{ display: 'grid', gap: 5 }}>
-        {allLines.map((line) => (
-          <div key={line} style={{
-            display: 'grid', gridTemplateColumns: 'minmax(52px,.6fr) 1fr 1fr', gap: 6, alignItems: 'center',
-            padding: '5px 7px', borderRadius: 8, background: 'rgba(255,255,255,.02)',
-          }}>
-            <span style={{ color: '#e2e8f0', fontSize: '.72rem', fontWeight: 800 }}>Línea {line}</span>
-            <strong style={{ textAlign: 'center', color: '#5ee6b1', fontFamily: 'JetBrains Mono, monospace' }}>{probabilityText(homeLines?.[line]?.over)}</strong>
-            <strong style={{ textAlign: 'center', color: '#5ee6b1', fontFamily: 'JetBrains Mono, monospace' }}>{probabilityText(awayLines?.[line]?.over)}</strong>
-          </div>
-        ))}
-      </div>
-    </article>
-  );
-}
-
-function TeamStatistics({ statistics, homeName, awayName }) {
-  const rows = Object.entries(statistics || {});
-  if (!rows.length) return null;
-  return (
-    <Section title="Estadísticas de equipos">
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 10 }}>
-        {rows.map(([key, values]) => (
-          <TeamComparisonCard key={key} title={values.label || key} homeLines={values.home} awayLines={values.away} homeName={homeName} awayName={awayName} />
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-function SpecialAnalysis({ specials, homeName, awayName }) {
+/** Situaciones especiales: malla de 2 columnas + acordeón con marcadores. */
+function BaseballSpecials({ specials, homeName, awayName }) {
   if (!specials || !Object.keys(specials).length) return null;
-  const primary = [
-    ['Total de carreras impar', specials.totalParity?.odd],
-    ['Total de carreras par', specials.totalParity?.even],
-    [`${homeName} anota primero`, specials.firstTeamScore?.home],
-    [`${awayName} anota primero`, specials.firstTeamScore?.away],
-    [`${homeName} anota de último`, specials.lastTeamScore?.home],
-    [`${awayName} anota de último`, specials.lastTeamScore?.away],
-    ['Habrá entradas extra', specials.extraInnings?.yes],
-    ['No habrá entradas extra', specials.extraInnings?.no],
-    [`${homeName}: carreras impares`, specials.teamParity?.home?.odd],
-    [`${homeName}: carreras pares`, specials.teamParity?.home?.even],
-    [`${awayName}: carreras impares`, specials.teamParity?.away?.odd],
-    [`${awayName}: carreras pares`, specials.teamParity?.away?.even],
-    [`${homeName} termina con más carreras`, specials.highestScoring?.home],
-    [`${awayName} termina con más carreras`, specials.highestScoring?.away],
-  ].filter(([, value]) => value != null);
+  const pairs = [
+    ['Total impar', specials.totalParity?.odd, 'Total par', specials.totalParity?.even],
+    [`${homeName} anota primero`, specials.firstTeamScore?.home, `${awayName} anota primero`, specials.firstTeamScore?.away],
+    [`${homeName} anota último`, specials.lastTeamScore?.home, `${awayName} anota último`, specials.lastTeamScore?.away],
+    ['Habrá entradas extra', specials.extraInnings?.yes, 'Sin entradas extra', specials.extraInnings?.no],
+    [`${homeName}: impares`, specials.teamParity?.home?.odd, `${homeName}: pares`, specials.teamParity?.home?.even],
+    [`${awayName}: impares`, specials.teamParity?.away?.odd, `${awayName}: pares`, specials.teamParity?.away?.even],
+    [`${homeName} con más carreras`, specials.highestScoring?.home, `${awayName} con más carreras`, specials.highestScoring?.away],
+  ].filter(([, l, , r]) => prob(l) != null || prob(r) != null);
   const detailed = [
     ...Object.entries(specials.correctScore || {}).map(([key, value]) => [`Marcador exacto ${key}`, value]),
     ...Object.entries(specials.halfFull || {}).map(([key, value]) => [`Primeras 5 / final: ${displayBettingText(key)}`, value]),
     ...Object.entries(specials.resultTotals || {}).map(([key, value]) => [`Resultado y carreras: ${displayBettingText(key)}`, value]),
-  ].filter(([, value]) => value != null);
-  if (!primary.length && !detailed.length) return null;
+  ].filter(([, value]) => prob(value) != null);
+  if (!pairs.length && !detailed.length) return null;
   return (
-    <Section title="Situaciones especiales">
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 6 }}>
-        {primary.map(([label, value]) => <ProbabilityPill key={label} label={label} value={value} />)}
-      </div>
-      {detailed.length > 0 && (
-        <details style={{ marginTop: 10, border: '1px solid rgba(255,255,255,.07)', borderRadius: 9 }}>
-          <summary style={{ padding: '9px 10px', cursor: 'pointer', color: '#cbd5e1', fontSize: '.78rem', fontWeight: 800 }}>
-            Marcadores y combinaciones calculadas · {detailed.length}
-          </summary>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: 6, padding: 8 }}>
-            {detailed.map(([label, value]) => <ProbabilityPill key={label} label={label} value={value} />)}
-          </div>
-        </details>
-      )}
-    </Section>
-  );
-}
-
-function PitcherAnalysis({ pitchers }) {
-  if (!pitchers?.home && !pitchers?.away) return null;
-  const sides = ['home', 'away'].filter((side) => pitchers?.[side]);
-  return (
-    <Section title="Lanzadores abridores">
-      <article style={{ padding: 11, borderRadius: 10, background: 'rgba(255,255,255,.025)', border: '1px solid rgba(255,255,255,.07)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${sides.length}, 1fr)`, gap: 16 }}>
-          {sides.map((side) => {
-            const pitcher = pitchers[side];
-            return (
-              <div key={side} style={{ minWidth: 0 }}>
-                <strong style={{ color: '#e2e8f0', display: 'block', marginBottom: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pitcher.name || 'Abridor por confirmar'}</strong>
-                <div style={{ display: 'grid', gap: 6 }}>
-                  {[
-                    ['ERA', fmt(pitcher.stats?.era)],
-                    ['WHIP', fmt(pitcher.stats?.whip)],
-                    ['K/9', fmt(pitcher.stats?.k9)],
-                    ['IP', fmt(pitcher.stats?.ip, 1)],
-                  ].map(([label, value]) => (
-                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-                      <span style={{ color: '#94a3b8', fontSize: '.76rem' }}>{label}</span>
-                      <strong style={{ color: '#5ee6b1', fontFamily: 'JetBrains Mono, monospace' }}>{value}</strong>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </article>
-    </Section>
-  );
-}
-
-function PlayerAnalysis({ players }) {
-  const rows = Object.entries(players || {}).filter(([, entries]) => Array.isArray(entries) && entries.length);
-  if (!rows.length) return null;
-  return (
-    <Section title="Bateadores y lanzadores — análisis completo">
-      <p style={{ margin: '0 0 12px', color: '#94a3b8', fontSize: '.78rem', lineHeight: 1.55 }}>
-        Cada porcentaje sale del registro partido a partido del jugador. Este bloque no depende de que exista una cuota.
-      </p>
-      <div style={{ display: 'grid', gap: 7 }}>
-        {rows.map(([category, entries], categoryIndex) => (
-          <details key={category} open={categoryIndex < 2} style={{ border: '1px solid rgba(94,230,177,.12)', borderRadius: 10, overflow: 'hidden' }}>
-            <summary style={{ padding: '10px 12px', cursor: 'pointer', color: '#5ee6b1', fontSize: '.82rem', fontWeight: 800, background: 'rgba(94,230,177,.035)' }}>
-              {PLAYER_CATEGORY_LABELS[category] || category} · {entries.length} jugadores
-            </summary>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(250px,1fr))', gap: 7, padding: 8 }}>
-              {entries.map((player) => (
-                <article key={`${category}-${player.id || player.name}`} style={{ padding: 9, borderRadius: 9, background: 'rgba(255,255,255,.025)', border: '1px solid rgba(255,255,255,.06)', minWidth: 0 }}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-                    {player.photo && <Image src={player.photo} alt={player.name || 'Jugador'} width={34} height={34} style={{ borderRadius: '50%', objectFit: 'cover', background: 'rgba(255,255,255,.05)' }} unoptimized />}
-                    <span style={{ minWidth: 0 }}>
-                      <strong style={{ display: 'block', color: '#e2e8f0', fontSize: '.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{player.name}</strong>
-                      <small style={{ color: '#64748b' }}>{player.teamName || 'MLB'} · media {fmt(player.mean)} · {player.history?.length || 0} partidos</small>
-                    </span>
-                  </div>
-                  <div style={{ display: 'grid', gap: 5 }}>
-                    {Object.entries(player.lineSides || {}).sort((left, right) => Number(left[0]) - Number(right[0])).map(([line, sides]) => (
-                      <div key={line} style={{ display: 'grid', gridTemplateColumns: '50px 1fr 1fr', gap: 5, alignItems: 'center' }}>
-                        <small style={{ color: '#94a3b8', fontWeight: 700 }}>Línea {line}</small>
-                        <ProbabilityPill label="Más" value={sides.over?.probability} />
-                        <ProbabilityPill label="Menos" value={sides.under?.probability} tone="#fcd34d" />
-                      </div>
-                    ))}
-                  </div>
-                  {player.history?.length > 0 && (
-                    <small style={{ display: 'block', color: '#64748b', marginTop: 7, lineHeight: 1.4 }}>
-                      Últimos registros: {player.history.slice(-10).reverse().join(' · ')}
-                    </small>
-                  )}
-                </article>
-              ))}
-            </div>
-          </details>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-// Malla simétrica de recuadros (línea + más%/menos%) en vez de la lista
-// vertical infinita — mismo criterio para el total del partido y para cada
-// equipo, todo dentro de la misma tarjeta "Carreras".
-function RunsMesh({ lines }) {
-  const entries = Object.entries(lines || {}).sort((left, right) => Number(left[0]) - Number(right[0]));
-  if (!entries.length) return null;
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-      {entries.map(([line, values]) => (
-        <div key={line} style={{
-          minWidth: 88, padding: '7px 10px', borderRadius: 9, textAlign: 'center',
-          background: 'rgba(255,255,255,.025)', border: '1px solid rgba(255,255,255,.07)',
-        }}>
-          <div style={{ fontSize: '.72rem', fontWeight: 800, color: '#e2e8f0', marginBottom: 4 }}>{line} carreras</div>
-          <div style={{ fontSize: '.68rem', color: '#5ee6b1' }}>Más {probabilityText(values?.over)}</div>
-          <div style={{ fontSize: '.68rem', color: '#fcd34d' }}>Menos {probabilityText(values?.under)}</div>
-        </div>
+    <AccordionSection title="Situaciones especiales" icon={Sparkles} accent="#f472b6">
+      {pairs.map(([l, lv, r, rv]) => (
+        <Grid key={l} columns={2}>
+          <StatTile label={l} value={pctText(lv)} />
+          <StatTile label={r} value={pctText(rv)} color="#fbbf24" />
+        </Grid>
       ))}
-    </div>
-  );
-}
-
-function CompleteBaseballAnalysis({ probabilities, homeName, awayName }) {
-  const expected = probabilities.expected;
-  return (
-    <>
-      <Section title="Análisis estadístico completo">
-        <p style={{ margin: '0 0 12px', color: '#94a3b8', fontSize: '.78rem', lineHeight: 1.55 }}>
-          Aquí aparece todo lo calculado con los antecedentes reales; las cuotas solo determinan qué opciones pasan a la sección apostable.
-        </p>
-        {expected && (
-          <div style={{ color: '#94a3b8', fontSize: '.82rem', lineHeight: 1.6, marginBottom: 12 }}>
-            Media ponderada: <strong style={{ color: '#5ee6b1' }}>{fmt(expected.lambdaHome)} carreras de {homeName} y {fmt(expected.lambdaAway)} de {awayName}</strong>; total medio {fmt(expected.totalRuns)}.
-          </div>
-        )}
-        <div style={{ marginBottom: 14 }}>
-          <h3 style={{ margin: '0 0 7px', color: '#cbd5e1', fontSize: '.78rem' }}>Ganador</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 5 }}>
-            <ProbabilityPill label={homeName} value={probabilities.moneyline?.home} />
-            <ProbabilityPill label={awayName} value={probabilities.moneyline?.away} />
-          </div>
-        </div>
-        <div style={{ display: 'grid', gap: 14 }}>
-          <div>
-            <div style={{ fontSize: '.72rem', fontWeight: 700, color: '#94a3b8', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.03em' }}>Total</div>
-            <RunsMesh lines={probabilities.totals?.lines} />
-          </div>
-          <div>
-            <div style={{ fontSize: '.72rem', fontWeight: 700, color: '#94a3b8', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.03em' }}>Visitante — {awayName}</div>
-            <RunsMesh lines={probabilities.teamTotals?.away} />
-          </div>
-          <div>
-            <div style={{ fontSize: '.72rem', fontWeight: 700, color: '#94a3b8', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.03em' }}>Local — {homeName}</div>
-            <RunsMesh lines={probabilities.teamTotals?.home} />
-          </div>
-        </div>
-        <div style={{ marginTop: 14 }}><RunLines runLines={probabilities.runLines} homeName={homeName} awayName={awayName} /></div>
-      </Section>
-      <PeriodAnalysis periods={probabilities.periods} homeName={homeName} awayName={awayName} />
-      <InningsAnalysis innings={probabilities.innings} homeName={homeName} awayName={awayName} />
-      <TeamStatistics statistics={probabilities.statistics} homeName={homeName} awayName={awayName} />
-      <SpecialAnalysis specials={probabilities.specials} homeName={homeName} awayName={awayName} />
-      <PitcherAnalysis pitchers={probabilities.pitchers} />
-      <PlayerAnalysis players={probabilities.players} />
-    </>
-  );
-}
-
-function TeamHeader({ name, score, side, probability }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: '.7rem', color: '#64748b', fontWeight: 700, letterSpacing: 1 }}>{side}</div>
-        <div style={{ fontSize: '1.15rem', fontWeight: 800 }}>{name}</div>
-        {probability != null && (
-          <div style={{ marginTop: 3, color: '#5ee6b1', fontSize: '.72rem', fontWeight: 800 }}>
-            Probabilidad de ganar: {cap(probability)}%
-          </div>
-        )}
-      </div>
-      {score != null && (
-        <div style={{ fontSize: '2rem', fontWeight: 800, color: '#5ee6b1', fontFamily: 'JetBrains Mono, monospace' }}>{score}</div>
+      {detailed.length > 0 && (
+        <SubAccordion title="Marcadores y combinaciones calculadas" meta={String(detailed.length)}>
+          {detailed.map(([label, value]) => <KeyValue key={label} label={label} value={pctText(value)} />)}
+        </SubAccordion>
       )}
-    </div>
+    </AccordionSection>
   );
 }
-
-function Badge({ label, color }) {
-  return (
-    <span style={{
-      padding: '3px 9px', borderRadius: 999, fontSize: '.7rem', fontWeight: 700,
-      background: `${color}1a`, border: `1px solid ${color}55`, color,
-    }}>{label}</span>
-  );
-}
-
-const navBtnPlain = {
-  padding: '6px 12px', borderRadius: 8,
-  background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
-  color: '#cbd5e1', cursor: 'pointer', fontSize: '.85rem', fontWeight: 600,
-};
-const backBtn = { ...navBtnPlain };
-const primaryBtn = { ...navBtnPlain, background: 'rgba(94,230,177,0.15)', border: '1px solid #5ee6b1', color: '#5ee6b1' };

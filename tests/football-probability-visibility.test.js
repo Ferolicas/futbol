@@ -40,5 +40,7 @@ test('dashboard y análisis completo no ocultan frecuencias por falta de cuota',
   const detail = fs.readFileSync(path.join(root, 'app/dashboard/analisis/[id]/page.js'), 'utf8');
   assert.match(dashboard, /buildFootballProbabilityGroups\(p, odds, homeTeam, awayTeam\)/);
   assert.match(dashboard, /'Cuota pendiente'/);
-  assert.match(detail, /const cats = buildFootballProbabilityGroups\(p, o, a\.homeTeam, a\.awayTeam\)/);
+  // El análisis completo reutiliza el mismo bloque del dashboard (misma regla de 'Cuota pendiente').
+  assert.match(dashboard, /export function AccordionProbBlock/);
+  assert.match(detail, /<AccordionProbBlock probabilities=\{p\} odds=\{a\.odds\}/);
 });
