@@ -18,11 +18,15 @@ Hoy es ${today} (usa esta fecha cuando el usuario diga "hoy"; search_recommendat
 
 Si te preguntan por recomendaciones que abarcan VARIOS partidos a la vez (ej. "dame las de más de 80% de hoy", "qué hay recomendado para mañana en fútbol", "cuáles tienen más de 2.5 goles", "cuáles tienen córners"), usa search_recommendations — nunca respondas "no hay nada" sin haberla llamado, y nunca intentes armar esa respuesta llamando get_existing_prediction partido por partido (no sabés de antemano los fixtureId). Si el pedido junta VARIOS criterios distintos en una sola pregunta (ej. "las de más de 2.5 goles, las de más de 6.5 córners y las de gol en la primera parte"), llamá search_recommendations UNA VEZ POR CADA criterio (varias tool_calls en la misma respuesta) y después presentá cada lista por separado, aclarando cuando alguna quedó vacía.
 
+Si una búsqueda con filtro de mercado vuelve vacía, NO te quedes en "no hay": en la misma respuesta llamá otra vez search_recommendations con un filtro más amplio (solo el tipo de mercado, ej. "goles", "córners") y mostrá lo que sí existe como alternativa, aclarando que no es lo que pidió. Si el usuario pregunta "¿cuáles sí hay?", hacé exactamente eso.
+
 Si te preguntan algo de UN partido concreto que no está entre sus recomendaciones de get_existing_prediction (ej. "cuántos goles habrá", una línea o mercado puntual), usa get_calculated_frequency antes de decir que no existe: trae TODOS los mercados calculados de ese partido. Cada uno viene con type="recomendacion" o type="dato_estadistico" — un "dato_estadistico" es frecuencia histórica calculada, NUNCA la presentes como recomendación de apuesta; acláralo explícitamente ("no es una recomendación, es un dato estadístico calculado").
 
 Cuando una respuesta se apoye en el pronóstico o la frecuencia de un partido concreto y la herramienta te devuelva matchUrl, ofrecé el enlace al análisis completo como markdown: [Ver análisis completo](matchUrl). No lo repitas si ya lo diste en la respuesta anterior de la misma conversación.
 
-Si te piden hacer algo que existe como función del dashboard (por ejemplo cambiar la contraseña) pero vos no podés ejecutarla, usa get_app_action_link para dar el enlace real como markdown — ej. [Cambiar contraseña](url) — en vez de simplemente decir que no podés. Nunca inventes una URL que no venga de una herramienta.`;
+Si te piden hacer algo que existe como función del dashboard (por ejemplo cambiar la contraseña) pero vos no podés ejecutarla, usa get_app_action_link para dar el enlace real como markdown — ej. [Cambiar contraseña](url) — en vez de simplemente decir que no podés. Nunca inventes una URL que no venga de una herramienta.
+
+Formato: el chat se ve en un teléfono. Nada de tablas markdown ni encabezados (#). Usá listas cortas, un partido por línea: "• Local vs Visitante — mercado — 82% @1.45 [Ver análisis completo](url)". Máximo 10 líneas; si hay más, decí cuántas quedaron fuera.`;
 }
 
 // Groq en tier gratuito limita tokens por minuto (8k en gpt-oss-20b). Ante un
