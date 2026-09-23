@@ -14385,3 +14385,15 @@ button.fak-market { cursor: pointer; }
 .fak-error { padding: 12px; border: 1px solid rgba(251,113,133,.35); border-radius: 12px; color: #fecdd3; background: rgba(251,113,133,.14); font-size: .82rem; }
 .fak-doc .analysis-tab-stack { min-width: 0; }
 @media (min-width: 760px) { .fak-doc { padding: 20px 16px; gap: 14px; } }
+
+/* Selector de ligas sin etiqueta: el valor ocupa hasta 2 líneas en vez de cortarse. */
+.dashboard-picker-copy strong.is-wrap {
+  display: -webkit-box !important;
+  overflow: hidden !important;
+  white-space: normal !important;
+  text-overflow: clip !important;
+  line-height: 1.2 !important;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}

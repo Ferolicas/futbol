@@ -26,13 +26,17 @@ function renderWithLinks(text, onLinkClick) {
   return parts.length ? parts : text;
 }
 
-async function askAssistant(messages) {
+// timeZone: "hoy/ayer" se resuelven en la zona del usuario. context: filtros
+// de la última búsqueda, para que "de esas, las de más del 80%" siga el hilo.
+async function askAssistant(messages, context = null) {
+  let timeZone;
+  try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch {}
   const response = await fetch('/api/assistant/chat', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages, timeZone, context }),
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'No se pudo consultar al asistente');
-  return data.answer;
+  return data;
 }
 export default function MatchAssistant() {
   const router = useRouter();
@@ -41,6 +45,7 @@ export default function MatchAssistant() {
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState([{ role: 'assistant', content: 'Pregúntame por cualquier partido o pronóstico que exista en CF Análisis.' }]);
   const end = useRef(null);
+  const contextRef = useRef(null);
 
   // Tocar un enlace del asistente cierra el chat de inmediato y ejecuta la
   // acción ahí mismo — antes navegaba a una URL con query param y solo se
@@ -65,7 +70,7 @@ export default function MatchAssistant() {
       inputSchema: { type: 'object', additionalProperties: false, properties: { question: { type: 'string', minLength: 1, maxLength: 3000 } }, required: ['question'] },
       annotations: { readOnlyHint: true, consequentialHint: false, untrustedContentHint: false },
       async execute({ question }) {
-        const answer = await askAssistant([{ role: 'user', content: question }]);
+        const { answer } = await askAssistant([{ role: 'user', content: question }]);
         return { content: [{ type: 'text', text: answer }] };
       },
     }, { signal: controller.signal }).catch(() => {});
@@ -78,7 +83,11 @@ export default function MatchAssistant() {
     if (!question || busy) return;
     const history = [...messages.filter((message) => message.role !== 'error'), { role: 'user', content: question }].slice(-15);
     setMessages(history); setInput(''); setBusy(true);
-    try { setMessages([...history, { role: 'assistant', content: await askAssistant(history) }]); }
+    try {
+      const data = await askAssistant(history, contextRef.current);
+      contextRef.current = data.context || null;
+      setMessages([...history, { role: 'assistant', content: data.answer }]);
+    }
     catch (error) { setMessages([...history, { role: 'error', content: error.message }]); }
     finally { setBusy(false); }
   };

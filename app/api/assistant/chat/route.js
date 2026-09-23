@@ -2,31 +2,48 @@ import { z } from 'zod';
 import { getCurrentUser } from '../../../../lib/auth-pg';
 import { userHasActivePlan } from '../../../../lib/require-active-plan';
 import { redisRateLimit } from '../../../../lib/ratelimit-redis';
-import { CF_ASSISTANT_TOOLS, executeAssistantTool } from '../../../../lib/cf-assistant';
+import { CF_ASSISTANT_TOOLS, executeAssistantTool, localDate, safeTimeZone } from '../../../../lib/cf-assistant';
 
 export const dynamic = 'force-dynamic';
 
+// context = filtros de la última búsqueda (lo devuelve esta ruta y el chat
+// lo reenvía): permite "de esas, las de más del 80%" o "¿y las del cali?"
+// sin que el usuario repita fecha, deporte ni umbral.
+const contextSchema = z.object({
+  date: z.string().max(20).nullish(),
+  sport: z.string().max(30).nullish(),
+  team: z.string().max(80).nullish(),
+  minProbability: z.number().min(0).max(100).nullish(),
+  marketNameLike: z.string().max(80).nullish(),
+  timing: z.string().max(12).nullish(),
+}).partial();
+
 const schema = z.object({
   messages: z.array(z.object({ role: z.enum(['user','assistant']), content: z.string().min(1).max(3000) })).min(1).max(16),
+  timeZone: z.string().max(64).optional(),
+  context: contextSchema.nullish(),
 });
 
-function buildSystemPrompt() {
-  const today = new Date().toISOString().slice(0, 10);
-  return `Eres el asistente de CF Análisis. Responde en español claro usando exclusivamente datos devueltos por tus herramientas de solo lectura. Nunca inventes partidos, cuotas, probabilidades ni pronósticos. No calcules pronósticos nuevos, no modifiques el motor y no presentes una apuesta como segura. Si no existe información, dilo. Respeta el nivel de acceso devuelto por la herramienta. Las probabilidades son estimaciones, no garantías.
+function buildSystemPrompt({ timeZone, context }) {
+  const now = new Date();
+  const clock = new Intl.DateTimeFormat('es', { timeZone, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(now);
+  const [today, yesterday, tomorrow] = [localDate(timeZone, 0, now), localDate(timeZone, -1, now), localDate(timeZone, 1, now)];
+  const active = context && Object.values(context).some((value) => value != null && value !== '' && value !== 0)
+    ? `\n\nFILTROS ACTIVOS DE LA CONVERSACIÓN (última búsqueda): ${JSON.stringify(context)}.`
+    : '';
+  return `Eres el asistente de CF Análisis: un agente que ENTIENDE lo que el usuario quiere y usa sus herramientas de solo lectura para encontrarlo. Responde en español claro usando exclusivamente datos devueltos por las herramientas. Nunca inventes partidos, cuotas, probabilidades ni pronósticos; no calcules pronósticos nuevos ni presentes una apuesta como segura. Las probabilidades son estimaciones, no garantías. Respeta el nivel de acceso devuelto por la herramienta.
 
-Hoy es ${today} (usa esta fecha cuando el usuario diga "hoy"; search_recommendations y get_calculated_frequency ya la usan por defecto si no la das explícitamente).
+AHORA: ${clock} (zona ${timeZone}). Hoy=${today}, ayer=${yesterday}, mañana=${tomorrow}. Traducí siempre "hoy/ayer/mañana/el sábado" a su fecha.
 
-Si te preguntan por recomendaciones que abarcan VARIOS partidos a la vez (ej. "dame las de más de 80% de hoy", "qué hay recomendado para mañana en fútbol", "cuáles tienen más de 2.5 goles", "cuáles tienen córners"), usa search_recommendations — nunca respondas "no hay nada" sin haberla llamado, y nunca intentes armar esa respuesta llamando get_existing_prediction partido por partido (no sabés de antemano los fixtureId). Si el pedido junta VARIOS criterios distintos en una sola pregunta (ej. "las de más de 2.5 goles, las de más de 6.5 córners y las de gol en la primera parte"), llamá search_recommendations UNA VEZ POR CADA criterio (varias tool_calls en la misma respuesta) y después presentá cada lista por separado, aclarando cuando alguna quedó vacía.
+CÓMO PENSAR:
+1. Momento (el servidor lo aplica solo si dejás timing en null): pedido general de hoy SIN equipo ("qué opciones hay hoy", "lo mejor de hoy", "qué hay con más probabilidad") = solo lo que AÚN NO EMPIEZA. Con equipo ("las del cali") = todo lo de ese equipo, jugado o por jugar, buscando en los últimos 7 días y los próximos 3 si no dio fecha. Con otra fecha ("ayer", "el sábado") = todo ese día. Poné date SOLO si el usuario nombró un día. Si pregunta en pasado por hoy ("cuáles fueron las de hoy"), usá timing="all".
+2. Equipos: el usuario escribe nombres incompletos o mal escritos ("el cali", "atlanta", "medellin"). Pasá ese texto en "team" (search_recommendations o search_existing_matches); la búsqueda es parcial y sin tildes. Si coincide con UN solo partido, ese es. Si coincide con varios, preguntá cuál de ellos (listándolos con hora), no respondas por todos ni digas que no existe.
+3. Hilo de la conversación: cada pregunta continúa la anterior salvo que cambie de tema. "De esas, las de más del 80%" = misma búsqueda anterior + minProbability 80. "¿Y para el cali?" = mismos filtros (fecha, umbral, mercado) + team "cali". Solo reiniciá filtros si dice "en general", "todas", "otro día" o cambia claramente de tema.${active}
+4. Si una búsqueda de mercado vuelve vacía, no te quedes en "no hay": buscá con un filtro más amplio (solo el tipo de mercado, ej. "goles") y ofrecé lo que sí existe aclarando que no es exactamente lo pedido. Si el resultado trae alreadyStarted, decí que los de hoy ya empezaron y ofrecé mostrarlos.
+5. Para una línea o número puntual de UN partido que no está entre sus recomendaciones, usá get_calculated_frequency; un "dato_estadistico" es frecuencia histórica, NUNCA una recomendación — decilo explícitamente.
+6. Si piden algo que existe en el dashboard (ej. cambiar la contraseña), usá get_app_action_link y da el enlace en markdown, ej. [Cambiar contraseña](url). Nunca inventes URLs.
 
-Si una búsqueda con filtro de mercado vuelve vacía, NO te quedes en "no hay": en la misma respuesta llamá otra vez search_recommendations con un filtro más amplio (solo el tipo de mercado, ej. "goles", "córners") y mostrá lo que sí existe como alternativa, aclarando que no es lo que pidió. Si el usuario pregunta "¿cuáles sí hay?", hacé exactamente eso.
-
-Si te preguntan algo de UN partido concreto que no está entre sus recomendaciones de get_existing_prediction (ej. "cuántos goles habrá", una línea o mercado puntual), usa get_calculated_frequency antes de decir que no existe: trae TODOS los mercados calculados de ese partido. Cada uno viene con type="recomendacion" o type="dato_estadistico" — un "dato_estadistico" es frecuencia histórica calculada, NUNCA la presentes como recomendación de apuesta; acláralo explícitamente ("no es una recomendación, es un dato estadístico calculado").
-
-Cuando una respuesta se apoye en el pronóstico o la frecuencia de un partido concreto y la herramienta te devuelva matchUrl, ofrecé el enlace al análisis completo como markdown: [Ver análisis completo](matchUrl). No lo repitas si ya lo diste en la respuesta anterior de la misma conversación.
-
-Si te piden hacer algo que existe como función del dashboard (por ejemplo cambiar la contraseña) pero vos no podés ejecutarla, usa get_app_action_link para dar el enlace real como markdown — ej. [Cambiar contraseña](url) — en vez de simplemente decir que no podés. Nunca inventes una URL que no venga de una herramienta.
-
-Formato: el chat se ve en un teléfono. Nada de tablas markdown ni encabezados (#). Usá listas cortas, un partido por línea: "• Local vs Visitante — mercado — 82% @1.45 [Ver análisis completo](url)". Máximo 10 líneas; si hay más, decí cuántas quedaron fuera.`;
+FORMATO (se lee en un teléfono): sin tablas ni encabezados (#). Un partido por línea: "• Local vs Visitante (hora) — mercado — 82% @1.45 [Ver análisis completo](matchUrl)". Máximo 10 líneas; si hay más, decí cuántas quedaron fuera y cómo filtrarlas. Breve y directo.`;
 }
 
 // Groq en tier gratuito limita tokens por minuto (8k en gpt-oss-20b). Ante un
@@ -106,7 +123,9 @@ export async function POST(request) {
   if (!parsed.success) return Response.json({ error: 'Conversación inválida' }, { status: 400 });
   const paidAccess = await userHasActivePlan(user);
   // Solo las últimas 10 intervenciones: el historial completo gastaba el cupo por minuto.
-  const messages = [{ role: 'system', content: buildSystemPrompt() }, ...parsed.data.messages.slice(-10)];
+  const timeZone = safeTimeZone(parsed.data.timeZone);
+  let context = parsed.data.context || null;
+  const messages = [{ role: 'system', content: buildSystemPrompt({ timeZone, context }) }, ...parsed.data.messages.slice(-10)];
   const state = { modelIndex: 0 };
   try {
     for (let round = 0; round < 4; round++) {
@@ -114,15 +133,20 @@ export async function POST(request) {
       if (!answer) throw new Error('Groq no devolvió respuesta');
       // Groq rechaza campos extra (reasoning, etc.) al reenviar el turno del asistente.
       messages.push({ role: 'assistant', content: answer.content || '', ...(answer.tool_calls?.length ? { tool_calls: answer.tool_calls } : {}) });
-      if (!answer.tool_calls?.length) return Response.json({ answer: answer.content || 'No encontré información para responder.' });
+      if (!answer.tool_calls?.length) return Response.json({ answer: answer.content || 'No encontré información para responder.', context });
       for (const call of answer.tool_calls) {
         let args = {};
         try { args = JSON.parse(call.function?.arguments || '{}'); } catch {}
-        const result = await executeAssistantTool(call.function?.name, args, { paidAccess });
+        const result = await executeAssistantTool(call.function?.name, args, { paidAccess, timeZone });
+        // La última búsqueda de recomendaciones pasa a ser el contexto del hilo.
+        if (call.function?.name === 'search_recommendations' && result?.filter) {
+          const { date, sport, team, minProbability, marketNameLike, timing } = result.filter;
+          context = { date, sport, team, minProbability, marketNameLike, timing };
+        }
         messages.push({ role: 'tool', tool_call_id: call.id, name: call.function?.name, content: toolContent(result) });
       }
     }
-    return Response.json({ answer: 'No pude completar la consulta con los datos disponibles.' });
+    return Response.json({ answer: 'No pude completar la consulta con los datos disponibles.', context });
   } catch (error) {
     console.error('[assistant/chat]', error.message);
     return Response.json({ error: 'El asistente no está disponible temporalmente.' }, { status: 502 });

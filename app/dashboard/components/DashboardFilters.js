@@ -33,7 +33,9 @@ export const DASHBOARD_SPORTS = Object.freeze([
   { value: 'american_football', label: 'Fútbol americano', meta: 'NFL y NCAA', icon: FutbolAmericanoIcon },
 ]);
 
-function Picker({ value, onChange, options, label, placeholder, variant = 'green' }) {
+// hideLabel: el selector de ligas no muestra la etiqueta "Competición" y su
+// valor puede ocupar 2 líneas en vez de cortarse ("Todas las li…").
+function Picker({ value, onChange, options, label, placeholder, variant = 'green', hideLabel = false }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
   const selected = options.find((option) => String(option.value) === String(value));
@@ -80,8 +82,8 @@ function Picker({ value, onChange, options, label, placeholder, variant = 'green
           )}
         </span>
         <span className="dashboard-picker-copy">
-          <small>{label}</small>
-          <strong>{selected?.label || placeholder}</strong>
+          {!hideLabel && <small>{label}</small>}
+          <strong className={hideLabel ? 'is-wrap' : undefined}>{selected?.label || placeholder}</strong>
         </span>
         {selected?.count > 0 && <span className="dashboard-picker-count">{selected.count}</span>}
         <ChevronDown className="dashboard-picker-chevron" size={16} aria-hidden="true" />
@@ -152,6 +154,7 @@ export function LeaguePicker({
         onChange={onChange}
         options={options}
         label="Competición"
+        hideLabel
         placeholder="Todas las ligas"
         variant={variant}
       />
@@ -252,8 +255,7 @@ function MultiLeaguePicker({ leagues, value, onChange, variant, allLeagueIds, di
           )}
         </span>
         <span className="dashboard-picker-copy">
-          <small>Competición</small>
-          <strong>{summary}</strong>
+          <strong className="is-wrap">{summary}</strong>
         </span>
         {!disabled && <span className="dashboard-picker-count">{availableSelected}</span>}
         <ChevronDown className="dashboard-picker-chevron" size={16} aria-hidden="true" />
