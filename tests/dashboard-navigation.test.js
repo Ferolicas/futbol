@@ -9,7 +9,7 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 test('el header conserva avatar, logo centrado y búsqueda Spotlight', () => {
   const header = read('app/dashboard/components/DashboardHeader.js');
   const spotlight = read('app/dashboard/components/AppleSpotlightSearch.js');
-  assert.match(header, /<BrandLogoMedia animated=\{false\} \/>/);
+  assert.match(header, /<BrandLogoMedia deferred \/>/);
   assert.match(header, /<ChatWidget \/>/);
   assert.match(header, /<AppleSpotlightSearch \/>/);
   assert.doesNotMatch(header, /SportToggle|initialUser/);
@@ -33,7 +33,9 @@ test('el dashboard inicia sin splash bloqueante ni efectos pesados simultáneos'
   const styles = read('app/globals.css');
 
   assert.doesNotMatch(football, /if \(splash\)|setSplash|splashFade|_splashDone/);
-  assert.match(header, /<BrandLogoMedia animated=\{false\} \/>/);
+  // El logo animado no bloquea el arranque: se carga tras 'load' y en idle.
+  assert.match(header, /<BrandLogoMedia deferred \/>/);
+  assert.match(read('components/BrandLogoMedia.js'), /addEventListener\('load', scheduleIdle/);
   assert.match(access, /window\.setTimeout\(visit, 2500\)/);
   const overlay = styles.slice(styles.indexOf('.free-plan-overlay {'), styles.indexOf('}', styles.indexOf('.free-plan-overlay {')));
   assert.doesNotMatch(overlay, /backdrop-filter/);

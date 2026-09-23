@@ -14356,7 +14356,7 @@ button.fak-market { cursor: pointer; }
 .fak-last-row .is-c, .fak-last-row .is-t { font: 600 .68rem 'JetBrains Mono', monospace; text-align: right; }
 .fak-last-row .is-c { color: #22d3ee; }
 .fak-last-row .is-t { color: #fbbf24; }
-.fak-lineup-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 3px 0; font-size: .74rem; }
+.fak-lineup-row { display: grid; grid-template-columns: 26px 24px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 3px 0; font-size: .74rem; }
 .fak-lineup-row .is-num { color: #8fa1aa; font-family: 'JetBrains Mono', monospace; }
 .fak-lineup-row .is-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fak-lineup-row .is-pos { color: #5f707a; }
