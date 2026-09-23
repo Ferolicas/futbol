@@ -112,6 +112,13 @@ export async function runLineups(_payload = {}, _job = null) {
   const now = Date.now();
   const WINDOW_MS = 45 * 60 * 1000;
   const TOLERANCE_MS = 5 * 60 * 1000;
+  // Algunas ligas (sobre todo menores) publican el XI en API-Football unos
+  // minutos DESPUÉS del pitido inicial. Sin este margen, en cuanto el
+  // partido pasa de 'NS' a en vivo el filtro lo excluía para siempre y
+  // quedaba "alineaciones no disponibles" aunque el partido ya llevara rato
+  // jugándose — el job nunca volvía a intentarlo.
+  const LIVE_GRACE_MS = 25 * 60 * 1000;
+  const LIVE_STATUSES = new Set(['1H', '2H', 'HT', 'ET', 'BT', 'P']);
 
   let schedule = await redisGet(KEYS.schedule(today));
   if (!schedule) schedule = await getMatchSchedule(today).catch(() => null);
@@ -134,7 +141,8 @@ export async function runLineups(_payload = {}, _job = null) {
     }
     const hasMatchInWindow = schedule.kickoffTimes.some(m => {
       const timeUntilKickoff = m.kickoff - now;
-      return timeUntilKickoff > 0 && timeUntilKickoff <= WINDOW_MS + TOLERANCE_MS;
+      return (timeUntilKickoff > 0 && timeUntilKickoff <= WINDOW_MS + TOLERANCE_MS)
+        || (timeUntilKickoff <= 0 && Math.abs(timeUntilKickoff) <= LIVE_GRACE_MS);
     });
     if (!hasMatchInWindow) {
       return { ok: true, skipped: true, reason: 'no matches within 50min of kickoff', updated: 0, apiCalls: 0 };
@@ -146,10 +154,13 @@ export async function runLineups(_payload = {}, _job = null) {
   }
 
   const matchesNearKickoff = cachedFixtures.filter(m => {
-    if (m.fixture.status.short !== 'NS') return false;
+    const status = m.fixture.status.short;
     const kickoff = new Date(m.fixture.date).getTime();
     const timeUntil = kickoff - now;
-    return timeUntil > 0 && timeUntil <= WINDOW_MS + TOLERANCE_MS;
+    if (status === 'NS') {
+      return timeUntil > 0 && timeUntil <= WINDOW_MS + TOLERANCE_MS;
+    }
+    return LIVE_STATUSES.has(status) && timeUntil <= 0 && Math.abs(timeUntil) <= LIVE_GRACE_MS;
   });
 
   if (matchesNearKickoff.length === 0) {
@@ -163,6 +174,13 @@ export async function runLineups(_payload = {}, _job = null) {
     const fixtureId = match.fixture.id;
     const homeId = match.teams?.home?.id, awayId = match.teams?.away?.id;
     const homeTeam = match.teams?.home?.name || 'Home', awayTeam = match.teams?.away?.name || 'Away';
+
+    // Partido ya en vivo (margen de gracia post-pitido): si ya tenemos el XI
+    // confirmado, no hace falta seguir gastando cuota reintentando cada 5min.
+    if (match.fixture.status.short !== 'NS') {
+      const already = await getCachedAnalysis(fixtureId, today, { strict: true });
+      if (already?.lineups?.available) return { fixtureId, skipped: true, reason: 'already-available' };
+    }
 
     const [lineups, injuries] = await Promise.all([
       fetchFromApi(`/fixtures/lineups?fixture=${fixtureId}`),
