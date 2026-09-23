@@ -9,13 +9,15 @@ import { colors, radius } from '@/theme/tokens';
 
 export interface LeagueOption { id: string | number; name: string; country?: string | null; logo?: string | null }
 
-function Trigger({ label, value, leading, count, onPress, disabled }: { label: string; value: string; leading: React.ReactNode; count?: number | null; onPress: () => void; disabled?: boolean }) {
+// Sin label (selector de ligas) el valor ocupa hasta 2 líneas en vez de
+// cortarse ("Todas las li…") en pantallas angostas.
+function Trigger({ label, value, leading, count, onPress, disabled }: { label?: string; value: string; leading: React.ReactNode; count?: number | null; onPress: () => void; disabled?: boolean }) {
   return (
     <Pressable onPress={onPress} disabled={disabled} accessibilityRole="button" style={({ pressed }) => [styles.trigger, pressed && { opacity: 0.85 }, disabled && { opacity: 0.6 }]}>
       <View style={styles.leading}>{leading}</View>
       <View style={{ flex: 1, minWidth: 0 }}>
-        <AppText variant="kicker" size={9.5} tone="muted">{label}</AppText>
-        <AppText variant="label" weight="bold" size={12.5} numberOfLines={1}>{value}</AppText>
+        {label ? <AppText variant="kicker" size={9.5} tone="muted">{label}</AppText> : null}
+        <AppText variant="label" weight="bold" size={12.5} numberOfLines={label ? 1 : 2}>{value}</AppText>
       </View>
       {count != null && count > 0 && <View style={styles.count}><AppText variant="mono" size={10} tone="accent">{count}</AppText></View>}
       <ChevronDown size={15} color={colors.muted} />
@@ -73,7 +75,6 @@ export function LeaguePicker({ leagues, value, onChange }: { leagues: LeagueOpti
   return (
     <>
       <Trigger
-        label="Competición"
         value={selected?.name || 'Todas las ligas'}
         leading={selected?.logo ? <TeamLogo src={selected.logo} name={selected.name} size={20} /> : <Trophy size={18} color={colors.accent} />}
         onPress={() => setOpen(true)}
@@ -128,7 +129,6 @@ export function LeagueMultiPicker({ leagues, value, onChange, allLeagueIds, disa
   return (
     <>
       <Trigger
-        label="Competición"
         value={summary}
         count={disabled ? null : availableSelected}
         disabled={disabled}

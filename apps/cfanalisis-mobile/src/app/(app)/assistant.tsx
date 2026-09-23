@@ -5,6 +5,7 @@ import { Send, Sparkles, X } from 'lucide-react-native';
 import { AppText, Screen } from '@/components/ui';
 import { api } from '@/lib/api';
 import { openPasswordModal } from '@/lib/password-modal-store';
+import { getUserTz } from '@/lib/timezone';
 import { colors, fonts, radius } from '@/theme/tokens';
 
 interface ChatMessage { role: 'user' | 'assistant' | 'error'; content: string }
@@ -30,6 +31,9 @@ export default function AssistantScreen() {
   ]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  // Filtros de la última búsqueda que devuelve el servidor: se reenvían para
+  // que las preguntas de seguimiento ("de esas…", "¿y el cali?") sigan el hilo.
+  const contextRef = useRef<Record<string, unknown> | null>(null);
 
   const scrollToEnd = useCallback(() => {
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
@@ -57,7 +61,8 @@ export default function AssistantScreen() {
     const history = [...messages.filter((m) => m.role !== 'error'), { role: 'user' as const, content: question }].slice(-15);
     setMessages(history); setInput(''); setBusy(true); scrollToEnd();
     try {
-      const data = await api.post<{ answer?: string; error?: string }>('/api/assistant/chat', { messages: history });
+      const data = await api.post<{ answer?: string; error?: string; context?: Record<string, unknown> | null }>('/api/assistant/chat', { messages: history, timeZone: getUserTz(), context: contextRef.current });
+      contextRef.current = data.context || null;
       if (!data.answer) throw new Error(data.error || 'No se pudo consultar al asistente');
       setMessages([...history, { role: 'assistant', content: data.answer }]);
     } catch (cause: any) {
