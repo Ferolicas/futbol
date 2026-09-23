@@ -5483,33 +5483,52 @@ body.match-fs-open .float-bar-combinada {
   min-width: 0;
 }
 
+/* Marcador estilo TV: bloque tipo "bug" de transmisión — fuente digital
+   monoespaciada, panel oscuro con bisel y leve resplandor, en vez de dos
+   números sueltos en la fuente genérica del resto de la tarjeta. */
 .mhead-status {
   padding: 3px 10px;
   border-radius: 999px;
   color: #fff;
   background: rgba(255,255,255,.1);
+  font-family: var(--font-mono), 'JetBrains Mono', monospace;
   font-size: .58rem;
   font-weight: 800;
-  letter-spacing: .05em;
+  letter-spacing: .08em;
   white-space: nowrap;
 }
 
 .mhead-score {
   display: flex;
   align-items: center;
-  gap: 7px;
-  color: #f1f5f9;
+  gap: 8px;
+  padding: 3px 14px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(0,0,0,.42), rgba(0,0,0,.28));
+  border: 1px solid rgba(94,230,177,.16);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 0 rgba(0,0,0,.3), 0 0 14px rgba(94,230,177,.08);
+  color: #ecfff6;
+  font-family: var(--font-mono), 'JetBrains Mono', monospace;
   font-size: clamp(1.7rem, 7vw, 2.4rem);
   font-weight: 700;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 10px rgba(94,230,177,.35);
 }
 
-.mhead-score-sep { opacity: .4; }
+.mhead-score-sep { opacity: .45; font-weight: 400; }
 
 .mhead-kickoff {
-  color: #f1f5f9;
+  padding: 3px 14px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(0,0,0,.42), rgba(0,0,0,.28));
+  border: 1px solid rgba(94,230,177,.16);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 0 rgba(0,0,0,.3);
+  color: #ecfff6;
+  font-family: var(--font-mono), 'JetBrains Mono', monospace;
   font-size: clamp(1.1rem, 4.5vw, 1.5rem);
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .mhead .score-stats-summary {
@@ -10226,12 +10245,23 @@ input:checked + .cb-mark::after {
   padding:5px 14px; border-radius:999px;
   background:#dc2626; border:1px solid rgba(248,113,113,.4);
   font-size:.75rem; font-weight:700; color:white; letter-spacing:.05em;
+  font-variant-numeric: tabular-nums;
 }
+.ap2-live-badge > span:last-child { font-family: var(--font-mono), 'JetBrains Mono', monospace; }
 /* Indicador 1T/2T/TE dentro del badge live (junto al minuto). */
 .half-tag {
   font-size:.6rem; font-weight:800; line-height:1.5;
   padding:0 5px; border-radius:5px;
   background:rgba(255,255,255,.25); letter-spacing:.03em;
+}
+/* Adición flotando junto al minuto, estilo tablero del 4º árbitro (ej.
+   "45:00 +2"): conteo real de minutos de adición ya transcurridos. */
+.added-time-badge {
+  display: inline-flex; align-items: center;
+  font-size: .58rem; font-weight: 800; line-height: 1.4;
+  padding: 0 4px; border-radius: 4px;
+  background: #facc15; color: #111; letter-spacing: .02em;
+  transform: translateY(-4px);
 }
 
 /* Marcador tragaperras: el dígito nuevo BAJA desde arriba con rebote. Solo se

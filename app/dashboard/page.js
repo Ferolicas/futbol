@@ -2681,29 +2681,61 @@ function GoalScorersGrid({ liveStats, homeId }) {
 }
 
 function MatchTimer({ elapsed, extra, status }) {
-  // Minuto EXACTO de API-Football, sin interpolación ni offset local.
-  //   - fixture.status.elapsed = minuto base (45/90/120).
-  //   - fixture.status.extra   = minutos de adición TRANSCURRIDOS (va 1,2,3...),
-  //     NO el total decretado por el árbitro. API-Football no expone el total
-  //     decretado en ningún campo, así que no se puede mostrar "(+5)" sin
-  //     inventarlo.
-  //
-  // Minuto real en curso = elapsed + extra (ej. 90 + 1 = 91'). Cuando no hay
-  // adición, solo el minuto base (67').
+  // Minuto REAL de API-Football como única fuente de verdad — nunca se
+  // inventa. Lo único local es hacerlo avanzar visualmente entre
+  // actualizaciones del servidor (cada 20-90s según el partido, antes se
+  // quedaba quieto y "saltaba"): se ancla al último minuto real conocido y
+  // el momento en que llegó, y cada segundo real transcurrido en el reloj
+  // del navegador se suma en pantalla — apenas llega el próximo dato real,
+  // se vuelve a anclar ahí, así que nunca se aleja de lo que dice el proveedor.
+  //   - fixture.status.elapsed = minuto base (45/90/120, tope del período).
+  //   - fixture.status.extra   = minutos de adición YA TRANSCURRIDOS (va
+  //     1,2,3...), NO el total que anunció el 4º árbitro. API-Football no
+  //     expone ese total decretado en ningún campo — solo el conteo real de
+  //     cuánto tiempo de más ya pasó. Por eso el "+N" que se muestra abajo es
+  //     ese conteo real y sigue subiendo (como lo hacen SofaScore/Flashscore),
+  //     no el número fijo del tablero del árbitro, que no existe en los datos.
+  const base = Number(elapsed) || 0;
+  const add  = Number(extra)   || 0;
+  const anchorMinute = base + add;
+  const anchorRef = useRef({ minute: anchorMinute, at: Date.now() });
+  const [tick, setTick] = useState({ minute: anchorMinute, seconds: 0 });
+
+  useEffect(() => {
+    anchorRef.current = { minute: anchorMinute, at: Date.now() };
+    setTick({ minute: anchorMinute, seconds: 0 });
+  }, [anchorMinute]);
+
+  useEffect(() => {
+    if (status !== '1H' && status !== '2H' && status !== 'ET') return undefined;
+    const id = setInterval(() => {
+      const elapsedMs = Date.now() - anchorRef.current.at;
+      const totalSeconds = Math.floor(elapsedMs / 1000);
+      setTick({
+        minute: anchorRef.current.minute + Math.floor(totalSeconds / 60),
+        seconds: totalSeconds % 60,
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [status]);
+
   if (status === 'HT') return <span>DESCANSO</span>;
   if (status === 'BT') return <span>DESCANSO ET</span>;
   if (status === 'P')  return <span>PENALES</span>;
 
-  const base = Number(elapsed) || 0;
-  const add  = Number(extra)   || 0;
   // Indicador de tiempo (1T/2T/TE) junto al minuto, como bet365/sofascore.
   const half = status === '1H' ? '1T' : status === '2H' ? '2T' : status === 'ET' ? 'TE' : null;
+  const boundary = status === '1H' ? 45 : status === '2H' ? 90 : status === 'ET' ? 120 : null;
+  const inStoppage = boundary != null && tick.minute > boundary;
+  const mainMinute = inStoppage ? boundary : tick.minute;
+  const secs = String(tick.seconds).padStart(2, '0');
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
       {half && <span className="half-tag">{half}</span>}
-      <span>{base + add}&apos;</span>
+      <span>{mainMinute}:{secs}</span>
+      {inStoppage && <span className="added-time-badge">+{tick.minute - boundary}</span>}
     </span>
-  );   // "2T 67'" en 2H 67, "1T 47'" en 45+2
+  );   // "2T 67:14" en 2H 67, "1T 45:00 +2" en 45+2
 }
 
 function LiveStatsBar({ stats }) {

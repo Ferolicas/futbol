@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Flag, Star, X } from 'lucide-react-native';
@@ -25,17 +25,58 @@ interface Props {
   liveLabel?: string | null;
 }
 
+// Igual que MatchTimer en la web (page.js): el minuto real de API-Football
+// nunca se inventa, pero se hace avanzar visualmente entre actualizaciones
+// del servidor en vez de quedarse quieto — se ancla al último minuto real
+// y el momento en que llegó, y se corrige apenas llega el próximo dato real.
+//   - status.elapsed = minuto base (45/90/120, tope del período).
+//   - status.extra    = minutos de adición YA TRANSCURRIDOS (va 1,2,3...),
+//     NO el total que anunció el 4º árbitro — API-Football no expone ese
+//     número decretado, solo el conteo real de cuánto tiempo de más ya pasó.
+//     Por eso el "+N" flotante es ese conteo real y sigue subiendo, no un
+//     total fijo de tablero.
 function MatchTimer({ status }: { status: any }) {
+  const base = Number(status.elapsed) || 0;
+  const add = Number(status.extra) || 0;
+  const anchorMinute = base + add;
+  const anchorRef = useRef({ minute: anchorMinute, at: Date.now() });
+  const [tick, setTick] = useState({ minute: anchorMinute, seconds: 0 });
+
+  useEffect(() => {
+    anchorRef.current = { minute: anchorMinute, at: Date.now() };
+    setTick({ minute: anchorMinute, seconds: 0 });
+  }, [anchorMinute]);
+
+  useEffect(() => {
+    if (status.short !== '1H' && status.short !== '2H' && status.short !== 'ET') return undefined;
+    const id = setInterval(() => {
+      const elapsedMs = Date.now() - anchorRef.current.at;
+      const totalSeconds = Math.floor(elapsedMs / 1000);
+      setTick({
+        minute: anchorRef.current.minute + Math.floor(totalSeconds / 60),
+        seconds: totalSeconds % 60,
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [status.short]);
+
   if (status.short === 'HT') return <AppText variant="kicker" size={10} tone="white">Descanso</AppText>;
   if (status.short === 'BT') return <AppText variant="kicker" size={10} tone="white">Descanso ET</AppText>;
   if (status.short === 'P') return <AppText variant="kicker" size={10} tone="white">Penales</AppText>;
-  const base = Number(status.elapsed) || 0;
-  const add = Number(status.extra) || 0;
   const half = status.short === '1H' ? '1T' : status.short === '2H' ? '2T' : status.short === 'ET' ? 'TE' : null;
+  const boundary = status.short === '1H' ? 45 : status.short === '2H' ? 90 : status.short === 'ET' ? 120 : null;
+  const inStoppage = boundary != null && tick.minute > boundary;
+  const mainMinute = inStoppage ? boundary : tick.minute;
+  const secs = String(tick.seconds).padStart(2, '0');
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
       {half && <AppText variant="kicker" size={9} tone="white" style={styles.halfTag}>{half}</AppText>}
-      <AppText variant="mono" size={12} tone="white" weight="bold">{base + add}&apos;</AppText>
+      <AppText variant="mono" size={12} tone="white" weight="bold">{mainMinute}:{secs}</AppText>
+      {inStoppage && (
+        <AppText variant="kicker" size={9} weight="bold" style={[styles.addedTimeBadge, styles.addedTimeBadgeText]}>
+          +{tick.minute - boundary}
+        </AppText>
+      )}
     </View>
   );
 }
@@ -204,10 +245,12 @@ const styles = StyleSheet.create({
   team: { flex: 1, alignItems: 'center', gap: 5 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   center: { width: 104, alignItems: 'center', gap: 6, paddingTop: 4 },
-  score: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  score: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 3, paddingHorizontal: 12, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.32)', borderWidth: 1, borderColor: 'rgba(94,230,177,0.16)' },
   liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 3, paddingHorizontal: 8, borderRadius: radius.pill, backgroundColor: colors.live },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.white },
   halfTag: { paddingHorizontal: 4, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.25)', overflow: 'hidden' },
+  addedTimeBadge: { paddingHorizontal: 4, borderRadius: 4, backgroundColor: '#facc15', overflow: 'hidden', transform: [{ translateY: -4 }] },
+  addedTimeBadgeText: { color: '#111' },
   statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center' },
   statChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 9, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: colors.border },
   statUnavailable: { opacity: 0.55 },
