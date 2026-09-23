@@ -214,19 +214,41 @@ function MsfPill({ label, value }: { label: string; value: any }) {
   if (msfProb(value) == null) return null;
   return <View style={styles.msfPill}><AppText variant="caption" tone="muted">{label}</AppText><AppText variant="mono" size={12} weight="bold" tone="accent">{msfPct(value)}</AppText></View>;
 }
-function MsfLadder({ title, lines, label = 'puntos' }: { title?: string; lines: any; label?: string }) {
+// Malla simétrica (línea + más%/menos%) en vez de la lista vertical infinita.
+function MsfMesh({ lines, label = 'puntos' }: { lines: any; label?: string }) {
   const entries = Object.entries(lines || {}).sort((l, r) => Number(l[0]) - Number(r[0]));
   if (!entries.length) return null;
   return (
-    <Card style={{ flex: 1, gap: 6, minWidth: 140 }}>
-      {title ? <AppText variant="kicker" tone="muted" numberOfLines={1}>{title}</AppText> : null}
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
       {entries.map(([line, values]: any) => (
-        <View key={line} style={{ gap: 4 }}>
-          <AppText variant="caption" tone="secondary" weight="bold">{line} {label}</AppText>
-          <View style={{ flexDirection: 'row', gap: 6 }}>
-            <MsfPill label="Más" value={values?.over} />
-            <MsfPill label="Menos" value={values?.under} />
-          </View>
+        <View key={line} style={styles.msfMeshCell}>
+          <AppText variant="caption" weight="bold" align="center" numberOfLines={1}>{line} {label}</AppText>
+          <AppText variant="caption" tone="accent" align="center">Más {msfPct(values?.over)}</AppText>
+          <AppText variant="caption" tone="warning" align="center">Menos {msfPct(values?.under)}</AppText>
+        </View>
+      ))}
+    </View>
+  );
+}
+// Una sola tarjeta por estadística: columna de líneas + columna por equipo
+// con su porcentaje, en vez de 2-3 ladders sueltos por equipo/total.
+function MsfComparisonCard({ title, homeLines, awayLines, homeName, awayName }: { title?: string; homeLines: any; awayLines: any; homeName: string; awayName: string }) {
+  const allLines = [...new Set([...Object.keys(homeLines || {}), ...Object.keys(awayLines || {})])]
+    .map(Number).filter(Number.isFinite).sort((l, r) => l - r);
+  if (!allLines.length) return null;
+  return (
+    <Card style={{ gap: 8 }}>
+      {title ? <AppText variant="kicker" tone="muted" numberOfLines={1}>{title}</AppText> : null}
+      <View style={{ flexDirection: 'row', gap: 6 }}>
+        <View style={{ flex: 1.1 }} />
+        <AppText variant="caption" weight="bold" align="center" style={{ flex: 1 }} numberOfLines={1}>{homeName}</AppText>
+        <AppText variant="caption" weight="bold" align="center" style={{ flex: 1 }} numberOfLines={1}>{awayName}</AppText>
+      </View>
+      {allLines.map((line) => (
+        <View key={line} style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+          <AppText variant="caption" tone="secondary" style={{ flex: 1.1 }}>Línea {line}</AppText>
+          <AppText variant="mono" size={12} tone="accent" align="center" style={{ flex: 1 }}>{msfPct(homeLines?.[line]?.over)}</AppText>
+          <AppText variant="mono" size={12} tone="accent" align="center" style={{ flex: 1 }}>{msfPct(awayLines?.[line]?.over)}</AppText>
         </View>
       ))}
     </Card>
@@ -245,13 +267,24 @@ function MsfExpected({ value, homeName, awayName }: { value: any; homeName: stri
     </View>
   );
 }
+// Columna por equipo (sin repetir el nombre en cada renglón) en vez de una
+// lista plana mezclando ambos equipos.
 function MsfSpreads({ values, homeName, awayName }: { values: any; homeName: string; awayName: string }) {
-  const rows = [
-    ...Object.entries(values?.home || {}).map(([line, value]) => ({ side: homeName, line, value })),
-    ...Object.entries(values?.away || {}).map(([line, value]) => ({ side: awayName, line, value })),
-  ];
-  if (!rows.length) return null;
-  return <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>{rows.map((row) => <MsfPill key={`${row.side}-${row.line}`} label={`${row.side} ${Number(row.line) > 0 ? '+' : ''}${row.line}`} value={row.value} />)}</View>;
+  const homeEntries = Object.entries(values?.home || {}).sort((l, r) => Number(l[0]) - Number(r[0]));
+  const awayEntries = Object.entries(values?.away || {}).sort((l, r) => Number(l[0]) - Number(r[0]));
+  if (!homeEntries.length && !awayEntries.length) return null;
+  const Column = ({ name, entries }: { name: string; entries: [string, any][] }) => (
+    <View style={{ flex: 1, gap: 6, minWidth: 130 }}>
+      <AppText variant="kicker" tone="muted" numberOfLines={1}>{name}</AppText>
+      {entries.map(([line, value]) => (
+        <View key={line} style={styles.msfSpreadRow}>
+          <AppText variant="caption" tone="secondary">{Number(line) > 0 ? '+' : ''}{line}</AppText>
+          <AppText variant="mono" size={12} tone="accent">{msfPct(value)}</AppText>
+        </View>
+      ))}
+    </View>
+  );
+  return <View style={{ flexDirection: 'row', gap: 10 }}><Column name={homeName} entries={homeEntries} /><Column name={awayName} entries={awayEntries} /></View>;
 }
 
 /** Frecuencias calculadas completas (baseball/basketball/NFL): mismo
@@ -271,11 +304,11 @@ function MultisportFullFrequencies({ prediction, homeName, awayName, scoreLabel 
           <MsfPill label={`${awayName} gana`} value={prediction.moneyline?.away} />
         </View>
       </Card>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        <MsfLadder title="Total del partido" lines={prediction.totals?.lines} label={scoreLabel} />
-        <MsfLadder title={homeName} lines={prediction.teamTotals?.home} label={scoreLabel} />
-        <MsfLadder title={awayName} lines={prediction.teamTotals?.away} label={scoreLabel} />
-      </View>
+      <Card style={{ gap: 10 }}>
+        <AppText variant="kicker" tone="muted">Total del partido</AppText>
+        <MsfMesh lines={prediction.totals?.lines} label={scoreLabel} />
+      </Card>
+      <MsfComparisonCard title={`Total — ${scoreLabel}`} homeLines={prediction.teamTotals?.home} awayLines={prediction.teamTotals?.away} homeName={homeName} awayName={awayName} />
       {prediction.spreads && (
         <Card style={{ gap: 8 }}>
           <AppText variant="kicker" tone="muted">Hándicaps calculados</AppText>
@@ -291,24 +324,16 @@ function MultisportFullFrequencies({ prediction, homeName, awayName, scoreLabel 
             <MsfPill label="Empate" value={period.moneyline?.draw} />
             <MsfPill label={`${awayName} gana`} value={period.moneyline?.away} />
           </View>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <MsfLadder title="Total" lines={period.totals} label={scoreLabel} />
-            <MsfLadder title={homeName} lines={period.teamTotals?.home} label={scoreLabel} />
-            <MsfLadder title={awayName} lines={period.teamTotals?.away} label={scoreLabel} />
-          </View>
+          <MsfMesh lines={period.totals} label={scoreLabel} />
+          <MsfComparisonCard homeLines={period.teamTotals?.home} awayLines={period.teamTotals?.away} homeName={homeName} awayName={awayName} />
           <MsfSpreads values={period.spreads} homeName={homeName} awayName={awayName} />
         </Card>
       ))}
       {Object.entries<any>(prediction.statistics || {}).map(([key, values]) => (
-        <Card key={key} style={{ gap: 10 }}>
-          <AppText variant="kicker" tone="muted">{values.label || key}</AppText>
+        <View key={key} style={{ gap: 10 }}>
           <MsfExpected value={values.expected} homeName={homeName} awayName={awayName} />
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <MsfLadder title={homeName} lines={values.home} label={values.label || key} />
-            <MsfLadder title={awayName} lines={values.away} label={values.label || key} />
-            <MsfLadder title="Total" lines={values.total} label={values.label || key} />
-          </View>
-        </Card>
+          <MsfComparisonCard title={values.label || key} homeLines={values.home} awayLines={values.away} homeName={homeName} awayName={awayName} />
+        </View>
       ))}
     </View>
   );
@@ -529,18 +554,23 @@ function BaseballDetail({ id }: { id: string }) {
       </Section>
       {a?.analysis?.pitcherMatchup && (
         <Section title="Lanzadores abridores">
-          <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Card style={{ flexDirection: 'row', gap: 16 }}>
             {(['home', 'away'] as const).map((side) => {
               const pitcher = a.analysis.pitcherMatchup[side];
               return (
-                <Card key={side} style={{ flex: 1, gap: 3 }}>
+                <View key={side} style={{ flex: 1, gap: 6 }}>
                   <AppText variant="kicker" tone="muted" numberOfLines={1}>{side === 'home' ? homeName : awayName}</AppText>
-                  <AppText variant="label" weight="bold">{pitcher?.name || 'Por confirmar'}</AppText>
-                  {['era', 'whip', 'k9'].map((stat) => pitcher?.stats?.[stat] != null ? <AppText key={stat} variant="caption" tone="secondary">{stat.toUpperCase()} <AppText variant="mono" size={12}>{pitcher.stats[stat]}</AppText></AppText> : null)}
-                </Card>
+                  <AppText variant="label" weight="bold" numberOfLines={1}>{pitcher?.name || 'Por confirmar'}</AppText>
+                  {['era', 'whip', 'k9'].map((stat) => pitcher?.stats?.[stat] != null ? (
+                    <View key={stat} style={styles.msfSpreadRow}>
+                      <AppText variant="caption" tone="secondary">{stat.toUpperCase()}</AppText>
+                      <AppText variant="mono" size={12} tone="accent">{msfFmt(pitcher.stats[stat])}</AppText>
+                    </View>
+                  ) : null)}
+                </View>
               );
             })}
-          </View>
+          </Card>
         </Section>
       )}
       <Section title="Frecuencias calculadas · análisis completo" hint="Incluye todos los periodos y líneas calculadas, aunque la casa no ofrezca cuota.">
@@ -619,4 +649,6 @@ const styles = StyleSheet.create({
   playerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 3 },
   lastRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: colors.border },
   msfPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 9, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: colors.border },
+  msfMeshCell: { minWidth: 84, gap: 2, paddingVertical: 7, paddingHorizontal: 8, borderRadius: radius.sm, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: colors.border },
+  msfSpreadRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: colors.border },
 });

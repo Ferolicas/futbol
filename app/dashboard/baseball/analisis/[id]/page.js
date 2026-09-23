@@ -16,6 +16,8 @@ const cap = (v) => {
   if (value >= 95) return 95;
   return Math.floor((value + 1e-9) * 100) / 100;
 };
+// Normaliza decimales largos (ej. 6.680412371134021) a 2 decimales legibles.
+const fmt = (v, decimals = 2) => (v == null || Number.isNaN(Number(v)) ? '—' : Number(v).toFixed(decimals));
 const isBet365Market = (market) => String(market?.bookmaker || '').normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '') === 'bet365'
   && Number(market?.odd) >= 1.20
@@ -359,16 +361,31 @@ function ProbabilityLadder({ title, lines }) {
 }
 
 function RunLines({ runLines, homeName, awayName }) {
-  const rows = [
-    ...Object.entries(runLines?.home || {}).map(([line, value]) => ({ key: `h-${line}`, name: homeName, line, value })),
-    ...Object.entries(runLines?.away || {}).map(([line, value]) => ({ key: `a-${line}`, name: awayName, line, value })),
-  ].sort((left, right) => Number(right.value) - Number(left.value));
-  if (!rows.length) return null;
+  const homeEntries = Object.entries(runLines?.home || {}).sort((left, right) => Number(left[0]) - Number(right[0]));
+  const awayEntries = Object.entries(runLines?.away || {}).sort((left, right) => Number(left[0]) - Number(right[0]));
+  if (!homeEntries.length && !awayEntries.length) return null;
+  const Column = ({ name, entries }) => (
+    <div style={{ minWidth: 0 }}>
+      <h4 style={{ margin: '0 0 6px', color: '#5ee6b1', fontSize: '.76rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</h4>
+      <div style={{ display: 'grid', gap: 5 }}>
+        {entries.map(([line, value]) => (
+          <div key={line} style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+            padding: '6px 9px', borderRadius: 8, background: 'rgba(255,255,255,.025)', border: '1px solid rgba(255,255,255,.07)',
+          }}>
+            <span style={{ color: '#e2e8f0', fontSize: '.76rem', fontWeight: 700 }}>{Number(line) > 0 ? '+' : ''}{line}</span>
+            <strong style={{ color: '#5ee6b1', fontFamily: 'JetBrains Mono, monospace' }}>{probabilityText(value)}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
   return (
     <div>
       <h3 style={{ margin: '0 0 7px', color: '#cbd5e1', fontSize: '.78rem' }}>Hándicaps de carreras calculados</h3>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 5 }}>
-        {rows.map((row) => <ProbabilityPill key={row.key} label={`${row.name} ${Number(row.line) > 0 ? '+' : ''}${row.line}`} value={row.value} />)}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14 }}>
+        <Column name={homeName} entries={homeEntries} />
+        <Column name={awayName} entries={awayEntries} />
       </div>
     </div>
   );
@@ -425,21 +442,45 @@ function InningsAnalysis({ innings, homeName, awayName }) {
   );
 }
 
+// Una sola tarjeta por estadística: columna izquierda con la línea, columna
+// derecha con el nombre de cada equipo y su porcentaje debajo — reemplaza los
+// 3 ladders sueltos (local/visitante/total) que se veían como desorden.
+function TeamComparisonCard({ title, homeLines, awayLines, homeName, awayName }) {
+  const allLines = [...new Set([...Object.keys(homeLines || {}), ...Object.keys(awayLines || {})])]
+    .map(Number).filter(Number.isFinite).sort((left, right) => left - right);
+  if (!allLines.length) return null;
+  return (
+    <article style={{ padding: 11, borderRadius: 10, background: 'rgba(255,255,255,.025)', border: '1px solid rgba(255,255,255,.07)', minWidth: 0 }}>
+      {title && <h3 style={{ margin: '0 0 8px', color: '#5ee6b1', fontSize: '.82rem', textTransform: 'capitalize' }}>{title}</h3>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(52px,.6fr) 1fr 1fr', gap: 6, marginBottom: 6 }}>
+        <span />
+        <span style={{ textAlign: 'center', fontSize: '.68rem', fontWeight: 800, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{homeName}</span>
+        <span style={{ textAlign: 'center', fontSize: '.68rem', fontWeight: 800, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{awayName}</span>
+      </div>
+      <div style={{ display: 'grid', gap: 5 }}>
+        {allLines.map((line) => (
+          <div key={line} style={{
+            display: 'grid', gridTemplateColumns: 'minmax(52px,.6fr) 1fr 1fr', gap: 6, alignItems: 'center',
+            padding: '5px 7px', borderRadius: 8, background: 'rgba(255,255,255,.02)',
+          }}>
+            <span style={{ color: '#e2e8f0', fontSize: '.72rem', fontWeight: 800 }}>Línea {line}</span>
+            <strong style={{ textAlign: 'center', color: '#5ee6b1', fontFamily: 'JetBrains Mono, monospace' }}>{probabilityText(homeLines?.[line]?.over)}</strong>
+            <strong style={{ textAlign: 'center', color: '#5ee6b1', fontFamily: 'JetBrains Mono, monospace' }}>{probabilityText(awayLines?.[line]?.over)}</strong>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
 function TeamStatistics({ statistics, homeName, awayName }) {
   const rows = Object.entries(statistics || {});
   if (!rows.length) return null;
   return (
     <Section title="Estadísticas de equipos">
-      <div style={{ display: 'grid', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 10 }}>
         {rows.map(([key, values]) => (
-          <div key={key}>
-            <h3 style={{ margin: '0 0 8px', color: '#5ee6b1', fontSize: '.84rem', textTransform: 'capitalize' }}>{values.label || key}</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(230px,1fr))', gap: 8 }}>
-              <ProbabilityLadder title={homeName} lines={values.home} />
-              <ProbabilityLadder title={awayName} lines={values.away} />
-              <ProbabilityLadder title="Total del partido" lines={values.total} />
-            </div>
-          </div>
+          <TeamComparisonCard key={key} title={values.label || key} homeLines={values.home} awayLines={values.away} homeName={homeName} awayName={awayName} />
         ))}
       </div>
     </Section>
@@ -491,25 +532,34 @@ function SpecialAnalysis({ specials, homeName, awayName }) {
 
 function PitcherAnalysis({ pitchers }) {
   if (!pitchers?.home && !pitchers?.away) return null;
+  const sides = ['home', 'away'].filter((side) => pitchers?.[side]);
   return (
     <Section title="Lanzadores abridores">
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 8 }}>
-        {['home', 'away'].map((side) => {
-          const pitcher = pitchers?.[side];
-          if (!pitcher) return null;
-          return (
-            <article key={side} style={{ padding: 11, borderRadius: 10, background: 'rgba(255,255,255,.025)', border: '1px solid rgba(255,255,255,.07)' }}>
-              <strong style={{ color: '#e2e8f0' }}>{pitcher.name || 'Abridor por confirmar'}</strong>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(78px,1fr))', gap: 5, marginTop: 9 }}>
-                <ProbabilityPill label="ERA" value={pitcher.stats?.era == null ? null : Number(pitcher.stats.era).toFixed(2)} probability={false} />
-                <ProbabilityPill label="WHIP" value={pitcher.stats?.whip == null ? null : Number(pitcher.stats.whip).toFixed(2)} probability={false} />
-                <ProbabilityPill label="K/9" value={pitcher.stats?.k9 == null ? null : Number(pitcher.stats.k9).toFixed(2)} probability={false} />
-                <ProbabilityPill label="IP" value={pitcher.stats?.ip == null ? null : Number(pitcher.stats.ip).toFixed(1)} probability={false} />
+      <article style={{ padding: 11, borderRadius: 10, background: 'rgba(255,255,255,.025)', border: '1px solid rgba(255,255,255,.07)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${sides.length}, 1fr)`, gap: 16 }}>
+          {sides.map((side) => {
+            const pitcher = pitchers[side];
+            return (
+              <div key={side} style={{ minWidth: 0 }}>
+                <strong style={{ color: '#e2e8f0', display: 'block', marginBottom: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pitcher.name || 'Abridor por confirmar'}</strong>
+                <div style={{ display: 'grid', gap: 6 }}>
+                  {[
+                    ['ERA', fmt(pitcher.stats?.era)],
+                    ['WHIP', fmt(pitcher.stats?.whip)],
+                    ['K/9', fmt(pitcher.stats?.k9)],
+                    ['IP', fmt(pitcher.stats?.ip, 1)],
+                  ].map(([label, value]) => (
+                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                      <span style={{ color: '#94a3b8', fontSize: '.76rem' }}>{label}</span>
+                      <strong style={{ color: '#5ee6b1', fontFamily: 'JetBrains Mono, monospace' }}>{value}</strong>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </article>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      </article>
     </Section>
   );
 }
@@ -535,7 +585,7 @@ function PlayerAnalysis({ players }) {
                     {player.photo && <Image src={player.photo} alt={player.name || 'Jugador'} width={34} height={34} style={{ borderRadius: '50%', objectFit: 'cover', background: 'rgba(255,255,255,.05)' }} unoptimized />}
                     <span style={{ minWidth: 0 }}>
                       <strong style={{ display: 'block', color: '#e2e8f0', fontSize: '.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{player.name}</strong>
-                      <small style={{ color: '#64748b' }}>{player.teamName || 'MLB'} · media {player.mean} · {player.history?.length || 0} partidos</small>
+                      <small style={{ color: '#64748b' }}>{player.teamName || 'MLB'} · media {fmt(player.mean)} · {player.history?.length || 0} partidos</small>
                     </span>
                   </div>
                   <div style={{ display: 'grid', gap: 5 }}>
@@ -562,6 +612,28 @@ function PlayerAnalysis({ players }) {
   );
 }
 
+// Malla simétrica de recuadros (línea + más%/menos%) en vez de la lista
+// vertical infinita — mismo criterio para el total del partido y para cada
+// equipo, todo dentro de la misma tarjeta "Carreras".
+function RunsMesh({ lines }) {
+  const entries = Object.entries(lines || {}).sort((left, right) => Number(left[0]) - Number(right[0]));
+  if (!entries.length) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {entries.map(([line, values]) => (
+        <div key={line} style={{
+          minWidth: 88, padding: '7px 10px', borderRadius: 9, textAlign: 'center',
+          background: 'rgba(255,255,255,.025)', border: '1px solid rgba(255,255,255,.07)',
+        }}>
+          <div style={{ fontSize: '.72rem', fontWeight: 800, color: '#e2e8f0', marginBottom: 4 }}>{line} carreras</div>
+          <div style={{ fontSize: '.68rem', color: '#5ee6b1' }}>Más {probabilityText(values?.over)}</div>
+          <div style={{ fontSize: '.68rem', color: '#fcd34d' }}>Menos {probabilityText(values?.under)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CompleteBaseballAnalysis({ probabilities, homeName, awayName }) {
   const expected = probabilities.expected;
   return (
@@ -572,22 +644,31 @@ function CompleteBaseballAnalysis({ probabilities, homeName, awayName }) {
         </p>
         {expected && (
           <div style={{ color: '#94a3b8', fontSize: '.82rem', lineHeight: 1.6, marginBottom: 12 }}>
-            Media ponderada: <strong style={{ color: '#5ee6b1' }}>{expected.lambdaHome} carreras de {homeName} y {expected.lambdaAway} de {awayName}</strong>; total medio {expected.totalRuns}.
+            Media ponderada: <strong style={{ color: '#5ee6b1' }}>{fmt(expected.lambdaHome)} carreras de {homeName} y {fmt(expected.lambdaAway)} de {awayName}</strong>; total medio {fmt(expected.totalRuns)}.
           </div>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(245px,1fr))', gap: 12 }}>
-          <div>
-            <h3 style={{ margin: '0 0 7px', color: '#cbd5e1', fontSize: '.78rem' }}>Ganador</h3>
-            <div style={{ display: 'grid', gap: 5 }}>
-              <ProbabilityPill label={homeName} value={probabilities.moneyline?.home} />
-              <ProbabilityPill label={awayName} value={probabilities.moneyline?.away} />
-            </div>
+        <div style={{ marginBottom: 14 }}>
+          <h3 style={{ margin: '0 0 7px', color: '#cbd5e1', fontSize: '.78rem' }}>Ganador</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 5 }}>
+            <ProbabilityPill label={homeName} value={probabilities.moneyline?.home} />
+            <ProbabilityPill label={awayName} value={probabilities.moneyline?.away} />
           </div>
-          <ProbabilityLadder title="Carreras totales" lines={probabilities.totals?.lines} />
-          <ProbabilityLadder title={`Carreras de ${homeName}`} lines={probabilities.teamTotals?.home} />
-          <ProbabilityLadder title={`Carreras de ${awayName}`} lines={probabilities.teamTotals?.away} />
         </div>
-        <div style={{ marginTop: 12 }}><RunLines runLines={probabilities.runLines} homeName={homeName} awayName={awayName} /></div>
+        <div style={{ display: 'grid', gap: 14 }}>
+          <div>
+            <div style={{ fontSize: '.72rem', fontWeight: 700, color: '#94a3b8', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.03em' }}>Total</div>
+            <RunsMesh lines={probabilities.totals?.lines} />
+          </div>
+          <div>
+            <div style={{ fontSize: '.72rem', fontWeight: 700, color: '#94a3b8', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.03em' }}>Visitante — {awayName}</div>
+            <RunsMesh lines={probabilities.teamTotals?.away} />
+          </div>
+          <div>
+            <div style={{ fontSize: '.72rem', fontWeight: 700, color: '#94a3b8', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.03em' }}>Local — {homeName}</div>
+            <RunsMesh lines={probabilities.teamTotals?.home} />
+          </div>
+        </div>
+        <div style={{ marginTop: 14 }}><RunLines runLines={probabilities.runLines} homeName={homeName} awayName={awayName} /></div>
       </Section>
       <PeriodAnalysis periods={probabilities.periods} homeName={homeName} awayName={awayName} />
       <InningsAnalysis innings={probabilities.innings} homeName={homeName} awayName={awayName} />
