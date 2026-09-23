@@ -22,6 +22,7 @@ import { useAuth } from '../../components/providers';
 import { usePusherEvent } from '../../lib/use-pusher';
 import AndroidIcon from '../../components/AndroidIcon';
 import { ANDROID_APK_URL } from '../../lib/app-download';
+import { subscribeAppAction } from '../../lib/action-link-store';
 
 export default function ChatWidget() {
   const { user, supabase } = useAuth();
@@ -180,8 +181,13 @@ export default function ChatWidget() {
   };
 
   // El asistente de chat ("Preguntar") no puede cambiar la contraseña — no
-  // ejecuta acciones, solo consulta. Pero sí puede señalar este enlace
-  // (?action=change-password) para abrir el modal real que ya existe acá.
+  // ejecuta acciones, solo consulta. Puede disparar la apertura por dos vías:
+  // en vivo, sin navegar, vía triggerAppAction (mismo montaje, reacciona al
+  // toque inmediato); y ?action=change-password como respaldo para un enlace
+  // externo/compartido que sí recarga la página.
+  useEffect(() => subscribeAppAction((action) => {
+    if (action === 'change-password') openPasswordModal();
+  }), []);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('action') !== 'change-password') return;

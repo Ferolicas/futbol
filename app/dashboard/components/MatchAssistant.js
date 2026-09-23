@@ -1,20 +1,25 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { MessageCircle, Send, X } from 'lucide-react';
+import { triggerAppAction } from '../../../lib/action-link-store';
 
 // Renderiza [texto](url) como enlace clicable — el asistente los usa para
 // ofrecer el análisis completo de un partido o una acción del dashboard
-// (ej. cambiar contraseña) sin poder ejecutarla él mismo.
+// (ej. cambiar contraseña) sin poder ejecutarla él mismo. onLinkClick decide
+// qué hacer con la url (navegar, o disparar la acción en vivo).
 const LINK_RE = /\[([^\]]+)\]\((\/[^)\s]+)\)/g;
-function renderWithLinks(text) {
+function renderWithLinks(text, onLinkClick) {
   const parts = [];
   let last = 0, match, key = 0;
   LINK_RE.lastIndex = 0;
   while ((match = LINK_RE.exec(text))) {
     if (match.index > last) parts.push(text.slice(last, match.index));
-    parts.push(<Link key={key++} href={match[2]} className="match-assistant-link">{match[1]}</Link>);
+    const url = match[2];
+    parts.push(
+      <a key={key++} href={url} className="match-assistant-link" onClick={(event) => { event.preventDefault(); onLinkClick(url); }}>{match[1]}</a>,
+    );
     last = match.index + match[0].length;
   }
   if (last < text.length) parts.push(text.slice(last));
@@ -30,11 +35,23 @@ async function askAssistant(messages) {
   return data.answer;
 }
 export default function MatchAssistant() {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState([{ role: 'assistant', content: 'Pregúntame por cualquier partido o pronóstico que exista en CF Análisis.' }]);
   const end = useRef(null);
+
+  // Tocar un enlace del asistente cierra el chat de inmediato y ejecuta la
+  // acción ahí mismo — antes navegaba a una URL con query param y solo se
+  // veía el resultado si la página se remontaba (ej. al refrescar).
+  const handleLinkClick = (url) => {
+    setOpen(false);
+    const parsed = new URL(url, window.location.origin);
+    const action = parsed.searchParams.get('action');
+    if (action) { triggerAppAction(action); return; }
+    router.push(url);
+  };
 
   useEffect(() => { end.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, busy]);
   useEffect(() => {
@@ -71,7 +88,7 @@ export default function MatchAssistant() {
     {open && <section className="match-assistant" role="dialog" aria-modal="false" aria-label="Asistente de CF Análisis">
       <header><span><small>Solo consulta datos existentes</small><strong>Asistente CF</strong></span><button type="button" onClick={() => setOpen(false)} aria-label="Cerrar"><X size={18} /></button></header>
       <div className="match-assistant-messages">
-        {messages.map((message, index) => <div key={index} className={`match-assistant-message is-${message.role}`}>{renderWithLinks(message.content)}</div>)}
+        {messages.map((message, index) => <div key={index} className={`match-assistant-message is-${message.role}`}>{renderWithLinks(message.content, handleLinkClick)}</div>)}
         {busy && <div className="match-assistant-message is-assistant">Consultando datos guardados…</div>}
         <span ref={end} />
       </div>
