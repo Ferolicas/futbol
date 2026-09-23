@@ -167,7 +167,7 @@ test('la lista de partidos no transporta el análisis pesado de jugadores y entr
   assert.match(route, /analysis:\s*\{\s*\n\s*pitcherMatchup:/);
   assert.match(route, /finalVerdict: analysis\.analysis\?\.finalVerdict \|\| null/);
   assert.doesNotMatch(route, /playerMarkets: analysis\.analysis/);
-  assert.match(route, /innings, home_stats, away_stats, finished_at/);
+  assert.match(route, /innings, home_stats, away_stats, outs, balls, strikes, bases, finished_at/);
 });
 
 test('el live de MLB cierra resultados y cubre la jornada anterior', () => {

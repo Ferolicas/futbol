@@ -12,7 +12,7 @@
  */
 import {
   getMlbScheduleByDate, getMlbLiveGame, getMlbGameBoxscore,
-  buildBaseballResultRow, baseballResultRowChanged,
+  buildBaseballResultRow, baseballResultRowChanged, extractMlbTeamResultStats,
   triggerEvent, bogotaToday,
   supabaseAdmin, redisGet, redisSet, sendPushNotification, MLB_SPORT_IDS,
 } from '../../shared.js';
@@ -321,14 +321,15 @@ export async function runBaseballLive(payload = {}) {
     prevMap = Object.fromEntries((prevRows || []).map((row) => [Number(row.fixture_id), row]));
   }
 
-  // El boxscore completo se pide una sola vez cuando un juego llega a Final.
-  // Si falló temporalmente, home_stats/away_stats siguen null y el siguiente
-  // tick lo reintenta sin inventar ceros.
-  const finalsMissingBoxscore = resultGames.filter((game) => {
+  // El boxscore completo se pide siempre que el juego está en curso (para el
+  // widget en vivo: HR/BB/K/LOB, no solo H/E) y, si falta, una vez cuando
+  // llega a Final. MLB Stats API es gratis y sin límite de requests.
+  const needsBoxscore = resultGames.filter((game) => {
+    if (game.isLive) return true;
     const previous = prevMap[Number(game.gamePk)];
     return game.isFinal && (!previous?.home_stats || !previous?.away_stats);
   });
-  const boxscoreAttempts = await mapPool(finalsMissingBoxscore, 4, async (game) => ({
+  const boxscoreAttempts = await mapPool(needsBoxscore, 4, async (game) => ({
     fixtureId: Number(game.gamePk),
     boxscore: await getMlbGameBoxscore(game.gamePk),
   }));

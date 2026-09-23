@@ -213,6 +213,7 @@ export const getMlbResultsByDate = _mlbStatsApi.getMlbResultsByDate;
 export const MLB_SPORT_IDS = _mlbStatsApi.MLB_SPORT_IDS;
 export const buildBaseballResultRow = _baseballResultSnapshot.buildBaseballResultRow;
 export const baseballResultRowChanged = _baseballResultSnapshot.baseballResultRowChanged;
+export const extractMlbTeamResultStats = _baseballResultSnapshot.extractMlbTeamResultStats;
 // Player props (game logs MLB). Sustituye al extractor legacy de baseball-model
 // (que devolvía null porque api-baseball no tiene jugadores).
 export const extractBaseballPlayerHighlights = _mlbStatsApi.extractBaseballPlayerHighlights;

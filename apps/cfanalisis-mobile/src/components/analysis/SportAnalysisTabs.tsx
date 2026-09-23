@@ -85,6 +85,42 @@ export function BaseballResultStats({ result, homeName = 'Local', awayName = 'Vi
   );
 }
 
+function DiamondBase({ occupied, style }: { occupied: boolean; style: any }) {
+  return <View style={[styles.base, style, occupied ? styles.baseOn : styles.baseOff]} />;
+}
+
+/** Diamante con corredores en base + conteo (bolas-strikes) + outs + entrada.
+ * Mismo estado pitch-by-pitch que la web (bases/balls/strikes/outs/inning). */
+export function LiveDiamond({ live }: { live: any }) {
+  if (!live) return null;
+  const b = live.bases || {};
+  const hasCount = live.balls != null || live.strikes != null || live.outs != null;
+  if (!hasCount && !b.first && !b.second && !b.third) return null;
+  const balls = live.balls ?? 0;
+  const strikes = live.strikes ?? 0;
+  const outs = live.outs ?? 0;
+  const arrow = live.inning_half === 'top' ? '↑' : live.inning_half === 'bottom' ? '↓' : '';
+  return (
+    <Card tone="accent" style={styles.diamondCard}>
+      <View style={styles.diamond}>
+        <DiamondBase occupied={!!b.second} style={{ top: '10%', left: '38%' }} />
+        <DiamondBase occupied={!!b.third} style={{ top: '38%', left: '10%' }} />
+        <DiamondBase occupied={!!b.first} style={{ top: '38%', left: '66%' }} />
+      </View>
+      <View style={{ gap: 3 }}>
+        <AppText variant="mono" size={12} weight="bold" tone="accent">{arrow}{live.inning ?? ''} · {balls}-{strikes}</AppText>
+        <AppText variant="mono" size={11} tone="secondary">{'●'.repeat(Math.min(outs, 3))}{'○'.repeat(Math.max(0, 2 - outs))} outs</AppText>
+      </View>
+      {(live.currentPitcher?.name || live.currentBatter?.name) && (
+        <View style={{ gap: 2, flex: 1, minWidth: 0 }}>
+          {live.currentPitcher?.name && <AppText variant="caption" tone="muted" numberOfLines={1}>⚾ {live.currentPitcher.name}</AppText>}
+          {live.currentBatter?.name && <AppText variant="caption" tone="muted" numberOfLines={1}>🏏 {live.currentBatter.name}</AppText>}
+        </View>
+      )}
+    </Card>
+  );
+}
+
 const QUARTER_LABELS = ['C1', 'C2', 'C3', 'C4'];
 
 /** Marcador por cuarto (NBA/NCAA) — mismo patrón que BaseballResultStats,
@@ -285,4 +321,9 @@ const styles = StyleSheet.create({
   tableRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 2 },
   pair: { borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 3 },
   pairRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 2 },
+  diamondCard: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 10 },
+  diamond: { width: 40, height: 40, flexShrink: 0 },
+  base: { position: 'absolute', width: 12, height: 12, transform: [{ rotate: '45deg' }] },
+  baseOn: { backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.accent },
+  baseOff: { backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)' },
 });

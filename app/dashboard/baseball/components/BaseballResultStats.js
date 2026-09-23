@@ -2,6 +2,54 @@
 
 const valueOrDash = (value) => value == null || !Number.isFinite(Number(value)) ? '—' : Number(value);
 
+function diamondBase(occupied, top, left) {
+  return {
+    position: 'absolute', top, left, transform: 'translate(-50%,-50%) rotate(45deg)',
+    width: 12, height: 12,
+    background: occupied ? '#5ee6b1' : 'rgba(255,255,255,.15)',
+    border: occupied ? '1px solid #5ee6b1' : '1px solid rgba(255,255,255,.25)',
+    boxShadow: occupied ? '0 0 8px rgba(94,230,177,.6)' : 'none',
+  };
+}
+
+// Diamante con corredores en base + conteo (bolas-strikes) + outs + entrada.
+// Usa el estado pitch-by-pitch que getMlbLiveGame ya trae (bases/balls/
+// strikes/outs/inning/inning_half) — antes se calculaba pero nunca se
+// persistía ni se mostraba en ningún lado.
+export function LiveDiamond({ live }) {
+  if (!live) return null;
+  const b = live.bases || {};
+  const hasCount = live.balls != null || live.strikes != null || live.outs != null;
+  if (!hasCount && !b.first && !b.second && !b.third) return null;
+  const balls = live.balls ?? 0;
+  const strikes = live.strikes ?? 0;
+  const outs = live.outs ?? 0;
+  const arrow = live.inning_half === 'top' ? '↑' : live.inning_half === 'bottom' ? '↓' : '';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(94,230,177,0.06)', border: '1px solid rgba(94,230,177,0.16)' }}>
+      <div style={{ position: 'relative', width: 40, height: 40, flexShrink: 0 }}>
+        <span style={diamondBase(b.second, '50%', '22%')} />
+        <span style={diamondBase(b.third, '22%', '50%')} />
+        <span style={diamondBase(b.first, '78%', '50%')} />
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontFamily: 'JetBrains Mono, monospace' }}>
+        <span style={{ fontSize: '.72rem', color: '#5ee6b1', fontWeight: 800 }}>
+          {arrow}{live.inning ?? ''}  ·  {balls}-{strikes}
+        </span>
+        <span style={{ fontSize: '.64rem', color: '#bff4df', letterSpacing: 1 }}>
+          {'●'.repeat(Math.min(outs, 3))}{'○'.repeat(Math.max(0, 2 - outs))} outs
+        </span>
+      </div>
+      {(live.currentPitcher?.name || live.currentBatter?.name) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: '.62rem', color: '#94a3b8', minWidth: 0, flex: 1 }}>
+          {live.currentPitcher?.name && <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>⚾ {live.currentPitcher.name}</span>}
+          {live.currentBatter?.name && <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>🏏 {live.currentBatter.name}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function BaseballResultStats({
   result,
   homeName = 'Local',
