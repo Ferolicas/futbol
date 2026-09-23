@@ -173,15 +173,27 @@ function FootballDetail({ id, date }: { id: string; date?: string }) {
           {[[a.homeTeam, a.homeLastFive], [a.awayTeam, a.awayLastFive]].map(([name, list]: any) => Array.isArray(list) && list.length > 0 ? (
             <Card key={name} style={{ gap: 4 }}>
               <AppText variant="kicker" tone="muted">{name}</AppText>
-              {list.map((m: any, i: number) => (
-                <View key={i} style={styles.lastRow}>
-                  <AppText variant="mono" size={11} weight="bold" style={{ width: 16, color: m.r === 'W' ? colors.accent : m.r === 'L' ? colors.error : colors.warning }}>{m.r || '?'}</AppText>
-                  <AppText variant="mono" size={12} style={{ width: 40 }}>{m.gF ?? '?'}-{m.gA ?? '?'}</AppText>
-                  <AppText variant="caption" tone="secondary" style={{ flex: 1 }} numberOfLines={1}>vs {m.op || '?'}</AppText>
-                  {m.c?.total != null && <AppText variant="caption" tone="cyan">{m.c.total} córners</AppText>}
-                  {m.y?.total != null && <AppText variant="caption" tone="warning">{m.y.total} amarillas</AppText>}
-                </View>
-              ))}
+              {list.map((m: any, i: number) => {
+                // /api/match/[id] devuelve la forma cruda (_enriched), no el
+                // resumen compacto {r,gF,gA,op} que arma compactLastFive()
+                // para la lista de "Analizados" — por eso salía todo "?".
+                const e = m._enriched || m;
+                const result = e.result ?? m.r;
+                const goalsFor = e.goalsFor ?? m.gF;
+                const goalsAgainst = e.goalsAgainst ?? m.gA;
+                const opponent = e.opponentName ?? m.op;
+                const corners = e.corners ?? m.c;
+                const yellows = e.yellowCards ?? m.y;
+                return (
+                  <View key={i} style={styles.lastRow}>
+                    <AppText variant="mono" size={11} weight="bold" style={{ width: 16, color: result === 'W' ? colors.accent : result === 'L' ? colors.error : colors.warning }}>{result || '?'}</AppText>
+                    <AppText variant="mono" size={12} style={{ width: 40 }}>{goalsFor ?? '?'}-{goalsAgainst ?? '?'}</AppText>
+                    <AppText variant="caption" tone="secondary" style={{ flex: 1 }} numberOfLines={1}>vs {opponent || '?'}</AppText>
+                    {corners?.total != null && <AppText variant="caption" tone="cyan">{corners.total} córners</AppText>}
+                    {yellows?.total != null && <AppText variant="caption" tone="warning">{yellows.total} amarillas</AppText>}
+                  </View>
+                );
+              })}
             </Card>
           ) : null)}
         </Section>
