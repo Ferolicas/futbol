@@ -12,6 +12,7 @@ import { isFootballFrontendDailyPickEligible } from '@/shared/recommendation-pol
 import { leagueSelectionIncludes, normalizeLeagueSelection } from '@/shared/league-view-filter';
 import { freeRecommendationForRail } from '@/shared/free-recommendation-rail';
 import type { StatusFilter } from '@/components/dashboard/StatusDock';
+import type { HiddenFixture } from '@/components/dashboard/HiddenMatches';
 
 interface FixturesResponse {
   fixtures: any[];
@@ -274,6 +275,17 @@ export function useFootballDashboard({ date, userTz, statusFilter }: { date: str
     }
   }, [hidden, date]);
 
+  // Recuperar un partido ocultado por error (panel "Ocultos"): optimista + rollback.
+  const unhideMatch = useCallback(async (fixtureId: number) => {
+    setHidden((prev) => prev.filter((id) => id !== fixtureId));
+    try {
+      await api.delete('/api/hidden', { fixtureId });
+    } catch {
+      setHidden((prev) => prev.includes(fixtureId) ? prev : [...prev, fixtureId]);
+      setError('No se pudo recuperar el partido.');
+    }
+  }, []);
+
   const saveCombinada = useCallback(async (combination: any) => {
     if (!combination?.selections?.length) return;
     setSavingComb(true);
@@ -307,6 +319,8 @@ export function useFootballDashboard({ date, userTz, statusFilter }: { date: str
   const hiddenSet = useMemo(() => new Set(hidden), [hidden]);
   const favoritesSet = useMemo(() => new Set(favorites), [favorites]);
   const analyzedSet = useMemo(() => new Set(analyzed), [analyzed]);
+  const hiddenFixtures = useMemo<HiddenFixture[]>(() => fixtures.filter((f) => hiddenSet.has(f.fixture.id))
+    .map((f) => ({ id: f.fixture.id, home: f.teams?.home?.name || '', away: f.teams?.away?.name || '', date: f.fixture.date })), [fixtures, hiddenSet]);
   const fixtureById = useMemo(() => new Map(fixtures.map((f) => [Number(f.fixture.id), f])), [fixtures]);
 
   const sorted = useMemo(() => fixtures.filter((f) => {
@@ -375,6 +389,6 @@ export function useFootballDashboard({ date, userTz, statusFilter }: { date: str
     loading, error, setError, batchRunning, isViewingToday, isViewingPast,
     leagueFilter, allLeagueIds, leagueFilterReady, leagueFilterSaving, updateLeagueFilter,
     apuestaDelDia, savedCombinadas, savingComb, saveCombinada, deleteSavedCombinada,
-    toggleFavorite, dismissMatch, refresh: () => mutate(), markDateChange,
+    toggleFavorite, dismissMatch, unhideMatch, hiddenFixtures, refresh: () => mutate(), markDateChange,
   };
 }

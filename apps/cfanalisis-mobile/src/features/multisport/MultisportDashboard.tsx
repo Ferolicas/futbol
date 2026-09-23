@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
@@ -20,9 +20,9 @@ import { todayInTz } from '@/lib/timezone';
 import { useMultisportDashboard } from './useMultisportDashboard';
 import { colors, radius } from '@/theme/tokens';
 
-interface Props { sport: 'basketball' | 'american_football'; slug: string; title: string; scoreLabel: string; date: string; userTz: string; onDateChange: (date: string) => void; activeSport: SportKey; onSportChange: (sport: SportKey) => void }
+interface Props { sport: 'basketball' | 'american_football'; slug: string; title: string; scoreLabel: string; date: string; userTz: string; onDateChange: (date: string) => void; activeSport: SportKey; onSportChange: (sport: SportKey) => void; onComboBarChange?: (visible: boolean) => void }
 
-export function MultisportDashboard({ sport, slug, title, scoreLabel, date, userTz, onDateChange, activeSport, onSportChange }: Props) {
+export function MultisportDashboard({ sport, slug, title, scoreLabel, date, userTz, onDateChange, activeSport, onSportChange, onComboBarChange }: Props) {
   const router = useRouter();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [leagueFilter, setLeagueFilter] = useState('');
@@ -30,6 +30,9 @@ export function MultisportDashboard({ sport, slug, title, scoreLabel, date, user
   const [selectedMarkets, setSelectedMarkets] = useState<Record<string, Record<string, any>>>({});
   const dash = useMultisportDashboard({ sport, slug, date, userTz, statusFilter, leagueFilter, selectedMarkets });
   const totalSel = dash.combination?.selections.length || 0;
+  const comboBar = statusFilter !== 'favoritos' && totalSel > 0;
+  useEffect(() => { onComboBarChange?.(comboBar); }, [comboBar, onComboBarChange]);
+  useEffect(() => () => onComboBarChange?.(false), [onComboBarChange]);
 
   const changeDate = (next: string) => { if (next === date) return; setSelectedMarkets({}); setExpanded(null); onDateChange(next); };
 
@@ -106,7 +109,7 @@ export function MultisportDashboard({ sport, slug, title, scoreLabel, date, user
           keyExtractor={(item: any) => item.key}
           getItemType={(item: any) => item.type}
           ListHeaderComponent={header}
-          contentContainerStyle={{ paddingBottom: 120 }}
+          contentContainerStyle={{ paddingBottom: comboBar ? 200 : 120 }}
           ListEmptyComponent={(
             <View style={{ paddingHorizontal: 16 }}>
               {dash.error && !dash.games.length
@@ -142,7 +145,7 @@ export function MultisportDashboard({ sport, slug, title, scoreLabel, date, user
         />
       )}
 
-      {statusFilter !== 'favoritos' && totalSel > 0 && (
+      {comboBar && (
         <Pressable onPress={() => { setExpanded(null); setStatusFilter('favoritos'); }} style={styles.floatBar}>
           <View style={styles.floatIcon}><Layers size={18} color={colors.accent} /></View>
           <View style={{ flex: 1 }}><AppText variant="caption" tone="muted">Tu selección</AppText><AppText variant="label" weight="bold">Ver combinada · {totalSel}</AppText></View>

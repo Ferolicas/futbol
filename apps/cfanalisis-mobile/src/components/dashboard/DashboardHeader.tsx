@@ -60,10 +60,6 @@ export function DashboardHeader() {
             <AppText variant="caption" tone="muted" numberOfLines={1}>{user?.email}</AppText>
             <AppText variant="caption" tone={isFree ? 'muted' : 'accent'}>{isFree ? 'Acceso gratis' : 'Acceso Pro activo'}</AppText>
           </View>
-          <Pressable style={styles.menuItem} onPress={() => { setMenuOpen(false); router.push('/assistant'); }}>
-            <Sparkles size={17} color={colors.accent} />
-            <AppText variant="label">Preguntar</AppText>
-          </Pressable>
           <Pressable style={styles.menuItem} onPress={() => { setMenuOpen(false); router.push('/chat'); }}>
             <MessageCircle size={17} color={colors.accent} />
             <AppText variant="label">Chat y soporte</AppText>

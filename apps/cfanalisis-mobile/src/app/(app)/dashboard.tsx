@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { Screen } from '@/components/ui';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
+import { AssistantLauncher } from '@/components/dashboard/AssistantLauncher';
 import type { SportKey } from '@/components/dashboard/SportIcons';
 import { FootballDashboard } from '@/features/football/FootballDashboard';
 import { BaseballDashboard } from '@/features/baseball/BaseballDashboard';
@@ -19,7 +20,9 @@ export default function DashboardScreen() {
   const [userTz] = useState(getUserTz);
   const [date, setDate] = useState(() => todayInTz(getUserTz()));
   const onSportChange = useCallback((sport: SportKey) => setActiveSport(sport), []);
-  const shared = { date, userTz, onDateChange: setDate, activeSport, onSportChange };
+  // Cada dashboard avisa si muestra "Ver combinada" para subir el botón "Preguntar" por encima.
+  const [comboBar, setComboBar] = useState(false);
+  const shared = { date, userTz, onDateChange: setDate, activeSport, onSportChange, onComboBarChange: setComboBar };
 
   return (
     <Screen edges={[]}>
@@ -29,6 +32,8 @@ export default function DashboardScreen() {
         {activeSport === 'baseball' && <BaseballDashboard {...shared} />}
         {activeSport === 'basketball' && <MultisportDashboard {...shared} sport="basketball" slug="baloncesto" title="baloncesto" scoreLabel="puntos" />}
         {activeSport === 'american_football' && <MultisportDashboard {...shared} sport="american_football" slug="futbol-americano" title="fútbol americano" scoreLabel="puntos" />}
+        {/* Solo en el dashboard; el partido desplegado (Modal fullscreen) lo tapa. */}
+        <AssistantLauncher lifted={comboBar} />
       </View>
     </Screen>
   );

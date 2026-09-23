@@ -6,6 +6,7 @@ import { useWorkerEvent, useWorkerSocketState } from '@/lib/realtime/hooks';
 import { buildBaseballApuestaDelDia, buildCustomBaseballCombinada } from '@/shared/baseball-combinada';
 import { freeRecommendationForRail } from '@/shared/free-recommendation-rail';
 import type { StatusFilter } from '@/components/dashboard/StatusDock';
+import type { HiddenFixture } from '@/components/dashboard/HiddenMatches';
 
 const isLive = (s?: string) => !!s && ['LIVE', 'IN', 'IN1', 'IN2', 'IN3', 'IN4', 'IN5', 'IN6', 'IN7', 'IN8', 'IN9'].includes(s);
 const isFinished = (s?: string) => !!s && ['FT', 'AOT'].includes(s);
@@ -79,12 +80,22 @@ export function useBaseballDashboard({ date, userTz, statusFilter, leagueFilter,
     catch { mutate(); setError('No se pudo ocultar el partido — restaurado.'); }
   }, [mutate, date]);
 
+  // Recuperar un partido ocultado por error (panel "Ocultos").
+  const unhideMatch = useCallback(async (fixtureId: number) => {
+    mutate((prev: any) => prev && ({ ...prev, fixtures: prev.fixtures.map((g: any) => g.id === fixtureId ? { ...g, isHidden: false } : g) }), { revalidate: false });
+    try { await api.post('/api/baseball/hidden', { fixtureId, action: 'unhide' }); }
+    catch { mutate(); setError('No se pudo recuperar el partido.'); }
+  }, [mutate]);
+
   const toggleFavorite = useCallback(async (fixtureId: number) => {
     const isFav = favorites.includes(fixtureId);
     mutate((prev: any) => prev && ({ ...prev, fixtures: prev.fixtures.map((g: any) => g.id === fixtureId ? { ...g, isFavorite: !isFav } : g) }), { revalidate: false });
     try { await api.post('/api/baseball/favorites', { fixtureId, action: isFav ? 'remove' : 'add' }); }
     catch { mutate(); setError('No se pudo guardar el favorito — restaurado.'); }
   }, [favorites, mutate]);
+
+  const hiddenFixtures = useMemo<HiddenFixture[]>(() => games.filter((g) => g.isHidden)
+    .map((g) => ({ id: g.id, home: g.teams?.home?.name || '', away: g.teams?.away?.name || '', date: g.date })), [games]);
 
   const visible = useMemo(() => games.filter((g) => {
     if (hidden.includes(g.id)) return false;
@@ -126,5 +137,5 @@ export function useBaseballDashboard({ date, userTz, statusFilter, leagueFilter,
 
   const customCombinada = useMemo(() => buildCustomBaseballCombinada(selectedMarkets, Object.fromEntries(games.map((g) => [g.id, g]))), [selectedMarkets, games]);
 
-  return { games, visible, analyzed, favorites, counts, leagues, loading, error, setError, apuestaDelDia, customCombinada, dismissMatch, toggleFavorite, refresh: () => mutate() };
+  return { games, visible, analyzed, favorites, counts, leagues, loading, error, setError, apuestaDelDia, customCombinada, dismissMatch, unhideMatch, hiddenFixtures, toggleFavorite, refresh: () => mutate() };
 }

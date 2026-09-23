@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
@@ -11,6 +11,7 @@ import { DailyPickRail, type DecoratedSelection } from '@/components/dashboard/D
 import { MatchHeadCard } from '@/components/dashboard/MatchHeadCard';
 import { MatchFullscreen } from '@/components/dashboard/MatchFullscreen';
 import { CombinationPanel } from '@/components/dashboard/CombinationPanel';
+import { DismissConfirmDialog, HiddenFixturesButton, HiddenFixturesPanel } from '@/components/dashboard/HiddenMatches';
 import { SportGameCard, baseballLiveLabel, toHeadMatch } from '@/components/dashboard/SportGameCard';
 import { SportAnalysisTabs } from '@/components/analysis/SportAnalysisTabs';
 import type { SportKey } from '@/components/dashboard/SportIcons';
@@ -20,9 +21,9 @@ import { todayInTz } from '@/lib/timezone';
 import { effectiveGameStatus, useBaseballDashboard } from './useBaseballDashboard';
 import { colors, radius } from '@/theme/tokens';
 
-interface Props { date: string; userTz: string; onDateChange: (date: string) => void; activeSport: SportKey; onSportChange: (sport: SportKey) => void }
+interface Props { date: string; userTz: string; onDateChange: (date: string) => void; activeSport: SportKey; onSportChange: (sport: SportKey) => void; onComboBarChange?: (visible: boolean) => void }
 
-export function BaseballDashboard({ date, userTz, onDateChange, activeSport, onSportChange }: Props) {
+export function BaseballDashboard({ date, userTz, onDateChange, activeSport, onSportChange, onComboBarChange }: Props) {
   const router = useRouter();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [leagueFilter, setLeagueFilter] = useState('');
@@ -30,6 +31,20 @@ export function BaseballDashboard({ date, userTz, onDateChange, activeSport, onS
   const [selectedMarkets, setSelectedMarkets] = useState<Record<string, Record<string, any>>>({});
   const dash = useBaseballDashboard({ date, userTz, statusFilter, leagueFilter, selectedMarkets });
   const totalSel = Object.values(selectedMarkets).reduce((sum, m) => sum + Object.keys(m).length, 0);
+  // La X solo pide confirmación; se oculta al confirmar (igual que la web).
+  const [pendingDismiss, setPendingDismiss] = useState<number | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
+  const askDismiss = useCallback((id: number) => setPendingDismiss(id), []);
+  const pendingGame = pendingDismiss != null ? dash.games.find((g) => g.id === pendingDismiss) : null;
+  const confirmDismiss = () => {
+    if (pendingDismiss == null) return;
+    dash.dismissMatch(pendingDismiss);
+    setExpanded((current) => (current === pendingDismiss ? null : current));
+    setPendingDismiss(null);
+  };
+  const comboBar = statusFilter !== 'favoritos' && totalSel > 0;
+  useEffect(() => { onComboBarChange?.(comboBar); }, [comboBar, onComboBarChange]);
+  useEffect(() => () => onComboBarChange?.(false), [onComboBarChange]);
 
   const changeDate = (next: string) => { if (next === date) return; setSelectedMarkets({}); setExpanded(null); onDateChange(next); };
 
@@ -86,6 +101,7 @@ export function BaseballDashboard({ date, userTz, onDateChange, activeSport, onS
       <View style={styles.filters}>
         <LeaguePicker leagues={dash.leagues} value={leagueFilter} onChange={setLeagueFilter} />
         <SportPicker value={activeSport} onChange={onSportChange} />
+        <HiddenFixturesButton count={dash.hiddenFixtures.length} onPress={() => setShowHidden(true)} />
       </View>
       {statusFilter !== 'favoritos' && <DailyPickRail selections={decorated} averageProbability={dash.apuestaDelDia?.combinedProbability || 0} sport="baseball" />}
       <View style={{ paddingHorizontal: 16, gap: 8 }}>
@@ -113,7 +129,7 @@ export function BaseballDashboard({ date, userTz, onDateChange, activeSport, onS
           keyExtractor={(item: any) => item.key}
           getItemType={(item: any) => item.type}
           ListHeaderComponent={header}
-          contentContainerStyle={{ paddingBottom: 120 }}
+          contentContainerStyle={{ paddingBottom: comboBar ? 200 : 120 }}
           ListEmptyComponent={<View style={{ paddingHorizontal: 16 }}><EmptyState title={statusFilter === 'favoritos' ? 'Sin favoritos para esta fecha' : 'Sin partidos'} description={statusFilter === 'favoritos' ? 'Marca la estrella de un partido para guardarlo aquí junto a tu combinada.' : 'No hay partidos de béisbol para esta fecha y filtro.'} /></View>}
           renderItem={({ item }: { item: any }) => item.type === 'league' ? (
             <View style={styles.leagueHead}>
@@ -128,7 +144,7 @@ export function BaseballDashboard({ date, userTz, onDateChange, activeSport, onS
                 timeZone={userTz}
                 favorite={dash.favorites.includes(item.game.id)}
                 onFavorite={(id) => dash.toggleFavorite(Number(id))}
-                onDismiss={dash.dismissMatch}
+                onDismiss={askDismiss}
                 onOpen={() => setExpanded(item.game.id)}
                 liveLabel={baseballLiveLabel(item.game)}
                 selectedCount={Object.keys(selectedMarkets[String(item.game.id)] || {}).length}
@@ -138,7 +154,7 @@ export function BaseballDashboard({ date, userTz, onDateChange, activeSport, onS
         />
       )}
 
-      {statusFilter !== 'favoritos' && totalSel > 0 && (
+      {comboBar && (
         <Pressable onPress={() => { setExpanded(null); setStatusFilter('favoritos'); }} style={styles.floatBar}>
           <View style={styles.floatIcon}><Layers size={18} color={colors.accent} /></View>
           <View style={{ flex: 1 }}><AppText variant="caption" tone="muted">Tu selección</AppText><AppText variant="label" weight="bold">Mi combinada · {totalSel}</AppText></View>
@@ -155,15 +171,19 @@ export function BaseballDashboard({ date, userTz, onDateChange, activeSport, onS
           <MatchFullscreen
             visible
             title="Partido de béisbol"
-            head={<MatchHeadCard match={match} userTz={userTz} sport="baseball" isFavorite={dash.favorites.includes(game.id)} onFavorite={() => dash.toggleFavorite(game.id)} liveLabel={baseballLiveLabel(game)} />}
+            head={<MatchHeadCard match={match} userTz={userTz} sport="baseball" isFavorite={dash.favorites.includes(game.id)} onFavorite={() => dash.toggleFavorite(game.id)} onDismiss={askDismiss} liveLabel={baseballLiveLabel(game)} />}
             body={game.analysis
               ? <SportAnalysisTabs game={game} sport="baseball" scoreLabel="carreras" selected={selectedMarkets[String(game.id)] || {}} onToggle={(pick) => toggleMarket(game.id, pick)} onViewFull={() => { setExpanded(null); router.push({ pathname: '/match/[sport]/[id]', params: { sport: 'baseball', id: String(game.id) } }); }} />
               : <AppText tone="muted">El análisis se está preparando automáticamente.</AppText>}
             onClose={() => setExpanded(null)}
             onStep={stepExpanded}
+            overlay={<DismissConfirmDialog inline visible={pendingDismiss != null} home={pendingGame?.teams?.home?.name} away={pendingGame?.teams?.away?.name} onCancel={() => setPendingDismiss(null)} onConfirm={confirmDismiss} />}
           />
         );
       })()}
+
+      <DismissConfirmDialog visible={pendingDismiss != null && !expandedGame} home={pendingGame?.teams?.home?.name} away={pendingGame?.teams?.away?.name} onCancel={() => setPendingDismiss(null)} onConfirm={confirmDismiss} />
+      <HiddenFixturesPanel visible={showHidden} fixtures={dash.hiddenFixtures} userTz={userTz} onUnhide={dash.unhideMatch} onClose={() => setShowHidden(false)} />
     </View>
   );
 }

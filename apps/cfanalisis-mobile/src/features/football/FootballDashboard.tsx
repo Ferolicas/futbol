@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
@@ -11,6 +11,7 @@ import { DailyPickRail, type DecoratedSelection } from '@/components/dashboard/D
 import { MatchHeadCard } from '@/components/dashboard/MatchHeadCard';
 import { MatchFullscreen } from '@/components/dashboard/MatchFullscreen';
 import { CombinationPanel } from '@/components/dashboard/CombinationPanel';
+import { DismissConfirmDialog, HiddenFixturesButton, HiddenFixturesPanel } from '@/components/dashboard/HiddenMatches';
 import { FootballAnalysisTabs } from '@/components/analysis/FootballAnalysisTabs';
 import type { SportKey } from '@/components/dashboard/SportIcons';
 import { useFixtureLiveStats, useLiveStatsSnapshot } from '@/lib/realtime/fixture-store';
@@ -20,7 +21,7 @@ import { todayInTz } from '@/lib/timezone';
 import { useFootballDashboard } from './useFootballDashboard';
 import { colors, radius } from '@/theme/tokens';
 
-interface Props { date: string; userTz: string; onDateChange: (date: string) => void; activeSport: SportKey; onSportChange: (sport: SportKey) => void }
+interface Props { date: string; userTz: string; onDateChange: (date: string) => void; activeSport: SportKey; onSportChange: (sport: SportKey) => void; onComboBarChange?: (visible: boolean) => void }
 
 const FootballRow = memo(function FootballRow({ match, odds, data, standings, userTz, isFavorite, analyzed, selCount, onFavorite, onDismiss, onOpen }: any) {
   const liveStats = useFixtureLiveStats(match.fixture.id);
@@ -48,7 +49,7 @@ function ExpandedFootball({ match, data, odds, standings, userTz, isFavorite, on
 
 function ExpandedFootballView(props: any) {
   const { head, body } = ExpandedFootball(props);
-  return <MatchFullscreen visible title="Partido analizado" head={head} body={body} onClose={props.onClose} onStep={props.onStep} />;
+  return <MatchFullscreen visible title="Partido analizado" head={head} body={body} onClose={props.onClose} onStep={props.onStep} overlay={props.overlay} />;
 }
 
 function FootballDailyRail({ selections, averageProbability, fixtures }: { selections: any[]; averageProbability: number; fixtures: any[] }) {
@@ -62,12 +63,26 @@ function FootballDailyRail({ selections, averageProbability, fixtures }: { selec
   return <DailyPickRail selections={decorated} averageProbability={averageProbability} sport="football" />;
 }
 
-export function FootballDashboard({ date, userTz, onDateChange, activeSport, onSportChange }: Props) {
+export function FootballDashboard({ date, userTz, onDateChange, activeSport, onSportChange, onComboBarChange }: Props) {
   const router = useRouter();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expanded, setExpanded] = useState<number | null>(null);
   const { selectedMarkets, toggleMarket, clearMarkets, totalSelections } = useSelectedMarkets();
   const dash = useFootballDashboard({ date, userTz, statusFilter });
+  // La X solo pide confirmación; se oculta al confirmar (igual que la web).
+  const [pendingDismiss, setPendingDismiss] = useState<number | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
+  const askDismiss = useCallback((id: number) => setPendingDismiss(id), []);
+  const pendingMatch = pendingDismiss != null ? dash.fixtures.find((f) => f.fixture.id === pendingDismiss) : null;
+  const confirmDismiss = () => {
+    if (pendingDismiss == null) return;
+    dash.dismissMatch(pendingDismiss);
+    setExpanded((current) => (current === pendingDismiss ? null : current));
+    setPendingDismiss(null);
+  };
+  const comboBar = totalSelections > 0 && statusFilter !== 'favoritos';
+  useEffect(() => { onComboBarChange?.(comboBar); }, [comboBar, onComboBarChange]);
+  useEffect(() => () => onComboBarChange?.(false), [onComboBarChange]);
 
   const changeDate = useCallback((next: string) => {
     if (next === date) return;
@@ -107,6 +122,7 @@ export function FootballDashboard({ date, userTz, onDateChange, activeSport, onS
       <View style={styles.filters}>
         <LeagueMultiPicker leagues={dash.leagues} value={dash.leagueFilter} onChange={dash.updateLeagueFilter} allLeagueIds={dash.allLeagueIds} disabled={!dash.leagueFilterReady} saving={dash.leagueFilterSaving} />
         <SportPicker value={activeSport} onChange={onSportChange} />
+        <HiddenFixturesButton count={dash.hiddenFixtures.length} onPress={() => setShowHidden(true)} />
       </View>
       {statusFilter !== 'favoritos' && dash.apuestaDelDia && (
         <FootballDailyRail selections={dash.apuestaDelDia.selections} averageProbability={dash.apuestaDelDia.combinedProbability} fixtures={dash.fixtures} />
@@ -142,7 +158,7 @@ export function FootballDashboard({ date, userTz, onDateChange, activeSport, onS
           data={dash.sorted}
           keyExtractor={(item: any) => String(item.fixture.id)}
           ListHeaderComponent={header}
-          contentContainerStyle={{ paddingBottom: 120 }}
+          contentContainerStyle={{ paddingBottom: comboBar ? 200 : 120 }}
           ListEmptyComponent={(
             <View style={{ paddingHorizontal: 16 }}>
               {dash.error && !dash.fixtures.length ? (
@@ -167,7 +183,7 @@ export function FootballDashboard({ date, userTz, onDateChange, activeSport, onS
                 analyzed={dash.analyzedSet.has(item.fixture.id)}
                 selCount={Object.keys(selectedMarkets[String(item.fixture.id)] || {}).length}
                 onFavorite={dash.toggleFavorite}
-                onDismiss={dash.dismissMatch}
+                onDismiss={askDismiss}
                 onOpen={() => openMatch(item)}
               />
             </View>
@@ -175,7 +191,7 @@ export function FootballDashboard({ date, userTz, onDateChange, activeSport, onS
         />
       )}
 
-      {totalSelections > 0 && statusFilter !== 'favoritos' && (
+      {comboBar && (
         <Pressable onPress={() => { setExpanded(null); setStatusFilter('favoritos'); }} style={styles.floatBar}>
           <View style={styles.floatIcon}><Layers size={18} color={colors.accent} /></View>
           <View style={{ flex: 1 }}>
@@ -198,12 +214,16 @@ export function FootballDashboard({ date, userTz, onDateChange, activeSport, onS
           userTz={userTz}
           isFavorite={dash.favoritesSet.has(expandedMatch.fixture.id)}
           onFavorite={dash.toggleFavorite}
-          onDismiss={(id: number) => { dash.dismissMatch(id); setExpanded(null); }}
+          onDismiss={askDismiss}
           onViewFull={() => { setExpanded(null); router.push({ pathname: '/match/[sport]/[id]', params: { sport: 'football', id: String(expandedMatch.fixture.id), date } }); }}
           onClose={() => setExpanded(null)}
           onStep={stepExpanded}
+          overlay={<DismissConfirmDialog inline visible={pendingDismiss != null} home={pendingMatch?.teams?.home?.name} away={pendingMatch?.teams?.away?.name} onCancel={() => setPendingDismiss(null)} onConfirm={confirmDismiss} />}
         />
       )}
+
+      <DismissConfirmDialog visible={pendingDismiss != null && !expandedMatch} home={pendingMatch?.teams?.home?.name} away={pendingMatch?.teams?.away?.name} onCancel={() => setPendingDismiss(null)} onConfirm={confirmDismiss} />
+      <HiddenFixturesPanel visible={showHidden} fixtures={dash.hiddenFixtures} userTz={userTz} onUnhide={dash.unhideMatch} onClose={() => setShowHidden(false)} />
     </View>
   );
 }

@@ -11,13 +11,15 @@ interface Props {
   onClose: () => void;
   onStep?: ((direction: 1 | -1) => void) | null;
   title?: string;
+  /** Capa sobre el partido (p.ej. confirmación de ocultar) dentro del mismo Modal: en iOS dos Modals de árboles distintos no se apilan bien. */
+  overlay?: React.ReactNode;
 }
 
 /**
  * Partido desplegado a pantalla completa: la cabecera queda fija y solo se
  * desplaza el bloque de datos; las flechas cambian de partido analizado.
  */
-export function MatchFullscreen({ visible, head, body, onClose, onStep, title = 'Partido' }: Props) {
+export function MatchFullscreen({ visible, head, body, onClose, onStep, title = 'Partido', overlay }: Props) {
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="fullScreen">
@@ -38,6 +40,7 @@ export function MatchFullscreen({ visible, head, body, onClose, onStep, title = 
             <Pressable onPress={() => onStep(1)} style={styles.navBtn} accessibilityLabel="Partido siguiente"><ChevronDown size={20} color={colors.text} /></Pressable>
           </View>
         )}
+        {overlay}
       </View>
     </Modal>
   );
