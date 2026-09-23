@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Flag, Star, X } from 'lucide-react-native';
 import { AppText, TeamLogo } from '@/components/ui';
+import { BaseballResultStats } from '@/components/analysis/SportAnalysisTabs';
 import { FLAGS } from '@/shared/leagues';
 import { assetUrl } from '@/lib/config';
 import { FOOTBALL_STATUS_LABEL, eventPersonName, isAwaitingOfficialResult, isCoveredCounter, isFinished, isLive } from '@/lib/format';
@@ -167,6 +168,10 @@ export const MatchHeadCard = memo(function MatchHeadCard({ match, odds, data, st
             <AppText variant="mono" size={12}>{redCovered ? `${liveStats.redCards.home}-${liveStats.redCards.away}` : '—'}</AppText>
           </View>
         </View>
+      )}
+
+      {sport === 'baseball' && hasScore && liveStats && (
+        <BaseballResultStats compact result={liveStats} homeName={match.teams.home.name} awayName={match.teams.away.name} />
       )}
 
       {(homeGoals.length + awayGoals.length + homeMissed.length + awayMissed.length) > 0 && (

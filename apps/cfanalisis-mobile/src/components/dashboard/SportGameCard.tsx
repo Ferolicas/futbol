@@ -47,7 +47,7 @@ export const SportGameCard = memo(function SportGameCard({ game, sport, timeZone
   const analyzed = !!game.analysis;
   return (
     <Pressable onPress={onOpen} style={({ pressed }) => [styles.wrap, pressed && { opacity: 0.9 }]}>
-      <MatchHeadCard match={match} userTz={timeZone} sport={sport} isFavorite={favorite} onFavorite={() => onFavorite(game.id)} onDismiss={onDismiss} liveLabel={liveLabel} />
+      <MatchHeadCard match={match} userTz={timeZone} sport={sport} isFavorite={favorite} onFavorite={() => onFavorite(game.id)} onDismiss={onDismiss} liveLabel={liveLabel} liveStats={game.liveResult} />
       <View style={styles.foot}>
         <AppText variant="kicker" size={9.5} tone={analyzed ? 'accent' : 'muted'}>{analyzed ? '✓ Analizado' : (game.analysisPending ? 'Análisis en preparación' : 'Sin análisis')}</AppText>
         {selectedCount > 0 && <AppText variant="caption" tone="accent">{selectedCount} sel.</AppText>}

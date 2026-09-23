@@ -38,9 +38,11 @@ export function DashboardHeader() {
         <ChevronDown size={14} color={colors.muted} />
       </Pressable>
 
+      {/* Mismo logo que la cabecera del dashboard web (BrandLogoMedia,
+          animated=false ahí también): el isotipo completo, sin ícono+texto
+          por separado. */}
       <View style={styles.brand}>
-        <Image source={{ uri: assetUrl('/cf-icon-192.png') || undefined }} style={styles.logo} contentFit="cover" />
-        <AppText variant="heading" size={15}>CF Análisis</AppText>
+        <Image source={{ uri: assetUrl('/logo-metalizado-alpha-fast.webp') || undefined }} style={styles.logo} contentFit="contain" accessibilityLabel="CF Análisis" />
       </View>
 
       <View style={styles.actions}>
@@ -91,7 +93,7 @@ const styles = StyleSheet.create({
   account: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, paddingRight: 6, borderRadius: radius.pill },
   avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
   brand: { position: 'absolute', left: 0, right: 0, bottom: 10, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, pointerEvents: 'none' },
-  logo: { width: 24, height: 24, borderRadius: 7 },
+  logo: { width: 128, height: 128 * (288 / 512) },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   iconBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: colors.border },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' },

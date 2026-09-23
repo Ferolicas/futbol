@@ -65,6 +65,7 @@ import { groupSavedCombinadaSelections } from '../../lib/saved-combinada';
 import { freeRecommendationForRail } from '../../lib/free-recommendation-rail';
 import { BaseballDashboard } from './baseball/page';
 import MultisportDashboard from './components/MultisportDashboard';
+import BaseballResultStats from './baseball/components/BaseballResultStats';
 import {
   leagueSelectionIncludes,
   normalizeLeagueSelection,
@@ -2057,6 +2058,10 @@ export function MatchHeadCard({ match, odds, data, standings, liveStats, userTz,
       </div>
 
       {sport === 'football' && (hasScore || odds?.draw != null) && <ScoreStatsSummary stats={liveStats} drawOdd={odds?.draw ?? null} />}
+
+      {sport === 'baseball' && hasScore && liveStats && (
+        <BaseballResultStats compact result={liveStats} homeName={match.teams.home.name} awayName={match.teams.away.name} />
+      )}
 
       <GoalScorersGrid liveStats={liveStats} homeId={match.teams.home.id} />
     </div>
