@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { ArrowRight, ChartColumn, Flag, Layers, Scale, Sparkles } from 'lucide-react-native';
+import { ArrowRight, ChartColumn, Flag, Layers, Sparkles } from 'lucide-react-native';
 import { AppText, Button, Card } from '@/components/ui';
 import { HorizontalChoiceBar } from './HorizontalChoiceBar';
 import { MarketButton } from './MarketButton';
@@ -32,58 +32,6 @@ export function footballMarkets(data: any, match: any) {
               : s.category || 'Otros',
     }))
     .sort((a, b) => Number(b.rawProbability ?? b.probability) - Number(a.rawProbability ?? a.probability));
-}
-
-function StatCell({ label, value, color }: { label: string; value: unknown; color?: string }) {
-  const text = value == null || Number.isNaN(value as number) ? '—' : (typeof value === 'number' ? value.toFixed(2) : String(value));
-  return (
-    <View style={styles.statRow}>
-      <AppText variant="caption" tone="secondary">{label}</AppText>
-      <AppText variant="mono" size={13} style={{ color: color || colors.text }}>{text}</AppText>
-    </View>
-  );
-}
-
-function StatsBlock({ p, homeTeam, awayTeam }: { p: any; homeTeam: string; awayTeam: string }) {
-  const [group, setGroup] = useState('goals');
-  const ccd = p?.cornerCardData || {};
-  return (
-    <View style={{ gap: 10 }}>
-      <HorizontalChoiceBar small items={[{ key: 'goals', label: 'Goles', color: '#4ade80' }, { key: 'corners', label: 'Córners', color: '#22d3ee' }, { key: 'cards', label: 'Tarjetas', color: '#fbbf24' }]} active={group} onChange={setGroup} />
-      {group === 'goals' && (
-        <>
-          <Card><AppText variant="kicker" tone="muted" style={{ marginBottom: 6 }}>Goles — {homeTeam}</AppText>
-            <StatCell label="Prom. anotados" value={p.homeGoals?.avgScored} color="#4ade80" />
-            <StatCell label="Prom. recibidos" value={p.homeGoals?.avgConceded} color="#f87171" />
-            <StatCell label="Prom. vs rival H2H" value={p.h2hGoals?.homeAvg} color="#67e8f9" />
-          </Card>
-          <Card><AppText variant="kicker" tone="muted" style={{ marginBottom: 6 }}>Goles — {awayTeam}</AppText>
-            <StatCell label="Prom. anotados" value={p.awayGoals?.avgScored} color="#4ade80" />
-            <StatCell label="Prom. recibidos" value={p.awayGoals?.avgConceded} color="#f87171" />
-            <StatCell label="Prom. vs rival H2H" value={p.h2hGoals?.awayAvg} color="#f472b6" />
-          </Card>
-        </>
-      )}
-      {group === 'corners' && (
-        <Card><AppText variant="kicker" tone="muted" style={{ marginBottom: 6 }}>Córners (últimos 5)</AppText>
-          <StatCell label={`${homeTeam} a favor`} value={ccd.homeCornersAvg} />
-          <StatCell label={`${homeTeam} en contra`} value={ccd.homeCornersAgainstAvg} />
-          <StatCell label={`${awayTeam} a favor`} value={ccd.awayCornersAvg} />
-          <StatCell label={`${awayTeam} en contra`} value={ccd.awayCornersAgainstAvg} />
-          <StatCell label="Total combinado" value={p.cornerAvg} color="#4ade80" />
-        </Card>
-      )}
-      {group === 'cards' && (
-        <Card><AppText variant="kicker" tone="muted" style={{ marginBottom: 6 }}>Tarjetas (últimos 5)</AppText>
-          <StatCell label={`${homeTeam} amarillas`} value={ccd.homeYellowsAvg} />
-          <StatCell label={`${homeTeam} rojas`} value={ccd.homeRedsAvg} />
-          <StatCell label={`${awayTeam} amarillas`} value={ccd.awayYellowsAvg} />
-          <StatCell label={`${awayTeam} rojas`} value={ccd.awayRedsAvg} />
-          <StatCell label="Total amarillas prom." value={p.cardAvg} color="#fbbf24" />
-        </Card>
-      )}
-    </View>
-  );
 }
 
 export function ProbBlock({ p, odds, homeTeam, awayTeam }: { p: any; odds: any; homeTeam: string; awayTeam: string }) {
@@ -190,7 +138,6 @@ export function FootballAnalysisTabs({ match, data, liveStats, selected, onToggl
   const free = data?.access === 'free';
   const tabs = useMemo(() => [
     (free || markets.length > 0) && { key: 'markets', label: 'Mercados para tu combinada', count: free ? (data.freePreview?.selection ? 1 : 0) : markets.length, color: '#5ee6b1', icon: <Layers size={14} color={active === 'markets' ? '#5ee6b1' : colors.muted} /> },
-    (free || data?.calculatedProbabilities) && { key: 'stats', label: 'Estadísticas calculadas', color: '#f97316', icon: <Scale size={14} color={active === 'stats' ? '#f97316' : colors.muted} /> },
     (free || data?.calculatedProbabilities) && { key: 'probs', label: 'Frecuencias calculadas', color: '#2dd4bf', icon: <ChartColumn size={14} color={active === 'probs' ? '#2dd4bf' : colors.muted} /> },
     hasPlayerHighlights(data?.playerHighlights) && { key: 'players', label: 'Jugadores destacados', color: '#fbbf24', icon: <Sparkles size={14} color={active === 'players' ? '#fbbf24' : colors.muted} /> },
     { key: 'verdict', label: 'Veredicto final', color: '#f5e400', icon: <Flag size={14} color={active === 'verdict' ? '#f5e400' : colors.muted} /> },
@@ -232,7 +179,6 @@ export function FootballAnalysisTabs({ match, data, liveStats, selected, onToggl
               {!markets.length && <AppText tone="muted">Todavía no hay opciones que cumplan los criterios de recomendación.</AppText>}
             </View>
           )}
-          {resolved === 'stats' && data.calculatedProbabilities && <StatsBlock p={data.calculatedProbabilities} homeTeam={match.teams.home.name} awayTeam={match.teams.away.name} />}
           {resolved === 'probs' && <ProbBlock p={data.calculatedProbabilities} odds={data.odds} homeTeam={match.teams.home.name} awayTeam={match.teams.away.name} />}
           {resolved === 'players' && <PlayersBlock highlights={data.playerHighlights} />}
           {resolved === 'verdict' && <FinalVerdictPanel verdict={data.finalVerdict} homeName={match.teams.home.name} awayName={match.teams.away.name} compact embedded />}
@@ -246,7 +192,6 @@ export function FootballAnalysisTabs({ match, data, liveStats, selected, onToggl
 }
 
 const styles = StyleSheet.create({
-  statRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: colors.border },
   probRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: colors.border },
   dot: { width: 24, height: 22, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
 });

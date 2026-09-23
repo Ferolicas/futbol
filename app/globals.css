@@ -10466,9 +10466,6 @@ input:checked + .cb-mark::after {
 .ap2-timing-cell {
   padding:7px 4px; text-align:center; border-radius:8px; font-size:.75rem; font-weight:700;
 }
-.ap2-timing-cell.hi { background:rgba(34,197,94,.3); color:#4ade80; }
-.ap2-timing-cell.md { background:rgba(245,158,11,.3); color:#fbbf24; }
-.ap2-timing-cell.lo { background:rgba(255,255,255,.05); color:rgba(255,255,255,.4); }
 .ap2-timing-halves { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:16px; }
 .ap2-half-card { border-radius:14px; padding:16px; background:rgba(99,102,241,.1); border:1px solid rgba(99,102,241,.2); }
 .ap2-half-row { display:flex; justify-content:space-between; font-size:.85rem; margin-bottom:6px; color:#f1f5f9; }
@@ -10490,7 +10487,6 @@ input:checked + .cb-mark::after {
 .ap2-page .ap2-lst-lbl { color: white; }
 .ap2-page .ap2-timing-th { color: white; }
 .ap2-page .ap2-timing-label { color: white; }
-.ap2-page .ap2-timing-cell.lo { color: white; }
 .ap2-page .lineup-coach { color: white; }
 .ap2-page .lineup-list h5 { color: white; }
 .ap2-page .player-pos { color: white; }

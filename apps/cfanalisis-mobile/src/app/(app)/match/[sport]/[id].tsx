@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { AlertTriangle, ChevronLeft, Zap } from 'lucide-react-native';
-import { AppText, Banner, Button, Card, ProgressBar, Screen, SkeletonList, TeamLogo } from '@/components/ui';
+import { AppText, Banner, Button, Card, Screen, SkeletonList, TeamLogo } from '@/components/ui';
 import { MatchHeadCard } from '@/components/dashboard/MatchHeadCard';
 import { toHeadMatch } from '@/components/dashboard/SportGameCard';
 import { FinalVerdictPanel } from '@/components/analysis/FinalVerdictPanel';
@@ -39,18 +39,6 @@ function Header({ onBack, title }: { onBack: () => void; title: string }) {
     <View style={styles.topbar}>
       <Pressable onPress={onBack} style={styles.back} accessibilityLabel="Volver"><ChevronLeft size={18} color={colors.text} /><AppText variant="label">Volver</AppText></Pressable>
       <AppText variant="kicker" tone="muted">{title}</AppText>
-    </View>
-  );
-}
-
-function StatBar({ label, value }: { label: string; value: number }) {
-  return (
-    <View style={{ gap: 3, marginBottom: 6 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <AppText variant="caption" tone="secondary">{label}</AppText>
-        <AppText variant="mono" size={12} tone="accent">{value}%</AppText>
-      </View>
-      <ProgressBar value={value} />
     </View>
   );
 }
@@ -173,35 +161,15 @@ function LineupsSection({ id, lineups, onRefreshed }: { id: string; lineups: any
   );
 }
 
-/** Estadísticas por equipo (goles/tarjetas/córners ≥50%) — mismo p.perTeam que la web. */
-function PerTeamStatsSection({ perTeam, homeTeam, awayTeam }: { perTeam: any; homeTeam: string; awayTeam: string }) {
-  const labels: Record<string, Record<string, string>> = {
-    goals: { over05: '+0.5', over15: '+1.5', over25: '+2.5' },
-    cards: { over05: '+0.5', over15: '+1.5', over25: '+2.5', over35: '+3.5' },
-    corners: { over05: '+0.5', over15: '+1.5', over25: '+2.5', over35: '+3.5', over45: '+4.5', over55: '+5.5' },
-  };
-  const catLabel: Record<string, string> = { goals: 'Goles', cards: 'Tarjetas', corners: 'Córners' };
-  const renderTeam = (data: any, name: string) => (
-    <Card style={{ flex: 1, gap: 8 }}>
-      <AppText variant="kicker" tone="muted" numberOfLines={1}>{name}</AppText>
-      {['goals', 'cards', 'corners'].map((cat) => {
-        const catData = data?.[cat];
-        if (!catData) return null;
-        const entries = Object.entries<number>(catData).filter(([, prob]) => prob >= 50);
-        if (!entries.length) return null;
-        return (
-          <View key={cat}>
-            <AppText variant="caption" tone="secondary" weight="bold">{catLabel[cat]}</AppText>
-            {entries.map(([key, prob]) => <StatBar key={key} label={labels[cat]?.[key] || key} value={Math.round(prob)} />)}
-          </View>
-        );
-      })}
-    </Card>
-  );
-  return <View style={{ flexDirection: 'row', gap: 8 }}>{renderTeam(perTeam?.home, homeTeam)}{renderTeam(perTeam?.away, awayTeam)}</View>;
+// Heatmap rojo→verde: mismo criterio que la web (hue 0=rojo a 120=verde
+// interpolado por porcentaje real, no 3 cubetas discretas).
+function heatmapColor(prob: number): { background: string; color: string } {
+  const pct = Math.max(0, Math.min(100, Number(prob) || 0));
+  const hue = (pct / 100) * 120;
+  return { background: `hsl(${hue}, 70%, 32%)`, color: pct >= 40 && pct <= 65 ? '#1a1a1a' : '#fff' };
 }
 
-/** Probabilidad de gol por periodo de 15' — mismo goalTiming que la web. */
+/** Probabilidad de gol por periodo de 15' — mismo goalTiming que la web, en heatmap. */
 function GoalTimingSection({ goalTiming, homeTeam, awayTeam }: { goalTiming: any; homeTeam: string; awayTeam: string }) {
   const periods = ['0-15', '15-30', '30-45', '45-60', '60-75', '75-90'];
   const at = (data: any[], i: number) => cap(data?.[i]?.probability || 0);
@@ -213,10 +181,11 @@ function GoalTimingSection({ goalTiming, homeTeam, awayTeam }: { goalTiming: any
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
             {periods.map((p, i) => {
               const value = at(data, i);
+              const heat = heatmapColor(value);
               return (
-                <View key={p} style={{ alignItems: 'center', minWidth: 46 }}>
-                  <AppText variant="caption" tone="faint">{p}&apos;</AppText>
-                  <AppText variant="mono" size={12} weight="bold" style={{ color: value >= 70 ? colors.accent : value >= 50 ? colors.warning : colors.muted }}>{value}%</AppText>
+                <View key={p} style={{ alignItems: 'center', minWidth: 46, borderRadius: 8, paddingVertical: 4, backgroundColor: heat.background }}>
+                  <AppText variant="caption" style={{ color: heat.color, opacity: 0.85 }}>{p}&apos;</AppText>
+                  <AppText variant="mono" size={12} weight="bold" style={{ color: heat.color }}>{value}%</AppText>
                 </View>
               );
             })}
@@ -431,25 +400,30 @@ function FootballDetail({ id, date }: { id: string; date?: string }) {
 
       {p && (
         <Section title="Estadísticas calculadas">
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            {[['Goles', a.homeTeam, p.homeGoals], ['Goles', a.awayTeam, p.awayGoals]].map(([kind, name, stats]: any) => (
-              <Card key={name} style={{ flex: 1, gap: 4 }}>
-                <AppText variant="kicker" tone="muted" numberOfLines={1}>{kind} — {name}</AppText>
-                <AppText variant="caption" tone="secondary">Anotados <AppText variant="mono" size={12} tone="accent">{stats?.avgScored ?? '—'}</AppText></AppText>
-                <AppText variant="caption" tone="secondary">Recibidos <AppText variant="mono" size={12} tone="error">{stats?.avgConceded ?? '—'}</AppText></AppText>
-              </Card>
-            ))}
-          </View>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Card style={{ flex: 1, gap: 4 }}><AppText variant="kicker" tone="muted">Córners</AppText><AppText variant="mono" size={18} tone="cyan">{p.cornerAvg ?? '—'}</AppText><AppText variant="caption" tone="faint">Total combinado</AppText></Card>
-            <Card style={{ flex: 1, gap: 4 }}><AppText variant="kicker" tone="muted">Tarjetas</AppText><AppText variant="mono" size={18} tone="warning">{p.cardAvg ?? '—'}</AppText><AppText variant="caption" tone="faint">Amarillas promedio</AppText></Card>
-          </View>
-        </Section>
-      )}
-
-      {p?.perTeam && (
-        <Section title="Estadísticas por equipo">
-          <PerTeamStatsSection perTeam={p.perTeam} homeTeam={a.homeTeam} awayTeam={a.awayTeam} />
+          <Card style={{ gap: 12 }}>
+            <AppText variant="label" weight="bold" align="center">Goles</AppText>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {[[a.homeTeam, p.homeGoals], [a.awayTeam, p.awayGoals]].map(([name, stats]: any) => (
+                <View key={name} style={{ flex: 1, gap: 4 }}>
+                  <AppText variant="kicker" tone="muted" numberOfLines={1}>{name}</AppText>
+                  <AppText variant="caption" tone="secondary">Anotados <AppText variant="mono" size={12} tone="accent">{stats?.avgScored ?? '—'}</AppText></AppText>
+                  <AppText variant="caption" tone="secondary">Recibidos <AppText variant="mono" size={12} tone="error">{stats?.avgConceded ?? '—'}</AppText></AppText>
+                </View>
+              ))}
+            </View>
+            <View style={{ height: 1, backgroundColor: colors.border }} />
+            <AppText variant="label" weight="bold" align="center">Total combinado</AppText>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View style={{ flex: 1, alignItems: 'center', gap: 2 }}>
+                <AppText variant="mono" size={18} tone="cyan">{p.cornerAvg ?? '—'}</AppText>
+                <AppText variant="caption" tone="faint">Corners</AppText>
+              </View>
+              <View style={{ flex: 1, alignItems: 'center', gap: 2 }}>
+                <AppText variant="mono" size={18} tone="warning">{p.cardAvg ?? '—'}</AppText>
+                <AppText variant="caption" tone="faint">Tarjetas</AppText>
+              </View>
+            </View>
+          </Card>
         </Section>
       )}
 

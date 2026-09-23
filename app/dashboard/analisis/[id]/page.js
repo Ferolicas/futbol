@@ -1921,14 +1921,20 @@ function PlayerGroupList({ title, hint, players, metric, totalKey, unit, accentB
 // GOAL TIMING SECTION
 // ══════════════════════════════════════════
 // P8: memo — solo re-render cuando cambia goalTiming.
+// Heatmap rojo→verde: interpola el tono (hue) de 0 (rojo) a 120 (verde) según
+// el porcentaje, en vez de 3 cubetas discretas — así la intensidad del color
+// refleja el valor real de la celda, no un rango.
+function heatmapColor(prob) {
+  const pct = Math.max(0, Math.min(100, Number(prob) || 0));
+  const hue = (pct / 100) * 120;
+  return {
+    background: `hsl(${hue}, 70%, 32%)`,
+    color: pct >= 40 && pct <= 65 ? '#1a1a1a' : '#fff',
+  };
+}
+
 const GoalTimingSection = memo(function GoalTimingSection({ goalTiming, homeTeam, awayTeam }) {
   const periods = ['0-15', '15-30', '30-45', '45-60', '60-75', '75-90'];
-
-  const timingClass = (prob) => {
-    if (prob >= 70) return 'hi';
-    if (prob >= 50) return 'md';
-    return 'lo';
-  };
 
   const aggregate = (data, s, e) => {
     if (!data || !data.length) return 0;
@@ -1964,7 +1970,7 @@ const GoalTimingSection = memo(function GoalTimingSection({ goalTiming, homeTeam
               <tr key={ri}>
                 <td className="ap2-timing-label" style={{ color: row.color }}>{row.label}</td>
                 {row.data.map((d, i) => (
-                  <td key={i} className={`ap2-timing-cell ${timingClass(d.probability)}`}>
+                  <td key={i} className="ap2-timing-cell" style={heatmapColor(d.probability)}>
                     {cap(d.probability)}%
                   </td>
                 ))}
