@@ -25,16 +25,71 @@ Cuando una respuesta se apoye en el pronóstico o la frecuencia de un partido co
 Si te piden hacer algo que existe como función del dashboard (por ejemplo cambiar la contraseña) pero vos no podés ejecutarla, usa get_app_action_link para dar el enlace real como markdown — ej. [Cambiar contraseña](url) — en vez de simplemente decir que no podés. Nunca inventes una URL que no venga de una herramienta.`;
 }
 
-async function groq(messages, tools) {
+// Groq en tier gratuito limita tokens por minuto (8k en gpt-oss-20b). Ante un
+// 429 se espera lo que pide Groq (si es poco) y se reintenta; si sigue
+// saturado o la petición no cabe (413), se pasa al siguiente modelo, que
+// tiene su propio cupo. Así una pregunta normal no termina en "no disponible".
+const MODELS = [process.env.GROQ_MODEL || 'openai/gpt-oss-20b', ...(process.env.GROQ_FALLBACK_MODELS || 'openai/gpt-oss-120b,qwen/qwen3.8-27b').split(',')]
+  .map((model) => model.trim()).filter((model, index, all) => model && all.indexOf(model) === index);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+class GroqError extends Error {
+  constructor(status, message) { super(`Groq ${status}: ${message}`); this.status = status; }
+}
+
+async function groqOnce(model, messages, tools) {
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: process.env.GROQ_MODEL || 'openai/gpt-oss-20b', messages, tools, tool_choice: 'auto', temperature: 0.1, max_completion_tokens: 900 }),
+    body: JSON.stringify({ model, messages, tools, tool_choice: 'auto', temperature: 0.1, max_completion_tokens: 900 }),
     signal: AbortSignal.timeout(25_000),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`Groq ${response.status}: ${body.error?.message || 'error de servicio'}`);
+  if (!response.ok) throw new GroqError(response.status, body.error?.message || 'error de servicio');
   return body.choices?.[0]?.message;
+}
+
+async function groq(messages, tools, state) {
+  let lastError = null;
+  for (let index = state.modelIndex; index < MODELS.length; index++) {
+    const model = MODELS[index];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const message = await groqOnce(model, messages, tools);
+        state.modelIndex = index; // el resto de rondas sigue con el modelo que respondió
+        return message;
+      } catch (error) {
+        lastError = error;
+        const waitSeconds = Number(String(error.message).match(/try again in ([\d.]+)s/i)?.[1]);
+        if (error.status === 429 && attempt === 0 && Number.isFinite(waitSeconds) && waitSeconds <= 8) {
+          await sleep(Math.ceil(waitSeconds * 1000) + 250);
+          continue;
+        }
+        if (error.status === 429 || error.status === 413 || error.status >= 500 || error.status === 400) break;
+        throw error;
+      }
+    }
+    console.warn('[assistant/chat] modelo sin cupo, se prueba el siguiente:', model, lastError?.message);
+  }
+  throw lastError || new Error('Groq no respondió');
+}
+
+// Un resultado de herramienta nunca debe superar ~1.5k tokens: si una lista
+// es muy larga se recorta y se avisa al modelo cuántas quedaron fuera.
+function toolContent(result) {
+  let text = JSON.stringify(result);
+  if (text.length <= 6000) return text;
+  const listKey = ['recommendations', 'markets'].find((key) => Array.isArray(result?.[key]));
+  if (listKey) {
+    const list = result[listKey];
+    let keep = list.length;
+    while (keep > 1 && text.length > 6000) {
+      keep = Math.floor(keep * 0.75);
+      text = JSON.stringify({ ...result, [listKey]: list.slice(0, keep), truncated: `Se muestran ${keep} de ${list.length}, ordenados por probabilidad.` });
+    }
+    return text;
+  }
+  return text.slice(0, 6000);
 }
 
 export async function POST(request) {
@@ -46,18 +101,21 @@ export async function POST(request) {
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: 'Conversación inválida' }, { status: 400 });
   const paidAccess = await userHasActivePlan(user);
-  const messages = [{ role: 'system', content: buildSystemPrompt() }, ...parsed.data.messages];
+  // Solo las últimas 10 intervenciones: el historial completo gastaba el cupo por minuto.
+  const messages = [{ role: 'system', content: buildSystemPrompt() }, ...parsed.data.messages.slice(-10)];
+  const state = { modelIndex: 0 };
   try {
     for (let round = 0; round < 4; round++) {
-      const answer = await groq(messages, CF_ASSISTANT_TOOLS);
+      const answer = await groq(messages, CF_ASSISTANT_TOOLS, state);
       if (!answer) throw new Error('Groq no devolvió respuesta');
-      messages.push(answer);
+      // Groq rechaza campos extra (reasoning, etc.) al reenviar el turno del asistente.
+      messages.push({ role: 'assistant', content: answer.content || '', ...(answer.tool_calls?.length ? { tool_calls: answer.tool_calls } : {}) });
       if (!answer.tool_calls?.length) return Response.json({ answer: answer.content || 'No encontré información para responder.' });
       for (const call of answer.tool_calls) {
         let args = {};
         try { args = JSON.parse(call.function?.arguments || '{}'); } catch {}
         const result = await executeAssistantTool(call.function?.name, args, { paidAccess });
-        messages.push({ role: 'tool', tool_call_id: call.id, name: call.function?.name, content: JSON.stringify(result) });
+        messages.push({ role: 'tool', tool_call_id: call.id, name: call.function?.name, content: toolContent(result) });
       }
     }
     return Response.json({ answer: 'No pude completar la consulta con los datos disponibles.' });
