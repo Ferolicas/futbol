@@ -369,7 +369,16 @@ export async function runBaseballLive(payload = {}) {
   const states = detailed.filter(r => r.ok && r.value).map(r => r.value);
 
   // 4) El feed vivo enriquece el snapshot de schedule con conteo y bases.
+  // outs/balls/strikes/bases SOLO existen en este feed detallado (el
+  // schedule de arriba no los trae) — antes nunca se persistían, así que
+  // la vista inicial (REST) nunca tenía diamante; solo aparecía una vez
+  // que llegaba la primera actualización por WebSocket con el estado en
+  // memoria de este mismo tick. Guardarlos acá hace que el primer fetch
+  // ya traiga el diamante real, sin esperar el próximo tick del worker.
   await mapPool(states, 8, async (s) => {
+    const boxscore = boxscoreMap[Number(s.gamePk)] || null;
+    const homeStats = boxscore ? extractMlbTeamResultStats(boxscore, 'home') : null;
+    const awayStats = boxscore ? extractMlbTeamResultStats(boxscore, 'away') : null;
     const { error } = await supabaseAdmin.from('baseball_match_results').upsert({
       fixture_id: s.gamePk,
       league_id: Number(s.sportId || 1),
@@ -385,6 +394,12 @@ export async function runBaseballLive(payload = {}) {
       home_errors: s.home?.errors ?? null,
       away_errors: s.away?.errors ?? null,
       innings: s.innings || null,
+      ...(homeStats ? { home_stats: homeStats } : {}),
+      ...(awayStats ? { away_stats: awayStats } : {}),
+      outs: s.outs ?? null,
+      balls: s.balls ?? null,
+      strikes: s.strikes ?? null,
+      bases: s.bases || null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'fixture_id' });
     if (error) throw new Error(`upsert ${s.gamePk}: ${error.message || error}`);
