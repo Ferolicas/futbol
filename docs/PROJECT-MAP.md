@@ -4,11 +4,12 @@ Actualizado: 2026-10-03 · Next 16, membresías fail-closed, consentimiento lega
 
 ## Identidad y stack
 
-CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combinadas y mercados estadísticos. Es una PWA móvil primero, servida por Next.js 16.3 desde el VPS mediante PM2/Caddy.
+CF Análisis vende acceso recurrente a análisis deportivos, marcadores, combinadas y mercados estadísticos. La web/PWA móvil primero se sirve con Next.js 16.3 desde el VPS mediante PM2/Caddy y comparte API con la app Expo nativa de Android/iOS.
 
 | Área | Implementación |
 |---|---|
 | Web/API | Next.js 16.3 App Router, React 19.2, JavaScript |
+| Android/iOS | Expo SDK 57, React Native 0.86, TypeScript, EAS Build |
 | Datos | PostgreSQL 17, `pg`, wrapper `pgAdmin` |
 | Auth | bcrypt, JWT HS256 y sesiones revocables en PostgreSQL |
 | Cache/realtime | Redis + worker TypeScript/WebSocket |
@@ -212,6 +213,28 @@ el fragmento de la URL (no llega al access log), dura una hora, se consume con
 válido revoca todas las sesiones existentes.
 
 Tras login o registro, las pantallas cliente llaman `refreshSession()` antes de navegar. El layout autenticado resuelve sesión y acceso en servidor antes de montar el encabezado mínimo compartido.
+
+### App nativa Android/iOS
+
+`apps/cfanalisis-mobile` consume exclusivamente `https://cfanalisis.com/api/*`
+y `wss://worker.cfanalisis.com/ws` en builds de producción. Conserva
+`__Host-cf_session` y el desafío temporal `__Host-cf_mfa` en SecureStore con
+accesibilidad `WHEN_UNLOCKED_THIS_DEVICE_ONLY`; Android no permite backup de
+la app ni tráfico cleartext y iOS mantiene ATS sin cargas arbitrarias ni
+intercambio de archivos.
+
+Registro espera verificación de email antes de crear sesión. Los correos de
+verificación y reset contienen enlace web y deep link `cfanalisis:///...`,
+siempre con el token en el fragmento. Admin/owner completa el código MFA en la
+app. “Cambiar contraseña” solo solicita el enlace al correo registrado; la
+pantalla de reset pide clave nueva y confirmación, consume el token una vez y
+limpia la sesión local después de que el servidor revoque todas las sesiones.
+
+La aceptación legal bloqueante y las casillas del registro usan los mismos
+documentos/versiones del backend. El menú `Legal y comunicaciones` abre los
+documentos canónicos y permite consultar, otorgar o retirar marketing mediante
+`/api/legal/marketing` con evidencia `source: mobile`. `app.json`, el plugin
+`plugins/with-security.js` y EAS generan ambos binarios desde el mismo código.
 
 ### Apuesta diaria en Telegram
 

@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Linking, Modal, Pressable, View } from 'react-native';
+import { Modal, Pressable, View } from 'react-native';
 import { CheckSquare2, Square } from 'lucide-react-native';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import { AppText, Banner, Button } from '@/components/ui';
 import { colors } from '@/theme/tokens';
+import { LEGAL_DOCUMENTS, openLegalDocument } from '@/lib/legal';
 
 export function LegalAcceptanceGate() {
   const { user, refreshSession, signOut } = useAuth();
@@ -37,9 +38,9 @@ export function LegalAcceptanceGate() {
           <AppText variant="title">Documentos legales</AppText>
           <AppText tone="muted">Para continuar, confirma que eres mayor de 18 años y acepta los Términos, Privacidad y Cookies.</AppText>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14 }}>
-            {['terminos', 'privacidad', 'cookies'].map((document) => (
-              <Pressable key={document} onPress={() => Linking.openURL(`https://cfanalisis.com/${document}`)}>
-                <AppText tone="accent" weight="bold">{document[0].toUpperCase() + document.slice(1)}</AppText>
+            {LEGAL_DOCUMENTS.map((document) => (
+              <Pressable key={document.key} onPress={() => openLegalDocument(document.url)}>
+                <AppText tone="accent" weight="bold">{document.label}</AppText>
               </Pressable>
             ))}
           </View>

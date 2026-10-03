@@ -21,11 +21,15 @@ export default function SignInScreen() {
     setError('');
     setLoading(true);
     try {
-      await signIn(email.trim(), password);
-      router.replace('/dashboard');
+      const result = await signIn(email.trim(), password);
+      router.replace(result.mfaRequired ? '/mfa' : '/dashboard');
     } catch (cause: any) {
       const info = cause instanceof ApiError ? (cause.info as any) : null;
       if (info?.needsReset) setError('Tu cuenta fue migrada. Usa "¿Olvidaste tu contraseña?" para crear una nueva.');
+      else if (info?.verificationRequired) {
+        setError(cause?.message || 'Debes verificar tu correo antes de entrar.');
+        router.push('/verify-email');
+      }
       else setError(cause?.message || 'Email o contraseña incorrectos');
     } finally {
       setLoading(false);
@@ -44,9 +48,9 @@ export default function SignInScreen() {
         </View>
       )}
     >
-      <Input label="Correo electrónico" icon={<Mail size={18} color={colors.muted} />} value={email} onChangeText={setEmail} placeholder="tu@correo.com" keyboardType="email-address" autoCapitalize="none" autoComplete="email" textContentType="emailAddress" />
+      <Input label="Correo electrónico" icon={<Mail size={18} color={colors.muted} />} value={email} onChangeText={setEmail} placeholder="tu@correo.com" keyboardType="email-address" autoCapitalize="none" autoComplete="email" textContentType="emailAddress" maxLength={254} />
       <View style={{ gap: 6 }}>
-        <Input label="Contraseña" icon={<LockKeyhole size={18} color={colors.muted} />} value={password} onChangeText={setPassword} placeholder="Introduce tu contraseña" secureTextEntry autoComplete="password" textContentType="password" onSubmitEditing={submit} returnKeyType="go" />
+        <Input label="Contraseña" icon={<LockKeyhole size={18} color={colors.muted} />} value={password} onChangeText={setPassword} placeholder="Introduce tu contraseña" secureTextEntry autoComplete="password" textContentType="password" onSubmitEditing={submit} returnKeyType="go" maxLength={256} />
         <Link href="/forgot-password" asChild><Pressable style={{ alignSelf: 'flex-end' }}><AppText variant="caption" tone="accent">¿La olvidaste?</AppText></Pressable></Link>
       </View>
       {error ? <Banner tone="error" message={error} /> : null}

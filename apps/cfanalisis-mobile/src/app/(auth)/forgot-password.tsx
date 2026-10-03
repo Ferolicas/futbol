@@ -14,7 +14,7 @@ export default function ForgotPasswordScreen() {
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
-    if (!email.trim()) { setError('Email requerido'); return; }
+    if (!email.trim() || email.trim().length > 254) { setError('Introduce un email válido'); return; }
     setError('');
     setLoading(true);
     try {
@@ -35,7 +35,7 @@ export default function ForgotPasswordScreen() {
 
   if (sent) {
     return (
-      <AuthShell eyebrow="Revisa tu correo" title="Enlace enviado" subtitle="Si tu email está registrado, recibirás un enlace para restablecer tu contraseña en los próximos minutos. El enlace abre la web de CF Análisis; después vuelve aquí e inicia sesión." footer={back}>
+      <AuthShell eyebrow="Revisa tu correo" title="Enlace enviado" subtitle="Si tu email está registrado, recibirás un enlace para restablecer tu contraseña. Puedes abrirlo directamente en la app o usar la web." footer={back}>
         <View />
       </AuthShell>
     );
@@ -43,7 +43,7 @@ export default function ForgotPasswordScreen() {
 
   return (
     <AuthShell eyebrow="Recuperar acceso" title="Restablecer contraseña" subtitle="Ingresa tu email y te enviaremos un enlace para crear una nueva contraseña." footer={back}>
-      <Input label="Correo electrónico" icon={<Mail size={18} color={colors.muted} />} value={email} onChangeText={setEmail} placeholder="Introduce tu correo electrónico" keyboardType="email-address" autoCapitalize="none" autoComplete="email" onSubmitEditing={submit} returnKeyType="send" />
+      <Input label="Correo electrónico" icon={<Mail size={18} color={colors.muted} />} value={email} onChangeText={setEmail} placeholder="Introduce tu correo electrónico" keyboardType="email-address" autoCapitalize="none" autoComplete="email" onSubmitEditing={submit} returnKeyType="send" maxLength={254} />
       {error ? <Banner tone="error" message={error} /> : null}
       <Button title={loading ? 'Enviando…' : 'Enviar enlace'} size="lg" loading={loading} onPress={submit} />
     </AuthShell>

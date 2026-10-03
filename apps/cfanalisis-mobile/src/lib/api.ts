@@ -1,5 +1,5 @@
 import { API_URL } from './config';
-import { getSessionToken, parseSessionCookie, sessionCookieHeader, setSessionToken } from './session';
+import { applyAuthCookies, authCookieHeader, clearAuthTokens, parseAuthCookies } from './session';
 
 export class ApiError extends Error {
   status: number;
@@ -39,9 +39,11 @@ async function readBody(response: Response): Promise<Json | string | null> {
 }
 
 export async function apiFetch<T = any>(path: string, options: RequestOptions = {}): Promise<T> {
+  if (!/^\/api(?:\/|$)/.test(path) || /[\r\n]/.test(path)) {
+    throw new ApiError('Ruta de API no permitida', 0);
+  }
   const { method = 'GET', body, headers = {}, timeoutMs = 25_000, allowUnauthorized = false } = options;
-  const token = await getSessionToken();
-  const cookie = sessionCookieHeader(token);
+  const cookie = await authCookieHeader();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
@@ -54,8 +56,9 @@ export async function apiFetch<T = any>(path: string, options: RequestOptions = 
       headers: {
         Accept: 'application/json',
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(cookie ? { Cookie: cookie } : {}),
         ...headers,
+        // Ningún consumidor interno puede reemplazar la sesión protegida.
+        ...(cookie ? { Cookie: cookie } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: controller.signal,
@@ -67,13 +70,13 @@ export async function apiFetch<T = any>(path: string, options: RequestOptions = 
   }
   clearTimeout(timer);
 
-  // Login/registro emiten la cookie de sesión; la conservamos como token.
+  // Login, MFA, verificación y logout pueden crear o borrar cookies.
   const setCookie = response.headers.get('set-cookie');
-  const fresh = parseSessionCookie(setCookie);
-  if (fresh && fresh !== token) await setSessionToken(fresh);
+  await applyAuthCookies(parseAuthCookies(setCookie));
 
   const payload = await readBody(response);
   if (response.status === 401 && !allowUnauthorized) {
+    await clearAuthTokens();
     for (const listener of unauthorizedListeners) listener();
     throw new ApiError('Sesión no válida', 401, payload);
   }

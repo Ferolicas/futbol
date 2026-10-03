@@ -3,7 +3,7 @@ import { Modal, Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronDown, KeyRound, LogOut, MessageCircle, Search, Sparkles } from 'lucide-react-native';
+import { ChevronDown, FileText, KeyRound, LogOut, MessageCircle, Search, Sparkles } from 'lucide-react-native';
 import { AppText } from '@/components/ui';
 import { UpgradeButton } from '@/components/analysis/FreeAccess';
 import { useAuth } from '@/lib/auth-context';
@@ -68,6 +68,10 @@ export function DashboardHeader() {
           <Pressable style={styles.menuItem} onPress={() => { setMenuOpen(false); openPasswordModal(); }}>
             <KeyRound size={17} color={colors.accent} />
             <AppText variant="label">Cambiar contraseña</AppText>
+          </Pressable>
+          <Pressable style={styles.menuItem} onPress={() => { setMenuOpen(false); router.push('/legal'); }}>
+            <FileText size={17} color={colors.accent} />
+            <AppText variant="label">Legal y comunicaciones</AppText>
           </Pressable>
           {isFree && (
             <Pressable style={styles.menuItem} onPress={() => { setMenuOpen(false); router.push('/plans'); }}>

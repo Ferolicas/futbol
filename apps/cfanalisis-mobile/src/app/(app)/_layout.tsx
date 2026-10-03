@@ -21,6 +21,7 @@ export default function AppLayout() {
         <Stack.Screen name="assistant" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         <Stack.Screen name="plans" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="payment-status" options={{ animation: 'fade' }} />
+        <Stack.Screen name="legal" options={{ animation: 'slide_from_right' }} />
       </Stack>
       <PlansModal />
       <ChangePasswordModal />

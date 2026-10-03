@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Linking, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { ArrowRight, CheckSquare2, LockKeyhole, Mail, Square, UserRound } from 'lucide-react-native';
 import { AuthShell } from '@/components/AuthShell';
@@ -7,6 +7,7 @@ import { AppText, Banner, Button, Input } from '@/components/ui';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api';
 import { colors } from '@/theme/tokens';
+import { LEGAL_DOCUMENTS, openLegalDocument } from '@/lib/legal';
 
 export default function SignUpScreen() {
   const { signUp } = useAuth();
@@ -30,7 +31,7 @@ export default function SignUpScreen() {
     setLoading(true);
     try {
       await signUp(name.trim(), email.trim(), password, marketingConsent);
-      router.replace('/dashboard');
+      router.replace('/verify-email');
     } catch (cause: any) {
       setError(cause?.message || 'Error al registrarse. Intenta de nuevo.');
       setEmailTaken(cause instanceof ApiError && cause.status === 409);
@@ -52,16 +53,16 @@ export default function SignUpScreen() {
       )}
     >
       <Input label="Nombre" icon={<UserRound size={18} color={colors.muted} />} value={name} onChangeText={setName} placeholder="Tu nombre" autoComplete="name" textContentType="name" maxLength={60} />
-      <Input label="Correo electrónico" icon={<Mail size={18} color={colors.muted} />} value={email} onChangeText={setEmail} placeholder="tu@correo.com" keyboardType="email-address" autoCapitalize="none" autoComplete="email" textContentType="emailAddress" />
-      <Input label="Contraseña" hint="Usa al menos 8 caracteres." icon={<LockKeyhole size={18} color={colors.muted} />} value={password} onChangeText={setPassword} placeholder="Mínimo 8 caracteres" secureTextEntry autoComplete="new-password" textContentType="newPassword" onSubmitEditing={submit} returnKeyType="go" />
+      <Input label="Correo electrónico" icon={<Mail size={18} color={colors.muted} />} value={email} onChangeText={setEmail} placeholder="tu@correo.com" keyboardType="email-address" autoCapitalize="none" autoComplete="email" textContentType="emailAddress" maxLength={254} />
+      <Input label="Contraseña" hint="Usa al menos 8 caracteres." icon={<LockKeyhole size={18} color={colors.muted} />} value={password} onChangeText={setPassword} placeholder="Mínimo 8 caracteres" secureTextEntry autoComplete="new-password" textContentType="newPassword" onSubmitEditing={submit} returnKeyType="go" maxLength={256} />
       <Pressable onPress={() => setAcceptedLegal((value) => !value)} style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
         {acceptedLegal ? <CheckSquare2 size={20} color={colors.accent} /> : <Square size={20} color={colors.muted} />}
         <AppText tone="muted" style={{ flex: 1 }}>Soy mayor de 18 años y acepto los documentos legales obligatorios.</AppText>
       </Pressable>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
-        {['terminos', 'privacidad', 'cookies'].map((document) => (
-          <Pressable key={document} onPress={() => Linking.openURL(`https://cfanalisis.com/${document}`)}>
-            <AppText tone="accent" weight="bold">{document[0].toUpperCase() + document.slice(1)}</AppText>
+        {LEGAL_DOCUMENTS.map((document) => (
+          <Pressable key={document.key} onPress={() => openLegalDocument(document.url)}>
+            <AppText tone="accent" weight="bold">{document.label}</AppText>
           </Pressable>
         ))}
       </View>

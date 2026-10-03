@@ -2,7 +2,7 @@
   "expo": {
     "name": "CF Análisis",
     "slug": "cfanalisis",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "cfanalisis",
@@ -13,11 +13,17 @@
       "supportsTablet": false,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-	"CFBundleDisplayName": "CF Analisis"
+        "CFBundleDisplayName": "CF Analisis",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false
+        },
+        "UIFileSharingEnabled": false,
+        "LSSupportsOpeningDocumentsInPlace": false
       }
     },
     "android": {
       "package": "com.cfanalisis.app",
+      "allowBackup": false,
       "adaptiveIcon": {
         "backgroundColor": "#03090f",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -28,7 +34,13 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store",
+      "./plugins/with-security",
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": false
+        }
+      ],
       [
         "expo-splash-screen",
         {
