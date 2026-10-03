@@ -43,6 +43,7 @@ export default function FerneyDashboard({ user }) {
   const [vpsStats, setVpsStats]   = useState(null);
   const [vpsError, setVpsError]   = useState(null);
   const [clientsOpen, setClientsOpen] = useState(false);
+  const [marketingOpen, setMarketingOpen] = useState(false);
 
   const fetchOnce = useCallback(async () => {
     try {
@@ -648,6 +649,10 @@ export default function FerneyDashboard({ user }) {
               <span>👥</span>
               <span>Clientes</span>
             </button>
+            <button onClick={() => setMarketingOpen(true)} className="fw-action-btn cyan">
+              <span>✉</span>
+              <span>Marketing</span>
+            </button>
             <button onClick={onReanalyze} disabled={!!actionBusy} className="fw-action-btn green">
               <span>{actionBusy === 'reanalyze' ? '⏳' : '↻'}</span>
               <span>{actionBusy === 'reanalyze' ? 'Encolando…' : `Re-analizar fútbol ${date}`}</span>
@@ -988,6 +993,7 @@ export default function FerneyDashboard({ user }) {
 
         {/* ── Modal clientes ── */}
         {clientsOpen && <ClientsModal onClose={() => setClientsOpen(false)} />}
+        {marketingOpen && <MarketingModal onClose={() => setMarketingOpen(false)} />}
 
         {/* ── Modal calibración ── */}
         {calibrationResult && (
@@ -1061,6 +1067,204 @@ export default function FerneyDashboard({ user }) {
         )}
       </div>
     </>
+  );
+}
+
+function MarketingModal({ onClose }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+  const [ctaLabel, setCtaLabel] = useState('');
+  const [ctaUrl, setCtaUrl] = useState('https://cfanalisis.com/');
+  const [inlineImages, setInlineImages] = useState([]);
+  const [attachments, setAttachments] = useState([]);
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState('');
+
+  useEffect(() => {
+    fetch('/api/admin/marketing', { cache: 'no-store' })
+      .then(async (response) => {
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+        setData(body);
+      })
+      .catch((cause) => setError(cause.message));
+  }, []);
+
+  useEffect(() => () => {
+    inlineImages.forEach((item) => URL.revokeObjectURL(item.url));
+  }, [inlineImages]);
+
+  const addFiles = (fileList, inline) => {
+    const accepted = Array.from(fileList || []).filter((file) => file.size > 0);
+    if (inline) {
+      const images = accepted.filter((file) => ['image/png', 'image/jpeg', 'image/gif'].includes(file.type));
+      setInlineImages((current) => [
+        ...current,
+        ...images.map((file) => ({ file, url: URL.createObjectURL(file) })),
+      ].slice(0, 8));
+      if (images.length !== accepted.length) setError('Las imágenes pegadas deben ser PNG, JPG o GIF.');
+    } else setAttachments((current) => [...current, ...accepted].slice(0, 8));
+  };
+
+  const onPaste = (event) => {
+    const files = Array.from(event.clipboardData?.files || []);
+    if (!files.length) return;
+    event.preventDefault();
+    addFiles(files, true);
+  };
+
+  const createCampaign = async () => {
+    if (!data?.count) { setError('No hay destinatarios con consentimiento vigente.'); return; }
+    if (!subject.trim() || message.trim().length < 10) { setError('Completa el asunto y el mensaje.'); return; }
+    if (!confirm(`¿Crear y enviar esta comunicación a ${data.count} cuenta(s) autorizada(s)?`)) return;
+    setSending(true);
+    setError('');
+    setResult('');
+    try {
+      const form = new FormData();
+      form.set('subject', subject);
+      form.set('message', message);
+      form.set('ctaLabel', ctaLabel);
+      form.set('ctaUrl', ctaLabel ? ctaUrl : '');
+      inlineImages.forEach(({ file }) => form.append('inlineImages', file));
+      attachments.forEach((file) => form.append('attachments', file));
+      const response = await fetch('/api/admin/marketing', { method: 'POST', body: form });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+      setResult(`Campaña creada para ${body.campaign.recipientCount} destinatario(s). El envío seguro ya quedó en cola.`);
+      setSubject('');
+      setMessage('');
+      setCtaLabel('');
+      inlineImages.forEach((item) => URL.revokeObjectURL(item.url));
+      setInlineImages([]);
+      setAttachments([]);
+      const refreshed = await fetch('/api/admin/marketing', { cache: 'no-store' }).then((res) => res.json());
+      setData(refreshed);
+    } catch (cause) {
+      setError(cause.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const needle = query.trim().toLowerCase();
+  const recipients = (data?.recipients || []).filter((row) => (
+    !needle || String(row.email || '').toLowerCase().includes(needle)
+      || String(row.name || '').toLowerCase().includes(needle)
+  ));
+
+  return (
+    <div className="fw-overlay" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="fw-modal">
+        <div className="fw-modal-header">
+          <h3 className="fw-modal-title">Marketing · {data?.count ?? '…'} consentimientos vigentes</h3>
+          <button onClick={onClose} className="fw-modal-close">✕ Cerrar</button>
+        </div>
+        <div className="fw-modal-body">
+          <p className="fw-modal-note">Esta es la única lista autorizada para descuentos o novedades. Las bajas desaparecen automáticamente.</p>
+          <div className="fw-cli-list">
+            <label className="fw-cli-name">Asunto
+              <input className="fw-cli-search" maxLength={140} value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Ej. Descuento especial de octubre" />
+            </label>
+            <label className="fw-cli-name">Mensaje
+              <textarea
+                className="fw-cli-search"
+                style={{ minHeight: 150, resize: 'vertical', marginTop: 7 }}
+                maxLength={5000}
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                onPaste={onPaste}
+                placeholder="Escribe el contenido. También puedes pegar aquí una imagen desde el portapapeles."
+              />
+            </label>
+            <div className="fw-cli-controls">
+              <label className="fw-cli-btn assign" style={{ cursor: 'pointer' }}>
+                Pegar o elegir imágenes
+                <input type="file" accept="image/png,image/jpeg,image/gif" multiple hidden onChange={(event) => addFiles(event.target.files, true)} />
+              </label>
+              <label className="fw-cli-btn assign" style={{ cursor: 'pointer' }}>
+                Adjuntar archivos
+                <input type="file" accept="image/png,image/jpeg,image/gif,application/pdf,text/plain,text/csv,.docx,.xlsx" multiple hidden onChange={(event) => addFiles(event.target.files, false)} />
+              </label>
+              <span className="fw-modal-note">Máx. 5 MB por archivo, 12 MB en total.</span>
+            </div>
+            {inlineImages.length ? (
+              <div className="fw-cli-controls">
+                {inlineImages.map((item, index) => (
+                  <button key={`${item.file.name}-${index}`} type="button" className="fw-run-btn" onClick={() => {
+                    URL.revokeObjectURL(item.url);
+                    setInlineImages((current) => current.filter((_, itemIndex) => itemIndex !== index));
+                  }}>
+                    <img src={item.url} alt="" style={{ width: 54, height: 38, objectFit: 'cover', display: 'block', marginBottom: 4 }} />
+                    {item.file.name} · quitar
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {attachments.length ? (
+              <div className="fw-cli-controls">
+                {attachments.map((file, index) => (
+                  <button key={`${file.name}-${index}`} type="button" className="fw-run-btn" onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
+                    📎 {file.name} · quitar
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <div className="fw-cli-controls">
+              <input className="fw-cli-search" style={{ flex: 1 }} maxLength={60} value={ctaLabel} onChange={(event) => setCtaLabel(event.target.value)} placeholder="Texto del botón (opcional)" />
+              <input className="fw-cli-search" style={{ flex: 2 }} value={ctaUrl} onChange={(event) => setCtaUrl(event.target.value)} placeholder="https://cfanalisis.com/..." />
+            </div>
+            <div className="fw-cli-row" style={{ alignItems: 'flex-start' }}>
+              <div className="fw-cli-info">
+                <div className="fw-cli-name">Vista previa</div>
+                <div className="fw-cli-email">De: CF Análisis &lt;info@cfanalisis.com&gt;</div>
+                <h4 style={{ margin: '14px 0 8px', color: 'var(--t1)' }}>{subject || 'Asunto de la comunicación'}</h4>
+                <p style={{ whiteSpace: 'pre-wrap', color: 'var(--t2)', lineHeight: 1.6 }}>{message || 'El mensaje aparecerá aquí.'}</p>
+              </div>
+            </div>
+            {result ? <div className="fw-action-msg ok">✓ {result}</div> : null}
+            <button type="button" className="fw-action-btn green" disabled={sending || !data?.count} onClick={createCampaign}>
+              <span>{sending ? '⏳' : '✉'}</span>
+              <span>{sending ? 'Creando campaña…' : `Revisar y enviar a ${data?.count || 0}`}</span>
+            </button>
+          </div>
+          <div className="fw-section">
+            <h4 className="fw-section-title">Campañas recientes</h4>
+            <div className="fw-cli-list">
+              {(data?.campaigns || []).map((campaign) => (
+                <div key={campaign.id} className="fw-cli-row">
+                  <div className="fw-cli-info">
+                    <div className="fw-cli-name">{campaign.subject}</div>
+                    <div className="fw-cli-email">{fmtDateTime(campaign.created_at)} · {campaign.sent_count}/{campaign.recipient_count} enviados · {campaign.failed_count} fallidos</div>
+                  </div>
+                  <span className={`fw-badge ${campaign.status === 'completed' ? 'green' : campaign.status === 'completed_with_errors' ? 'red' : 'cyan'}`}>{campaign.status}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <input className="fw-cli-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por email o nombre…" />
+          {error && <div className="fw-error"><span>⚠</span> {error}</div>}
+          {!data && !error ? <div className="fw-empty-card">Cargando consentimientos…</div> : null}
+          {data ? (
+            <div className="fw-cli-list">
+              {recipients.length === 0 ? <div className="fw-empty-card">No hay destinatarios autorizados.</div> : null}
+              {recipients.map((row) => (
+                <div key={row.id} className="fw-cli-row">
+                  <div className="fw-cli-info">
+                    <div className="fw-cli-name">{row.name || '(sin nombre)'}</div>
+                    <div className="fw-cli-email">{row.email} · aceptó {fmtDateTime(row.consented_at)} · versión {row.policy_version}</div>
+                  </div>
+                  <span className="fw-badge green">AUTORIZADO</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }
 

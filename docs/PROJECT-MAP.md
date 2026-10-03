@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-09-21 · Base: `1c23a86` · Next 16, transparencia pública, sellado externo y operación enterprise
+Actualizado: 2026-10-03 · Next 16, membresías fail-closed, consentimiento legal y marketing autorizado
 
 ## Identidad y stack
 
@@ -29,6 +29,9 @@ Las creatividades listas para campañas se guardan en `public/marketing/`.
 | `/sign-in` | `app/sign-in/[[...sign-in]]/page.js` | No | Login PG |
 | `/forgot-password` | `app/forgot-password/page.js` | No | Solicitud de recuperación |
 | `/reset-password` | `app/reset-password/page.js` | No | Cambio de contraseña con token |
+| `/terminos`, `/privacidad`, `/cookies` | `app/*/page.js` | No | Documentos legales versionados y enlazados desde registro, footer y emails |
+| `/preferencias/comunicaciones` | `app/preferencias/comunicaciones/` | Sí | Alta o baja del consentimiento promocional |
+| `/preferencias/comunicaciones/baja` | `app/preferencias/comunicaciones/baja/` | No, token firmado | Baja directa desde un correo promocional |
 | `/planes` | `app/planes/page.js` | Sí | Selección y apertura de checkout |
 | `/pago/estado` | `app/pago/estado/` | Sí | Confirmación durable y recuperación del pago |
 | `/dashboard` | `app/dashboard/layout.js`, `page.js` | Sesión (Free/Pro) | Panel único de fútbol, béisbol, baloncesto y fútbol americano |
@@ -45,14 +48,14 @@ Las creatividades listas para campañas se guardan en `public/marketing/`.
 | `/api/admin/prediction-history` | `app/api/admin/prediction-history/route.js` | Admin/owner | Histórico, filtros y ranking exacto de mercados sin recalcular resultados |
 | `GET /api/public/rendimiento` | `app/api/public/rendimiento/route.js` | Pública, limitada | Estadísticas y ranking de mercados finalizados más recomendaciones selladas paginadas, con caché Redis de cinco minutos |
 | `/admin` | `app/admin/` | Admin/owner | Operación y clientes |
-| `/ferney` | `app/ferney/` | Privada | Auditoría del propietario |
+| `/ferney` | `app/ferney/` | Privada | Auditoría del propietario y campañas para consentimientos vigentes |
 | `/ferney/informes` | `app/ferney/informes/` | Admin/owner | Informes interactivos móviles de fútbol y MLB |
 
 ## Endpoints críticos
 
 | Método y ruta | Archivo | Consumidor | Datos/efecto |
 |---|---|---|---|
-| `POST /api/register` | `app/api/register/route.js` | Registro | Crea `users`, perfil y sesión |
+| `POST /api/register` | `app/api/register/route.js` | Registro | Crea usuario, perfil y prueba legal atómicamente; marketing es opcional |
 | `POST /api/auth/login` | `app/api/auth/login/route.js` | Login | Valida bcrypt y crea sesión |
 | `GET /api/auth/session` | `app/api/auth/session/route.js` | Provider | Devuelve usuario/perfil actual |
 | `GET /api/realtime/token` | `app/api/realtime/token/route.js` | Cliente WS autenticado | Emite JWT efímero con topics limitados por usuario/rol |
@@ -67,6 +70,10 @@ Las creatividades listas para campañas se guardan en `public/marketing/`.
 | `DELETE /api/payments/attempt` | `app/api/payments/attempt/route.js` | Checkout/estado | Cancela primero en proveedor y libera intento |
 | `POST /api/payments/cancel` | `app/api/payments/cancel/route.js` | Cuenta | Cancela renovación conservando periodo pagado |
 | `GET/POST /api/cron/payments` | `app/api/cron/payments/route.js` | Cron VPS | Reconcilia operaciones, perfiles y emails |
+| `POST /api/legal/accept` | `app/api/legal/accept/route.js` | Sesión | Registra aceptación vigente de una cuenta anterior |
+| `GET/POST /api/legal/marketing` | `app/api/legal/marketing/route.js` | Sesión | Consulta o cambia la preferencia promocional append-only |
+| `POST /api/legal/marketing/unsubscribe` | `app/api/legal/marketing/unsubscribe/route.js` | Token firmado | Retira marketing desde el propio correo |
+| `GET/POST /api/admin/marketing` | `app/api/admin/marketing/route.js` | Admin/owner | Lista consentidos y crea campañas con imágenes/adjuntos |
 | `GET/POST /api/cron/publish-combinada` | `app/api/cron/publish-combinada/route.js` | n8n | Elige y guarda la apuesta Telegram dentro de las reglas comerciales |
 | `GET /api/cron/personal-market-report` | `app/api/cron/personal-market-report/route.js` | Compatibilidad | CSV de córners de 1.ª parte protegido por secreto de cron |
 | `GET /api/admin/personal-market-report` | `app/api/admin/personal-market-report/route.js` | Informe privado | Descarga el CSV de córners 1T de fútbol o el catálogo MLB para la fecha elegida |
@@ -97,6 +104,12 @@ Las migraciones viven en `scripts/`. Tablas clave:
 - `payment_attempts`: intención durable, recurso del proveedor, estado y entrega de email.
 - `payment_webhook_events`: idempotencia persistente y reintentos de webhooks.
 - `payment_exchange_rates`: última tasa EUR→COP válida para tolerar caídas del proveedor FX.
+- `legal_acceptances`: prueba versionada e inmutable de Términos, privacidad,
+  tratamiento, cookies y mayoría de edad; IP y user-agent solo se guardan como hash.
+- `marketing_consent_events`: historial append-only de altas y bajas; el último
+  evento determina la preferencia actual.
+- `marketing_campaigns`, `marketing_campaign_deliveries` y
+  `marketing_campaign_assets`: cola durable, destinatarios, resultados y adjuntos.
 - `fixtures_cache`, `match_schedule`, `match_results`, `match_analysis`, `match_predictions`: núcleo de fútbol.
 - `baseball_*`: MLB más hechos, jugadores, predicciones y pesos empíricos
   propios en `baseball_engine_*`. Filas históricas de MiLB pueden permanecer
@@ -136,7 +149,9 @@ dos frames para absorber el reajuste de filas y la inercia de Safari.
 
 1. Home obtiene `/api/detect-country` y `/api/currency`.
 2. El CTA genera `plan` validado + `intent` opaca (`lib/purchase-flow.js`).
-3. Registro llama `/api/register`; `signupUser` crea usuario, perfil, sesión y cookie.
+3. Registro exige la casilla legal y ofrece marketing separado, desmarcado y
+   opcional. `signupUser` confirma usuario, perfil y aceptación en una sola
+   transacción; solo después crea sesión y cookie.
 4. Registro redirige a `/dashboard` (conserva plan/intención en la URL si existían). El modal permite elegir Pro o continuar gratis.
 5. `/planes` valida auth e intención, resuelve país/moneda y consume la intención una sola vez.
 6. Colombia abre `MercadoPagoModal`; otros países crean una suscripción incompleta y abren `PaymentModal`.
@@ -155,7 +170,23 @@ El Brick recoge el método → `subscribe` valida sesión/plan/geografía y reca
 
 ### Fiabilidad de pagos
 
-`lib/payment-store.js` serializa la activación con advisory lock y confirma perfil + intento en una sola transacción. Los cambios de estado están ligados al proveedor y al ID de suscripción vigente: un webhook atrasado no puede pisar una compra posterior. `lib/payment-reconcile.js` recupera webhooks perdidos, timeouts y respuestas cortadas. `scripts/run-payment-reconcile.sh` llama el cron cada dos minutos; perfiles sanos se verifican cada seis horas y `past_due` cada quince minutos para no castigar APIs externas. Los emails de activación se reclaman una sola vez y se reintentan hasta seis veces.
+`lib/payment-store.js` serializa la activación con advisory lock y confirma perfil + intento en una sola transacción. Los cambios de estado están ligados al proveedor, al ID de suscripción y al ID del cobro vigente: un webhook atrasado o duplicado no puede reactivar una cuenta. El primer fallo de renovación cambia el perfil a `inactive` + `free`; Stripe o Mercado Pago pueden seguir reintentando y solo un cobro nuevo confirmado restaura el plan. Todo acceso de usuario exige una fecha futura real. Las asignaciones manuales semanal/mensual/trimestral/semestral/anual derivan vencimiento desde el inicio y el barrido del cron desactiva lo vencido o sin fecha. `lib/payment-reconcile.js` recupera webhooks perdidos, timeouts y respuestas cortadas. `scripts/run-payment-reconcile.sh` llama el cron cada dos minutos; perfiles sanos se verifican cada seis horas y cuentas inactivas con proveedor cada quince minutos. Los emails de activación se reclaman una sola vez y se reintentan hasta seis veces.
+
+### Legal, cookies y comunicaciones
+
+`LEGAL_DOCUMENT_VERSION` identifica el juego vigente. Las cuentas creadas antes
+de esa versión reciben un modal bloqueante en su próximo inicio; no se fabrican
+aceptaciones históricas. El registro y los checkouts fallan cerrados si falta la
+prueba. Actualmente solo se usan tecnologías esenciales, por lo que el aviso de
+cookies informa y enlaza la política sin simular un consentimiento opcional.
+
+El botón Marketing de `/ferney` solo muestra destinatarios cuyo último evento
+es `consent`. Al crear una campaña se congela la lista inicial, pero la cola
+vuelve a comprobar cada consentimiento justo antes de enviar. El remitente es
+`CF Análisis <info@cfanalisis.com>`; todos los correos incluyen Términos,
+Privacidad y Cookies, y los promocionales añaden baja visible y cabeceras
+`List-Unsubscribe`. Imágenes inline y adjuntos se validan por tipo y tamaño y
+se envían con una clave de idempotencia por destinatario.
 
 ### Auth
 

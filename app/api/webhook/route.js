@@ -19,6 +19,7 @@ import {
   updatePaymentAttempt,
 } from '../../../lib/payment-store';
 import { reconcileStripeAttempt } from '../../../lib/payment-reconcile';
+import { hasActiveEntitlement } from '../../../lib/entitlements';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,7 +51,7 @@ async function handleSubscription(subscription) {
   const plan = subscription.metadata?.plan || owner.plan;
   if (!isValidPlan(plan)) throw new Error(`Invalid Stripe plan for subscription ${subscription.id}`);
 
-  if (owner.attempt && owner.attempt.status !== 'succeeded') {
+  if (owner.attempt) {
     return reconcileStripeAttempt(owner.attempt);
   }
 
@@ -60,10 +61,11 @@ async function handleSubscription(subscription) {
     // Los eventos de suscripcion no prueban por si solos un nuevo cobro y no
     // deben mover last_payment_at. La factura pagada es la unica que registra
     // dinero; aqui solo sincronizamos estado y vigencia.
+    const currentProfile = await getPaymentAccessProfile(owner.userId);
     return syncSubscriptionStatus({
       userId: owner.userId,
       provider: 'stripe',
-      status: 'active',
+      status: hasActiveEntitlement(currentProfile) ? 'active' : 'inactive',
       customerId: stringId(subscription.customer),
       subscriptionId: subscription.id,
       periodEnd,
@@ -81,7 +83,7 @@ async function handleSubscription(subscription) {
   return syncSubscriptionStatus({
     userId: owner.userId,
     provider: 'stripe',
-    status: appStatus,
+    status: keepPaidPeriod ? 'cancelled' : 'inactive',
     customerId: stringId(subscription.customer),
     subscriptionId: subscription.id,
     periodEnd,
@@ -109,7 +111,7 @@ async function handlePaidInvoice(invoice) {
     amount: invoice.amount_paid,
     currency: invoice.currency,
     periodEnd: stripeSubscriptionPeriodEnd(subscription),
-    providerStatus: subscription.status,
+    providerStatus: invoice.status,
     cancelAtPeriodEnd: subscription.cancel_at_period_end,
   });
 }
@@ -136,10 +138,9 @@ async function handleFailedInvoice(invoice, eventType) {
   await syncSubscriptionStatus({
     userId: owner.userId,
     provider: 'stripe',
-    // Una accion requerida o una factura anulada no debe cortar acceso si
-    // Stripe aun considera vigente la suscripcion (por ejemplo, una factura
-    // de renovacion que sigue dentro del periodo pagado).
-    status: appStatus === 'active' ? 'active' : 'past_due',
+    // El primer fallo de renovacion corta Pro. Stripe conserva y reintenta la
+    // factura; un invoice.paid posterior reactivara el plan correcto.
+    status: 'inactive',
     customerId: stringId(subscription.customer),
     subscriptionId: subscription.id,
     periodEnd: stripeSubscriptionPeriodEnd(subscription),

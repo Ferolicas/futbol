@@ -21,7 +21,7 @@ import {
 import AndroidIcon from '../components/AndroidIcon';
 import { ANDROID_APK_URL } from '../lib/app-download';
 import { useAuth } from '../components/providers';
-import BrandLogoMedia from '../components/BrandLogoMedia';
+import LandingBrandVideo from '../components/LandingBrandVideo';
 import { createPurchaseIntent, purchaseRoute } from '../lib/purchase-flow';
 
 const FEATURES = [
@@ -337,7 +337,7 @@ export default function LandingPage() {
         <span className="apple-grid" />
       </div>
 
-      <BrandLogoMedia
+      <LandingBrandVideo
         className={`apple-brand-video ${activeScene === 0 ? 'is-hero' : activeScene === FINAL_SCENE ? 'is-finale' : 'is-away'}`}
       />
 
@@ -513,6 +513,9 @@ export default function LandingPage() {
                 <button onClick={() => goToScene(1, true)}>Funciones</button>
                 <button onClick={() => goToScene(FIRST_PLAN_SCENE, true)}>Precios</button>
                 <button onClick={() => router.push('/rendimiento')}>Rendimiento</button>
+                <button onClick={() => router.push('/terminos')}>Términos</button>
+                <button onClick={() => router.push('/privacidad')}>Privacidad</button>
+                <button onClick={() => router.push('/cookies')}>Cookies</button>
               </div>
             </footer>
           </div>

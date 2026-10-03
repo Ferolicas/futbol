@@ -14,6 +14,7 @@ import { AccessProvider } from '@/lib/access-context';
 import { SelectedMarketsProvider } from '@/lib/selected-markets';
 import { STRIPE_PUBLISHABLE_KEY } from '@/lib/config';
 import { colors } from '@/theme/tokens';
+import { LegalAcceptanceGate } from '@/components/LegalAcceptanceGate';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -43,6 +44,7 @@ export default function RootLayout() {
                 <SelectedMarketsProvider>
                   <StatusBar style="light" />
                   <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg }, animation: 'fade' }} />
+                  <LegalAcceptanceGate />
                 </SelectedMarketsProvider>
               </AccessProvider>
             </AuthProvider>

@@ -1,12 +1,14 @@
 import { pgPool } from '../../../../lib/db';
 import {
   deliverActivationEmail,
+  expireElapsedEntitlements,
   listActivationEmailsForRetry,
   listPaymentAttemptsForReconciliation,
   listPaymentProfilesForReconciliation,
   markPaymentProfileReconciled,
   updatePaymentAttempt,
 } from '../../../../lib/payment-store';
+import { processMarketingCampaigns } from '../../../../lib/marketing-campaigns';
 import {
   reconcilePaymentAttempt,
   reconcilePaymentProfile,
@@ -33,7 +35,7 @@ async function run(request) {
     return Response.json({ ok: true, skipped: 'already_running' });
   }
 
-  const summary = { attempts: 0, profiles: 0, emails: 0, errors: [] };
+  const summary = { attempts: 0, profiles: 0, expired: 0, emails: 0, marketing: null, errors: [] };
   try {
     const attempts = await listPaymentAttemptsForReconciliation(40);
     for (const attempt of attempts) {
@@ -60,9 +62,17 @@ async function run(request) {
       }
     }
 
+    summary.expired = await expireElapsedEntitlements();
+
     const emails = await listActivationEmailsForRetry(20);
     for (const row of emails) {
       if (await deliverActivationEmail(row.id)) summary.emails += 1;
+    }
+
+    try {
+      summary.marketing = await processMarketingCampaigns(20);
+    } catch (error) {
+      summary.errors.push({ type: 'marketing', error: error.message });
     }
 
     if (summary.errors.length) {

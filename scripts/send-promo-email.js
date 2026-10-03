@@ -11,6 +11,9 @@
  * archivo de entorno hazlo explícitamente con `node --env-file=.env.local`.
  */
 
+console.error('Este script está deshabilitado: usa /ferney → Marketing, que filtra consentimiento vigente y registra las entregas.');
+process.exit(1);
+
 const { Pool } = require('pg');
 
 const ZEPTOMAIL_API_KEY = process.env.ZEPTOMAIL_API_KEY;

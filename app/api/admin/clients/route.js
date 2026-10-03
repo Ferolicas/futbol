@@ -76,7 +76,7 @@ export async function GET() {
 //                                            (subscription_status = 'active')
 //   { action: 'revoke',   userId }        → revoca el acceso
 //                                            (subscription_status = 'inactive',
-//                                             plan = null) y cancela cualquier
+//                                             plan = free) y cancela cualquier
 //                                             suscripción viva en Stripe para que
 //                                             deje de cobrar.
 //
@@ -132,7 +132,6 @@ export async function POST(request) {
       subscription_current_period_end: periodEnd,
       cancel_at_period_end: false,
       plan_started_at: now.toISOString(),
-      last_payment_at: now.toISOString(),
       updated_at: now.toISOString(),
     };
   } else {
@@ -170,7 +169,7 @@ export async function POST(request) {
       }
     }
     update = {
-      plan: null,
+      plan: 'free',
       subscription_status: 'inactive',
       plan_expires_at: null,
       subscription_current_period_end: null,

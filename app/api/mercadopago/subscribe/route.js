@@ -18,6 +18,7 @@ import {
 } from '../../../../lib/payment-store';
 import { hasActiveEntitlement } from '../../../../lib/entitlements';
 import { jsonError } from '../../../../lib/api-error';
+import { currentLegalAcceptance } from '../../../../lib/legal';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,6 +93,9 @@ export async function POST(request) {
   try {
     const user = await getCurrentUser();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!(await currentLegalAcceptance(user.id))) {
+      return Response.json({ error: 'Debes aceptar los documentos legales antes de pagar.', code: 'LEGAL_ACCEPTANCE_REQUIRED' }, { status: 403 });
+    }
 
     const parsed = subscribeSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success || !isValidPlan(parsed.data?.plan)) {

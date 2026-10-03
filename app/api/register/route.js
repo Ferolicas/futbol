@@ -2,9 +2,13 @@
 // Antes usaba supabaseAdmin.auth.admin.createUser. Ahora signupUser de
 // lib/auth-pg.js: bcrypt + tabla `users` + sesión inmediata (cookie JWT).
 import { signupUser } from '../../../lib/auth-pg';
-import { supabaseAdmin } from '../../../lib/supabase';
 import { sendWelcomeEmail } from '../../../lib/email';
 import { redisRateLimit, clientIp } from '../../../lib/ratelimit-redis';
+import { validateDisplayName } from '../../../lib/user-profile-validation';
+import {
+  LEGAL_DOCUMENT_VERSION,
+  prepareLegalEvidence,
+} from '../../../lib/legal';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +23,7 @@ export async function POST(request) {
       );
     }
 
-    const { name, email, password } = await request.json();
+    const { name, email, password, acceptAll, marketingConsent, legalVersion, source } = await request.json();
 
     if (!name || !email || !password) {
       return Response.json({ error: 'Nombre, email y contrasena son obligatorios' }, { status: 400 });
@@ -27,16 +31,32 @@ export async function POST(request) {
     if (password.length < 8) {
       return Response.json({ error: 'La contrasena debe tener al menos 8 caracteres' }, { status: 400 });
     }
+    const validName = validateDisplayName(name);
+    if (!validName.success) {
+      return Response.json({ error: validName.error }, { status: 400 });
+    }
+    if (acceptAll !== true || legalVersion !== LEGAL_DOCUMENT_VERSION) {
+      return Response.json({ error: 'Debes aceptar los documentos legales vigentes.' }, { status: 400 });
+    }
 
     const emailLower = email.toLowerCase().trim();
     const ua = request.headers.get('user-agent') || null;
     const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null;
+    const registrationSource = source === 'mobile' ? 'registration-mobile' : 'registration-web';
+    const legalEvidence = prepareLegalEvidence(request, registrationSource);
+    const marketingEvidence = marketingConsent === true
+      ? prepareLegalEvidence(request, registrationSource, 'marketing-consent')
+      : null;
 
-    // signupUser: crea users + user_profiles minimal + sesión (setea cookie).
+    // Cuenta, perfil y aceptación legal se confirman en una sola transacción;
+    // la sesión solo nace después del COMMIT.
     const result = await signupUser(emailLower, password, {
-      displayName: name.trim(),
+      displayName: validName.name,
       userAgent: ua,
       ip,
+      legalEvidence,
+      marketingConsent: marketingConsent === true,
+      marketingEvidence,
     });
 
     if (result.error) {
@@ -48,26 +68,9 @@ export async function POST(request) {
 
     const userId = result.user.id;
 
-    // Completar el perfil (signupUser crea el perfil minimal). El plan NO se
-    // persiste hasta que el proveedor confirme un pago real.
-    // BUG FIX: antes se escribía `country`, columna que NO existe en
-    // user_profiles → el upsert fallaba en CADA registro (error tragado) y el
-    // perfil se quedaba en 'inactive' (estado mínimo de signupUser) en vez de
-    // 'pending'. Quitado `country` (nada lo lee) → el upsert ahora sí persiste.
-    const { error: profileErr } = await supabaseAdmin.from('user_profiles').upsert({
-      id: userId,
-      email: emailLower,
-      name: name.trim(),
-      role: 'user',
-      plan: null,
-      subscription_status: 'inactive',
-      created_at: new Date().toISOString(),
-    }, { onConflict: 'id' });
-    if (profileErr) console.error('[Register] profile:', profileErr.message);
-
     // Welcome email (fire and forget). NO incluir password en claro en el email
     // ya no es necesario — el usuario la eligió. Mantenemos compat con la firma.
-    sendWelcomeEmail({ to: emailLower, name: name.trim() }).catch((e) =>
+    sendWelcomeEmail({ to: emailLower, name: validName.name }).catch((e) =>
       console.error('[Register] Welcome email failed:', e.message)
     );
 

@@ -47,19 +47,20 @@ export async function POST() {
       const before = await getPreapproval(profile.mp_preapproval_id);
       if (!before) return Response.json({ error: 'Suscripcion no encontrada en Mercado Pago.' }, { status: 404 });
       const cancelled = await cancelPreapproval(profile.mp_preapproval_id);
-      const periodEnd = before.next_payment_date
-        || profile.subscription_current_period_end
+      // next_payment_date es un intento futuro, no un periodo pagado.
+      const periodEnd = profile.subscription_current_period_end
         || profile.plan_expires_at;
+      const paidPeriodRemaining = !!periodEnd && new Date(periodEnd).getTime() > Date.now();
       await syncSubscriptionStatus({
         userId: user.id,
         provider: 'mercadopago',
-        status: 'cancelled',
+        status: paidPeriodRemaining ? 'cancelled' : 'inactive',
         subscriptionId: cancelled.id || profile.mp_preapproval_id,
         periodEnd,
-        cancelAtPeriodEnd: true,
+        cancelAtPeriodEnd: paidPeriodRemaining,
         providerStatus: cancelled.status || 'cancelled',
       });
-      return Response.json({ ok: true, accessUntil: periodEnd });
+      return Response.json({ ok: true, accessUntil: paidPeriodRemaining ? periodEnd : null });
     }
 
     return Response.json({

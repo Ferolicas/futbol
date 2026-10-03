@@ -12,6 +12,9 @@
 | Sesiones expiradas | eliminables; no son historial comercial |
 | Pagos/webhooks | conservar según obligación fiscal y contractual aplicable |
 | Cuenta y perfil | hasta baja y plazos legales aplicables |
+| Aceptaciones legales | evidencia versionada durante la relación y plazos de reclamación aplicables |
+| Consentimiento de marketing | historial de alta/baja para acreditar la preferencia y respetar oposiciones |
+| Campañas y entregas | evidencia operativa durante los plazos legales y de reclamación aplicables |
 
 Los jobs automáticos solo eliminan cachés regenerables. El borrado de clientes,
 pagos o evidencia contractual requiere una política legal aprobada y un flujo

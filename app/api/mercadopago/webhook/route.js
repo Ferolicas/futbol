@@ -22,6 +22,7 @@ import {
   syncSubscriptionStatus,
   updatePaymentAttempt,
 } from '../../../../lib/payment-store';
+import { hasFuturePaidPeriod } from '../../../../lib/subscription-policy';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,31 +75,28 @@ async function handlePreapproval(id) {
   }
 
   const appStatus = mpStatusToApp(preapproval.status);
-  if (['cancelled', 'past_due'].includes(appStatus)) {
+  if (['cancelled', 'inactive'].includes(appStatus)) {
     const profile = await getPaymentAccessProfile(owner.userId);
-    const periodEnd = preapproval.next_payment_date
-      || profile?.subscription_current_period_end
+    const periodEnd = profile?.subscription_current_period_end
       || profile?.plan_expires_at
       || null;
-    const paidPeriodRemaining = periodEnd && new Date(periodEnd).getTime() > Date.now();
-    const hasConfirmedPaidPeriod = owner.attempt?.status === 'succeeded'
-      || profile?.subscription_status === 'active'
-      || (profile?.subscription_status === 'cancelled' && profile?.cancel_at_period_end === true);
+    const paidPeriodRemaining = hasFuturePaidPeriod(profile);
+    const preserveRequestedCancellation = appStatus === 'cancelled'
+      && profile?.cancel_at_period_end === true
+      && paidPeriodRemaining;
     await syncSubscriptionStatus({
       userId: owner.userId,
       provider: 'mercadopago',
-      status: appStatus,
+      status: preserveRequestedCancellation ? 'cancelled' : 'inactive',
       subscriptionId: preapproval.id,
       periodEnd,
-      cancelAtPeriodEnd: appStatus === 'cancelled'
-        && !!paidPeriodRemaining
-        && hasConfirmedPaidPeriod,
+      cancelAtPeriodEnd: preserveRequestedCancellation,
       providerStatus: preapproval.status,
     });
   }
   if (owner.attempt && owner.attempt.status !== 'succeeded') {
     await updatePaymentAttempt(owner.attempt.id, {
-      status: appStatus === 'cancelled' ? 'cancelled' : appStatus === 'past_due' ? 'failed' : 'processing',
+      status: appStatus === 'cancelled' ? 'cancelled' : appStatus === 'inactive' ? 'failed' : 'processing',
       last_provider_status: preapproval.status,
       last_reconciled_at: new Date().toISOString(),
     });
@@ -156,6 +154,17 @@ async function handleRecurringPayment(payment, preapprovalId, knownPreapproval =
 
   const terminal = ['rejected', 'cancelled', 'canceled', 'refunded', 'charged_back'].includes(payment.status);
   if (!terminal) {
+    const profile = await getPaymentAccessProfile(owner.userId);
+    if (!hasFuturePaidPeriod(profile)) {
+      await syncSubscriptionStatus({
+        userId: owner.userId,
+        provider: 'mercadopago',
+        status: 'inactive',
+        subscriptionId: preapproval.id,
+        cancelAtPeriodEnd: false,
+        providerStatus: payment.status,
+      });
+    }
     if (owner.attempt && owner.attempt.status !== 'succeeded') {
       await updatePaymentAttempt(owner.attempt.id, {
         status: 'processing',
@@ -167,18 +176,18 @@ async function handleRecurringPayment(payment, preapprovalId, knownPreapproval =
     return;
   }
 
-  const reversed = ['refunded', 'charged_back'].includes(payment.status);
   if (owner.attempt?.status === 'succeeded' || !owner.attempt) {
     const profile = await getPaymentAccessProfile(owner.userId);
     const periodEnd = profile?.subscription_current_period_end || profile?.plan_expires_at || null;
-    const paidPeriodRemaining = periodEnd && new Date(periodEnd).getTime() > Date.now();
     await syncSubscriptionStatus({
       userId: owner.userId,
       provider: 'mercadopago',
-      status: reversed ? 'cancelled' : paidPeriodRemaining ? 'active' : 'past_due',
+      // Un solo rechazo basta: el proveedor conserva sus reintentos, pero la
+      // cuenta queda Free hasta recibir payment=approved.
+      status: 'inactive',
       subscriptionId: preapproval.id,
       periodEnd,
-      cancelAtPeriodEnd: !reversed && profile?.cancel_at_period_end === true,
+      cancelAtPeriodEnd: false,
       providerStatus: payment.status,
     });
   }
@@ -186,7 +195,7 @@ async function handleRecurringPayment(payment, preapprovalId, knownPreapproval =
     // Los rechazos de un cobro recurrente pueden ser reintentados por MP. Una
     // devolucion/contracargo si es terminal y libera una compra futura.
     await updatePaymentAttempt(owner.attempt.id, {
-      status: reversed ? 'failed' : 'processing',
+      status: ['refunded', 'charged_back'].includes(payment.status) ? 'failed' : 'processing',
       provider_payment_id: String(payment.id),
       last_provider_status: payment.status,
       error_code: payment.status_detail || payment.status,
@@ -264,7 +273,7 @@ async function handleOneTimePayment(id) {
       await syncSubscriptionStatus({
         userId: owner.userId,
         provider: 'mercadopago',
-        status: 'cancelled',
+        status: 'inactive',
         subscriptionId: String(payment.id),
         periodEnd: null,
         cancelAtPeriodEnd: false,

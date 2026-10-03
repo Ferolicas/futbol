@@ -3,6 +3,7 @@
 // del cliente (no puede leer la cookie httpOnly directamente).
 import { getCurrentUser } from '../../../../lib/auth-pg';
 import { supabaseAdmin } from '../../../../lib/supabase';
+import { currentLegalAcceptance, LEGAL_DOCUMENT_VERSION } from '../../../../lib/legal';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,12 +18,17 @@ export async function GET() {
       .eq('id', user.id)
       .single();
 
+    const legalAcceptance = await currentLegalAcceptance(user.id);
+
     return Response.json({
       user: {
         id: user.id,
         email: user.email,
         emailVerified: user.emailVerified,
         ...(profile || {}),
+        legalAcceptanceRequired: !legalAcceptance,
+        legalDocumentVersion: LEGAL_DOCUMENT_VERSION,
+        legalAcceptedAt: legalAcceptance?.accepted_at || null,
       },
     });
   } catch (err) {

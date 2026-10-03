@@ -13,6 +13,9 @@ export interface SessionUser {
   subscription_status?: string | null;
   timezone?: string | null;
   custom_league_ids?: number[] | null;
+  legalAcceptanceRequired?: boolean;
+  legalDocumentVersion?: string;
+  legalAcceptedAt?: string | null;
 }
 
 interface AuthContextValue {
@@ -20,7 +23,7 @@ interface AuthContextValue {
   loading: boolean;
   refreshSession: () => Promise<SessionUser | null>;
   signIn: (email: string, password: string) => Promise<SessionUser>;
-  signUp: (name: string, email: string, password: string) => Promise<SessionUser>;
+  signUp: (name: string, email: string, password: string, marketingConsent?: boolean) => Promise<SessionUser>;
   signOut: () => Promise<void>;
 }
 
@@ -80,8 +83,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return next;
   }, [refreshSession]);
 
-  const signUp = useCallback(async (name: string, email: string, password: string) => {
-    await api.post('/api/register', { name, email, password }, { allowUnauthorized: true });
+  const signUp = useCallback(async (name: string, email: string, password: string, marketingConsent = false) => {
+    await api.post('/api/register', {
+      name,
+      email,
+      password,
+      acceptAll: true,
+      marketingConsent,
+      legalVersion: '2026-10-03',
+      source: 'mobile',
+    }, { allowUnauthorized: true });
     const token = await getSessionToken();
     if (!token) throw new Error('Cuenta creada, pero no recibimos la sesión. Inicia sesión.');
     const next = await refreshSession();

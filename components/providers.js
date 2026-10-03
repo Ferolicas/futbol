@@ -1,5 +1,7 @@
 'use client';
 import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
+import LegalAcceptanceGate from './LegalAcceptanceGate';
+import CookieNotice from './CookieNotice';
 
 const AuthContext = createContext(null);
 
@@ -80,6 +82,8 @@ export default function Providers({ children }) {
     <AuthContext.Provider value={ctxValue}>
       {user && <TimezoneSync />}
       {children}
+      <LegalAcceptanceGate user={user} refreshSession={refreshSession} />
+      <CookieNotice />
     </AuthContext.Provider>
   );
 }

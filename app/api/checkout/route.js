@@ -3,19 +3,16 @@ import {
   createEmbeddedSubscription,
   isValidPlan,
   retrieveEmbeddedSubscription,
-  stripeSubscriptionPeriodEnd,
 } from '../../../lib/stripe';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { jsonError } from '../../../lib/api-error';
 import { redisRateLimit } from '../../../lib/ratelimit-redis';
 import { resolvePaymentGeo } from '../../../lib/payment-geo';
-import {
-  activatePaidAccess,
-  reservePaymentAttempt,
-  updatePaymentAttempt,
-} from '../../../lib/payment-store';
+import { reservePaymentAttempt, updatePaymentAttempt } from '../../../lib/payment-store';
 import { hasActiveEntitlement } from '../../../lib/entitlements';
+import { currentLegalAcceptance } from '../../../lib/legal';
+import { reconcileStripeAttempt } from '../../../lib/payment-reconcile';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,6 +44,9 @@ export async function POST(request) {
     const supabase = createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!(await currentLegalAcceptance(user.id))) {
+      return Response.json({ error: 'Debes aceptar los documentos legales antes de pagar.', code: 'LEGAL_ACCEPTANCE_REQUIRED' }, { status: 403 });
+    }
 
     const parsed = checkoutSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success || !isValidPlan(parsed.data?.plan)) {
@@ -92,19 +92,17 @@ export async function POST(request) {
         throw new Error('Stripe subscription ownership mismatch');
       }
       if (['active', 'trialing'].includes(subscription.status)) {
-        await activatePaidAccess({
-          attemptId: reserved.attempt.id,
-          userId: profile.id,
-          plan,
-          provider: 'stripe',
-          customerId: typeof subscription.customer === 'string' ? subscription.customer : subscription.customer?.id,
-          subscriptionId: subscription.id,
-          amount: reserved.attempt.amount,
-          currency: reserved.attempt.currency,
-          periodEnd: stripeSubscriptionPeriodEnd(subscription),
-          providerStatus: subscription.status,
-        });
-        return Response.json({ active: true, attemptId: reserved.attempt.id });
+        // El estado de la suscripción no prueba el cobro. Reconciliar exige
+        // latest_invoice=paid antes de activar.
+        await reconcileStripeAttempt(reserved.attempt);
+        const refreshed = await supabaseAdmin
+          .from('user_profiles')
+          .select('role, plan, subscription_status, plan_expires_at, subscription_current_period_end, cancel_at_period_end')
+          .eq('id', user.id)
+          .single();
+        if (hasActiveEntitlement(refreshed.data)) {
+          return Response.json({ active: true, attemptId: reserved.attempt.id });
+        }
       }
       if (['canceled', 'incomplete_expired'].includes(subscription.status)) {
         await updatePaymentAttempt(reserved.attempt.id, {

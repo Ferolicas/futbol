@@ -23,6 +23,7 @@ import {
 } from '../../../lib/purchase-flow';
 import BrandLogoMedia from '../../../components/BrandLogoMedia';
 import { useAuth } from '../../../components/providers';
+import { LEGAL_DOCUMENT_VERSION } from '../../../lib/legal-constants';
 
 export default function SignUpPage() {
   const router = useRouter();
@@ -38,6 +39,8 @@ export default function SignUpPage() {
   const [error, setError] = useState('');
   const [emailTaken, setEmailTaken] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [acceptAll, setAcceptAll] = useState(false);
+  const [marketingConsent, setMarketingConsent] = useState(false);
 
   // Auth nativo PG: /api/register (signupUser) ya crea la sesión y setea la
   // cookie. No hace falta un segundo signInWithPassword. Antes el auto-login
@@ -52,7 +55,7 @@ export default function SignUpPage() {
       const res = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password }),
+        body: JSON.stringify({ name, email, password, acceptAll, marketingConsent, legalVersion: LEGAL_DOCUMENT_VERSION, source: 'web' }),
       });
       const data = await res.json().catch(() => ({}));
 
@@ -149,6 +152,8 @@ export default function SignUpPage() {
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Tu nombre"
                   required
+                  minLength={2}
+                  maxLength={60}
                   autoComplete="name"
                 />
               </div>
@@ -187,6 +192,28 @@ export default function SignUpPage() {
               </div>
               <p className="signup-field-hint">Usa al menos 8 caracteres.</p>
             </div>
+
+            <label className="signup-legal-consent">
+              <input
+                type="checkbox"
+                checked={acceptAll}
+                onChange={(event) => setAcceptAll(event.target.checked)}
+                required
+              />
+              <span>
+                Soy mayor de 18 años, acepto los <Link href="/terminos" target="_blank">Términos</Link>,
+                confirmo que leí la <Link href="/privacidad" target="_blank">Política de Privacidad</Link> y
+                autorizo el tratamiento allí descrito. También leí la <Link href="/cookies" target="_blank">Política de Cookies</Link>.
+              </span>
+            </label>
+            <label className="signup-legal-consent is-optional">
+              <input
+                type="checkbox"
+                checked={marketingConsent}
+                onChange={(event) => setMarketingConsent(event.target.checked)}
+              />
+              <span>Quiero recibir descuentos y novedades de CF Análisis. Es opcional y puedo retirarlo cuando quiera.</span>
+            </label>
 
             {error && (
               <div className="signup-error" role="alert">
