@@ -22,17 +22,21 @@ if (!processInfo) throw Error('cfanalisis-web is not registered in PM2');
 const previous = processInfo.pm2_env;
 const config = { name: 'cfanalisis-web', script: previous.pm_exec_path, cwd: previous.pm_cwd,
   interpreter: previous.exec_interpreter || 'node', node_args: previous.node_args || [], autorestart: true,
-  uid: 'cfanalisis', gid: 'cfanalisis',
   env: { ...(previous.env || {}), NODE_ENV: 'production', PORT: previous.PORT || 3000,
     HOSTNAME: '127.0.0.1' } };
+const previousPrivileges = previous.username === 'cfanalisis'
+  ? { uid: 'cfanalisis', gid: 'cfanalisis' }
+  : {};
 const rollbackMode = previous.exec_mode === 'cluster_mode' ? 'cluster' : 'fork';
 const configuredInstances = Number(previous.env?.CF_WEB_INSTANCES);
 const desiredInstances = Number.isInteger(configuredInstances) && configuredInstances >= 2
   ? configuredInstances
   : 2;
 fs.writeFileSync(`${dir}/rollback.config.json`, JSON.stringify({ apps: [{ ...config,
+  ...previousPrivileges,
   exec_mode: rollbackMode, instances: webProcesses.length }] }), { mode: 0o600 });
 fs.writeFileSync(`${dir}/release.config.json`, JSON.stringify({ apps: [{ ...config,
+  uid: 'cfanalisis', gid: 'cfanalisis',
   script: `${dir}/.next/standalone/server.js`, cwd: `${dir}/.next/standalone`,
   exec_mode: 'cluster', instances: desiredInstances }] }), { mode: 0o600 });
 fs.writeFileSync(`${dir}/previous-runtime`, require('node:path').dirname(previous.pm_exec_path));
@@ -59,8 +63,8 @@ node scripts/vps/check-web-release.cjs "$RUNTIME_DIR"
 
 # El proceso nunca corre como root. El runtime queda legible pero no
 # modificable por el usuario de la app; solo un cache existente puede escribir.
-chgrp cfanalisis "$RELEASES_DIR" "$RELEASE_DIR"
-chmod 750 "$RELEASES_DIR" "$RELEASE_DIR"
+chgrp cfanalisis "$RELEASES_DIR" "$RELEASE_DIR" "$RELEASE_DIR/.next"
+chmod 750 "$RELEASES_DIR" "$RELEASE_DIR" "$RELEASE_DIR/.next"
 chown -R root:cfanalisis "$RUNTIME_DIR"
 find "$RUNTIME_DIR" -type d -exec chmod 750 {} +
 find "$RUNTIME_DIR" -type f -exec chmod 640 {} +
