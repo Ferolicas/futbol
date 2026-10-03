@@ -237,7 +237,13 @@ La aceptación legal bloqueante y las casillas del registro usan los mismos
 documentos/versiones del backend. El menú `Legal y comunicaciones` abre los
 documentos canónicos y permite consultar, otorgar o retirar marketing mediante
 `/api/legal/marketing` con evidencia `source: mobile`. `app.json`, el plugin
-`plugins/with-security.js` y EAS generan ambos binarios desde el mismo código.
+`plugins/with-security.js` genera ambos binarios desde el mismo código. Android
+se compila con EAS y el IPA unsigned para SideStore con
+`.github/workflows/build-expo-ios.yml`. Caddy sirve las rutas canónicas
+`/android/cfanalisis.apk` y `/cfanalisis.ipa` desde
+`/var/www/cfanalisis-downloads/{android,ios}`; los binarios viven fuera del repo
+y no son alterados por el deploy web. El Home y el menú del dashboard usan la
+ruta APK canónica definida en `lib/app-download.js`.
 
 ### Apuesta diaria en Telegram
 

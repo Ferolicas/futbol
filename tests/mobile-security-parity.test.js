@@ -60,3 +60,11 @@ test('transactional emails keep tokens in fragments and offer app deep links', (
   assert.doesNotMatch(email, /reset-password\?token=/);
   assert.doesNotMatch(email, /verify-email\?token=/);
 });
+
+test('mobile binaries use stable canonical download URLs', () => {
+  const downloads = read('lib/app-download.js');
+  const iosWorkflow = read('.github/workflows/build-expo-ios.yml');
+  assert.match(downloads, /https:\/\/cfanalisis\.com\/android\/cfanalisis\.apk/);
+  assert.match(downloads, /https:\/\/cfanalisis\.com\/cfanalisis\.ipa/);
+  assert.match(iosWorkflow, /CFAnalisis\.ipa/);
+});

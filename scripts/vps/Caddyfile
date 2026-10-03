@@ -27,6 +27,24 @@ cfanalisis.com, www.cfanalisis.com {
     # /apps/futbol/public. Todo lo demás —rutas de la app, /_next/*, /api/*—
     # NO matchea y cae al reverse_proxy. Así no interfiere con los assets
     # propios de Next (/_next/static/*) que sí sirve el server de Node.
+    # ── Binarios móviles permanentes (fuera del repo) ──
+    handle /cfanalisis.ipa {
+        rewrite * /ios/cfanalisis.ipa
+        root * /var/www/cfanalisis-downloads
+        header Content-Type "application/octet-stream"
+        header Content-Disposition "attachment; filename=\"CFAnalisis.ipa\""
+        header Cache-Control "public, max-age=300"
+        file_server
+    }
+
+    handle_path /android/* {
+        root * /var/www/cfanalisis-downloads/android
+        header Content-Type "application/vnd.android.package-archive"
+        header Content-Disposition "attachment; filename=\"CF-Analisis.apk\""
+        header Cache-Control "public, max-age=3600"
+        file_server
+    }
+
     root * /apps/futbol/public
     @static file
     handle @static {
