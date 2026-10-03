@@ -225,11 +225,10 @@ con dedup de 1 mensaje/minuto por error.
 ```bash
 # 1. Directorio de logs con permisos para el user que corre PM2
 sudo mkdir -p /var/log/cfanalisis
-# Ajustar al user que ejecuta `pm2 start`. Si PM2 corre como root:
-sudo chown -R root:root /var/log/cfanalisis
-# Si PM2 corre como otro user (ej. "deploy"):
-# sudo chown -R deploy:deploy /var/log/cfanalisis
-sudo chmod 755 /var/log/cfanalisis
+# Los procesos de CF Analisis bajan privilegios al usuario dedicado.
+sudo chown -R cfanalisis:cfanalisis /var/log/cfanalisis
+sudo chmod 750 /var/log/cfanalisis
+sudo find /var/log/cfanalisis -type f -name '*.log' -exec chmod 640 {} +
 
 # 2. Rotación con logrotate (impide que worker.log crezca sin límite)
 sudo tee /etc/logrotate.d/cfanalisis-worker > /dev/null <<'EOF'

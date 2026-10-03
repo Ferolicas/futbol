@@ -158,9 +158,14 @@ jobs:
 
               install -d -o cfanalisis -g cfanalisis -m 0750 /var/log/cfanalisis
               touch /var/log/cfanalisis/worker-rt-out.log /var/log/cfanalisis/worker-rt-error.log \
-                /var/log/cfanalisis/worker-heavy-out.log /var/log/cfanalisis/worker-heavy-error.log
-              chown cfanalisis:cfanalisis /var/log/cfanalisis/worker-*.log
-              chmod 0640 /var/log/cfanalisis/worker-*.log
+                /var/log/cfanalisis/worker-heavy-out.log /var/log/cfanalisis/worker-heavy-error.log \
+                /var/log/cfanalisis/worker.log
+              chown cfanalisis:cfanalisis /var/log/cfanalisis/worker*.log
+              chmod 0640 /var/log/cfanalisis/worker*.log
+              if [ -f /apps/futbol/apps/cfanalisis-worker/.env ]; then
+                chown root:cfanalisis /apps/futbol/apps/cfanalisis-worker/.env
+                chmod 0640 /apps/futbol/apps/cfanalisis-worker/.env
+              fi
 
               # Reload pm2 — recarga el worker sea cual sea su topología:
               #   · monolito  → cfanalisis-worker        (pre Fase 1)
