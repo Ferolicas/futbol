@@ -25,6 +25,9 @@ COMMENT ON TABLE public.telegram_result_notifications IS
 COMMENT ON COLUMN public.telegram_result_notifications.payload IS
   'Snapshot liquidado de las mismas opciones almacenadas en combinada_dia; nunca recalculadas.';
 
+GRANT SELECT,INSERT,UPDATE,DELETE
+  ON public.telegram_result_notifications TO cfanalisis;
+
 -- No inundar el canal con partidos que ya habían finalizado antes de activar
 -- esta automatización. Se registran como entregados sin alterar combinada_dia.
 INSERT INTO public.telegram_result_notifications
