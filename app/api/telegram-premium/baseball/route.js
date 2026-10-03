@@ -1,5 +1,7 @@
+import { isCronAuthorized } from '@/lib/internal-auth';
 /**
- * GET /api/telegram-premium/baseball?secret=CRON_SECRET[&date=YYYY-MM-DD]
+ * GET /api/telegram-premium/baseball[?date=YYYY-MM-DD]
+ * Authorization: Bearer CRON_SECRET
  *
  * Feed JSON del canal Picks Premium (béisbol): todos los juegos del día (fecha
  * Bogotá, como el motor) aún no comenzados con TODAS sus opciones calculadas:
@@ -23,15 +25,8 @@ import { jsonError } from '../../../../lib/api-error';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-function verifyAuth(request) {
-  const { searchParams } = new URL(request.url);
-  const secret = searchParams.get('secret')
-    || request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
-  return Boolean(process.env.CRON_SECRET) && secret === process.env.CRON_SECRET;
-}
-
 export async function GET(request) {
-  if (!verifyAuth(request)) {
+  if (!isCronAuthorized(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

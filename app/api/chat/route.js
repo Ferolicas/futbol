@@ -7,6 +7,7 @@ import { sendChatNotification } from '../../../lib/resend-email';
 import { triggerEvent } from '../../../lib/pusher';
 import { jsonError } from '../../../lib/api-error';
 import { z } from 'zod';
+import { redisRateLimit } from '../../../lib/ratelimit-redis';
 
 export const dynamic = 'force-dynamic';
 
@@ -77,6 +78,14 @@ export async function POST(request) {
 
   const { data: profile } = await supabaseAdmin.from('user_profiles').select('role, name, email').eq('id', user.id).single();
   const isAdmin = ['admin', 'owner'].includes(profile?.role);
+  const limit = await redisRateLimit(
+    'chat-send',
+    user.id,
+    isAdmin ? 60 : 10,
+    60,
+    { failClosed: true },
+  );
+  if (!limit.success) return Response.json({ error: 'Demasiados mensajes. Espera un momento.' }, { status: 429 });
   const sender = isAdmin ? 'agent' : 'user';
   const userId = isAdmin && targetUserId ? targetUserId : user.id;
 
@@ -130,6 +139,8 @@ export async function PATCH(request) {
     .eq('id', user.id)
     .single();
   const isAdmin = ['admin', 'owner'].includes(profile?.role);
+  const limit = await redisRateLimit('chat-read', user.id, 120, 60, { failClosed: true });
+  if (!limit.success) return Response.json({ error: 'Demasiadas solicitudes.' }, { status: 429 });
 
   let update = supabaseAdmin.from('chat_messages').update({ read: true }).in('id', messageIds);
   if (!isAdmin) update = update.eq('user_id', user.id);

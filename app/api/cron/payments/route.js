@@ -13,18 +13,13 @@ import {
   reconcilePaymentAttempt,
   reconcilePaymentProfile,
 } from '../../../../lib/payment-reconcile';
+import { isCronAuthorized } from '../../../../lib/internal-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-function authorized(request) {
-  const supplied = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
-    || request.headers.get('x-cron-secret');
-  return !!process.env.CRON_SECRET && supplied === process.env.CRON_SECRET;
-}
-
 async function run(request) {
-  if (!authorized(request)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isCronAuthorized(request)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const lockClient = await pgPool.connect();
   const locked = (await lockClient.query(

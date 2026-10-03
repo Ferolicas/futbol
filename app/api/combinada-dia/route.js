@@ -1,3 +1,4 @@
+import { isCronAuthorized } from '@/lib/internal-auth';
 /**
  * GET /api/combinada-dia?date=YYYY-MM-DD
  *
@@ -34,18 +35,11 @@ import {
 export const dynamic = 'force-dynamic';
 
 // Endpoint de uso EXCLUSIVO de n8n (no lo llama el frontend). Se protege con
-// CRON_SECRET — mismo secreto que el resto de crons y que n8n ya envía a
-// /api/cron/publish-combinada — vía ?secret= o `Authorization: Bearer`.
+// CRON_SECRET — mismo secreto que el resto de crons. Solo se admite mediante
+// `Authorization: Bearer`; nunca en la URL.
 // Antes era público: cualquiera podía leer la combinada del día en crudo.
-function verifyAuth(request) {
-  const { searchParams } = new URL(request.url);
-  const secret = searchParams.get('secret')
-    || request.headers.get('authorization')?.replace('Bearer ', '');
-  return Boolean(process.env.CRON_SECRET) && secret === process.env.CRON_SECRET;
-}
-
 export async function GET(request) {
-  if (!verifyAuth(request)) {
+  if (!isCronAuthorized(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

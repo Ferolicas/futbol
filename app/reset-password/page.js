@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 function ResetPasswordForm() {
@@ -11,12 +11,14 @@ function ResetPasswordForm() {
   const [loading, setLoading] = useState(false);
   const [tokenError, setTokenError] = useState(false);
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const token = searchParams.get('token');
+  const [token, setToken] = useState('');
 
   useEffect(() => {
-    if (!token) setTokenError(true);
-  }, [token]);
+    const value = new URLSearchParams(window.location.hash.slice(1)).get('token') || '';
+    setToken(value);
+    setTokenError(!value);
+    if (value) window.history.replaceState(null, '', window.location.pathname);
+  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -29,7 +31,7 @@ function ResetPasswordForm() {
       const res = await fetch('/api/auth/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, password }),
+        body: JSON.stringify({ token, password, confirmPassword: confirm }),
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || 'Error al restablecer');

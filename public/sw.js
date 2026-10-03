@@ -44,7 +44,12 @@ self.addEventListener('push', event => {
         await fetch('/api/telemetry/live-shown', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fid: Number(m[1]), minute: m[2], shownAt: new Date().toISOString() }),
+          body: JSON.stringify({
+            fid: Number(m[1]),
+            minute: m[2],
+            token: data.telemetryToken,
+            expiresAt: data.telemetryExpiresAt,
+          }),
           keepalive: true,
         });
       } catch {}

@@ -5,7 +5,9 @@ module.exports = {
     name: 'cfanalisis-web',
     script: '.next/standalone/server.js',
     cwd: '/apps/futbol',
-    env: { ...process.env, PORT: 3000 },
+    uid: 'cfanalisis',
+    gid: 'cfanalisis',
+    env: { ...process.env, PORT: 3000, HOSTNAME: '127.0.0.1' },
     max_memory_restart: '1G',
   }],
 };

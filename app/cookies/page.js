@@ -7,7 +7,7 @@ export default function CookiesPage() {
     <LegalDocument eyebrow="Tecnologías del sitio" title="Política de cookies">
       <section>
         <h2>1. Uso actual</h2>
-        <p>CF Análisis usa la cookie <strong>cf_session</strong>, estrictamente necesaria para mantener la sesión autenticada de forma segura. Es HttpOnly, Secure y SameSite=Lax; el código del navegador no puede leerla. Su duración máxima es de 30 días y puede finalizar antes al cerrar sesión o revocar la sesión.</p>
+        <p>CF Análisis usa la cookie <strong>__Host-cf_session</strong>, estrictamente necesaria para mantener la sesión autenticada de forma segura. Es HttpOnly, Secure y SameSite=Lax; el código del navegador no puede leerla. Su duración máxima es de 30 días para usuarios y de 12 horas para cuentas administrativas, y puede finalizar antes al cerrar sesión o revocar la sesión.</p>
       </section>
       <section>
         <h2>2. Almacenamiento local necesario</h2>

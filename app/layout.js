@@ -1,5 +1,6 @@
 import './globals.css';
 import { Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
+import { headers } from 'next/headers';
 import Providers from '../components/providers';
 
 // FE-2: fuentes auto-hospedadas via next/font (reemplaza el @import render-blocking
@@ -53,7 +54,11 @@ export const viewport = {
   themeColor: '#00e676',
 };
 
-export default function RootLayout({ children }) {
+export default async function RootLayout({ children }) {
+  // La CSP usa un nonce nuevo por respuesta. Leer los headers del proxy hace
+  // que Next renderice el HTML por request y aplique ese nonce a sus scripts;
+  // un HTML estático no podría cumplir una CSP estricta sin unsafe-inline.
+  await headers();
   return (
     <html lang="es" className={`${jakarta.variable} ${jetbrainsMono.variable}`}>
       <body>

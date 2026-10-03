@@ -41,6 +41,8 @@ export default function SignInPage() {
   const checkoutHref = purchaseRoute('/planes', 'checkout', selectedPlan, purchaseIntent);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -52,12 +54,19 @@ export default function SignInPage() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(mfaRequired ? '/api/auth/mfa/verify' : '/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(mfaRequired ? { code: mfaCode } : { email, password }),
       });
       const data = await res.json().catch(() => ({}));
+
+      if (data.mfaRequired) {
+        setMfaRequired(true);
+        setPassword('');
+        setLoading(false);
+        return;
+      }
 
       if (!res.ok) {
         setLoading(false);
@@ -137,6 +146,31 @@ export default function SignInPage() {
           </header>
 
           <form onSubmit={handleSubmit} className="signup-form signin-form">
+            {mfaRequired ? (
+              <>
+                <p className="auth-subtitle">Enviamos un código de seis dígitos al correo administrativo registrado.</p>
+                <div className="signup-field">
+                  <label htmlFor="signin-mfa">Código de seguridad</label>
+                  <div className="signup-input">
+                    <ShieldCheck size={18} aria-hidden="true" />
+                    <input
+                      id="signin-mfa"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      pattern="[0-9]{6}"
+                      maxLength={6}
+                      value={mfaCode}
+                      onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="000000"
+                      required
+                      autoFocus
+                    />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
             <div className="signup-field">
               <label htmlFor="signin-email">Correo electrónico</label>
               <div className="signup-input">
@@ -171,11 +205,13 @@ export default function SignInPage() {
                 />
               </div>
             </div>
+              </>
+            )}
 
             {error && <p className="signup-error" role="alert">{error}</p>}
 
             <button type="submit" className="signup-submit" disabled={loading}>
-              <span>{loading ? 'Iniciando sesión…' : 'Entrar a mi cuenta'}</span>
+              <span>{loading ? 'Comprobando…' : mfaRequired ? 'Verificar código' : 'Entrar a mi cuenta'}</span>
               {loading
                 ? <LoaderCircle className="signup-loading-icon" size={18} aria-hidden="true" />
                 : <ArrowRight size={18} aria-hidden="true" />}

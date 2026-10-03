@@ -11,6 +11,7 @@ import { analysisDateKey, getCachedAnalysis } from '../../../../lib/sanity-cache
 import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { redisGet, redisSet, KEYS, TTL } from '../../../../lib/redis';
+import { isCronAuthorized } from '../../../../lib/internal-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -81,9 +82,7 @@ export async function POST(request) {
   // header `x-internal-trigger` forjable, que permitía a cualquiera saltarse la
   // sesión de owner y disparar el reanálisis batch — quema cuota).
   const { searchParams } = new URL(request.url);
-  const internalSecret = searchParams.get('secret')
-    || request.headers.get('authorization')?.replace('Bearer ', '');
-  const isInternal = !!process.env.CRON_SECRET && internalSecret === process.env.CRON_SECRET;
+  const isInternal = isCronAuthorized(request);
 
   // Internal batch calls skip session auth
   if (!isInternal) {
@@ -135,10 +134,10 @@ export async function POST(request) {
     await redisSet(`reanalyze-progress:${date}`, progress, PROGRESS_TTL);
 
     // Fire first internal batch (fire-and-forget — browser can close).
-    // R17: el chain se autentica con CRON_SECRET en la query (no header forjable).
-    const _sec = encodeURIComponent(process.env.CRON_SECRET || '');
-    fetch(`${getBaseUrl()}/api/admin/reanalyze?date=${date}&offset=0&secret=${_sec}`, {
+    // El secreto viaja solo en Authorization para no persistirlo en logs.
+    fetch(`${getBaseUrl()}/api/admin/reanalyze?date=${date}&offset=0`, {
       method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.CRON_SECRET || ''}` },
     }).catch(e => console.error('[reanalyze] Failed to start chain:', e.message));
 
     return Response.json({ started: true, total: fixtures.length });
@@ -248,10 +247,9 @@ export async function POST(request) {
   }
 
   // Chain next batch (fire-and-forget — this function returns immediately).
-  // R17: autenticación del chain con CRON_SECRET en la query.
-  const _sec = encodeURIComponent(process.env.CRON_SECRET || '');
-  fetch(`${getBaseUrl()}/api/admin/reanalyze?date=${date}&offset=${nextOffset}&secret=${_sec}`, {
+  fetch(`${getBaseUrl()}/api/admin/reanalyze?date=${date}&offset=${nextOffset}`, {
     method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.CRON_SECRET || ''}` },
   }).catch(e => console.error(`[reanalyze] Chain to offset ${nextOffset} failed:`, e.message));
 
   return Response.json({ success: true, ...updatedProg });

@@ -8,6 +8,7 @@ import { logAction } from '../../../lib/audit';
 import { jsonError } from '../../../lib/api-error';
 import { randomBytes } from 'crypto';
 import { z } from 'zod';
+import { redisRateLimit } from '../../../lib/ratelimit-redis';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,7 @@ export async function GET() {
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { data: profile } = await supabaseAdmin.from('user_profiles').select('role, name, email').eq('id', user.id).single();
-  const isAdmin = profile?.role === 'admin';
+  const isAdmin = ['admin', 'owner'].includes(profile?.role);
 
   try {
     let query = supabaseAdmin.from('tickets').select('*').order('created_at', { ascending: false });
@@ -48,7 +49,15 @@ export async function POST(request) {
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { data: profile } = await supabaseAdmin.from('user_profiles').select('role, name, email').eq('id', user.id).single();
-  const isAdmin = profile?.role === 'admin';
+  const isAdmin = ['admin', 'owner'].includes(profile?.role);
+  const limit = await redisRateLimit(
+    'tickets-write',
+    user.id,
+    isAdmin ? 30 : 3,
+    isAdmin ? 60 : 60 * 60,
+    { failClosed: true },
+  );
+  if (!limit.success) return Response.json({ error: 'Demasiadas solicitudes. Espera antes de continuar.' }, { status: 429 });
   const parsed = ticketSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: 'Invalid ticket payload' }, { status: 400 });
   const { message, ticketId: targetTicketId, reply } = parsed.data;

@@ -36,6 +36,8 @@ module.exports = {
       script: tsx,
       args: 'src/index.ts',
       interpreter: 'none',
+      uid: 'cfanalisis',
+      gid: 'cfanalisis',
       env: { WORKER_ROLE: 'realtime', PORT: '8080' },
       autorestart: true,
       // El realtime debe ser estable y liviano; si por una fuga llegara a 1.5G
@@ -49,6 +51,8 @@ module.exports = {
       script: tsx,
       args: 'src/index.ts',
       interpreter: 'none',
+      uid: 'cfanalisis',
+      gid: 'cfanalisis',
       env: { WORKER_ROLE: 'heavy' },
       autorestart: true,
       // SIN max_memory_restart: retrain/analyze pueden usar varios GB

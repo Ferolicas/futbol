@@ -25,7 +25,7 @@ Las creatividades listas para campañas se guardan en `public/marketing/`.
 | Ruta | Archivo | Auth | Responsabilidad |
 |---|---|---:|---|
 | `/` | `app/page.js` | No | Home, precios localizados e inicio de compra |
-| `/sign-up` | `app/sign-up/[[...sign-up]]/page.js` | No | Registro y sesión inmediata |
+| `/sign-up` | `app/sign-up/[[...sign-up]]/page.js` | No | Registro; envía verificación antes de crear sesión |
 | `/sign-in` | `app/sign-in/[[...sign-in]]/page.js` | No | Login PG |
 | `/forgot-password` | `app/forgot-password/page.js` | No | Solicitud de recuperación |
 | `/reset-password` | `app/reset-password/page.js` | No | Cambio de contraseña con token |
@@ -57,6 +57,10 @@ Las creatividades listas para campañas se guardan en `public/marketing/`.
 |---|---|---|---|
 | `POST /api/register` | `app/api/register/route.js` | Registro | Crea usuario, perfil y prueba legal atómicamente; marketing es opcional |
 | `POST /api/auth/login` | `app/api/auth/login/route.js` | Login | Valida bcrypt y crea sesión |
+| `POST /api/auth/change-password` | `app/api/auth/change-password/route.js` | Sesión | Envía enlace de restablecimiento al correo registrado; no recibe contraseñas |
+| `POST /api/auth/reset-password` | `app/api/auth/reset-password/route.js` | Token de un uso | Confirma la nueva contraseña y revoca todas las sesiones |
+| `POST /api/auth/verify-email` | `app/api/auth/verify-email/route.js` | Token de un uso | Verifica el correo y crea la primera sesión |
+| `POST /api/auth/mfa/verify` | `app/api/auth/mfa/verify/route.js` | Desafío temporal | Segundo factor por email para admin/owner |
 | `GET /api/auth/session` | `app/api/auth/session/route.js` | Provider | Devuelve usuario/perfil actual |
 | `GET /api/realtime/token` | `app/api/realtime/token/route.js` | Cliente WS autenticado | Emite JWT efímero con topics limitados por usuario/rol |
 | `POST /api/auth/logout` | `app/api/auth/logout/route.js` | UI | Revoca sesión y borra cookie |
@@ -151,8 +155,9 @@ dos frames para absorber el reajuste de filas y la inercia de Safari.
 2. El CTA genera `plan` validado + `intent` opaca (`lib/purchase-flow.js`).
 3. Registro exige la casilla legal y ofrece marketing separado, desmarcado y
    opcional. `signupUser` confirma usuario, perfil y aceptación en una sola
-   transacción; solo después crea sesión y cookie.
-4. Registro redirige a `/dashboard` (conserva plan/intención en la URL si existían). El modal permite elegir Pro o continuar gratis.
+   transacción; después envía un enlace de verificación. La primera sesión y
+   cookie solo nacen al demostrar control del correo.
+4. La verificación redirige a `/dashboard` (conserva plan/intención en la URL si existían). El modal permite elegir Pro o continuar gratis.
 5. `/planes` valida auth e intención, resuelve país/moneda y consume la intención una sola vez.
 6. Colombia abre `MercadoPagoModal`; otros países crean una suscripción incompleta y abren `PaymentModal`.
 7. Cada operación usa un UUID durable; reintentos, dos pestañas y respuestas perdidas reutilizan el mismo recurso.
@@ -193,7 +198,18 @@ se envían con una clave de idempotencia por destinatario.
 
 ### Auth
 
-`lib/auth-pg.js` crea/verifica usuarios y sesiones. `lib/auth-session.js` firma `cf_session`. `proxy.js` valida firma/expiración; layouts y endpoints vuelven a comprobar la sesión contra PostgreSQL.
+`lib/auth-pg.js` crea/verifica usuarios y sesiones. `lib/auth-session.js` firma
+`__Host-cf_session` con issuer/audience y mantiene sesiones normales de hasta
+30 días; admin/owner expira a las 12 horas y exige un código de email tras la
+contraseña. `proxy.js` valida firma/expiración, aplica CSP con nonce y bloquea
+peticiones cross-site autenticadas; layouts y endpoints vuelven a comprobar la
+sesión contra PostgreSQL.
+
+El panel nunca recibe ni cambia una contraseña directamente. Solicita un enlace
+al correo registrado; el token aleatorio se guarda hasheado en Redis, viaja en
+el fragmento de la URL (no llega al access log), dura una hora, se consume con
+`GETDEL` y el formulario exige nueva contraseña más confirmación. Un reset
+válido revoca todas las sesiones existentes.
 
 Tras login o registro, las pantallas cliente llaman `refreshSession()` antes de navegar. El layout autenticado resuelve sesión y acceso en servidor antes de montar el encabezado mínimo compartido.
 
@@ -218,6 +234,10 @@ partido**, cada una con entre una y tres opciones (probabilidad,
 fiabilidad y cuota) y un único enlace a CF Análisis en la primera.
 `scripts/build-n8n-telegram-workflow.mjs`
 mantiene en n8n las mismas validaciones defensivas que el publicador y un
+credential `httpHeaderAuth` aporta `Authorization: Bearer …`; ningún secreto
+viaja en la URL. `scripts/vps/secure-n8n-internal-auth.cjs` migra y verifica las
+versiones actuales y publicadas, y conserva también el token de Telegram dentro
+de su credencial cifrada en lugar de incrustarlo en nodos HTTP.
 disparador interno, no público, para poder ejecutar el mismo flujo en QA sin
 alterar su programación diaria.
 

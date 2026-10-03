@@ -5,8 +5,6 @@ import {
   ArrowLeft,
   CheckCircle2,
   ChevronDown,
-  Eye,
-  EyeOff,
   Globe2,
   Headphones,
   KeyRound,
@@ -14,7 +12,6 @@ import {
   MessageCircle,
   Minimize2,
   Send,
-  XCircle,
 } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -47,12 +44,9 @@ export default function ChatWidget() {
   const [unread, setUnread] = useState(0);
   const [feedback, setFeedback] = useState('');
   const [pwdModalOpen, setPwdModalOpen] = useState(false);
-  const [pwdNew, setPwdNew] = useState('');
-  const [pwdConfirm, setPwdConfirm] = useState('');
   const [pwdSaving, setPwdSaving] = useState(false);
   const [pwdError, setPwdError] = useState('');
   const [pwdSuccess, setPwdSuccess] = useState(false);
-  const [pwdReveal, setPwdReveal] = useState(false);
   const pwdDialogRef = useRef(null);
 
   openRef.current = isOpen;
@@ -172,11 +166,8 @@ export default function ChatWidget() {
 
   const openPasswordModal = () => {
     setAccountOpen(false);
-    setPwdNew('');
-    setPwdConfirm('');
     setPwdError('');
     setPwdSuccess(false);
-    setPwdReveal(false);
     setPwdModalOpen(true);
   };
 
@@ -207,7 +198,7 @@ export default function ChatWidget() {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     const frame = window.requestAnimationFrame(() => {
-      pwdDialogRef.current?.querySelector('input')?.focus();
+      pwdDialogRef.current?.querySelector('button')?.focus();
     });
     const onEscape = (event) => {
       if (event.key === 'Escape') closePasswordModal();
@@ -225,31 +216,14 @@ export default function ChatWidget() {
     if (pwdSaving) return;
     setPwdError('');
 
-    if (!pwdNew || !pwdConfirm) {
-      setPwdError('Completa todos los campos');
-      return;
-    }
-    if (pwdNew !== pwdConfirm) {
-      setPwdError('Las contraseñas no coinciden');
-      return;
-    }
-    if (pwdNew.length < 8) {
-      setPwdError('La contraseña debe tener al menos 8 caracteres');
-      return;
-    }
-
     setPwdSaving(true);
     try {
       const response = await fetch('/api/auth/change-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newPassword: pwdNew, confirmPassword: pwdConfirm }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'No se pudo cambiar la contraseña.');
       setPwdSuccess(true);
-      setPwdNew('');
-      setPwdConfirm('');
     } catch (error) {
       setPwdError(error.message || 'No se pudo cambiar la contraseña.');
     } finally {
@@ -530,66 +504,16 @@ export default function ChatWidget() {
             {pwdSuccess ? (
               <>
                 <p className="password-modal-success">
-                  <CheckCircle2 size={18} aria-hidden="true" /> Contraseña actualizada correctamente.
+                  <CheckCircle2 size={18} aria-hidden="true" /> Enlace enviado al correo registrado.
                 </p>
                 <button type="button" className="chat-primary-action" onClick={closePasswordModal}>Listo</button>
               </>
             ) : (
               <form onSubmit={submitPasswordChange}>
-                <label>
-                  <span>Nueva contraseña</span>
-                  <span className="password-modal-field">
-                    <input
-                      type={pwdReveal ? 'text' : 'password'}
-                      value={pwdNew}
-                      onChange={(event) => setPwdNew(event.target.value)}
-                      autoComplete="new-password"
-                      minLength={8}
-                      required
-                    />
-                    <button
-                      type="button"
-                      className="password-modal-reveal"
-                      onClick={() => setPwdReveal((reveal) => !reveal)}
-                      aria-label={pwdReveal ? 'Ocultar contraseñas' : 'Mostrar contraseñas'}
-                      aria-pressed={pwdReveal}
-                    >
-                      {pwdReveal ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
-                    </button>
-                  </span>
-                </label>
-                <label>
-                  <span>Confirmar nueva contraseña</span>
-                  <span className="password-modal-field">
-                    <input
-                      type={pwdReveal ? 'text' : 'password'}
-                      value={pwdConfirm}
-                      onChange={(event) => setPwdConfirm(event.target.value)}
-                      autoComplete="new-password"
-                      minLength={8}
-                      required
-                    />
-                    <button
-                      type="button"
-                      className="password-modal-reveal"
-                      onClick={() => setPwdReveal((reveal) => !reveal)}
-                      aria-label={pwdReveal ? 'Ocultar contraseñas' : 'Mostrar contraseñas'}
-                      aria-pressed={pwdReveal}
-                    >
-                      {pwdReveal ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
-                    </button>
-                  </span>
-                  {pwdConfirm && (
-                    pwdNew === pwdConfirm ? (
-                      <small className="password-modal-match is-ok"><CheckCircle2 size={13} aria-hidden="true" /> Las contraseñas coinciden</small>
-                    ) : (
-                      <small className="password-modal-match is-bad"><XCircle size={13} aria-hidden="true" /> Las contraseñas no coinciden</small>
-                    )
-                  )}
-                </label>
+                <p>Por seguridad, enviaremos un enlace de un solo uso al correo registrado. Allí podrás escribir y confirmar tu nueva contraseña.</p>
                 {pwdError && <div className="chat-feedback is-error" role="alert">{pwdError}</div>}
                 <button type="submit" className="chat-primary-action" disabled={pwdSaving}>
-                  {pwdSaving ? 'Guardando…' : 'Guardar contraseña'}
+                  {pwdSaving ? 'Enviando…' : 'Enviar enlace seguro'}
                 </button>
               </form>
             )}

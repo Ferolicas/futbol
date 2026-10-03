@@ -1,14 +1,15 @@
 // Registro de usuario — auth nativo PG VPS (Fase 2.5 cerrada).
 // Antes usaba supabaseAdmin.auth.admin.createUser. Ahora signupUser de
-// lib/auth-pg.js: bcrypt + tabla `users` + sesión inmediata (cookie JWT).
+// lib/auth-pg.js: bcrypt + tabla `users`; la sesión nace tras verificar email.
 import { signupUser } from '../../../lib/auth-pg';
-import { sendWelcomeEmail } from '../../../lib/email';
+import { sendEmailVerificationEmail } from '../../../lib/email';
 import { redisRateLimit, clientIp } from '../../../lib/ratelimit-redis';
 import { validateDisplayName } from '../../../lib/user-profile-validation';
 import {
   LEGAL_DOCUMENT_VERSION,
   prepareLegalEvidence,
 } from '../../../lib/legal';
+import { normalizePurchaseIntent, normalizePurchasePlan, purchaseRoute } from '../../../lib/purchase-flow';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,13 +24,11 @@ export async function POST(request) {
       );
     }
 
-    const { name, email, password, acceptAll, marketingConsent, legalVersion, source } = await request.json();
+    const body = await request.json().catch(() => null);
+    const { name, email, password, acceptAll, marketingConsent, legalVersion, source, plan, intent } = body || {};
 
     if (!name || !email || !password) {
       return Response.json({ error: 'Nombre, email y contrasena son obligatorios' }, { status: 400 });
-    }
-    if (password.length < 8) {
-      return Response.json({ error: 'La contrasena debe tener al menos 8 caracteres' }, { status: 400 });
     }
     const validName = validateDisplayName(name);
     if (!validName.success) {
@@ -41,7 +40,7 @@ export async function POST(request) {
 
     const emailLower = email.toLowerCase().trim();
     const ua = request.headers.get('user-agent') || null;
-    const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null;
+    const ip = clientIp(request);
     const registrationSource = source === 'mobile' ? 'registration-mobile' : 'registration-web';
     const legalEvidence = prepareLegalEvidence(request, registrationSource);
     const marketingEvidence = marketingConsent === true
@@ -67,14 +66,25 @@ export async function POST(request) {
     }
 
     const userId = result.user.id;
+    const verifiedPlan = normalizePurchasePlan(plan);
+    const verifiedIntent = normalizePurchaseIntent(intent);
+    const continuePath = purchaseRoute('/verify-email', 'plan', verifiedPlan, verifiedIntent);
+    try {
+      await sendEmailVerificationEmail({
+        to: emailLower,
+        name: validName.name,
+        token: result.emailVerifyToken,
+        continuePath,
+      });
+    } catch (mailError) {
+      console.error('[Register] verification email failed:', mailError.message);
+      return Response.json({
+        error: 'La cuenta fue creada, pero no pudimos enviar el correo. Inicia sesión para solicitar otro enlace.',
+        accountCreated: true,
+      }, { status: 503 });
+    }
 
-    // Welcome email (fire and forget). NO incluir password en claro en el email
-    // ya no es necesario — el usuario la eligió. Mantenemos compat con la firma.
-    sendWelcomeEmail({ to: emailLower, name: validName.name }).catch((e) =>
-      console.error('[Register] Welcome email failed:', e.message)
-    );
-
-    return Response.json({ success: true, userId, message: 'Usuario registrado exitosamente' });
+    return Response.json({ success: true, userId, verificationRequired: true });
   } catch (error) {
     console.error('[Register] Error:', error.message, error.stack?.split('\n')[1]);
     return Response.json({ error: 'Error al registrar usuario' }, { status: 500 });

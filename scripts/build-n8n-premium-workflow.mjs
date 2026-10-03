@@ -14,11 +14,17 @@ if (!inputPath || !outputPath) {
 
 const parsed = JSON.parse(readFileSync(inputPath, 'utf8'));
 const workflow = Array.isArray(parsed) ? parsed[0] : parsed;
+const internalCredentialId = process.env.N8N_CF_INTERNAL_AUTH_CREDENTIAL_ID;
+const internalCredentialName = process.env.N8N_CF_INTERNAL_AUTH_CREDENTIAL_NAME || 'CF Análisis Internal API';
+if (!internalCredentialId) {
+  throw new Error('Falta N8N_CF_INTERNAL_AUTH_CREDENTIAL_ID');
+}
 if (!workflow || workflow.id !== 'PicksPremiumDia1') {
   throw new Error('El archivo no corresponde al workflow PICKS PREMIUM DIARIO');
 }
 
 const schedule = workflow.nodes.find(node => node.name === 'Schedule Trigger');
+const gateFootball = workflow.nodes.find(node => node.name === 'Gate Futbol');
 let baseballSchedule = workflow.nodes.find(node => node.name === 'Schedule Baseball');
 const gateBaseball = workflow.nodes.find(node => node.name === 'Gate Baseball');
 let loopBaseball = workflow.nodes.find(node => node.name === 'Loop Baseball');
@@ -43,16 +49,34 @@ if (!schedule || !gateBaseball || !sendBaseball || !registerBaseball
   throw new Error('Faltan nodos esenciales en el workflow premium');
 }
 
-const currentGateCode = String(gateBaseball.parameters?.jsCode || '');
-const baseballImageBaseUrl = currentGateCode.match(/['"](https:\/\/cfanalisis\.com\/api\/telegram-premium\/baseball-image\?secret=[^'"]+)['"]/)?.[1];
-if (!baseballImageBaseUrl) {
-  throw new Error('No se pudo conservar la URL autenticada de imágenes de béisbol');
-}
+const baseballImageBaseUrl = 'https://cfanalisis.com/api/telegram-premium/baseball-image';
 const telegramSendDocumentUrl = String(sendBaseball.parameters?.url || '')
   .replace(/\/send(?:Photo|Document)$/, '/sendDocument');
 if (!telegramSendDocumentUrl.endsWith('/sendDocument')) {
   throw new Error('No se pudo conservar la URL autenticada de Telegram');
 }
+
+function secureInternalRequest(node, url) {
+  if (!node) throw new Error(`Falta nodo HTTP interno para ${url}`);
+  node.parameters = {
+    ...(node.parameters || {}),
+    authentication: 'genericCredentialType',
+    genericAuthType: 'httpHeaderAuth',
+    url,
+  };
+  node.credentials = {
+    ...(node.credentials || {}),
+    httpHeaderAuth: { id: internalCredentialId, name: internalCredentialName },
+  };
+}
+
+secureInternalRequest(workflow.nodes.find(node => node.name === 'Feed Futbol'), 'https://cfanalisis.com/api/telegram-premium/futbol');
+secureInternalRequest(workflow.nodes.find(node => node.name === 'Feed Baseball'), 'https://cfanalisis.com/api/telegram-premium/baseball');
+secureInternalRequest(workflow.nodes.find(node => node.name === 'Imagen Futbol'), '={{ $json.imageUrl }}');
+gateFootball.parameters.jsCode = String(gateFootball.parameters?.jsCode || '')
+  .replace(/https:\/\/cfanalisis\.com\/api\/telegram-premium\/futbol-image\?secret=[^'"`&]+/g,
+    'https://cfanalisis.com/api/telegram-premium/futbol-image')
+  .replace(/\+\s*(['"])&date=/g, (_match, quote) => `+ ${quote}?date=`);
 
 // Fútbol conserva su programación original a los :10. Béisbol usa un trigger
 // independiente para salir exactamente a las 18:00 de España; así cambiar un
@@ -117,7 +141,7 @@ return data.matches
       fixtureId: match.fixtureId,
       match: (match.homeTeam || '') + ' vs ' + (match.awayTeam || ''),
       imageUrl: ${JSON.stringify(baseballImageBaseUrl)}
-        + '&date=' + encodeURIComponent(data.fecha)
+        + '?date=' + encodeURIComponent(data.fecha)
         + '&fixture=' + encodeURIComponent(match.fixtureId)
         + '&layout=' + encodeURIComponent(${JSON.stringify(BASEBALL_IMAGE_LAYOUT_VERSION)}),
     },
@@ -217,6 +241,7 @@ imageBaseball.parameters = {
     },
   },
 };
+secureInternalRequest(imageBaseball, '={{ $json.imageUrl }}');
 imageBaseball.onError = 'continueRegularOutput';
 sendBaseball.parameters = {
   ...sendBaseball.parameters,

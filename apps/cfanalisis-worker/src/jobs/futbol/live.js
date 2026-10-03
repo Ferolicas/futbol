@@ -10,6 +10,7 @@ import {
   ALL_LEAGUE_IDS,
   redisGet, redisSet, redisDel, KEYS, TTL,
   incrementApiCallCount, sendPushNotification,
+  createLiveTelemetryToken,
   supabaseAdmin, getMatchSchedule, pgQuery,
   footballApiRequest, extractResultCoverage,
 } from '../../shared.js';
@@ -987,6 +988,7 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today, playerActi
       bundleHadSubscriberInFav = true;
 
       const deviceSubs = toSubArray(row.subscription);
+      const telemetry = createLiveTelemetryToken(bundle.fixtureId, bundle.events?.[0]?.min ?? '0');
       await Promise.allSettled(deviceSubs.map(async (sub) => {
         if (!sub?.endpoint) return;
         attempted++;
@@ -1001,6 +1003,8 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today, playerActi
             tag: bundle.tag,
             url: '/dashboard',
             timestamp: new Date().toISOString(),
+            telemetryToken: telemetry.token,
+            telemetryExpiresAt: telemetry.expiresAt,
           },
           { urgency: 'high' },
         );

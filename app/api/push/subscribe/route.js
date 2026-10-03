@@ -1,101 +1,90 @@
-import { createSupabaseServerClient } from '../../../../lib/supabase-auth';
+import { z } from 'zod';
+import { getCurrentUser } from '../../../../lib/auth-pg';
 import { supabaseAdmin } from '../../../../lib/supabase';
 import { vapidPublicKey } from '../../../../lib/webpush';
+import { redisRateLimit, clientIp } from '../../../../lib/ratelimit-redis';
 
 export const dynamic = 'force-dynamic';
+
+const endpointSchema = z.string().url().max(2048).refine(value => {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password;
+  } catch { return false; }
+});
+const subscriptionSchema = z.object({
+  endpoint: endpointSchema,
+  expirationTime: z.number().nullable().optional(),
+  keys: z.object({
+    p256dh: z.string().min(16).max(512),
+    auth: z.string().min(8).max(256),
+  }).strict(),
+}).strict();
 
 export async function GET() {
   return Response.json({ vapidPublicKey });
 }
 
-// Helper: normalize subscription storage to always be an array
 function toArray(stored) {
   if (!stored) return [];
   return Array.isArray(stored) ? stored : [stored];
 }
 
+async function authenticated(request, bucket) {
+  const user = await getCurrentUser();
+  if (!user) return { response: Response.json({ error: 'Unauthorized' }, { status: 401 }) };
+  const limit = await redisRateLimit(bucket, `${user.id}:${clientIp(request)}`, 20, 60, { failClosed: true });
+  if (!limit.success) {
+    return { response: Response.json({ error: 'Too many requests' }, { status: limit.available ? 429 : 503 }) };
+  }
+  return { user };
+}
+
 export async function POST(request) {
-  const supabase = createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  const auth = await authenticated(request, 'push-subscribe');
+  if (auth.response) return auth.response;
+  const parsed = subscriptionSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return Response.json({ error: 'Invalid subscription' }, { status: 400 });
+  const newSub = parsed.data;
 
-  const newSub = await request.json();
-  const endpoint = newSub?.endpoint;
-  if (!endpoint) return Response.json({ error: 'Invalid subscription' }, { status: 400 });
+  const { data: existing, error: readError } = await supabaseAdmin
+    .from('push_subscriptions').select('subscription').eq('user_id', auth.user.id).maybeSingle();
+  if (readError) return Response.json({ error: 'DB error' }, { status: 500 });
 
-  // Load existing row (if any) and merge the new device subscription
-  const { data: existing } = await supabaseAdmin
-    .from('push_subscriptions')
-    .select('subscription')
-    .eq('user_id', user.id)
-    .maybeSingle();
-
-  // Deduplicate by endpoint — replace same-endpoint entry, keep others
-  const prevArray = toArray(existing?.subscription);
-  const updatedArray = [...prevArray.filter(s => s?.endpoint !== endpoint), newSub];
-
+  const updatedArray = [
+    ...toArray(existing?.subscription).filter(item => item?.endpoint !== newSub.endpoint).slice(-4),
+    newSub,
+  ];
   const { error } = await supabaseAdmin.from('push_subscriptions').upsert({
-    user_id: user.id,
+    user_id: auth.user.id,
     subscription: updatedArray,
   }, { onConflict: 'user_id' });
-
-  // Antes devolvía success:true aunque el guardado fallara (solo log) → el
-  // frontend creía estar suscrito pero la fila nunca se escribía y no llegaban
-  // notificaciones. Ahora si el upsert falla, devolvemos 500 para que el
-  // cliente lo sepa y muestre el error.
   if (error) {
     console.error('[push:subscribe]', error.message);
-    return Response.json(
-      { error: 'No se pudo guardar la suscripción', detail: error.message },
-      { status: 500 },
-    );
+    return Response.json({ error: 'No se pudo guardar la suscripción' }, { status: 500 });
   }
-
   return Response.json({ success: true, deviceCount: updatedArray.length });
 }
 
 export async function DELETE(request) {
-  const supabase = createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
+  const auth = await authenticated(request, 'push-unsubscribe');
+  if (auth.response) return auth.response;
   const body = await request.json().catch(() => ({}));
-  const endpoint = body.endpoint; // specific device endpoint to remove
+  const endpoint = body?.endpoint == null ? null : endpointSchema.safeParse(body.endpoint);
+  if (endpoint && !endpoint.success) return Response.json({ error: 'Invalid endpoint' }, { status: 400 });
 
-  if (endpoint) {
-    // Remove only this device's subscription, keep others
+  if (endpoint?.data) {
     const { data: existing } = await supabaseAdmin
-      .from('push_subscriptions')
-      .select('subscription')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    const prevArray = toArray(existing?.subscription);
-    const remaining = prevArray.filter(s => s?.endpoint !== endpoint);
-
-    if (remaining.length === 0) {
-      // No devices left — remove the row entirely
-      const { error } = await supabaseAdmin
-        .from('push_subscriptions')
-        .delete()
-        .eq('user_id', user.id);
-      if (error) console.error('[push:unsubscribe]', error.message);
-    } else {
-      // Update with remaining devices
-      const { error } = await supabaseAdmin
-        .from('push_subscriptions')
-        .update({ subscription: remaining })
-        .eq('user_id', user.id);
-      if (error) console.error('[push:unsubscribe:update]', error.message);
-    }
+      .from('push_subscriptions').select('subscription').eq('user_id', auth.user.id).maybeSingle();
+    const remaining = toArray(existing?.subscription).filter(item => item?.endpoint !== endpoint.data);
+    const query = remaining.length === 0
+      ? supabaseAdmin.from('push_subscriptions').delete().eq('user_id', auth.user.id)
+      : supabaseAdmin.from('push_subscriptions').update({ subscription: remaining }).eq('user_id', auth.user.id);
+    const { error } = await query;
+    if (error) return Response.json({ error: 'DB error' }, { status: 500 });
   } else {
-    // Legacy / unsubscribe all — remove the entire row
-    const { error } = await supabaseAdmin
-      .from('push_subscriptions')
-      .delete()
-      .eq('user_id', user.id);
-    if (error) console.error('[push:unsubscribe:all]', error.message);
+    const { error } = await supabaseAdmin.from('push_subscriptions').delete().eq('user_id', auth.user.id);
+    if (error) return Response.json({ error: 'DB error' }, { status: 500 });
   }
-
   return Response.json({ success: true });
 }

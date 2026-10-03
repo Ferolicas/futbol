@@ -22,7 +22,9 @@ if (!processInfo) throw Error('cfanalisis-web is not registered in PM2');
 const previous = processInfo.pm2_env;
 const config = { name: 'cfanalisis-web', script: previous.pm_exec_path, cwd: previous.pm_cwd,
   interpreter: previous.exec_interpreter || 'node', node_args: previous.node_args || [], autorestart: true,
-  env: { ...(previous.env || {}), NODE_ENV: 'production', PORT: previous.PORT || 3000 } };
+  uid: 'cfanalisis', gid: 'cfanalisis',
+  env: { ...(previous.env || {}), NODE_ENV: 'production', PORT: previous.PORT || 3000,
+    HOSTNAME: '127.0.0.1' } };
 const rollbackMode = previous.exec_mode === 'cluster_mode' ? 'cluster' : 'fork';
 const configuredInstances = Number(previous.env?.CF_WEB_INSTANCES);
 const desiredInstances = Number.isInteger(configuredInstances) && configuredInstances >= 2
@@ -54,6 +56,17 @@ if [ -d "$PREVIOUS_BUILD/static" ]; then
   cp -an "$PREVIOUS_BUILD/static/." "$RUNTIME_DIR/.next/static/"
 fi
 node scripts/vps/check-web-release.cjs "$RUNTIME_DIR"
+
+# El proceso nunca corre como root. El runtime queda legible pero no
+# modificable por el usuario de la app; solo un cache existente puede escribir.
+chgrp cfanalisis "$RELEASES_DIR" "$RELEASE_DIR"
+chmod 750 "$RELEASES_DIR" "$RELEASE_DIR"
+chown -R root:cfanalisis "$RUNTIME_DIR"
+find "$RUNTIME_DIR" -type d -exec chmod 750 {} +
+find "$RUNTIME_DIR" -type f -exec chmod 640 {} +
+if [ -d "$RUNTIME_DIR/.next/cache" ]; then
+  chown -R cfanalisis:cfanalisis "$RUNTIME_DIR/.next/cache"
+fi
 
 activate() {
   # This PM2 version does not update pm_exec_path for an existing app through

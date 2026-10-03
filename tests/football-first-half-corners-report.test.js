@@ -75,7 +75,7 @@ test('el endpoint cron sigue siendo privado y entrega el nuevo CSV', () => {
     path.join(__dirname, '../app/api/cron/personal-market-report/route.js'),
     'utf8',
   );
-  assert.match(route, /process\.env\.CRON_SECRET/);
+  assert.match(route, /isCronAuthorized\(request\)/);
   assert.match(route, /buildFootballFirstHalfCornersReport/);
   assert.match(route, /Content-Disposition/);
   assert.match(route, /text\/csv/);

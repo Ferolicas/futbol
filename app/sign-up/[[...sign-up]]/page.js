@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -22,12 +22,9 @@ import {
   purchaseRoute,
 } from '../../../lib/purchase-flow';
 import BrandLogoMedia from '../../../components/BrandLogoMedia';
-import { useAuth } from '../../../components/providers';
 import { LEGAL_DOCUMENT_VERSION } from '../../../lib/legal-constants';
 
 export default function SignUpPage() {
-  const router = useRouter();
-  const { refreshSession } = useAuth();
   const searchParams = useSearchParams();
   const selectedPlan = normalizePurchasePlan(searchParams.get('plan'));
   const purchaseIntent = normalizePurchaseIntent(searchParams.get('intent'));
@@ -39,12 +36,12 @@ export default function SignUpPage() {
   const [error, setError] = useState('');
   const [emailTaken, setEmailTaken] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
   const [acceptAll, setAcceptAll] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
 
-  // Auth nativo PG: /api/register (signupUser) ya crea la sesión y setea la
-  // cookie. No hace falta un segundo signInWithPassword. Antes el auto-login
-  // se hacía con el browser client de Supabase.
+  // Auth nativo PG: /api/register crea la cuenta y envía la verificación. La
+  // sesión solo nace cuando el usuario demuestra control del correo.
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -55,7 +52,17 @@ export default function SignUpPage() {
       const res = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password, acceptAll, marketingConsent, legalVersion: LEGAL_DOCUMENT_VERSION, source: 'web' }),
+        body: JSON.stringify({
+          name,
+          email,
+          password,
+          acceptAll,
+          marketingConsent,
+          legalVersion: LEGAL_DOCUMENT_VERSION,
+          source: 'web',
+          plan: selectedPlan,
+          intent: purchaseIntent,
+        }),
       });
       const data = await res.json().catch(() => ({}));
 
@@ -66,10 +73,8 @@ export default function SignUpPage() {
         return;
       }
 
-      // Sesión ya creada por signupUser. Si la compra nació en la Home,
-      // conservamos únicamente el ID validado como preferencia de plan.
-      await refreshSession();
-      router.replace(purchaseRoute('/dashboard', 'plan', selectedPlan, purchaseIntent));
+      setVerificationSent(true);
+      setLoading(false);
     } catch {
       setError('Error al registrarse. Intenta de nuevo.');
       setLoading(false);
@@ -140,6 +145,14 @@ export default function SignUpPage() {
             </p>
           </header>
 
+          {verificationSent ? (
+            <div className="signup-form" style={{ textAlign: 'center' }}>
+              <Check size={42} color="#00e676" aria-hidden="true" />
+              <h2>Revisa tu correo</h2>
+              <p>Enviamos un enlace seguro a <strong>{email}</strong>. Verifícalo para activar la cuenta y continuar.</p>
+              <Link href={signInHref} className="signup-submit">Ir al inicio de sesión</Link>
+            </div>
+          ) : (
           <form onSubmit={handleSubmit} className="signup-form">
             <div className="signup-field">
               <label htmlFor="signup-name">Nombre</label>
@@ -233,14 +246,15 @@ export default function SignUpPage() {
                 {loading
                   ? 'Creando cuenta…'
                   : selectedPlan
-                    ? 'Continuar al pago'
-                    : 'Continuar'}
+                    ? 'Crear cuenta y verificar correo'
+                    : 'Crear cuenta y verificar correo'}
               </span>
               {loading
                 ? <LoaderCircle className="signup-loading-icon" size={18} aria-hidden="true" />
                 : <ArrowRight size={18} aria-hidden="true" />}
             </button>
           </form>
+          )}
 
           <p className="signup-footer">
             ¿Ya tienes una cuenta?{' '}

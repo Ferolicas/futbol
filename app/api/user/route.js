@@ -6,9 +6,16 @@ import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { supabaseAdmin } from '../../../lib/supabase';
 import { redisGet, redisSet, KEYS } from '../../../lib/redis';
 import { jsonError } from '../../../lib/api-error';
+import { redisRateLimit } from '../../../lib/ratelimit-redis';
+import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
 const HIDDEN_TTL = 30 * 24 * 3600;
+const writeSchema = z.object({
+  type: z.enum(['hide', 'unhide', 'save-combinada', 'delete-combinada']),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  data: z.record(z.string(), z.unknown()),
+}).strict();
 
 async function requireUser(supabase) {
   const { data: { user } } = await supabase.auth.getUser();
@@ -60,7 +67,11 @@ export async function POST(request) {
   const user = await requireUser(supabase);
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { type, data, date: clientDate } = await request.json();
+  const limit = await redisRateLimit('user-write', user.id, 30, 60, { failClosed: true });
+  if (!limit.success) return Response.json({ error: 'Demasiadas solicitudes.' }, { status: 429 });
+  const parsed = writeSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return Response.json({ error: 'Solicitud inválida' }, { status: 400 });
+  const { type, data, date: clientDate } = parsed.data;
   const userId = user.id;
   const date = clientDate || new Date().toISOString().split('T')[0];
 
@@ -98,17 +109,23 @@ export async function POST(request) {
     }
 
     if (type === 'save-combinada') {
+      if (!Array.isArray(data.selections) || data.selections.length < 1 || data.selections.length > 20) {
+        return Response.json({ error: 'La combinada debe tener entre 1 y 20 selecciones.' }, { status: 400 });
+      }
+      if (typeof data.name !== 'string' || data.name.trim().length < 1 || data.name.length > 100) {
+        return Response.json({ error: 'Nombre de combinada inválido.' }, { status: 400 });
+      }
       const normalizedSelections = (data.selections || []).map(s => ({
-        fixtureId: String(s.fixtureId || ''),
-        matchName: s.matchName || '',
-        market: s.name || s.market || '',
-        odd: s.odd || 0,
-        probability: s.probability || 0,
+        fixtureId: String(s?.fixtureId || '').slice(0, 40),
+        matchName: String(s?.matchName || '').slice(0, 160),
+        market: String(s?.name || s?.market || '').slice(0, 160),
+        odd: Math.max(0, Math.min(10000, Number(s?.odd) || 0)),
+        probability: Math.max(0, Math.min(100, Number(s?.probability) || 0)),
       }));
 
       const { data: row, error } = await supabaseAdmin.from('combinadas').insert({
         user_id: userId,
-        name: data.name || `Combinada ${new Date().toLocaleDateString('es')}`,
+        name: data.name.trim(),
         selections: normalizedSelections,
         combined_odd: data.combinedOdd,
         combined_probability: data.combinedProbability,
@@ -124,8 +141,8 @@ export async function POST(request) {
     }
 
     if (type === 'delete-combinada') {
-      const combinadaId = data.combinadaId;
-      if (!combinadaId) return Response.json({ error: 'combinadaId required' }, { status: 400 });
+      const combinadaId = String(data.combinadaId || '');
+      if (!/^[0-9a-f-]{1,80}$/i.test(combinadaId)) return Response.json({ error: 'combinadaId required' }, { status: 400 });
       const { error } = await supabaseAdmin
         .from('combinadas')
         .delete()

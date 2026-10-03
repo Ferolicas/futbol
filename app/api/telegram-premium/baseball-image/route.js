@@ -1,5 +1,7 @@
+import { isCronAuthorized } from '@/lib/internal-auth';
 /**
- * GET /api/telegram-premium/baseball-image?secret=CRON_SECRET&fixture=ID[&date=YYYY-MM-DD][&page=N]
+ * GET /api/telegram-premium/baseball-image?fixture=ID[&date=YYYY-MM-DD][&page=N]
+ * Authorization: Bearer CRON_SECRET
  *
  * PNG 16:9 del canal Picks Premium (béisbol). Cada partido se representa en
  * una única imagen horizontal con todas las tarjetas necesarias distribuidas
@@ -22,20 +24,13 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-function verifyAuth(request) {
-  const { searchParams } = new URL(request.url);
-  const secret = searchParams.get('secret')
-    || request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
-  return Boolean(process.env.CRON_SECRET) && secret === process.env.CRON_SECRET;
-}
-
 function displayDate(isoDate) {
   const [year, month, day] = String(isoDate || '').split('-');
   return year && month && day ? `${day}/${month}/${year}` : '';
 }
 
 export async function GET(request) {
-  if (!verifyAuth(request)) {
+  if (!isCronAuthorized(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

@@ -1,5 +1,6 @@
 /**
- * GET/POST /api/cron/publish-combinada?secret=CRON_SECRET[&date=YYYY-MM-DD][&status=draft|published]
+ * GET/POST /api/cron/publish-combinada[?date=YYYY-MM-DD][&status=draft|published]
+ * Authorization: Bearer CRON_SECRET
  *
  * Recorre todos los partidos analizados del día y elige como máximo los DOS
  * mejores partidos publicables, cada uno con entre UNA y TRES opciones:
@@ -38,6 +39,7 @@ import { supabaseAdmin } from '../../../../lib/supabase';
 import { getAnalyzedFixtureIds, getAnalyzedMatchesFull } from '../../../../lib/sanity-cache';
 import { jsonError } from '../../../../lib/api-error';
 import { reliabilityPercent } from '../../../../lib/recommendation-policy';
+import { isCronAuthorized } from '../../../../lib/internal-auth';
 import {
   selectTelegramDailyPick,
   TELEGRAM_DAILY_PICK_RULES,
@@ -59,9 +61,7 @@ function unwrapAnalysis(value) {
 
 async function handle(request) {
   const url = new URL(request.url);
-  const auth = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || '';
-  const secret = url.searchParams.get('secret') || auth;
-  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+  if (!isCronAuthorized(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

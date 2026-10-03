@@ -1,3 +1,4 @@
+import { isCronAuthorized } from '@/lib/internal-auth';
 /**
  * GET /api/cron/live
  * Thin enqueuer — pushes a `futbol-live` job to the BullMQ worker.
@@ -7,17 +8,8 @@ import { enqueue } from '../../../../lib/worker-client';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 10;
 
-function verifyAuth(request) {
-  const { searchParams } = new URL(request.url);
-  const secret = searchParams.get('secret')
-    || request.headers.get('authorization')?.replace('Bearer ', '');
-  // R17 FIX: eliminado el bypass por header `x-internal-trigger`.
-  // R18 FIX: eliminado el bypass `NODE_ENV !== 'production'`. Siempre CRON_SECRET.
-  return secret === process.env.CRON_SECRET;
-}
-
 export async function GET(request) {
-  if (!verifyAuth(request)) {
+  if (!isCronAuthorized(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const result = await enqueue('futbol-live', {});

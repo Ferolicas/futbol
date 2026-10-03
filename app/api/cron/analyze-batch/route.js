@@ -1,3 +1,4 @@
+import { isCronAuthorized } from '@/lib/internal-auth';
 /**
  * POST /api/cron/analyze-batch
  * Thin enqueuer — pushes a `futbol-analyze-batch` job to the BullMQ worker.
@@ -9,16 +10,8 @@ import { enqueue } from '../../../../lib/worker-client';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 10;
 
-function verifyAuth(request) {
-  // R17 FIX: eliminado el bypass forjable `x-internal-trigger`.
-  const { searchParams } = new URL(request.url);
-  const secret = searchParams.get('secret')
-    || request.headers.get('authorization')?.replace('Bearer ', '');
-  return secret === process.env.CRON_SECRET; // R18: sin bypass NODE_ENV
-}
-
 export async function POST(request) {
-  if (!verifyAuth(request)) {
+  if (!isCronAuthorized(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
   let body = {};

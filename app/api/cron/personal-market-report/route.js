@@ -1,21 +1,15 @@
+import { isCronAuthorized } from '@/lib/internal-auth';
 import { buildFootballFirstHalfCornersReport } from '../../../../lib/football-first-half-corners-report';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
-
-function verifyAuth(request) {
-  const { searchParams } = new URL(request.url);
-  const supplied = searchParams.get('secret')
-    || request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
-  return !!process.env.CRON_SECRET && supplied === process.env.CRON_SECRET;
-}
 
 function bogotaToday() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
 }
 
 export async function GET(request) {
-  if (!verifyAuth(request)) {
+  if (!isCronAuthorized(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const { searchParams } = new URL(request.url);

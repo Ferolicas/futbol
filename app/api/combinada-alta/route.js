@@ -1,5 +1,6 @@
 /**
- * GET /api/combinada-alta?secret=CRON_SECRET[&date=YYYY-MM-DD][&minProb=80][&minOdd=1.20]
+ * GET /api/combinada-alta[?date=YYYY-MM-DD][&minProb=80][&minOdd=1.20]
+ * Authorization: Bearer CRON_SECRET
  *
  * Calcula la combinada de selecciones >= minProb y >= minOdd para `date`
  * (default = hoy hora Colombia). NO guarda nada — solo devuelve JSON.
@@ -11,6 +12,7 @@
 
 import { getAnalyzedFixtureIds, getAnalyzedMatchesFull } from '../../../lib/sanity-cache';
 import { meetsFootballReliability } from '../../../lib/recommendation-policy';
+import { isCronAuthorized } from '../../../lib/internal-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -28,9 +30,7 @@ function todayInBogota() {
 
 async function handle(request) {
   const url = new URL(request.url);
-  const auth = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || '';
-  const secret = url.searchParams.get('secret') || auth;
-  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+  if (!isCronAuthorized(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

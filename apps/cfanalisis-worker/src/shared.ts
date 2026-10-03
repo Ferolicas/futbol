@@ -54,6 +54,7 @@ const [
   _finalVerdict,
   _predictionLedger,
   _predictionSeal,
+  _liveTelemetry,
 ] = await Promise.all([
   import(LIB + 'redis.js'),
   import(LIB + 'api-football.js'),
@@ -87,6 +88,7 @@ const [
   import(LIB + 'final-verdict.js'),
   import(LIB + 'prediction-ledger.js'),
   import(LIB + 'prediction-seal.js'),
+  import(LIB + 'live-telemetry-token.js'),
 ]);
 
 // triggerEvent ahora viene del wsManager local del worker (WebSocket nativo)
@@ -146,6 +148,7 @@ export const triggerEvent = wsTriggerEvent;
 
 // lib/webpush.js
 export const sendPushNotification = _webpush.sendPushNotification;
+export const createLiveTelemetryToken = _liveTelemetry.createLiveTelemetryToken;
 
 // lib/leagues.js
 export const ALL_LEAGUE_IDS = _leagues.ALL_LEAGUE_IDS;

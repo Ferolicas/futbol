@@ -14,6 +14,11 @@ test('la firma usa solo la clave actual y la verificación admite la anterior', 
   assert.match(session, /for \(const secret of getVerificationSecrets\(\)\)/);
   assert.match(proxy, /AUTH_JWT_SECRET_PREVIOUS/);
   assert.match(proxy, /for \(const secret of getJwtSecrets\(\)\)/);
+  assert.match(session, /__Host-cf_session/);
+  assert.match(session, /issuer: JWT_ISSUER/);
+  assert.match(session, /audience: JWT_AUDIENCE/);
+  assert.match(proxy, /issuer: JWT_ISSUER/);
+  assert.match(proxy, /audience: JWT_AUDIENCE/);
 });
 
 test('el rotador no imprime secretos y conserva permisos del entorno', () => {

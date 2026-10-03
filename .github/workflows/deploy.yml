@@ -143,7 +143,7 @@ jobs:
             # apps/cfanalisis-worker/src/shared.ts. Si cambia una lib que
             # el worker NO usa (ej lib/stripe.js, lib/zeptomail.js), no
             # disparamos restart del worker.
-            WORKER_RE='^(apps/cfanalisis-worker/|packages/realtime-protocol/|lib/(api-football|free-football-evidence|mlb-stats-api|combinada|baseball-model|baseball-calibration|baseball-features|baseball-ml|odds-api|redis|sanity-cache|supabase|supabase-cache|db|webpush|leagues|model-engine|model-ingest|model-profiles|model-impact|model-player-markets|model-probabilities|model-to-scored|meta-features|adn|h2h|market-labels|descriptive-stats|prediction-ledger|prediction-seal|prediction-seal-core|market-settlement|recommendation-policy|multisport-analysis|multisport-empirical-engine|multisport-providers|multisport-config)\.js$|lib/(prediction-math|football-api-client|football-result-snapshot)\.cjs$|scripts/(reenrich-baseball|train-baseball-meta-models|train-football-empirical-engine|train-multisport-empirical-engine)\.js$)'
+            WORKER_RE='^(apps/cfanalisis-worker/|packages/realtime-protocol/|lib/(api-football|free-football-evidence|mlb-stats-api|combinada|baseball-model|baseball-calibration|baseball-features|baseball-ml|odds-api|redis|sanity-cache|supabase|supabase-cache|db|webpush|live-telemetry-token|leagues|model-engine|model-ingest|model-profiles|model-impact|model-player-markets|model-probabilities|model-to-scored|meta-features|adn|h2h|market-labels|descriptive-stats|prediction-ledger|prediction-seal|prediction-seal-core|market-settlement|recommendation-policy|multisport-analysis|multisport-empirical-engine|multisport-providers|multisport-config)\.js$|lib/(prediction-math|football-api-client|football-result-snapshot)\.cjs$|scripts/(reenrich-baseball|train-baseball-meta-models|train-football-empirical-engine|train-multisport-empirical-engine)\.js$)'
             if echo "$CHANGED" | grep -qE "$WORKER_RE"; then
               echo ""
               echo "▶ Worker changed — rebuilding worker"
@@ -161,16 +161,9 @@ jobs:
               #   · partido   → cfanalisis-rt + cfanalisis-heavy (Fase 1 activa)
               # `|| true` evita que `set -e` aborte el deploy si alguno no existe
               # (según si ya migraste a la topología partida en el VPS).
-              WORKER_RELOADED=0
-              for proc in cfanalisis-rt cfanalisis-heavy cfanalisis-worker; do
-                if pm2 reload "$proc" --update-env 2>/dev/null; then
-                  echo "  ✓ pm2 reload $proc"
-                  WORKER_RELOADED=1
-                fi
-              done
-              if [ "$WORKER_RELOADED" = "0" ]; then
-                echo "  ⚠ ningún proceso worker recargado — revisa 'pm2 list' (nombres esperados: cfanalisis-rt/cfanalisis-heavy o cfanalisis-worker)"
-              fi
+              pm2 delete cfanalisis-worker 2>/dev/null || true
+              pm2 startOrReload /apps/futbol/ecosystem.config.cjs --update-env
+              pm2 save
 
               cd /apps/futbol
               echo "✓ Worker redeployed"

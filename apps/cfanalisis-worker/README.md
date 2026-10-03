@@ -76,7 +76,9 @@ populated keys regardless of which side wrote them.
 | `baseball-finalize`         | `0 5,9 * * *` Madrid            | Fill actual_* cols of predictions       |
 | `baseball-cleanup`          | `0 3 * * *`                     | Delete stale baseball rows              |
 
-All cron-job.org hits go to `https://cfanalisis.com/api/cron/<name>?secret=$CRON_SECRET`
+Internal HTTP triggers use `Authorization: Bearer $CRON_SECRET`; the secret is
+never accepted in the query string. Production schedules run directly in
+BullMQ and do not depend on public cron URLs.
 exactly as before — the Vercel endpoint now enqueues instead of executing.
 
 ## Configuration

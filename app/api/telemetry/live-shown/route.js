@@ -8,28 +8,51 @@
 // Guardamos el MÁS TEMPRANO (el primer dispositivo que lo mostró = latencia real).
 import { redisGet, redisSet } from '../../../../lib/redis';
 import { jsonError } from '../../../../lib/api-error';
+import { redisRateLimit, clientIp } from '../../../../lib/ratelimit-redis';
+import { verifyLiveTelemetryToken } from '../../../../lib/live-telemetry-token';
+import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
 
 const TTL = 48 * 3600;
 const utcToday = () => new Date().toISOString().split('T')[0];
+const bodySchema = z.object({
+  fid: z.coerce.number().int().positive().max(2_147_483_647),
+  minute: z.union([z.number().int().min(0).max(180), z.string().regex(/^\d{1,3}(?:\+\d{1,2})?$/)]),
+  token: z.string().min(32).max(128),
+  expiresAt: z.coerce.number().int().positive(),
+});
 
 export async function POST(request) {
   try {
-    const body = await request.json().catch(() => null);
-    const fid = Number(body?.fid);
-    const minute = body?.minute != null ? String(body.minute) : null;
-    const shownAt = typeof body?.shownAt === 'string' ? body.shownAt : new Date().toISOString();
-    if (!fid || minute == null) {
-      return Response.json({ ok: false, error: 'fid y minute requeridos' }, { status: 400 });
+    const limit = await redisRateLimit('live-telemetry', clientIp(request), 60, 60, { failClosed: true });
+    if (!limit.success) {
+      return Response.json({ ok: false, error: 'Too many requests' }, { status: limit.available ? 429 : 503 });
     }
+    const body = await request.json().catch(() => null);
+    const parsed = bodySchema.safeParse(body);
+    if (!parsed.success) {
+      return Response.json({ ok: false, error: 'Invalid payload' }, { status: 400 });
+    }
+    const { fid, token, expiresAt } = parsed.data;
+    const minute = String(parsed.data.minute);
+    if (!verifyLiveTelemetryToken(fid, minute, expiresAt, token)) {
+      return Response.json({ ok: false, error: 'Invalid token' }, { status: 401 });
+    }
+    const shownAt = new Date().toISOString();
 
     const key = `eventlog:shown:${utcToday()}`;
-    const map = (await redisGet(key)) || {};
+    const stored = await redisGet(key);
+    const map = stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
     const k = `${fid}:${minute}`;
     // Conservar el más temprano (primer dispositivo que lo mostró).
     if (!map[k] || shownAt < map[k]) map[k] = shownAt;
-    await redisSet(key, map, TTL);
+    const entries = Object.entries(map);
+    const bounded = entries.length > 5000
+      ? Object.fromEntries(entries.slice(-4999))
+      : map;
+    bounded[k] = map[k];
+    await redisSet(key, bounded, TTL);
 
     return Response.json({ ok: true });
   } catch (e) {

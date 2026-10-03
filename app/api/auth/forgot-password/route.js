@@ -1,8 +1,6 @@
-import crypto from 'crypto';
 import { pgQuery } from '../../../../lib/db';
-import { redisSet } from '../../../../lib/redis';
-import { sendPasswordResetEmail } from '../../../../lib/email';
 import { redisRateLimit, clientIp } from '../../../../lib/ratelimit-redis';
+import { issuePasswordReset } from '../../../../lib/password-reset';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,8 +15,9 @@ export async function POST(request) {
       );
     }
 
-    const { email } = await request.json();
-    if (!email?.trim()) {
+    const body = await request.json().catch(() => null);
+    const email = typeof body?.email === 'string' ? body.email : '';
+    if (!email.trim() || email.length > 254) {
       return Response.json({ error: 'Email requerido' }, { status: 400 });
     }
 
@@ -45,20 +44,16 @@ export async function POST(request) {
       return Response.json({ success: true });
     }
 
-    // Generate secure token — store in Redis with 1-hour TTL
-    const token = crypto.randomBytes(32).toString('hex');
-    await redisSet(`pwd-reset:${token}`, { userId: user.id, email: emailLower }, 3600);
-
     // El envío de email NO debe tumbar el endpoint. Si el proveedor falla
     // (p.ej. ZeptoMail "Credit exhausted" → 429, o key/sender mal config),
     // sendEmail lanza. Antes eso devolvía 500 SOLO para usuarios existentes,
     // mientras los inexistentes devuelven 200 → fuga de enumeración de cuentas.
     // Capturamos, logueamos para observabilidad, y respondemos success igual.
     try {
-      await sendPasswordResetEmail({
-        to: emailLower,
+      await issuePasswordReset({
+        userId: user.id,
+        email: emailLower,
         name: user.name,
-        token,
       });
     } catch (mailErr) {
       console.error('[ForgotPassword] envío de email falló:', mailErr.message);
