@@ -23,6 +23,15 @@ test('a provider retry only reactivates on a new or newly-approved payment', asy
   assert.equal(shouldApplyConfirmedPayment({ paymentId: null }), false);
 });
 
+test('active payment profiles are audited frequently and Mercado Pago uses its valid search limit', () => {
+  const root = path.join(__dirname, '..');
+  const store = fs.readFileSync(path.join(root, 'lib/payment-store.js'), 'utf8');
+  const mercadoPago = fs.readFileSync(path.join(root, 'lib/mercadopago.js'), 'utf8');
+  assert.match(store, /subscription_status IN \('active', 'trialing'\).*interval '15 minutes'/s);
+  assert.match(mercadoPago, /listAuthorizedPayments[\s\S]*limit: '10'/);
+  assert.doesNotMatch(mercadoPago, /preapproval_id: String\(preapprovalId\), limit: '20'/);
+});
+
 test('display names are normalized, bounded and reject abuse or impersonation', async () => {
   const { validateDisplayName } = await import('../lib/user-profile-validation.js');
   assert.deepEqual(validateDisplayName('  María   José  '), { success: true, name: 'María José', error: null });
