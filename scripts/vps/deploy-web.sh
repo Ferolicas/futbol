@@ -8,12 +8,21 @@ RELEASES_DIR="$REPO_DIR/.web-releases"
 mkdir -p "$RELEASES_DIR"
 RELEASE_DIR="$(mktemp -d "$RELEASES_DIR/release-$(git rev-parse --short HEAD)-XXXXXX")"
 RUNTIME_DIR="$RELEASE_DIR/.next/standalone"
+LOG_DIR="/var/log/cfanalisis"
+
+# PM2 abre stdout/stderr despues de bajar privilegios. Sus rutas por defecto
+# viven bajo /root/.pm2 y no son accesibles para el usuario de la aplicacion.
+install -d -o cfanalisis -g cfanalisis -m 0750 "$LOG_DIR"
+touch "$LOG_DIR/web-out.log" "$LOG_DIR/web-error.log"
+chown cfanalisis:cfanalisis "$LOG_DIR/web-out.log" "$LOG_DIR/web-error.log"
+chmod 0640 "$LOG_DIR/web-out.log" "$LOG_DIR/web-error.log"
 
 # Snapshot PM2 for an automatic rollback; these files may contain environment
 # values and stay private on the VPS, outside Git.
 pm2 jlist > "$RELEASE_DIR/pm2-before.json"
 node - "$RELEASE_DIR" <<'JS'
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
 const dir = process.argv[2];
 const processList = JSON.parse(fs.readFileSync(`${dir}/pm2-before.json`));
 const webProcesses = processList.filter(p => p.name === 'cfanalisis-web');
@@ -22,9 +31,12 @@ if (!processInfo) throw Error('cfanalisis-web is not registered in PM2');
 const previous = processInfo.pm2_env;
 const config = { name: 'cfanalisis-web', script: previous.pm_exec_path, cwd: previous.pm_cwd,
   interpreter: previous.exec_interpreter || 'node', node_args: previous.node_args || [], autorestart: true,
+  out_file: '/var/log/cfanalisis/web-out.log',
+  error_file: '/var/log/cfanalisis/web-error.log', merge_logs: true,
   env: { ...(previous.env || {}), NODE_ENV: 'production', PORT: previous.PORT || 3000,
     HOSTNAME: '127.0.0.1' } };
-const previousPrivileges = previous.username === 'cfanalisis'
+const serviceUid = Number(execFileSync('id', ['-u', 'cfanalisis'], { encoding: 'utf8' }).trim());
+const previousPrivileges = Number(previous.uid) === serviceUid
   ? { uid: 'cfanalisis', gid: 'cfanalisis' }
   : {};
 const rollbackMode = previous.exec_mode === 'cluster_mode' ? 'cluster' : 'fork';
@@ -92,11 +104,14 @@ fi
 pm2 jlist > "$RELEASE_DIR/pm2-after.json"
 if ! node - "$RELEASE_DIR" <<'JS'
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
 const dir = process.argv[2];
 const expected = JSON.parse(fs.readFileSync(`${dir}/release.config.json`)).apps[0];
 const active = JSON.parse(fs.readFileSync(`${dir}/pm2-after.json`)).filter(p => p.name === 'cfanalisis-web');
+const serviceUid = Number(execFileSync('id', ['-u', 'cfanalisis'], { encoding: 'utf8' }).trim());
 if (active.length !== expected.instances) throw Error(`PM2 started ${active.length}/${expected.instances} web instances`);
 if (active.some(p => p.pm2_env?.pm_exec_path !== `${dir}/.next/standalone/server.js`)) throw Error('PM2 did not activate the candidate runtime');
+if (active.some(p => Number(p.pm2_env?.uid) !== serviceUid)) throw Error('PM2 did not drop web process privileges');
 JS
 then rollback; exit 1; fi
 HEALTHY=0

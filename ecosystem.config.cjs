@@ -24,6 +24,7 @@
 const path = require('path');
 
 const cwd = '/apps/futbol/apps/cfanalisis-worker';
+const logDir = '/var/log/cfanalisis';
 // tsx instalado como devDependency del worker (package.json). interpreter:'none'
 // + script=binario es el patrón pm2 para ejecutar un binario directamente.
 const tsx = path.join(cwd, 'node_modules', '.bin', 'tsx');
@@ -39,6 +40,9 @@ module.exports = {
       uid: 'cfanalisis',
       gid: 'cfanalisis',
       env: { WORKER_ROLE: 'realtime', PORT: '8080' },
+      out_file: path.join(logDir, 'worker-rt-out.log'),
+      error_file: path.join(logDir, 'worker-rt-error.log'),
+      merge_logs: true,
       autorestart: true,
       // El realtime debe ser estable y liviano; si por una fuga llegara a 1.5G
       // algo va mal → reinicio preventivo (no interrumpe ningún job pesado,
@@ -54,6 +58,9 @@ module.exports = {
       uid: 'cfanalisis',
       gid: 'cfanalisis',
       env: { WORKER_ROLE: 'heavy' },
+      out_file: path.join(logDir, 'worker-heavy-out.log'),
+      error_file: path.join(logDir, 'worker-heavy-error.log'),
+      merge_logs: true,
       autorestart: true,
       // SIN max_memory_restart: retrain/analyze pueden usar varios GB
       // legítimamente; matarlos a mitad sería el "colgado" que evitamos.
