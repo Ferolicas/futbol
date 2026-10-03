@@ -7,7 +7,7 @@ export default function PrivacyPage() {
     <LegalDocument eyebrow="Protección de datos" title="Política de privacidad y tratamiento">
       <section>
         <h2>1. Responsable</h2>
-        <p>El responsable es <strong>Ferney Elpidio Oliveros Casanova</strong>, NIT <strong>1143978081</strong>, domicilio legal informado en Medellín, Colombia, correo <a href="mailto:info@cfanalisis.com">info@cfanalisis.com</a>. Esta política aplica a CF Análisis web y móvil.</p>
+        <p>El responsable es <strong>Ferney Oliveros</strong>, con domicilio informado en Medellín, Colombia, correo <a href="mailto:info@cfanalisis.com">info@cfanalisis.com</a>. Esta política aplica a CF Análisis web y móvil.</p>
       </section>
       <section>
         <h2>2. Datos tratados</h2>

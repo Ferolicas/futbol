@@ -7,7 +7,7 @@ export default function TermsPage() {
     <LegalDocument eyebrow="Información contractual" title="Términos y condiciones">
       <section>
         <h2>1. Responsable del servicio</h2>
-        <p>CF Análisis es operado por <strong>Ferney Elpidio Oliveros Casanova</strong>, NIT <strong>1143978081</strong>, con domicilio legal informado en Medellín, Colombia. Contacto: <a href="mailto:info@cfanalisis.com">info@cfanalisis.com</a>. El único sitio oficial es <strong>cfanalisis.com</strong>.</p>
+        <p>CF Análisis es operado por <strong>Ferney Oliveros</strong>, responsable del servicio, con domicilio informado en Medellín, Colombia. Contacto: <a href="mailto:info@cfanalisis.com">info@cfanalisis.com</a>. El único sitio oficial es <strong>cfanalisis.com</strong>.</p>
         <p>No solicitamos contraseñas, códigos de verificación, firmas, documentos escaneados ni pagos por mensajes privados. Los pagos se realizan únicamente mediante Stripe o Mercado Pago dentro del flujo oficial.</p>
       </section>
       <section>

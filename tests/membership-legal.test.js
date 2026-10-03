@@ -47,6 +47,16 @@ test('registration and checkout fail closed on legal acceptance', () => {
   assert.match(gate, /\['\/terminos', '\/privacidad', '\/cookies'\]/);
 });
 
+test('public legal documents expose only the chosen public operator name', () => {
+  const root = path.join(__dirname, '..');
+  const terms = fs.readFileSync(path.join(root, 'app/terminos/page.js'), 'utf8');
+  const privacy = fs.readFileSync(path.join(root, 'app/privacidad/page.js'), 'utf8');
+  const publicLegalCopy = `${terms}\n${privacy}`;
+  assert.match(publicLegalCopy, /Ferney Oliveros/);
+  assert.doesNotMatch(publicLegalCopy, /\bNIT\b/);
+  assert.doesNotMatch(publicLegalCopy, /nombre civil completo/i);
+});
+
 test('marketing campaigns use consent, recheck it and carry unsubscribe controls', () => {
   const root = path.join(__dirname, '..');
   const campaign = fs.readFileSync(path.join(root, 'lib/marketing-campaigns.js'), 'utf8');

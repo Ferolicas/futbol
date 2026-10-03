@@ -179,6 +179,9 @@ de esa versión reciben un modal bloqueante en su próximo inicio; no se fabrica
 aceptaciones históricas. El registro y los checkouts fallan cerrados si falta la
 prueba. Actualmente solo se usan tecnologías esenciales, por lo que el aviso de
 cookies informa y enlaza la política sin simular un consentimiento opcional.
+Las páginas legales públicas identifican al responsable como `Ferney Oliveros`;
+el nombre civil completo y los identificadores personales no se publican ni se
+versionan en el repositorio.
 
 El botón Marketing de `/ferney` solo muestra destinatarios cuyo último evento
 es `consent`. Al crear una campaña se congela la lista inicial, pero la cola
