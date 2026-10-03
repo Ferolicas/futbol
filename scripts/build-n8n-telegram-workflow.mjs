@@ -14,6 +14,9 @@ if (!workflow || workflow.id !== 'yrqca9FJFPClDu8H') {
 }
 
 const byName = new Map(workflow.nodes.map(node => [node.name, structuredClone(node)]));
+const dailyTelegramCredentialId = process.env.N8N_TELEGRAM_DAILY_CREDENTIAL_ID;
+const dailyTelegramCredentialName = process.env.N8N_TELEGRAM_DAILY_CREDENTIAL_NAME
+  || 'Telegram CF Análisis Diario';
 const schedule = byName.get('Schedule Trigger');
 const executeTrigger = byName.get('Execute Workflow Trigger') || {
   parameters: {},
@@ -39,6 +42,100 @@ publish.position = [-480, 0];
 code.position = [-220, 0];
 telegram.position = [80, 0];
 finalize.position = [340, 0];
+
+const resultSchedule = byName.get('Revisar resultados') || {
+  ...structuredClone(schedule),
+  id: 'a0848d9c-30e7-45f8-9d0a-90e458edab01',
+  name: 'Revisar resultados',
+};
+const resultFeed = byName.get('Consultar resultados') || {
+  ...structuredClone(publish),
+  id: 'b1959e0d-41f8-46a9-ae1b-a1f569febc02',
+  name: 'Consultar resultados',
+};
+const resultGate = byName.get('Preparar resultados') || {
+  ...structuredClone(code),
+  id: 'c2a60f1e-5209-47ba-bf2c-b2067a0fcd03',
+  name: 'Preparar resultados',
+};
+const resultTelegram = byName.get('Enviar resultado') || {
+  ...structuredClone(telegram),
+  id: 'd3b7102f-631a-48cb-803d-c3178b10de04',
+  name: 'Enviar resultado',
+};
+const resultAck = byName.get('Confirmar resultado') || {
+  ...structuredClone(publish),
+  id: 'e4c82130-742b-49dc-914e-d4289c21ef05',
+  name: 'Confirmar resultado',
+};
+
+resultSchedule.position = [-720, 360];
+resultFeed.position = [-480, 360];
+resultGate.position = [-220, 360];
+resultTelegram.position = [80, 360];
+resultAck.position = [340, 360];
+
+// El cierre se consulta cada cinco minutos. El backend reserva como máximo un
+// partido por pasada y conserva una cola durable, de modo que dos ejecuciones
+// simultáneas no publican el mismo resultado.
+resultSchedule.parameters.rule = {
+  interval: [{ field: 'minutes', minutesInterval: 5 }],
+};
+resultFeed.parameters = {
+  ...resultFeed.parameters,
+  method: 'GET',
+  url: 'https://cfanalisis.com/api/cron/telegram-results',
+  options: {
+    ...(resultFeed.parameters?.options || {}),
+    response: {
+      response: { neverError: false, fullResponse: false, responseFormat: 'json' },
+    },
+    timeout: 60000,
+  },
+};
+resultGate.parameters = {
+  jsCode: String.raw`const payload = $input.first()?.json || {};
+if (payload.ok !== true) {
+  throw new Error('CF Análisis no pudo consultar resultados: ' + (payload.error || 'respuesta inválida'));
+}
+if (!payload.event) return [];
+const event = payload.event;
+if (!event.eventId || !event.claimToken || !event.message) {
+  throw new Error('El backend devolvió un resultado incompleto');
+}
+return [{ json: event }];`,
+};
+resultTelegram.parameters = {
+  resource: 'message',
+  operation: 'sendMessage',
+  chatId: telegram.parameters.chatId,
+  text: '={{ $json.message }}',
+  additionalFields: {
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+  },
+};
+resultAck.parameters = {
+  ...resultAck.parameters,
+  method: 'POST',
+  url: 'https://cfanalisis.com/api/cron/telegram-results',
+  sendBody: true,
+  contentType: 'json',
+  specifyBody: 'keypair',
+  bodyParameters: {
+    parameters: [
+      { name: 'eventId', value: "={{ $('Preparar resultados').item.json.eventId }}" },
+      { name: 'claimToken', value: "={{ $('Preparar resultados').item.json.claimToken }}" },
+    ],
+  },
+  options: {
+    ...(resultAck.parameters?.options || {}),
+    response: {
+      response: { neverError: false, fullResponse: false, responseFormat: 'json' },
+    },
+    timeout: 60000,
+  },
+};
 
 // Reintenta durante la tarde si a las 13:00 todavía no hay opciones válidas.
 // El estado global impide publicar más de una vez por fecha.
@@ -185,6 +282,12 @@ telegram.parameters = {
     parse_mode: 'HTML',
   },
 };
+if (dailyTelegramCredentialId) {
+  telegram.credentials = {
+    telegramApi: { id: dailyTelegramCredentialId, name: dailyTelegramCredentialName },
+  };
+}
+resultTelegram.credentials = structuredClone(telegram.credentials);
 
 finalize.name = 'Registrar envio';
 finalize.parameters.jsCode = String.raw`const prepared = $('Code1').first().json;
@@ -194,7 +297,10 @@ state.lastTelegramDate = prepared.date;
 state.lastTelegramMessageId = telegramResponse.message_id || telegramResponse.result?.message_id || null;
 return $input.all();`;
 
-workflow.nodes = [schedule, executeTrigger, publish, code, telegram, finalize];
+workflow.nodes = [
+  schedule, executeTrigger, publish, code, telegram, finalize,
+  resultSchedule, resultFeed, resultGate, resultTelegram, resultAck,
+];
 workflow.connections = {
   'Schedule Trigger': {
     main: [[{ node: 'HTTP Request', type: 'main', index: 0 }]],
@@ -211,13 +317,25 @@ workflow.connections = {
   'Send a photo message': {
     main: [[{ node: 'Registrar envio', type: 'main', index: 0 }]],
   },
+  'Revisar resultados': {
+    main: [[{ node: 'Consultar resultados', type: 'main', index: 0 }]],
+  },
+  'Consultar resultados': {
+    main: [[{ node: 'Preparar resultados', type: 'main', index: 0 }]],
+  },
+  'Preparar resultados': {
+    main: [[{ node: 'Enviar resultado', type: 'main', index: 0 }]],
+  },
+  'Enviar resultado': {
+    main: [[{ node: 'Confirmar resultado', type: 'main', index: 0 }]],
+  },
 };
 workflow.settings = {
   ...(workflow.settings || {}),
   timezone: 'Europe/Madrid',
 };
 workflow.active = true;
-workflow.description = 'Publica cada día como máximo los 2 mejores partidos en Telegram, una imagen por partido con 1 a 3 opciones (>=85% probabilidad, >=90% fiabilidad, cuota >=1.20), sin IA.';
+workflow.description = 'Publica cada día como máximo los 2 mejores partidos en Telegram, una imagen por partido con 1 a 3 opciones (>=85% probabilidad, >=90% fiabilidad, cuota >=1.20), y al finalizar envía ganado/perdido para las mismas opciones mediante una cola durable sin duplicados.';
 workflow.pinData = {};
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });

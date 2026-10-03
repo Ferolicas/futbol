@@ -10,6 +10,7 @@ const path = require('node:path');
 const WORKFLOW_IDS = ['yrqca9FJFPClDu8H', 'PicksPremiumDia1'];
 const INTERNAL_HTTP_NODES = new Set([
   'HTTP Request', 'Feed Futbol', 'Feed Baseball', 'Imagen Futbol', 'Imagen Baseball',
+  'Consultar resultados', 'Confirmar resultado',
 ]);
 const TELEGRAM_CREDENTIAL_NAME = 'Telegram account';
 const INTERNAL_CREDENTIAL_NAME = 'CF Internal API Bearer';

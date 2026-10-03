@@ -65,6 +65,19 @@ test('n8n publica una imagen por partido, sin combinada', () => {
   assert.doesNotMatch(source, /selections=/);
 });
 
+test('n8n publica el cierre de cada partido y lo confirma en una cola durable', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../scripts/build-n8n-telegram-workflow.mjs'), 'utf8');
+  const route = fs.readFileSync(path.join(__dirname, '../app/api/cron/telegram-results/route.js'), 'utf8');
+  assert.match(source, /minutesInterval: 5/);
+  assert.match(source, /api\/cron\/telegram-results/);
+  assert.match(source, /operation: 'sendMessage'/);
+  assert.match(source, /Preparar resultados/);
+  assert.match(source, /Confirmar resultado/);
+  assert.match(route, /FOR UPDATE SKIP LOCKED/);
+  assert.match(route, /status='sent'/);
+  assert.match(route, /buildTelegramMatchResult/);
+});
+
 test('el informe personal queda programado a las 08:00 de Madrid', () => {
   const source = fs.readFileSync(path.join(__dirname, '../scripts/build-n8n-personal-market-report-workflow.mjs'), 'utf8');
   assert.match(source, /triggerAtHour: 8, triggerAtMinute: 0/);

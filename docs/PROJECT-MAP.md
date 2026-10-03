@@ -80,6 +80,7 @@ Las creatividades listas para campañas se guardan en `public/marketing/`.
 | `POST /api/legal/marketing/unsubscribe` | `app/api/legal/marketing/unsubscribe/route.js` | Token firmado | Retira marketing desde el propio correo |
 | `GET/POST /api/admin/marketing` | `app/api/admin/marketing/route.js` | Admin/owner | Lista consentidos y crea campañas con imágenes/adjuntos |
 | `GET/POST /api/cron/publish-combinada` | `app/api/cron/publish-combinada/route.js` | n8n | Elige y guarda la apuesta Telegram dentro de las reglas comerciales |
+| `GET/POST /api/cron/telegram-results` | `app/api/cron/telegram-results/route.js` | n8n | Reserva y confirma el aviso ganado/perdido de cada partido ya finalizado |
 | `GET /api/cron/personal-market-report` | `app/api/cron/personal-market-report/route.js` | Compatibilidad | CSV de córners de 1.ª parte protegido por secreto de cron |
 | `GET /api/admin/personal-market-report` | `app/api/admin/personal-market-report/route.js` | Informe privado | Descarga el CSV de córners 1T de fútbol o el catálogo MLB para la fecha elegida |
 | `GET /api/pick-image` | `app/api/pick-image/route.js` | n8n/Telegram | Renderiza la tarjeta PNG sin IA, con hasta tres selecciones y escudos |
@@ -123,7 +124,9 @@ Las migraciones viven en `scripts/`. Tablas clave:
   fútbol, béisbol ni fútbol americano.
 - `american_football_*`: calendario, análisis y hechos NFL/FBS/FCS; no consulta
   tablas de fútbol, béisbol ni baloncesto.
-- `combinadas`, `combinada_dia`, `tickets`, `chat_messages`, `push_subscriptions`.
+- `combinadas`, `combinada_dia`, `telegram_result_notifications`, `tickets`,
+  `chat_messages`, `push_subscriptions`. La cola de Telegram referencia el
+  snapshot diario y deduplica por jornada/fixture sin modificarlo.
 - Esquema `model`: entidades, hechos, perfiles y señales del motor estadístico.
 - `raw_api_payloads` + `api_capture_failures`: crudo válido e histórico durable
   de reintentos; un error HTTP/rate-limit nunca se guarda como evidencia.
@@ -260,9 +263,18 @@ mantiene en n8n las mismas validaciones defensivas que el publicador y un
 credential `httpHeaderAuth` aporta `Authorization: Bearer …`; ningún secreto
 viaja en la URL. `scripts/vps/secure-n8n-internal-auth.cjs` migra y verifica las
 versiones actuales y publicadas, y conserva también el token de Telegram dentro
-de su credencial cifrada en lugar de incrustarlo en nodos HTTP.
-disparador interno, no público, para poder ejecutar el mismo flujo en QA sin
-alterar su programación diaria.
+de su credencial cifrada en lugar de incrustarlo en nodos HTTP. Un segundo
+disparador consulta cada cinco minutos `/api/cron/telegram-results`: liquida
+únicamente las opciones originales de `combinada_dia` con el resultado oficial,
+publica por partido cuáles fueron ganadas o perdidas y confirma la entrega en
+`telegram_result_notifications`. La reserva transaccional con vencimiento evita
+duplicados entre ejecuciones concurrentes y permite reintentar un fallo real.
+El bot diario usa una credencial cifrada separada de los canales Premium; se
+instala o rota por entrada estándar con
+`scripts/vps/rotate-n8n-telegram-credential.cjs`, nunca mediante argumentos ni
+archivos versionados.
+Existe además un disparador interno, no público, para ejecutar el mismo flujo
+en QA sin alterar su programación diaria.
 
 ### Picks Premium en Telegram
 
