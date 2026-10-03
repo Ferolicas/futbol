@@ -50,13 +50,7 @@ const nextConfig = {
       { key: 'Content-Security-Policy', value: csp },
       { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
     ];
-    return [
-      { source: '/:path*', headers: securityHeaders },
-      // `mime` clasificaba este WebM VP9 como audio/webm. Con `nosniff`, esa
-      // respuesta puede congelarse o ser rechazada por el elemento <video>.
-      { source: '/logo-metalizado-fast.webm', headers: [{ key: 'Content-Type', value: 'video/webm' }] },
-      ...['/api/fixtures', '/api/match/:id', '/api/baseball/fixtures', '/api/baseball/match/:id', '/api/sports/:sport/fixtures', '/api/sports/:sport/match/:id', '/api/auth/session', '/api/realtime/token', '/api/free/visit'].map(source => ({ source, headers: [{ key: 'Cache-Control', value: 'private, no-store' }] })),
-    ];
+    return [{ source: '/:path*', headers: securityHeaders }, ...['/api/fixtures', '/api/match/:id', '/api/baseball/fixtures', '/api/baseball/match/:id', '/api/sports/:sport/fixtures', '/api/sports/:sport/match/:id', '/api/auth/session', '/api/realtime/token', '/api/free/visit'].map(source => ({ source, headers: [{ key: 'Cache-Control', value: 'private, no-store' }] }))];
   },
 };
 

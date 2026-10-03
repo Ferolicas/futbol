@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-const VIDEO = '/logo-metalizado-fast.webm';
+// MP4/H.264 evita la clasificación `audio/webm` del file_server de Caddy y
+// tiene soporte más consistente en Safari/iOS sin perder el loop de 6 s.
+const VIDEO = '/logo-metalizado-fast.mp4';
 const FALLBACK = '/logo-metalizado-alpha-fast.webp';
 
 export default function LandingBrandVideo({ className = '', ariaLabel = 'CF Análisis' }) {
