@@ -83,7 +83,7 @@ test('escapa nombres antes de enviarlos como HTML de Telegram', () => {
   assert.doesNotMatch(result.message, /<b>mercado<\/b>/);
 });
 
-test('publica como nula una línea exacta devuelta en vez de dejarla pendiente', () => {
+test('una línea estricta igualada se publica como perdida, nunca como nula', () => {
   const result = buildTelegramMatchResult({
     ...base,
     match: {
@@ -99,6 +99,7 @@ test('publica como nula una línea exacta devuelta en vez de dejarla pendiente',
     },
   });
   assert.ok(result);
-  assert.equal(result.voided, 1);
-  assert.match(result.message, /🟡 NULA/);
+  assert.equal(result.lost, 1);
+  assert.match(result.message, /❌ PERDIDA/);
+  assert.doesNotMatch(result.message, /NULA/);
 });
