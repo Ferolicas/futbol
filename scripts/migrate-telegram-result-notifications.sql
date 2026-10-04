@@ -23,7 +23,7 @@ CREATE INDEX IF NOT EXISTS telegram_result_notifications_queue_idx
 COMMENT ON TABLE public.telegram_result_notifications IS
   'Cola durable e idempotente de resultados de las opciones publicadas en Telegram.';
 COMMENT ON COLUMN public.telegram_result_notifications.payload IS
-  'Snapshot liquidado de las mismas opciones almacenadas en combinada_dia; nunca recalculadas.';
+  'Snapshot exacto confirmado por Telegram y, después, su won/lost ya persistido por la web; aquí no se recalcula.';
 
 GRANT SELECT,INSERT,UPDATE,DELETE
   ON public.telegram_result_notifications TO cfanalisis;

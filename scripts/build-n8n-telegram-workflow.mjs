@@ -201,8 +201,13 @@ if (payload.ok !== true) {
 const data = payload.data || {};
 const source = Array.isArray(data.matches) ? data.matches : [];
 const state = $getWorkflowStaticData('global');
+const combinadaId = payload.id;
 
 if (state.lastTelegramDate === data.fecha) return [];
+
+if (!combinadaId) {
+  throw new Error('La publicación de la web no incluyó su identificador');
+}
 
 if (source.length < 1) {
   throw new Error('Cantidad de partidos fuera de regla');
@@ -314,6 +319,7 @@ return matches.map((match, index) => {
     ].join('&'),
     caption: index === 0 ? caption : '',
     matches: matches.length,
+    combinadaId,
     date: data.fecha,
     fixtureId: publication.fixtureId,
     publication,
@@ -352,7 +358,9 @@ return sent.map((item, index) => {
     throw new Error('Telegram no confirmó completamente el envío diario');
   }
   return { json: {
+    action: 'register',
     sent: true,
+    combinadaId: source.combinadaId,
     date: source.date,
     fixtureId: source.fixtureId,
     telegramMessageId: Number(messageId),
@@ -363,7 +371,7 @@ return sent.map((item, index) => {
 persistPublication.parameters = {
   ...persistPublication.parameters,
   method: 'POST',
-  url: 'https://cfanalisis.com/api/cron/telegram-daily-publications',
+  url: 'https://cfanalisis.com/api/cron/telegram-results',
   sendBody: true,
   contentType: 'json',
   specifyBody: 'json',
@@ -438,7 +446,7 @@ workflow.settings = {
   timezone: 'Europe/Madrid',
 };
 workflow.active = true;
-workflow.description = 'Publica cada día como máximo 2 partidos de fútbol, guarda únicamente el contenido exacto confirmado por Telegram y envía después el resultado de esas mismas opciones en el mismo canal. Cada imagen lleva de 1 a 3 opciones (>=85% probabilidad, >=90% fiabilidad, cuota >=1.20).';
+workflow.description = 'Publica cada día como máximo 2 partidos de fútbol. Después de la confirmación de Telegram registra exactamente lo enviado en la cola existente y, cuando la web ya tiene won/lost para todas esas opciones, publica GANADA/PERDIDA en el mismo canal. No recalcula resultados.';
 workflow.pinData = {};
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });

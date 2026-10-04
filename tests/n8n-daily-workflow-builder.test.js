@@ -51,9 +51,10 @@ test('el workflow diario guarda y liquida exactamente sus dos envíos de fútbol
   assert.equal(resultSend.parameters.additionalFields.appendAttribution, false);
   assert.equal(resultSend.parameters.chatId, '-1003910091350');
   assert.deepEqual(resultSend.credentials, photo.credentials);
-  assert.match(persist.parameters.url, /telegram-daily-publications/);
+  assert.match(persist.parameters.url, /telegram-results/);
   assert.equal(persist.credentials.httpHeaderAuth.id, 'internal-test');
   assert.match(workflow.nodes.find(item => item.name === 'Code1').parameters.jsCode, /publicationOptions/);
+  assert.match(workflow.nodes.find(item => item.name === 'Code1').parameters.jsCode, /combinadaId = payload\.id/);
   assert.match(workflow.nodes.find(item => item.name === 'Code1').parameters.jsCode, /source\.slice\(0, 2\)/);
   assert.doesNotMatch(JSON.stringify(workflow), /Premium|premium|baseball/i);
   assert.equal(workflow.connections['Enviar resultado'].main[0][0].node, 'Confirmar resultado');

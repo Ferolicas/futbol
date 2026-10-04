@@ -80,8 +80,7 @@ Las creatividades listas para campañas se guardan en `public/marketing/`.
 | `POST /api/legal/marketing/unsubscribe` | `app/api/legal/marketing/unsubscribe/route.js` | Token firmado | Retira marketing desde el propio correo |
 | `GET/POST /api/admin/marketing` | `app/api/admin/marketing/route.js` | Admin/owner | Lista consentidos y crea campañas con imágenes/adjuntos |
 | `GET/POST /api/cron/publish-combinada` | `app/api/cron/publish-combinada/route.js` | n8n | Elige y guarda la apuesta Telegram dentro de las reglas comerciales |
-| `POST /api/cron/telegram-daily-publications` | `app/api/cron/telegram-daily-publications/route.js` | n8n | Guarda el contenido exacto después de que el bot diario confirme cada envío de fútbol |
-| `GET/POST /api/cron/telegram-results` | `app/api/cron/telegram-results/route.js` | n8n | Liquida, reserva y confirma solo los resultados de esos envíos diarios confirmados |
+| `GET/POST /api/cron/telegram-results` | `app/api/cron/telegram-results/route.js` | n8n | Registra el contenido confirmado por el bot diario y publica su `won/lost` ya persistido por la web |
 | `GET /api/cron/personal-market-report` | `app/api/cron/personal-market-report/route.js` | Compatibilidad | CSV de córners de 1.ª parte protegido por secreto de cron |
 | `GET /api/admin/personal-market-report` | `app/api/admin/personal-market-report/route.js` | Informe privado | Descarga el CSV de córners 1T de fútbol o el catálogo MLB para la fecha elegida |
 | `GET /api/pick-image` | `app/api/pick-image/route.js` | n8n/Telegram | Renderiza la tarjeta PNG sin IA, con hasta tres selecciones y escudos |
@@ -126,12 +125,9 @@ Las migraciones viven en `scripts/`. Tablas clave:
 - `american_football_*`: calendario, análisis y hechos NFL/FBS/FCS; no consulta
   tablas de fútbol, béisbol ni baloncesto.
 - `combinadas`, `combinada_dia`, `telegram_result_notifications`, `tickets`,
-  `chat_messages`, `push_subscriptions`. La cola `telegram_result_notifications`
-  es histórica y no se usa en el flujo actual.
-- `telegram_daily_publications` y `telegram_daily_result_notifications`:
-  snapshot exacto de cada partido confirmado por el bot diario de fútbol y su
-  cola idempotente de resultados. Nunca reconstruyen opciones desde
-  `combinada_dia` ni desde el motor.
+  `chat_messages`, `push_subscriptions`. `telegram_result_notifications`
+  conserva en su `payload` el envío exacto confirmado por el bot diario y actúa
+  como cola idempotente de su resultado.
 - Esquema `model`: entidades, hechos, perfiles y señales del motor estadístico.
 - `raw_api_payloads` + `api_capture_failures`: crudo válido e histórico durable
   de reintentos; un error HTTP/rate-limit nunca se guarda como evidencia.
@@ -273,10 +269,12 @@ fiabilidad y cuota) y un único enlace a CF Análisis en la primera.
 mantiene en n8n las mismas validaciones defensivas que el publicador y un
 credential `httpHeaderAuth` aporta `Authorization: Bearer …`; ningún secreto
 viaja en la URL. Después de cada envío confirmado, el workflow registra el
-partido y las opciones exactas en `telegram_daily_publications`. Cada cinco
-minutos consulta `/api/cron/telegram-results`, que liquida exclusivamente ese
-snapshot con `settleMarketSelection`, la misma liquidación que consumen el
-dashboard, Rendimiento y las apps, y devuelve como máximo un cierre reservado.
+partido y las opciones exactas en la cola existente
+`telegram_result_notifications`. Cada cinco minutos consulta
+`/api/cron/telegram-results`, que busca para esas claves exactas únicamente los
+estados `won`/`lost` ya escritos en `prediction_settlements`, la fuente durable
+que alimenta Rendimiento, y devuelve como máximo un cierre reservado. No vuelve
+a ejecutar ni adapta la liquidación.
 El mensaje se publica con la misma credencial y en el mismo canal diario; solo
 después se confirma la cola. Por ello una opción que no fue enviada por ese bot
 no puede aparecer luego como resultado, y Telegram solo emite estados decisivos

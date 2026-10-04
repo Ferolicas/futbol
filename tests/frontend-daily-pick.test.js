@@ -77,12 +77,17 @@ test('n8n publica una imagen por partido, sin combinada', () => {
 test('el bot diario publica resultados solo desde el snapshot confirmado por Telegram', () => {
   const source = fs.readFileSync(path.join(__dirname, '../scripts/build-n8n-telegram-workflow.mjs'), 'utf8');
   const route = fs.readFileSync(path.join(__dirname, '../app/api/cron/telegram-results/route.js'), 'utf8');
-  assert.match(source, /telegram-daily-publications/);
+  const hardening = fs.readFileSync(path.join(__dirname, '../scripts/vps/secure-n8n-internal-auth.cjs'), 'utf8');
+  assert.match(source, /url: 'https:\/\/cfanalisis\.com\/api\/cron\/telegram-results'/);
   assert.match(source, /resultSchedule, resultFeed, resultGate, resultTelegram, resultAck/);
   assert.match(source, /'Revisar resultados':/);
-  assert.match(route, /FROM telegram_daily_publications/);
-  assert.match(route, /telegram_daily_result_notifications/);
+  assert.match(route, /FROM prediction_runs/);
+  assert.match(route, /prediction_settlements/);
+  assert.match(route, /telegram_result_notifications/);
+  assert.doesNotMatch(route, /settleMarketSelection/);
   assert.doesNotMatch(route, /telegram_premium|baseball/);
+  assert.match(hardening, /'Persistir envio diario'/);
+  assert.match(hardening, /appendAttribution: false/);
 });
 
 test('el informe personal queda programado a las 08:00 de Madrid', () => {

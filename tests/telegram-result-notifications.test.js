@@ -22,46 +22,36 @@ const base = {
   },
 };
 
-test('liquida exactamente las opciones publicadas y genera ganado/perdido', () => {
+test('formatea las opciones exactas con los resultados won/lost ya guardados por la web', () => {
   const result = buildTelegramMatchResult({
     ...base,
-    publicationId: 'da959d02-b9ba-408c-a135-81830bd92d7c',
-    dailyPickId: undefined,
-    result: {
-      status: { short: 'FT' },
-      goals: { home: 0, away: 3 },
-      score: { fulltime: { home: 0, away: 3 }, halftime: { home: 0, away: 2 } },
-      // El snapshot final puede llegar antes de que el proveedor complete las estadísticas.
-      corners: { home: null, away: null, total: null },
-      yellow_cards: { home: 3, away: 1, total: 4 },
-      red_cards: { home: 0, away: 0, total: 0 },
-    },
-    liveStats: { corners: { home: 7, away: 1, total: 8, isReal: true } },
+    outcomes: [
+      { marketKey: 'total_corners_under11_5', outcome: 'won' },
+      { marketKey: 'away_goals_under2_5', outcome: 'lost' },
+    ],
   });
   assert.ok(result);
-  assert.equal(result.publicationId, 'da959d02-b9ba-408c-a135-81830bd92d7c');
-  assert.equal(result.combinadaId, undefined);
+  assert.equal(result.combinadaId, base.dailyPickId);
   assert.equal(result.won, 1);
   assert.equal(result.lost, 1);
-  assert.deepEqual(result.options.map(option => option.outcome.status), ['won', 'lost']);
+  assert.deepEqual(result.options.map(option => option.status), ['won', 'lost']);
   assert.match(result.message, /✅ GANADA/);
   assert.match(result.message, /❌ PERDIDA/);
-  assert.match(result.message, /Ukraine 0–3 Northern Ireland/);
+  assert.match(result.message, /Ukraine vs Northern Ireland/);
 });
 
-test('espera si el partido no terminó o falta una estadística oficial', () => {
+test('espera mientras la web no tenga won/lost para todas las opciones enviadas', () => {
   assert.equal(buildTelegramMatchResult({
     ...base,
-    result: { status: { short: '2H' }, goals: { home: 0, away: 3 } },
-    liveStats: { corners: { home: 7, away: 1, total: 8, isReal: true } },
+    outcomes: [{ marketKey: 'total_corners_under11_5', outcome: 'won' }],
   }), null);
 
   assert.equal(buildTelegramMatchResult({
     ...base,
-    result: {
-      status: { short: 'FT' }, goals: { home: 0, away: 3 },
-      score: { fulltime: { home: 0, away: 3 } },
-    },
+    outcomes: [
+      { marketKey: 'total_corners_under11_5', outcome: 'won' },
+      { marketKey: 'away_goals_under2_5', outcome: 'void' },
+    ],
   }), null);
 });
 
@@ -73,10 +63,7 @@ test('escapa nombres antes de enviarlos como HTML de Telegram', () => {
       homeTeam: '<Local>',
       options: [{ id: 'total_goals_under4_5', name: '<b>mercado</b>' }],
     },
-    result: {
-      status: { short: 'FT' }, goals: { home: 1, away: 1 },
-      score: { fulltime: { home: 1, away: 1 } },
-    },
+    outcomes: [{ marketKey: 'total_goals_under4_5', outcome: 'won' }],
   });
   assert.match(result.message, /&lt;Local&gt;/);
   assert.match(result.message, /&lt;b&gt;mercado&lt;\/b&gt;/);
