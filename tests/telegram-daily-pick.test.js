@@ -147,6 +147,30 @@ test('Telegram usa la frecuencia cruda y muestra máximo 95%', () => {
   assert.equal(result.matches[0].averageProbability, 95);
 });
 
+test('el snapshot conserva los campos necesarios para liquidar exactamente la opción enviada', () => {
+  const result = dailyPickModule.selectTelegramDailyPick([
+    option({
+      id: 'legacy-total-goals-over-2', category: 'total-goals',
+      _line: 2, _side: 'over', playerId: 77, playerName: 'Jugador',
+    }),
+  ]);
+  assert.deepEqual(result.matches[0].options[0], {
+    id: 'legacy-total-goals-over-2',
+    category: 'total-goals',
+    family: null,
+    scope: null,
+    line: 2,
+    side: 'over',
+    playerId: 77,
+    playerName: 'Jugador',
+    name: 'Más de 1.5 goles',
+    probability: 90,
+    rawProbability: 90,
+    confidence: 95,
+    odd: 1.55,
+  });
+});
+
 test('el contrato Telegram expone todos sus límites operativos', () => {
   assert.deepEqual(dailyPickModule.TELEGRAM_DAILY_PICK_RULES, {
     minProbability: 85,

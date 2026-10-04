@@ -25,6 +25,8 @@ const base = {
 test('liquida exactamente las opciones publicadas y genera ganado/perdido', () => {
   const result = buildTelegramMatchResult({
     ...base,
+    publicationId: 'da959d02-b9ba-408c-a135-81830bd92d7c',
+    dailyPickId: undefined,
     result: {
       status: { short: 'FT' },
       goals: { home: 0, away: 3 },
@@ -37,6 +39,8 @@ test('liquida exactamente las opciones publicadas y genera ganado/perdido', () =
     liveStats: { corners: { home: 7, away: 1, total: 8, isReal: true } },
   });
   assert.ok(result);
+  assert.equal(result.publicationId, 'da959d02-b9ba-408c-a135-81830bd92d7c');
+  assert.equal(result.combinadaId, undefined);
   assert.equal(result.won, 1);
   assert.equal(result.lost, 1);
   assert.deepEqual(result.options.map(option => option.outcome.status), ['won', 'lost']);
@@ -77,4 +81,24 @@ test('escapa nombres antes de enviarlos como HTML de Telegram', () => {
   assert.match(result.message, /&lt;Local&gt;/);
   assert.match(result.message, /&lt;b&gt;mercado&lt;\/b&gt;/);
   assert.doesNotMatch(result.message, /<b>mercado<\/b>/);
+});
+
+test('publica como nula una línea exacta devuelta en vez de dejarla pendiente', () => {
+  const result = buildTelegramMatchResult({
+    ...base,
+    match: {
+      ...base.match,
+      options: [{
+        id: 'legacy-total-goals-over-2', category: 'total-goals', line: 2,
+        side: 'over', name: 'Total goles — Más de 2',
+      }],
+    },
+    result: {
+      status: { short: 'FT' }, goals: { home: 1, away: 1 },
+      score: { fulltime: { home: 1, away: 1 } },
+    },
+  });
+  assert.ok(result);
+  assert.equal(result.voided, 1);
+  assert.match(result.message, /🟡 NULA/);
 });

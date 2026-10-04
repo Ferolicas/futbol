@@ -28,7 +28,9 @@ const executeTrigger = byName.get('Execute Workflow Trigger') || {
 const publish = byName.get('HTTP Request');
 const code = byName.get('Code1');
 const telegram = byName.get('Send a photo message');
-const finalize = byName.get('Registrar envio') || byName.get('Code in JavaScript1');
+const finalize = byName.get('Preparar registro envio')
+  || byName.get('Registrar envio')
+  || byName.get('Code in JavaScript1');
 if (!schedule || !publish || !code || !telegram || !finalize) {
   throw new Error('Faltan nodos esenciales en el workflow original');
 }
@@ -42,6 +44,19 @@ publish.position = [-480, 0];
 code.position = [-220, 0];
 telegram.position = [80, 0];
 finalize.position = [340, 0];
+
+const persistPublication = byName.get('Persistir envio diario') || {
+  ...structuredClone(publish),
+  id: 'f5d93241-853c-4c93-b28d-91caebc5af06',
+  name: 'Persistir envio diario',
+};
+const confirmPublication = byName.get('Confirmar envio diario') || {
+  ...structuredClone(code),
+  id: 'a6e04352-964d-4da4-a39e-a2dbfcd6b017',
+  name: 'Confirmar envio diario',
+};
+persistPublication.position = [590, 0];
+confirmPublication.position = [840, 0];
 
 const resultSchedule = byName.get('Revisar resultados') || {
   ...structuredClone(schedule),
@@ -113,6 +128,7 @@ resultTelegram.parameters = {
   additionalFields: {
     parse_mode: 'HTML',
     disable_web_page_preview: true,
+    appendAttribution: false,
   },
 };
 resultAck.parameters = {
@@ -136,6 +152,14 @@ resultAck.parameters = {
     timeout: 60000,
   },
 };
+
+// Todas las llamadas internas usan la misma credencial ya configurada en el
+// publicador. El token de Telegram solo se usa en los dos nodos de envío.
+for (const internalNode of [persistPublication, resultFeed, resultAck]) {
+  internalNode.parameters.authentication = publish.parameters.authentication;
+  internalNode.parameters.genericAuthType = publish.parameters.genericAuthType;
+  internalNode.credentials = structuredClone(publish.credentials || {});
+}
 
 // Reintenta durante la tarde si a las 13:00 todavía no hay opciones válidas.
 // El estado global impide publicar más de una vez por fecha.
@@ -217,6 +241,38 @@ const matches = source.slice(0, 2).map(match => {
   if (options.length < 1 || options.length > 3) {
     throw new Error('El backend devolvió un partido fuera del rango de una a tres opciones');
   }
+  const publicationOptions = options.map(option => {
+    const rawProbability = Number(option.rawProbability ?? option.probability);
+    const probability = Number(option.probability);
+    const rawReliability = Number(option.confidence);
+    const confidence = rawReliability >= 0 && rawReliability <= 1
+      ? rawReliability * 100
+      : rawReliability;
+    const odd = Number(option.odd);
+    if (!option.id || !allowedMarket(option)
+        || !Number.isFinite(rawProbability) || rawProbability < 85
+        || !Number.isFinite(confidence) || confidence < 90
+        || !Number.isFinite(odd) || odd < 1.2) {
+      throw new Error('El backend devolvió un mercado fuera de las reglas de Telegram');
+    }
+    return {
+      id: String(option.id),
+      name: String(option.name || '')
+        .replace(/\bOver\b/gi, 'Más de')
+        .replace(/\bUnder\b/gi, 'Menos de'),
+      probability: Math.min(95, probability),
+      rawProbability,
+      confidence,
+      odd,
+      category: option.category ?? null,
+      family: option.family ?? null,
+      scope: option.scope ?? null,
+      line: (option.line ?? option._line) == null ? null : Number(option.line ?? option._line),
+      side: option.side ?? option._side ?? null,
+      playerId: option.playerId ?? null,
+      playerName: option.playerName ?? null,
+    };
+  });
   return {
     homeTeam: match.homeTeam || '',
     awayTeam: match.awayTeam || '',
@@ -224,29 +280,19 @@ const matches = source.slice(0, 2).map(match => {
     awayLogo: match.awayLogo || '',
     league: match.league || '',
     time: formatTime(match.kickoff),
-    options: options.map(option => {
-      const rawProbability = Number(option.rawProbability ?? option.probability);
-      const probability = Number(option.probability);
-      const rawReliability = Number(option.confidence);
-      const reliability = rawReliability >= 0 && rawReliability <= 1
-        ? rawReliability * 100
-        : rawReliability;
-      const odd = Number(option.odd);
-      if (!allowedMarket(option)
-          || !Number.isFinite(rawProbability) || rawProbability < 85
-          || !Number.isFinite(reliability) || reliability < 90
-          || !Number.isFinite(odd) || odd < 1.2) {
-        throw new Error('El backend devolvió un mercado fuera de las reglas de Telegram');
-      }
-      return {
-        name: String(option.name || '')
-          .replace(/\bOver\b/gi, 'Más de')
-          .replace(/\bUnder\b/gi, 'Menos de'),
-        probability: Math.min(95, probability),
-        confidence: reliability,
-        odd,
-      };
-    }),
+    options: publicationOptions.map(({ name, probability, confidence, odd }) => ({
+      name, probability, confidence, odd,
+    })),
+    publication: {
+      fixtureId: match.fixtureId,
+      homeId: match.homeId ?? null,
+      awayId: match.awayId ?? null,
+      homeTeam: match.homeTeam || '',
+      awayTeam: match.awayTeam || '',
+      league: match.league || '',
+      kickoff: match.kickoff,
+      options: publicationOptions,
+    },
   };
 });
 
@@ -258,18 +304,22 @@ const caption = '<a href="https://cfanalisis.com">Si quieres cuotas más altas y
 // Un item por partido: el nodo de Telegram se ejecuta una vez por item, así que
 // sale una foto distinta por partido. El enlace va solo en la primera para no
 // repetirlo.
-return matches.map((match, index) => ({
-  json: {
+return matches.map((match, index) => {
+  const { publication, ...displayMatch } = match;
+  return { json: {
     imageUrl: 'https://cfanalisis.com/api/pick-image?' + [
       'fecha=' + encode(displayDate),
-      'match=' + encode(JSON.stringify(match)),
+      'match=' + encode(JSON.stringify(displayMatch)),
       'ts=' + encode(data.fecha || ''),
     ].join('&'),
     caption: index === 0 ? caption : '',
     matches: matches.length,
     date: data.fecha,
+    fixtureId: publication.fixtureId,
+    publication,
   },
-}));`;
+  };
+});`;
 
 telegram.parameters = {
   ...telegram.parameters,
@@ -291,16 +341,62 @@ if (dailyTelegramCredentialId) {
 }
 resultTelegram.credentials = structuredClone(telegram.credentials);
 
-finalize.name = 'Registrar envio';
-finalize.parameters.jsCode = String.raw`const prepared = $('Code1').first().json;
-const telegramResponse = $input.first()?.json || {};
+finalize.name = 'Preparar registro envio';
+finalize.parameters.jsCode = String.raw`const sent = $input.all();
+const prepared = $('Code1').all();
+return sent.map((item, index) => {
+  const response = item.json || {};
+  const source = (prepared[index] || {}).json || {};
+  const messageId = response.message_id || response.result?.message_id;
+  if (!messageId || !source.publication || source.fixtureId == null) {
+    throw new Error('Telegram no confirmó completamente el envío diario');
+  }
+  return { json: {
+    sent: true,
+    date: source.date,
+    fixtureId: source.fixtureId,
+    telegramMessageId: Number(messageId),
+    match: source.publication,
+  } };
+});`;
+
+persistPublication.parameters = {
+  ...persistPublication.parameters,
+  method: 'POST',
+  url: 'https://cfanalisis.com/api/cron/telegram-daily-publications',
+  sendBody: true,
+  contentType: 'json',
+  specifyBody: 'json',
+  jsonBody: '={{ JSON.stringify($json) }}',
+  options: {
+    ...(persistPublication.parameters?.options || {}),
+    response: {
+      response: { neverError: false, fullResponse: false, responseFormat: 'json' },
+    },
+    timeout: 60000,
+  },
+};
+
+confirmPublication.parameters.jsCode = String.raw`const responses = $input.all();
+const registrations = $('Preparar registro envio').all();
 const state = $getWorkflowStaticData('global');
-state.lastTelegramDate = prepared.date;
-state.lastTelegramMessageId = telegramResponse.message_id || telegramResponse.result?.message_id || null;
-return $input.all();`;
+for (let index = 0; index < responses.length; index++) {
+  const response = responses[index].json || {};
+  if (response.ok !== true || response.registered !== true) {
+    throw new Error('Telegram envió la opción diaria, pero no se pudo guardar su contenido exacto');
+  }
+}
+for (const item of registrations) {
+  const registration = item.json || {};
+  state.lastTelegramDate = registration.date;
+  state.lastTelegramMessageId = registration.telegramMessageId;
+}
+return responses;`;
 
 workflow.nodes = [
   schedule, executeTrigger, publish, code, telegram, finalize,
+  persistPublication, confirmPublication,
+  resultSchedule, resultFeed, resultGate, resultTelegram, resultAck,
 ];
 workflow.connections = {
   'Schedule Trigger': {
@@ -316,7 +412,25 @@ workflow.connections = {
     main: [[{ node: 'Send a photo message', type: 'main', index: 0 }]],
   },
   'Send a photo message': {
-    main: [[{ node: 'Registrar envio', type: 'main', index: 0 }]],
+    main: [[{ node: 'Preparar registro envio', type: 'main', index: 0 }]],
+  },
+  'Preparar registro envio': {
+    main: [[{ node: 'Persistir envio diario', type: 'main', index: 0 }]],
+  },
+  'Persistir envio diario': {
+    main: [[{ node: 'Confirmar envio diario', type: 'main', index: 0 }]],
+  },
+  'Revisar resultados': {
+    main: [[{ node: 'Consultar resultados', type: 'main', index: 0 }]],
+  },
+  'Consultar resultados': {
+    main: [[{ node: 'Preparar resultados', type: 'main', index: 0 }]],
+  },
+  'Preparar resultados': {
+    main: [[{ node: 'Enviar resultado', type: 'main', index: 0 }]],
+  },
+  'Enviar resultado': {
+    main: [[{ node: 'Confirmar resultado', type: 'main', index: 0 }]],
   },
 };
 workflow.settings = {
@@ -324,7 +438,7 @@ workflow.settings = {
   timezone: 'Europe/Madrid',
 };
 workflow.active = true;
-workflow.description = 'Publica cada día como máximo los 2 mejores partidos de Apuesta del Día, una imagen por partido con 1 a 3 opciones (>=85% probabilidad, >=90% fiabilidad, cuota >=1.20). Los resultados pertenecen exclusivamente al workflow Picks Premium y no se reconstruyen desde combinada_dia.';
+workflow.description = 'Publica cada día como máximo 2 partidos de fútbol, guarda únicamente el contenido exacto confirmado por Telegram y envía después el resultado de esas mismas opciones en el mismo canal. Cada imagen lleva de 1 a 3 opciones (>=85% probabilidad, >=90% fiabilidad, cuota >=1.20).';
 workflow.pinData = {};
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });

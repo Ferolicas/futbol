@@ -67,16 +67,6 @@ function secureInternalRequest(node, url) {
   };
 }
 
-function addNode(name, template) {
-  let node = workflow.nodes.find(item => item.name === name);
-  if (!node) {
-    node = structuredClone(template);
-    node.name = name;
-    workflow.nodes.push(node);
-  }
-  return node;
-}
-
 secureInternalRequest(workflow.nodes.find(node => node.name === 'Feed Futbol'), 'https://cfanalisis.com/api/telegram-premium/futbol');
 secureInternalRequest(workflow.nodes.find(node => node.name === 'Feed Baseball'), 'https://cfanalisis.com/api/telegram-premium/baseball');
 secureInternalRequest(workflow.nodes.find(node => node.name === 'Imagen Futbol'), '={{ $json.imageUrl }}');
@@ -92,17 +82,19 @@ gateFootball.parameters.jsCode = `const payload = $input.first()?.json || {};
 if (payload.ok !== true) return [];
 const data = payload.data || {};
 if (!Array.isArray(data.matches) || data.matches.length === 0) return [];
+
+// Dedupe por partido y fecha: solo salen los partidos del dia que aun no se
+// publicaron; un envio fallido queda pendiente y reintenta a la hora siguiente.
 const state = $getWorkflowStaticData('global');
 const sent = (state.futbolSent && state.futbolSent.date === data.fecha)
   ? (state.futbolSent.fixtures || [])
   : [];
-return data.matches
-  .filter(match => match.fixtureId != null && !sent.includes(match.fixtureId))
-  .map(match => ({ json: {
+const pending = data.matches.filter(match => match.fixtureId != null && !sent.includes(match.fixtureId));
+if (!pending.length) return [];
+return pending.map(match => ({ json: {
     date: data.fecha,
     fixtureId: match.fixtureId,
     match: (match.homeTeam || '') + ' vs ' + (match.awayTeam || ''),
-    publication: match,
     imageUrl: 'https://cfanalisis.com/api/telegram-premium/futbol-image'
       + '?date=' + encodeURIComponent(data.fecha)
       + '&fixture=' + encodeURIComponent(match.fixtureId),
@@ -170,7 +162,6 @@ return data.matches
       date: data.fecha,
       fixtureId: match.fixtureId,
       match: (match.homeTeam || '') + ' vs ' + (match.awayTeam || ''),
-      publication: match,
       imageUrl: ${JSON.stringify(baseballImageBaseUrl)}
         + '?date=' + encodeURIComponent(data.fecha)
         + '&fixture=' + encodeURIComponent(match.fixtureId)
@@ -178,124 +169,62 @@ return data.matches
     },
   }));`;
 
-// Telegram es la autoridad de entrega: primero valida su respuesta, después
-// persiste el snapshot exacto y solo entonces marca el fixture como enviado.
-registerFootball.parameters.jsCode = `const items = $input.all();
-const gates = $('Gate Futbol').all();
-return items.map((item, index) => {
-  const response = item.json || {};
-  const gate = (gates[index] || {}).json || {};
-  const messageId = response.result?.message_id;
-  return { json: response.ok === true && messageId && gate.publication ? {
-    sent: true,
-    sport: 'football',
-    date: gate.date,
-    fixtureId: gate.fixtureId,
-    telegramMessageId: Number(messageId),
-    match: gate.publication,
-  } : {
-    sent: false,
-    sport: 'football',
-    date: gate.date,
-    fixtureId: gate.fixtureId,
-    error: response.description || 'Telegram no confirmó el envío de fútbol',
-  } };
-});`;
-
-const persistFootball = addNode('Persistir Publicacion Futbol', {
-  id: '9d39b755-9f0f-40ef-9d0c-4d9ea8ca1101',
-  type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4, position: [700, -80], parameters: {},
-});
-persistFootball.parameters = {
-  method: 'POST', sendBody: true, contentType: 'json', specifyBody: 'json',
-  jsonBody: '={{ JSON.stringify($json) }}',
-  options: { response: { response: { neverError: false, fullResponse: false, responseFormat: 'json' } }, timeout: 60000 },
-};
-secureInternalRequest(persistFootball, 'https://cfanalisis.com/api/cron/telegram-premium-publications');
-
-const confirmFootball = addNode('Confirmar Publicacion Futbol', {
-  id: 'b63d4a25-3bcd-4ac8-8c97-6f47b9ca1102',
-  type: 'n8n-nodes-base.code', typeVersion: 2, position: [920, -80], parameters: {},
-});
-confirmFootball.parameters.jsCode = `const state = $getWorkflowStaticData('global');
-const responses = $input.all();
-const registrations = $('Registrar Futbol').all();
-for (let index = 0; index < responses.length; index++) {
-  const response = responses[index].json || {};
-  const registration = (registrations[index] || {}).json || {};
-  if (response.ok === true && response.registered === true && registration.sent === true) {
-    if (!state.futbolSent || state.futbolSent.date !== registration.date) {
-      state.futbolSent = { date: registration.date, fixtures: [] };
+registerFootball.parameters.jsCode = `const state = $getWorkflowStaticData('global');
+const items = $input.all();
+const gateItems = $('Gate Futbol').all();
+for (let i = 0; i < items.length; i++) {
+  const response = items[i].json || {};
+  const gate = (gateItems[i] || {}).json || {};
+  if (response.ok === true && gate.fixtureId != null) {
+    if (!state.futbolSent || state.futbolSent.date !== gate.date) {
+      state.futbolSent = { date: gate.date, fixtures: [] };
     }
-    if (!state.futbolSent.fixtures.includes(registration.fixtureId)) {
-      state.futbolSent.fixtures.push(registration.fixtureId);
+    if (!state.futbolSent.fixtures.includes(gate.fixtureId)) {
+      state.futbolSent.fixtures.push(gate.fixtureId);
     }
-    state.lastFutbolMessageId = registration.telegramMessageId;
+    state.lastFutbolMessageId = (response.result && response.result.message_id) || state.lastFutbolMessageId || null;
     state.lastFutbolError = null;
-  } else if (registration.sent !== true) {
-    state.lastFutbolError = { at: new Date().toISOString(), fixtureId: registration.fixtureId || null, message: registration.error || 'Envío no confirmado' };
-  } else {
-    throw new Error('Telegram envió fútbol pero no se pudo persistir su snapshot Premium');
+  } else if (response.ok !== true) {
+    state.lastFutbolError = { at: new Date().toISOString(), fixtureId: gate.fixtureId || null, response };
   }
 }
-return responses;`;
+return items;`;
 
-registerBaseball.parameters.jsCode = `const items = $input.all();
+registerBaseball.parameters.jsCode = `const state = $getWorkflowStaticData('global');
+const items = $input.all();
 const gate = $('Loop Baseball').item.json || {};
-return items.map(item => {
-  const response = item.json || {};
+const run = state.baseballRun || (state.baseballRun = {
+  date: gate.date || null, attempted: 0, sent: 0, errors: [],
+});
+for (let i = 0; i < items.length; i++) {
+  const response = items[i].json || {};
   const document = response.result?.document;
   const validPng = document?.mime_type === 'image/png'
     && Number(document.file_size) >= 10000;
-  const messageId = response.result?.message_id;
-  return { json: response.ok === true && validPng && messageId && gate.publication ? {
-    sent: true,
-    sport: 'baseball',
-    date: gate.date,
-    fixtureId: gate.fixtureId,
-    telegramMessageId: Number(messageId),
-    match: gate.publication,
-  } : {
-    sent: false,
-    sport: 'baseball',
-    date: gate.date,
-    fixtureId: gate.fixtureId,
-    error: response.error?.message || response.description
-      || (response.ok === true ? 'Telegram no devolvió un PNG válido' : 'Fallo de imagen o Telegram'),
-  } };
-});`;
-
-const persistBaseball = addNode('Persistir Publicacion Baseball', {
-  id: 'f204378d-af72-42b7-b3bb-f089a9ca1201',
-  type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4, position: [700, 220], parameters: {},
-});
-persistBaseball.parameters = structuredClone(persistFootball.parameters);
-secureInternalRequest(persistBaseball, 'https://cfanalisis.com/api/cron/telegram-premium-publications');
-
-const confirmBaseball = addNode('Confirmar Publicacion Baseball', {
-  id: '0ed19d74-c76e-4c9a-87ac-b755daca1202',
-  type: 'n8n-nodes-base.code', typeVersion: 2, position: [920, 220], parameters: {},
-});
-confirmBaseball.parameters.jsCode = `const state = $getWorkflowStaticData('global');
-const response = $input.first()?.json || {};
-const registration = $('Registrar Baseball').item.json || {};
-const run = state.baseballRun || (state.baseballRun = { date: registration.date || null, attempted: 0, sent: 0, errors: [] });
-run.attempted += 1;
-if (response.ok === true && response.registered === true && registration.sent === true) {
-  if (!state.baseballSent || state.baseballSent.date !== registration.date) {
-    state.baseballSent = { date: registration.date, fixtures: [] };
+  run.attempted += 1;
+  if (response.ok === true && validPng && gate.fixtureId != null) {
+    if (!state.baseballSent || state.baseballSent.date !== gate.date) {
+      state.baseballSent = { date: gate.date, fixtures: [] };
+    }
+    if (!Array.isArray(state.baseballSent.fixtures)) state.baseballSent.fixtures = [];
+    if (!state.baseballSent.fixtures.includes(gate.fixtureId)) {
+      state.baseballSent.fixtures.push(gate.fixtureId);
+    }
+    state.lastBaseballMessageId = (response.result && response.result.message_id)
+      || state.lastBaseballMessageId || null;
+    run.sent += 1;
+  } else {
+    const failure = {
+      at: new Date().toISOString(),
+      fixtureId: gate.fixtureId || null,
+      message: response.error?.message || response.description
+        || (response.ok === true ? 'Telegram no devolvio un PNG valido' : 'Fallo de imagen o Telegram'),
+    };
+    run.errors.push(failure);
+    state.lastBaseballError = failure;
   }
-  if (!Array.isArray(state.baseballSent.fixtures)) state.baseballSent.fixtures = [];
-  if (!state.baseballSent.fixtures.includes(registration.fixtureId)) state.baseballSent.fixtures.push(registration.fixtureId);
-  state.lastBaseballMessageId = registration.telegramMessageId;
-  run.sent += 1;
-} else {
-  const failure = { at: new Date().toISOString(), fixtureId: registration.fixtureId || null,
-    message: registration.error || 'Telegram envió béisbol pero no se pudo persistir su snapshot Premium' };
-  run.errors.push(failure);
-  state.lastBaseballError = failure;
 }
-return $input.all();`;
+return items;`;
 
 if (!loopBaseball) {
   loopBaseball = {
@@ -380,96 +309,38 @@ workflow.connections['Loop Baseball'] = {
 workflow.connections['Imagen Baseball'] = {
   main: [[{ node: 'Enviar Baseball', type: 'main', index: 0 }]],
 };
-workflow.connections['Registrar Futbol'] = {
-  main: [[{ node: 'Persistir Publicacion Futbol', type: 'main', index: 0 }]],
-};
-workflow.connections['Persistir Publicacion Futbol'] = {
-  main: [[{ node: 'Confirmar Publicacion Futbol', type: 'main', index: 0 }]],
-};
 workflow.connections['Registrar Baseball'] = {
-  main: [[{ node: 'Persistir Publicacion Baseball', type: 'main', index: 0 }]],
-};
-workflow.connections['Persistir Publicacion Baseball'] = {
-  main: [[{ node: 'Confirmar Publicacion Baseball', type: 'main', index: 0 }]],
-};
-workflow.connections['Confirmar Publicacion Baseball'] = {
   main: [[{ node: 'Loop Baseball', type: 'main', index: 0 }]],
 };
 
-// Los cierres viven en el mismo workflow y usan la misma credencial/canal que
-// los Picks Premium. La API entrega únicamente snapshots previamente
-// confirmados por Telegram; combinada_dia no participa en este flujo.
-const resultSchedule = addNode('Revisar resultados Premium', {
-  id: '60b580ea-b9a1-4ea9-b274-778c9aca1301',
-  type: 'n8n-nodes-base.scheduleTrigger', typeVersion: 1.2, position: [-760, 500], parameters: {},
-});
-resultSchedule.parameters.rule = { interval: [{ field: 'minutes', minutesInterval: 5 }] };
-
-const resultFeed = addNode('Consultar resultados Premium', {
-  id: '3cd94a15-cb8c-4ea1-bbf6-c50d3aca1302',
-  type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4, position: [-520, 500], parameters: {},
-});
-resultFeed.parameters = {
-  method: 'GET',
-  options: { response: { response: { neverError: false, fullResponse: false, responseFormat: 'json' } }, timeout: 60000 },
-};
-secureInternalRequest(resultFeed, 'https://cfanalisis.com/api/cron/telegram-premium-results');
-
-const resultGate = addNode('Preparar resultados Premium', {
-  id: '252ae4a4-8b21-4fdc-abac-2040caca1303',
-  type: 'n8n-nodes-base.code', typeVersion: 2, position: [-280, 500], parameters: {},
-});
-resultGate.parameters.jsCode = `const payload = $input.first()?.json || {};
-if (payload.ok !== true) throw new Error('CF Análisis no pudo consultar resultados Premium: ' + (payload.error || 'respuesta inválida'));
-if (!payload.event) return [];
-const event = payload.event;
-if (!event.eventId || !event.claimToken || !event.message) throw new Error('Resultado Premium incompleto');
-return [{ json: event }];`;
-
-const resultTelegram = addNode('Enviar resultado Premium', {
-  ...structuredClone(sendFootball),
-  id: 'e110bb4d-29d7-44ab-b170-acde9aca1304',
-  position: [-40, 500],
-});
-resultTelegram.parameters = {
-  resource: 'message', operation: 'sendMessage', chatId: sendFootball.parameters.chatId,
-  text: '={{ $json.message }}',
-  additionalFields: { parse_mode: 'HTML', disable_web_page_preview: true, appendAttribution: false },
-};
-
-const resultAck = addNode('Confirmar resultado Premium', {
-  id: '3c40fe4f-bb20-40c7-a888-c6c9baca1305',
-  type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4, position: [200, 500], parameters: {},
-});
-resultAck.parameters = {
-  method: 'POST', sendBody: true, contentType: 'json', specifyBody: 'keypair',
-  bodyParameters: { parameters: [
-    { name: 'eventId', value: "={{ $('Preparar resultados Premium').item.json.eventId }}" },
-    { name: 'claimToken', value: "={{ $('Preparar resultados Premium').item.json.claimToken }}" },
-  ] },
-  options: { response: { response: { neverError: false, fullResponse: false, responseFormat: 'json' } }, timeout: 60000 },
-};
-secureInternalRequest(resultAck, 'https://cfanalisis.com/api/cron/telegram-premium-results');
-
-workflow.connections['Revisar resultados Premium'] = {
-  main: [[{ node: 'Consultar resultados Premium', type: 'main', index: 0 }]],
-};
-workflow.connections['Consultar resultados Premium'] = {
-  main: [[{ node: 'Preparar resultados Premium', type: 'main', index: 0 }]],
-};
-workflow.connections['Preparar resultados Premium'] = {
-  main: [[{ node: 'Enviar resultado Premium', type: 'main', index: 0 }]],
-};
-workflow.connections['Enviar resultado Premium'] = {
-  main: [[{ node: 'Confirmar resultado Premium', type: 'main', index: 0 }]],
-};
+// Una exportación de producción puede contener nodos de la implementación
+// equivocada anterior. Este builder los elimina para que este canal no guarde
+// ni publique resultados del bot diario.
+const unrelatedDailyResultNodes = new Set([
+  'Persistir Publicacion Futbol',
+  'Confirmar Publicacion Futbol',
+  'Persistir Publicacion Baseball',
+  'Confirmar Publicacion Baseball',
+  'Revisar resultados Premium',
+  'Consultar resultados Premium',
+  'Preparar resultados Premium',
+  'Enviar resultado Premium',
+  'Confirmar resultado Premium',
+]);
+workflow.nodes = workflow.nodes.filter(node => !unrelatedDailyResultNodes.has(node.name));
+for (const name of unrelatedDailyResultNodes) delete workflow.connections[name];
+for (const connection of Object.values(workflow.connections)) {
+  connection.main = (connection.main || []).map(branch => (
+    (branch || []).filter(target => !unrelatedDailyResultNodes.has(target.node))
+  ));
+}
 
 workflow.settings = {
   ...(workflow.settings || {}),
   timezone: 'Europe/Madrid',
 };
 workflow.active = true;
-workflow.description = 'Publica picks Premium diarios por partido, registra el snapshot exacto solo tras confirmación de Telegram y envía sus resultados oficiales en el mismo canal. Fútbol conserva sus disparos a los :10; béisbol sale desde las 18:00 de España, procesa un juego por vez y envía PNG 4K sin compresión.';
+workflow.description = 'Publica picks premium diarios por partido: fútbol conserva sus disparos a los :10 y béisbol sale desde las 18:00 de España, procesando un juego por vez. Este workflow es independiente del bot diario de dos partidos y no publica sus resultados.';
 workflow.pinData = {};
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });

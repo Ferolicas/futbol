@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-10-05 · Telegram sin atribución de n8n, resultados Premium trazables y Rendimiento coherente
+Actualizado: 2026-10-05 · resultados exactos del bot diario de fútbol y Rendimiento coherente
 
 ## Identidad y stack
 
@@ -80,9 +80,8 @@ Las creatividades listas para campañas se guardan en `public/marketing/`.
 | `POST /api/legal/marketing/unsubscribe` | `app/api/legal/marketing/unsubscribe/route.js` | Token firmado | Retira marketing desde el propio correo |
 | `GET/POST /api/admin/marketing` | `app/api/admin/marketing/route.js` | Admin/owner | Lista consentidos y crea campañas con imágenes/adjuntos |
 | `GET/POST /api/cron/publish-combinada` | `app/api/cron/publish-combinada/route.js` | n8n | Elige y guarda la apuesta Telegram dentro de las reglas comerciales |
-| `GET/POST /api/cron/telegram-results` | `app/api/cron/telegram-results/route.js` | n8n legacy | Compatibilidad fail-safe sin eventos; impide cierres incorrectos desde Apuesta del Día |
-| `POST /api/cron/telegram-premium-publications` | `app/api/cron/telegram-premium-publications/route.js` | n8n | Guarda el snapshot exacto tras confirmarse un envío Premium |
-| `GET/POST /api/cron/telegram-premium-results` | `app/api/cron/telegram-premium-results/route.js` | n8n | Liquida, reserva y confirma resultados de los snapshots Premium de fútbol y béisbol |
+| `POST /api/cron/telegram-daily-publications` | `app/api/cron/telegram-daily-publications/route.js` | n8n | Guarda el contenido exacto después de que el bot diario confirme cada envío de fútbol |
+| `GET/POST /api/cron/telegram-results` | `app/api/cron/telegram-results/route.js` | n8n | Liquida, reserva y confirma solo los resultados de esos envíos diarios confirmados |
 | `GET /api/cron/personal-market-report` | `app/api/cron/personal-market-report/route.js` | Compatibilidad | CSV de córners de 1.ª parte protegido por secreto de cron |
 | `GET /api/admin/personal-market-report` | `app/api/admin/personal-market-report/route.js` | Informe privado | Descarga el CSV de córners 1T de fútbol o el catálogo MLB para la fecha elegida |
 | `GET /api/pick-image` | `app/api/pick-image/route.js` | n8n/Telegram | Renderiza la tarjeta PNG sin IA, con hasta tres selecciones y escudos |
@@ -127,11 +126,12 @@ Las migraciones viven en `scripts/`. Tablas clave:
 - `american_football_*`: calendario, análisis y hechos NFL/FBS/FCS; no consulta
   tablas de fútbol, béisbol ni baloncesto.
 - `combinadas`, `combinada_dia`, `telegram_result_notifications`, `tickets`,
-  `chat_messages`, `push_subscriptions`. La cola diaria antigua permanece por
-  compatibilidad, pero ya no emite cierres.
-- `telegram_premium_publications` y `telegram_premium_result_notifications`:
-  snapshots inmutables confirmados por Telegram y cola idempotente de sus
-  resultados. Nunca se reconstruyen desde `combinada_dia` ni desde el motor.
+  `chat_messages`, `push_subscriptions`. La cola `telegram_result_notifications`
+  es histórica y no se usa en el flujo actual.
+- `telegram_daily_publications` y `telegram_daily_result_notifications`:
+  snapshot exacto de cada partido confirmado por el bot diario de fútbol y su
+  cola idempotente de resultados. Nunca reconstruyen opciones desde
+  `combinada_dia` ni desde el motor.
 - Esquema `model`: entidades, hechos, perfiles y señales del motor estadístico.
 - `raw_api_payloads` + `api_capture_failures`: crudo válido e histórico durable
   de reintentos; un error HTTP/rate-limit nunca se guarda como evidencia.
@@ -272,13 +272,16 @@ fiabilidad y cuota) y un único enlace a CF Análisis en la primera.
 `scripts/build-n8n-telegram-workflow.mjs`
 mantiene en n8n las mismas validaciones defensivas que el publicador y un
 credential `httpHeaderAuth` aporta `Authorization: Bearer …`; ningún secreto
-viaja en la URL. `scripts/vps/secure-n8n-internal-auth.cjs` migra y verifica las
+viaja en la URL. Después de cada envío confirmado, el workflow registra el
+partido y las opciones exactas en `telegram_daily_publications`. Cada cinco
+minutos consulta `/api/cron/telegram-results`, que liquida exclusivamente ese
+snapshot con el resultado oficial y devuelve como máximo un cierre reservado.
+El mensaje se publica con la misma credencial y en el mismo canal diario; solo
+después se confirma la cola. Por ello una opción que no fue enviada por ese bot
+no puede aparecer luego como resultado. `scripts/vps/secure-n8n-internal-auth.cjs` migra y verifica las
 versiones actuales y publicadas, y conserva también el token de Telegram dentro
-de su credencial cifrada en lugar de incrustarlo en nodos HTTP. Los cierres ya
-no pertenecen a este workflow: `/api/cron/telegram-results` responde sin eventos
-para que ninguna versión anterior publique como si fueran Premium las opciones
-de `combinada_dia`.
-El bot diario usa una credencial cifrada separada de los canales Premium; se
+de su credencial cifrada en lugar de incrustarlo en nodos HTTP. El bot diario
+usa una credencial cifrada separada de los demás canales; se
 instala o rota por entrada estándar con
 `scripts/vps/rotate-n8n-telegram-credential.cjs`, nunca mediante argumentos ni
 archivos versionados.
@@ -314,16 +317,9 @@ columnas; cada tarjeta contiene hasta seis opciones de una sola familia para
 conservar el nombre y las métricas. El feed expone exactamente una imagen por
 partido.
 
-Después de cada `sendPhoto`/`sendDocument` exitoso, n8n envía al backend el
-partido completo y todas sus opciones junto con el `message_id`. Solo entonces
-se marca el fixture como enviado. Ese snapshot se guarda en
-`telegram_premium_publications`; un disparador del mismo workflow consulta cada
-cinco minutos `/api/cron/telegram-premium-results`, liquida fútbol y béisbol con
-datos oficiales y publica ganado/perdido/nulo en el mismo canal Premium. Si el
-texto supera el límite de Telegram se divide en partes idempotentes. Una opción
-que Telegram no confirmó como enviada nunca puede generar un resultado.
-Los envíos de fútbol, béisbol y resultados desactivan explícitamente la
-atribución automática de n8n.
+Este workflow es independiente del canal diario de dos partidos: no guarda sus
+envíos ni publica sus resultados. Los envíos de fútbol y béisbol desactivan
+explícitamente la atribución automática de n8n.
 
 `scripts/build-n8n-premium-workflow.mjs` fija ambos horarios y conexiones de
 forma reproducible. Después de importar cualquier JSON hay que ejecutar

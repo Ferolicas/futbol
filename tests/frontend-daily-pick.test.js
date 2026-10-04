@@ -52,12 +52,12 @@ test('el publicador recupera fiabilidad durable antes de aplicar las reglas Tele
 test('n8n conserva la defensa de probabilidad, fiabilidad y cuota de Telegram', () => {
   const source = fs.readFileSync(path.join(__dirname, '../scripts/build-n8n-telegram-workflow.mjs'), 'utf8');
   assert.match(source, /rawProbability < 85/);
-  assert.match(source, /reliability < 90/);
+  assert.match(source, /confidence < 90/);
   // La cuota solo filtra por debajo de 1.20: ya no existe techo.
   assert.match(source, /odd < 1\.2/);
   assert.doesNotMatch(source, /odd > 1\.6/);
   assert.match(source, /n8n-nodes-base\.executeWorkflowTrigger/);
-  assert.match(source, /telegramResponse\.result\?\.message_id/);
+  assert.match(source, /response\.result\?\.message_id/);
   assert.match(source, /appendAttribution: false/);
 });
 
@@ -66,20 +66,23 @@ test('n8n publica una imagen por partido, sin combinada', () => {
   assert.match(source, /Array\.isArray\(data\.matches\)/);
   assert.match(source, /options\.length < 1 \|\| options\.length > 3/);
   assert.match(source, /source\.slice\(0, 2\)\.map/);
-  assert.match(source, /return matches\.map\(\(match, index\) => \(\{/);
-  assert.match(source, /'match=' \+ encode\(JSON\.stringify\(match\)\)/);
+  assert.match(source, /return matches\.map\(\(match, index\) => \{/);
+  assert.match(source, /'match=' \+ encode\(JSON\.stringify\(displayMatch\)\)/);
   // Sin combinada no hay cuota total ni probabilidad conjunta.
   assert.doesNotMatch(source, /totalOdd/);
   assert.doesNotMatch(source, /totalProbability/);
   assert.doesNotMatch(source, /selections=/);
 });
 
-test('Apuesta del Día no publica resultados: el cierre pertenece a Picks Premium', () => {
+test('el bot diario publica resultados solo desde el snapshot confirmado por Telegram', () => {
   const source = fs.readFileSync(path.join(__dirname, '../scripts/build-n8n-telegram-workflow.mjs'), 'utf8');
   const route = fs.readFileSync(path.join(__dirname, '../app/api/cron/telegram-results/route.js'), 'utf8');
-  assert.doesNotMatch(source, /workflow\.nodes = \[[\s\S]*resultSchedule/);
-  assert.doesNotMatch(source, /'Revisar resultados':/);
-  assert.match(route, /event: null, deprecated: true/);
+  assert.match(source, /telegram-daily-publications/);
+  assert.match(source, /resultSchedule, resultFeed, resultGate, resultTelegram, resultAck/);
+  assert.match(source, /'Revisar resultados':/);
+  assert.match(route, /FROM telegram_daily_publications/);
+  assert.match(route, /telegram_daily_result_notifications/);
+  assert.doesNotMatch(route, /telegram_premium|baseball/);
 });
 
 test('el informe personal queda programado a las 08:00 de Madrid', () => {

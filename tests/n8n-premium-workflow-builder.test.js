@@ -36,10 +36,6 @@ test('el builder procesa cada imagen de baseball en un loop real y hace visible 
   const loop = workflow.nodes.find((item) => item.name === 'Loop Baseball');
   const verify = workflow.nodes.find((item) => item.name === 'Verificar Baseball');
   const image = workflow.nodes.find((item) => item.name === 'Imagen Baseball');
-  const persistFootball = workflow.nodes.find((item) => item.name === 'Persistir Publicacion Futbol');
-  const persistBaseball = workflow.nodes.find((item) => item.name === 'Persistir Publicacion Baseball');
-  const resultSchedule = workflow.nodes.find((item) => item.name === 'Revisar resultados Premium');
-  const resultSend = workflow.nodes.find((item) => item.name === 'Enviar resultado Premium');
   const footballSend = workflow.nodes.find((item) => item.name === 'Enviar Futbol');
   const baseballSend = workflow.nodes.find((item) => item.name === 'Enviar Baseball');
 
@@ -51,20 +47,13 @@ test('el builder procesa cada imagen de baseball en un loop real y hace visible 
   assert.equal(image.parameters.authentication, 'genericCredentialType');
   assert.equal(image.credentials.httpHeaderAuth.id, 'credential-test');
   assert.doesNotMatch(JSON.stringify(workflow), /[?&]secret=/);
-  assert.equal(persistFootball.credentials.httpHeaderAuth.id, 'credential-test');
-  assert.equal(persistBaseball.credentials.httpHeaderAuth.id, 'credential-test');
-  assert.match(persistFootball.parameters.url, /telegram-premium-publications/);
-  assert.match(resultSchedule.parameters.rule.interval[0].minutesInterval.toString(), /5/);
-  assert.equal(resultSend.parameters.operation, 'sendMessage');
   assert.equal(footballSend.parameters.additionalFields.appendAttribution, false);
   assert.equal(baseballSend.parameters.additionalFields.appendAttribution, false);
-  assert.equal(resultSend.parameters.additionalFields.appendAttribution, false);
-  assert.match(JSON.stringify(workflow), /telegram-premium-results/);
-  assert.match(workflow.nodes.find((item) => item.name === 'Gate Futbol').parameters.jsCode, /publication: match/);
-  assert.match(workflow.nodes.find((item) => item.name === 'Gate Baseball').parameters.jsCode, /publication: match/);
+  assert.doesNotMatch(JSON.stringify(workflow), /telegram-premium-(?:publications|results)/);
+  assert.doesNotMatch(workflow.nodes.find((item) => item.name === 'Gate Futbol').parameters.jsCode, /publication:/);
+  assert.doesNotMatch(workflow.nodes.find((item) => item.name === 'Gate Baseball').parameters.jsCode, /publication:/);
   assert.equal(workflow.connections['Gate Baseball'].main[0][0].node, 'Loop Baseball');
   assert.equal(workflow.connections['Loop Baseball'].main[0][0].node, 'Verificar Baseball');
   assert.equal(workflow.connections['Loop Baseball'].main[1][0].node, 'Imagen Baseball');
-  assert.equal(workflow.connections['Registrar Baseball'].main[0][0].node, 'Persistir Publicacion Baseball');
-  assert.equal(workflow.connections['Confirmar Publicacion Baseball'].main[0][0].node, 'Loop Baseball');
+  assert.equal(workflow.connections['Registrar Baseball'].main[0][0].node, 'Loop Baseball');
 });
