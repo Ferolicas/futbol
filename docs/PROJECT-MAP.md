@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-10-04 · resultados Premium trazables y Rendimiento coherente con web/apps
+Actualizado: 2026-10-05 · Telegram sin atribución de n8n, resultados Premium trazables y Rendimiento coherente
 
 ## Identidad y stack
 
@@ -282,6 +282,8 @@ El bot diario usa una credencial cifrada separada de los canales Premium; se
 instala o rota por entrada estándar con
 `scripts/vps/rotate-n8n-telegram-credential.cjs`, nunca mediante argumentos ni
 archivos versionados.
+Todos los nodos Telegram fijan `appendAttribution: false`; si se omite, n8n
+añade por defecto el texto «realizado por n8n» al mensaje o pie de imagen.
 Existe además un disparador interno, no público, para ejecutar el mismo flujo
 en QA sin alterar su programación diaria.
 
@@ -320,6 +322,8 @@ cinco minutos `/api/cron/telegram-premium-results`, liquida fútbol y béisbol c
 datos oficiales y publica ganado/perdido/nulo en el mismo canal Premium. Si el
 texto supera el límite de Telegram se divide en partes idempotentes. Una opción
 que Telegram no confirmó como enviada nunca puede generar un resultado.
+Los envíos de fútbol, béisbol y resultados desactivan explícitamente la
+atribución automática de n8n.
 
 `scripts/build-n8n-premium-workflow.mjs` fija ambos horarios y conexiones de
 forma reproducible. Después de importar cualquier JSON hay que ejecutar

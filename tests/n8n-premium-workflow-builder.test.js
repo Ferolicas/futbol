@@ -40,6 +40,8 @@ test('el builder procesa cada imagen de baseball en un loop real y hace visible 
   const persistBaseball = workflow.nodes.find((item) => item.name === 'Persistir Publicacion Baseball');
   const resultSchedule = workflow.nodes.find((item) => item.name === 'Revisar resultados Premium');
   const resultSend = workflow.nodes.find((item) => item.name === 'Enviar resultado Premium');
+  const footballSend = workflow.nodes.find((item) => item.name === 'Enviar Futbol');
+  const baseballSend = workflow.nodes.find((item) => item.name === 'Enviar Baseball');
 
   assert.equal(loop.type, 'n8n-nodes-base.splitInBatches');
   assert.equal(loop.typeVersion, 3);
@@ -54,6 +56,9 @@ test('el builder procesa cada imagen de baseball en un loop real y hace visible 
   assert.match(persistFootball.parameters.url, /telegram-premium-publications/);
   assert.match(resultSchedule.parameters.rule.interval[0].minutesInterval.toString(), /5/);
   assert.equal(resultSend.parameters.operation, 'sendMessage');
+  assert.equal(footballSend.parameters.additionalFields.appendAttribution, false);
+  assert.equal(baseballSend.parameters.additionalFields.appendAttribution, false);
+  assert.equal(resultSend.parameters.additionalFields.appendAttribution, false);
   assert.match(JSON.stringify(workflow), /telegram-premium-results/);
   assert.match(workflow.nodes.find((item) => item.name === 'Gate Futbol').parameters.jsCode, /publication: match/);
   assert.match(workflow.nodes.find((item) => item.name === 'Gate Baseball').parameters.jsCode, /publication: match/);

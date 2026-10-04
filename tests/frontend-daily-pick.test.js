@@ -58,6 +58,7 @@ test('n8n conserva la defensa de probabilidad, fiabilidad y cuota de Telegram', 
   assert.doesNotMatch(source, /odd > 1\.6/);
   assert.match(source, /n8n-nodes-base\.executeWorkflowTrigger/);
   assert.match(source, /telegramResponse\.result\?\.message_id/);
+  assert.match(source, /appendAttribution: false/);
 });
 
 test('n8n publica una imagen por partido, sin combinada', () => {

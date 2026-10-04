@@ -280,6 +280,8 @@ telegram.parameters = {
     ...(telegram.parameters?.additionalFields || {}),
     caption: '={{ $json.caption }}',
     parse_mode: 'HTML',
+    // n8n añade por defecto "realizado por n8n" cuando esta opción falta.
+    appendAttribution: false,
   },
 };
 if (dailyTelegramCredentialId) {

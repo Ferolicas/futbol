@@ -80,6 +80,14 @@ function addNode(name, template) {
 secureInternalRequest(workflow.nodes.find(node => node.name === 'Feed Futbol'), 'https://cfanalisis.com/api/telegram-premium/futbol');
 secureInternalRequest(workflow.nodes.find(node => node.name === 'Feed Baseball'), 'https://cfanalisis.com/api/telegram-premium/baseball');
 secureInternalRequest(workflow.nodes.find(node => node.name === 'Imagen Futbol'), '={{ $json.imageUrl }}');
+sendFootball.parameters = {
+  ...sendFootball.parameters,
+  additionalFields: {
+    ...(sendFootball.parameters?.additionalFields || {}),
+    // Si falta, n8n activa su atribución automáticamente en Telegram.
+    appendAttribution: false,
+  },
+};
 gateFootball.parameters.jsCode = `const payload = $input.first()?.json || {};
 if (payload.ok !== true) return [];
 const data = payload.data || {};
@@ -355,7 +363,7 @@ sendBaseball.parameters = {
   chatId: sendBaseball.parameters?.chatId || sendFootball.parameters?.chatId,
   binaryData: true,
   binaryPropertyName: 'data',
-  additionalFields: { fileName: 'cfanalisis-baseball.png' },
+  additionalFields: { fileName: 'cfanalisis-baseball.png', appendAttribution: false },
 };
 // Un timeout aislado no debe cancelar el lote completo: Registrar Baseball
 // conserva los éxitos y deja exclusivamente ese fixture para el próximo pase.
@@ -426,7 +434,7 @@ const resultTelegram = addNode('Enviar resultado Premium', {
 resultTelegram.parameters = {
   resource: 'message', operation: 'sendMessage', chatId: sendFootball.parameters.chatId,
   text: '={{ $json.message }}',
-  additionalFields: { parse_mode: 'HTML', disable_web_page_preview: true },
+  additionalFields: { parse_mode: 'HTML', disable_web_page_preview: true, appendAttribution: false },
 };
 
 const resultAck = addNode('Confirmar resultado Premium', {
