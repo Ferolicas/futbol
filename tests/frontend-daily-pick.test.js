@@ -10,6 +10,14 @@ test('el frontend diario lee el catálogo selectable y aplica el gate centraliza
   assert.doesNotMatch(source, /const MIN_PROB = 90/);
 });
 
+test('web y apps comparten el mismo gate de Apuesta del Día', () => {
+  const web = fs.readFileSync(path.join(__dirname, '../lib/recommendation-policy.js'), 'utf8');
+  const mobile = fs.readFileSync(path.join(__dirname, '../apps/cfanalisis-mobile/src/shared/recommendation-policy.js'), 'utf8');
+  const functionBody = source => source.match(/export function isFootballFrontendDailyPickEligible\(selection\) \{[\s\S]*?\n\}/)?.[0];
+  assert.equal(functionBody(mobile), functionBody(web));
+  assert.doesNotMatch(functionBody(mobile), /validationStatus|expectedValue/);
+});
+
 test('la Apuesta del Día muestra cuotas individuales y no fabrica una cuota total', () => {
   const source = fs.readFileSync(path.join(__dirname, '../app/dashboard/page.js'), 'utf8');
   assert.match(source, /cuotas individuales/);
@@ -65,17 +73,12 @@ test('n8n publica una imagen por partido, sin combinada', () => {
   assert.doesNotMatch(source, /selections=/);
 });
 
-test('n8n publica el cierre de cada partido y lo confirma en una cola durable', () => {
+test('Apuesta del Día no publica resultados: el cierre pertenece a Picks Premium', () => {
   const source = fs.readFileSync(path.join(__dirname, '../scripts/build-n8n-telegram-workflow.mjs'), 'utf8');
   const route = fs.readFileSync(path.join(__dirname, '../app/api/cron/telegram-results/route.js'), 'utf8');
-  assert.match(source, /minutesInterval: 5/);
-  assert.match(source, /api\/cron\/telegram-results/);
-  assert.match(source, /operation: 'sendMessage'/);
-  assert.match(source, /Preparar resultados/);
-  assert.match(source, /Confirmar resultado/);
-  assert.match(route, /FOR UPDATE SKIP LOCKED/);
-  assert.match(route, /status='sent'/);
-  assert.match(route, /buildTelegramMatchResult/);
+  assert.doesNotMatch(source, /workflow\.nodes = \[[\s\S]*resultSchedule/);
+  assert.doesNotMatch(source, /'Revisar resultados':/);
+  assert.match(route, /event: null, deprecated: true/);
 });
 
 test('el informe personal queda programado a las 08:00 de Madrid', () => {

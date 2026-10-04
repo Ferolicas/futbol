@@ -54,7 +54,7 @@ export async function GET(request) {
   if (!rate.success) return Response.json({ error: 'Demasiadas consultas. Inténtalo en un minuto.' }, { status: 429, headers: { 'Retry-After': '60' } });
   const filters = normalizedFilters(parsed.data);
   const fingerprint = crypto.createHash('sha256').update(JSON.stringify(filters)).digest('hex');
-  const cacheKey = `public-performance:v2:${fingerprint}`;
+  const cacheKey = `public-performance:v3:${fingerprint}`;
   try {
     const cached = await redisGet(cacheKey);
     if (cached) return Response.json(cached, { headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=300', 'X-Data-Cache': 'HIT' } });

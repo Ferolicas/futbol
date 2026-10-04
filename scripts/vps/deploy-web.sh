@@ -80,9 +80,10 @@ chmod 750 "$RELEASES_DIR" "$RELEASE_DIR" "$RELEASE_DIR/.next"
 chown -R root:cfanalisis "$RUNTIME_DIR"
 find "$RUNTIME_DIR" -type d -exec chmod 750 {} +
 find "$RUNTIME_DIR" -type f -exec chmod 640 {} +
-if [ -d "$RUNTIME_DIR/.next/cache" ]; then
-  chown -R cfanalisis:cfanalisis "$RUNTIME_DIR/.next/cache"
-fi
+# Next crea entradas de caché ISR/prerender después de arrancar. El directorio
+# debe existir antes de bajar privilegios; si no, el usuario cfanalisis intenta
+# crearlo dentro de un runtime root:cfanalisis 0750 y recibe EACCES.
+install -d -o cfanalisis -g cfanalisis -m 0750 "$RUNTIME_DIR/.next/cache"
 
 activate() {
   # This PM2 version does not update pm_exec_path for an existing app through

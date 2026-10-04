@@ -299,7 +299,6 @@ return $input.all();`;
 
 workflow.nodes = [
   schedule, executeTrigger, publish, code, telegram, finalize,
-  resultSchedule, resultFeed, resultGate, resultTelegram, resultAck,
 ];
 workflow.connections = {
   'Schedule Trigger': {
@@ -317,25 +316,13 @@ workflow.connections = {
   'Send a photo message': {
     main: [[{ node: 'Registrar envio', type: 'main', index: 0 }]],
   },
-  'Revisar resultados': {
-    main: [[{ node: 'Consultar resultados', type: 'main', index: 0 }]],
-  },
-  'Consultar resultados': {
-    main: [[{ node: 'Preparar resultados', type: 'main', index: 0 }]],
-  },
-  'Preparar resultados': {
-    main: [[{ node: 'Enviar resultado', type: 'main', index: 0 }]],
-  },
-  'Enviar resultado': {
-    main: [[{ node: 'Confirmar resultado', type: 'main', index: 0 }]],
-  },
 };
 workflow.settings = {
   ...(workflow.settings || {}),
   timezone: 'Europe/Madrid',
 };
 workflow.active = true;
-workflow.description = 'Publica cada día como máximo los 2 mejores partidos en Telegram, una imagen por partido con 1 a 3 opciones (>=85% probabilidad, >=90% fiabilidad, cuota >=1.20), y al finalizar envía ganado/perdido para las mismas opciones mediante una cola durable sin duplicados.';
+workflow.description = 'Publica cada día como máximo los 2 mejores partidos de Apuesta del Día, una imagen por partido con 1 a 3 opciones (>=85% probabilidad, >=90% fiabilidad, cuota >=1.20). Los resultados pertenecen exclusivamente al workflow Picks Premium y no se reconstruyen desde combinada_dia.';
 workflow.pinData = {};
 
 writeFileSync(outputPath, `${JSON.stringify([workflow], null, 2)}\n`, { mode: 0o600 });

@@ -70,4 +70,5 @@ test('resuelve los assets desde un cwd standalone anidado', async () => {
   const resolved = resolveBaseballPremiumProjectRoot([standalone]);
   assert.ok(fs.existsSync(path.join(resolved, 'scripts', 'render-baseball-premium-mosaic.mjs')));
   assert.ok(fs.existsSync(path.join(resolved, 'lib', 'baseball-premium-mosaic-image.js')));
+  assert.ok(fs.existsSync(path.join(resolved, 'lib', 'baseball-premium-mosaic-layout.js')));
 });

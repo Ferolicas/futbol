@@ -67,26 +67,24 @@ export function meetsFootballExpectedValuePolicy(probability, expectedValue) {
   return Number.isFinite(value) && value + Number.EPSILON >= minimum;
 }
 
+// Igual que el resto del catálogo: solo probabilidad, fiabilidad y una cuota
+// real (>=1.20) deciden la Apuesta del Día. La calibración general entre
+// equipos y el EV son informativos y no pueden ocultar una opción en la app.
 export function isFootballFrontendDailyPickEligible(selection) {
   const probability = Number(selection?.rawProbability ?? selection?.probability);
   const odd = Number(selection?.odd);
-  const expectedValue = selection?.expectedValue == null || selection.expectedValue === ''
-    ? NaN
-    : Number(selection.expectedValue);
   return meetsFootballReliability(selection?.confidence)
-    && selection?.validationStatus === 'calibrated'
     && selection?.dailyEligible === true
     && Number.isFinite(probability)
     && probability + Number.EPSILON >= FOOTBALL_DAILY_FRONTEND_MIN_PROBABILITY
     && Number.isFinite(odd)
-    && odd + Number.EPSILON >= FOOTBALL_DAILY_FRONTEND_MIN_ODD
-    && Number.isFinite(expectedValue)
-    && meetsFootballExpectedValuePolicy(probability, expectedValue);
+    && odd + Number.EPSILON >= FOOTBALL_DAILY_FRONTEND_MIN_ODD;
 }
 
 // Defensa de frontera para caches o filas antiguas. Las estadísticas viven
 // fuera de `combinada` y permanecen intactas; solo se vacían opciones que no
-// puedan demostrar la fiabilidad exigida por el contrato vigente.
+// puedan demostrar la fiabilidad del enfrentamiento. La calibración general
+// y los filtros económicos se conservan como metadatos, nunca como bloqueos.
 export function sanitizeFootballCombinada(combinada, scored = null) {
   if (!combinada || typeof combinada !== 'object') return combinada || null;
   const canonical = combinada.source === 'context-engine';
@@ -101,16 +99,13 @@ export function sanitizeFootballCombinada(combinada, scored = null) {
           ?? evidence?.validation?.decision?.status
           ?? null;
         const expectedValue = item?.expectedValue == null || item.expectedValue === ''
-          ? NaN
+          ? null
           : Number(item.expectedValue);
-        if (validationStatus !== 'calibrated') return null;
-        if (!Number.isFinite(expectedValue)
-            || !meetsFootballExpectedValuePolicy(item?.rawProbability ?? item?.probability, expectedValue)) return null;
         return {
           ...item,
           confidence: reliabilityPercent(confidence),
           validationStatus,
-          expectedValue,
+          expectedValue: Number.isFinite(expectedValue) ? expectedValue : null,
           sampleN: item?.sampleN ?? evidence?.n ?? null,
         };
       })

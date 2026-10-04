@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-10-03 · Next 16, membresías fail-closed, consentimiento legal y marketing autorizado
+Actualizado: 2026-10-04 · resultados Premium trazables y Rendimiento coherente con web/apps
 
 ## Identidad y stack
 
@@ -80,7 +80,9 @@ Las creatividades listas para campañas se guardan en `public/marketing/`.
 | `POST /api/legal/marketing/unsubscribe` | `app/api/legal/marketing/unsubscribe/route.js` | Token firmado | Retira marketing desde el propio correo |
 | `GET/POST /api/admin/marketing` | `app/api/admin/marketing/route.js` | Admin/owner | Lista consentidos y crea campañas con imágenes/adjuntos |
 | `GET/POST /api/cron/publish-combinada` | `app/api/cron/publish-combinada/route.js` | n8n | Elige y guarda la apuesta Telegram dentro de las reglas comerciales |
-| `GET/POST /api/cron/telegram-results` | `app/api/cron/telegram-results/route.js` | n8n | Reserva y confirma el aviso ganado/perdido de cada partido ya finalizado |
+| `GET/POST /api/cron/telegram-results` | `app/api/cron/telegram-results/route.js` | n8n legacy | Compatibilidad fail-safe sin eventos; impide cierres incorrectos desde Apuesta del Día |
+| `POST /api/cron/telegram-premium-publications` | `app/api/cron/telegram-premium-publications/route.js` | n8n | Guarda el snapshot exacto tras confirmarse un envío Premium |
+| `GET/POST /api/cron/telegram-premium-results` | `app/api/cron/telegram-premium-results/route.js` | n8n | Liquida, reserva y confirma resultados de los snapshots Premium de fútbol y béisbol |
 | `GET /api/cron/personal-market-report` | `app/api/cron/personal-market-report/route.js` | Compatibilidad | CSV de córners de 1.ª parte protegido por secreto de cron |
 | `GET /api/admin/personal-market-report` | `app/api/admin/personal-market-report/route.js` | Informe privado | Descarga el CSV de córners 1T de fútbol o el catálogo MLB para la fecha elegida |
 | `GET /api/pick-image` | `app/api/pick-image/route.js` | n8n/Telegram | Renderiza la tarjeta PNG sin IA, con hasta tres selecciones y escudos |
@@ -125,8 +127,11 @@ Las migraciones viven en `scripts/`. Tablas clave:
 - `american_football_*`: calendario, análisis y hechos NFL/FBS/FCS; no consulta
   tablas de fútbol, béisbol ni baloncesto.
 - `combinadas`, `combinada_dia`, `telegram_result_notifications`, `tickets`,
-  `chat_messages`, `push_subscriptions`. La cola de Telegram referencia el
-  snapshot diario y deduplica por jornada/fixture sin modificarlo.
+  `chat_messages`, `push_subscriptions`. La cola diaria antigua permanece por
+  compatibilidad, pero ya no emite cierres.
+- `telegram_premium_publications` y `telegram_premium_result_notifications`:
+  snapshots inmutables confirmados por Telegram y cola idempotente de sus
+  resultados. Nunca se reconstruyen desde `combinada_dia` ni desde el motor.
 - Esquema `model`: entidades, hechos, perfiles y señales del motor estadístico.
 - `raw_api_payloads` + `api_capture_failures`: crudo válido e histórico durable
   de reintentos; un error HTTP/rate-limit nunca se guarda como evidencia.
@@ -269,12 +274,10 @@ mantiene en n8n las mismas validaciones defensivas que el publicador y un
 credential `httpHeaderAuth` aporta `Authorization: Bearer …`; ningún secreto
 viaja en la URL. `scripts/vps/secure-n8n-internal-auth.cjs` migra y verifica las
 versiones actuales y publicadas, y conserva también el token de Telegram dentro
-de su credencial cifrada en lugar de incrustarlo en nodos HTTP. Un segundo
-disparador consulta cada cinco minutos `/api/cron/telegram-results`: liquida
-únicamente las opciones originales de `combinada_dia` con el resultado oficial,
-publica por partido cuáles fueron ganadas o perdidas y confirma la entrega en
-`telegram_result_notifications`. La reserva transaccional con vencimiento evita
-duplicados entre ejecuciones concurrentes y permite reintentar un fallo real.
+de su credencial cifrada en lugar de incrustarlo en nodos HTTP. Los cierres ya
+no pertenecen a este workflow: `/api/cron/telegram-results` responde sin eventos
+para que ninguna versión anterior publique como si fueran Premium las opciones
+de `combinada_dia`.
 El bot diario usa una credencial cifrada separada de los canales Premium; se
 instala o rota por entrada estándar con
 `scripts/vps/rotate-n8n-telegram-credential.cjs`, nunca mediante argumentos ni
@@ -309,6 +312,15 @@ columnas; cada tarjeta contiene hasta seis opciones de una sola familia para
 conservar el nombre y las métricas. El feed expone exactamente una imagen por
 partido.
 
+Después de cada `sendPhoto`/`sendDocument` exitoso, n8n envía al backend el
+partido completo y todas sus opciones junto con el `message_id`. Solo entonces
+se marca el fixture como enviado. Ese snapshot se guarda en
+`telegram_premium_publications`; un disparador del mismo workflow consulta cada
+cinco minutos `/api/cron/telegram-premium-results`, liquida fútbol y béisbol con
+datos oficiales y publica ganado/perdido/nulo en el mismo canal Premium. Si el
+texto supera el límite de Telegram se divide en partes idempotentes. Una opción
+que Telegram no confirmó como enviada nunca puede generar un resultado.
+
 `scripts/build-n8n-premium-workflow.mjs` fija ambos horarios y conexiones de
 forma reproducible. Después de importar cualquier JSON hay que ejecutar
 `n8n publish:workflow` y reiniciar n8n para registrar los cron de la versión
@@ -331,6 +343,9 @@ continúa ante errores individuales; `Registrar Baseball` persiste cada éxito y
 deja solo el fixture fallido para el siguiente intento horario. Solo registra
 éxito si Telegram devuelve un documento `image/png` de al menos 10 KB; una
 respuesta JSON de error nunca puede pasar por imagen válida.
+La resolución del proceso efímero exige juntos el script, el renderer y
+`baseball-premium-mosaic-layout.js`; si el standalone omite cualquiera, se usa
+la raíz íntegra `/apps/futbol` en vez de ejecutar un conjunto parcial.
 
 ### Informe personal de mercados en Telegram
 
@@ -1352,6 +1367,15 @@ el ledger ya no muestran la clave interna cruda (ej. `ah_home_p1`):
 `footballOutputs` (prediction-ledger.js) guardaba la fila de `_scored` en vez
 del ítem de recomendación con el nombre; corregido hacia adelante y con
 fallback `marketLabel()` al leer filas ya persistidas (public-performance.js).
+
+Desde 2026-10-04 el ledger por sí solo no acredita publicación. `loadLedgerRows`
+exige además que la clave exacta exista en `combinada.selectable` del snapshot
+persistido que consumen dashboard web y apps; en fútbol también debe conservar
+la marca `recommended` o pertenecer a `combinada.selections`. Esto elimina runs
+escritos antes de un upsert fallido y opciones retiradas por un reanálisis. La
+caché pública usa `public-performance:v3`. La política móvil de Apuesta del Día
+es copia exacta de la web: probabilidad, fiabilidad y cuota, sin los bloqueos
+antiguos por calibración general o EV.
 
 ## Cuotas multisport — API-Sports como fuente primaria (2026-09-22)
 

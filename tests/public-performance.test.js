@@ -89,7 +89,7 @@ test('la API pública está paginada, cacheada, limitada y separada del admin', 
   assert.match(api, /pageSize.*max\(24\)/s);
   assert.match(api, /day.*week.*fortnight.*month.*quarter.*semester.*year.*custom/s);
   assert.match(api, /value\.from > value\.to/);
-  assert.match(api, /public-performance:v2/);
+  assert.match(api, /public-performance:v3/);
   assert.match(api, /redisRateLimit\('public-performance'/);
   assert.match(api, /Cache-Control.*max-age=60/);
   assert.doesNotMatch(api, /getUserProfile|prediction-history/);
@@ -97,6 +97,10 @@ test('la API pública está paginada, cacheada, limitada y separada del admin', 
   assert.match(proof, /public-proof:v1/);
   assert.match(data, /r\.kickoff<now\(\)/);
   assert.match(data, /ps\.outcome IN \('won','lost','push','void'\)/);
+  assert.match(data, /fm\.combinada->'selectable'/);
+  assert.match(data, /bm\.combinada->'selectable'/);
+  assert.match(data, /afm\.combinada->'selectable'/);
+  assert.match(data, /visible\.option->>'id'=r\.market_key/);
   assert.doesNotMatch(data, /canonical_payload|response_tsr|model_version|feature_snapshot/);
 });
 
