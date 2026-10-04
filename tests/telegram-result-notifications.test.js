@@ -82,24 +82,3 @@ test('escapa nombres antes de enviarlos como HTML de Telegram', () => {
   assert.match(result.message, /&lt;b&gt;mercado&lt;\/b&gt;/);
   assert.doesNotMatch(result.message, /<b>mercado<\/b>/);
 });
-
-test('una línea estricta igualada se publica como perdida, nunca como nula', () => {
-  const result = buildTelegramMatchResult({
-    ...base,
-    match: {
-      ...base.match,
-      options: [{
-        id: 'legacy-total-goals-over-2', category: 'total-goals', line: 2,
-        side: 'over', name: 'Total goles — Más de 2',
-      }],
-    },
-    result: {
-      status: { short: 'FT' }, goals: { home: 1, away: 1 },
-      score: { fulltime: { home: 1, away: 1 } },
-    },
-  });
-  assert.ok(result);
-  assert.equal(result.lost, 1);
-  assert.match(result.message, /❌ PERDIDA/);
-  assert.doesNotMatch(result.message, /NULA/);
-});

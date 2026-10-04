@@ -275,10 +275,12 @@ credential `httpHeaderAuth` aporta `Authorization: Bearer …`; ningún secreto
 viaja en la URL. Después de cada envío confirmado, el workflow registra el
 partido y las opciones exactas en `telegram_daily_publications`. Cada cinco
 minutos consulta `/api/cron/telegram-results`, que liquida exclusivamente ese
-snapshot con el resultado oficial y devuelve como máximo un cierre reservado.
+snapshot con `settleMarketSelection`, la misma liquidación que consumen el
+dashboard, Rendimiento y las apps, y devuelve como máximo un cierre reservado.
 El mensaje se publica con la misma credencial y en el mismo canal diario; solo
 después se confirma la cola. Por ello una opción que no fue enviada por ese bot
-no puede aparecer luego como resultado. `scripts/vps/secure-n8n-internal-auth.cjs` migra y verifica las
+no puede aparecer luego como resultado, y Telegram solo emite estados decisivos
+`won`/`lost` como GANADA/PERDIDA. `scripts/vps/secure-n8n-internal-auth.cjs` migra y verifica las
 versiones actuales y publicadas, y conserva también el token de Telegram dentro
 de su credencial cifrada en lugar de incrustarlo en nodos HTTP. El bot diario
 usa una credencial cifrada separada de los demás canales; se
