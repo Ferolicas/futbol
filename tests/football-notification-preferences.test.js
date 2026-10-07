@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 let preferences;
 
@@ -53,4 +55,11 @@ test('un gol de penalti también pertenece a la preferencia Penaltis', () => {
     preferences.filterFootballNotificationEvents(events, ['penalties']).map((event) => event.detail),
     ['⚽ GOL DE PENALTI · Jugador'],
   );
+});
+
+test('favorites persiste TEXT[] con pg nativo y no con el serializador JSON legacy', () => {
+  const route = readFileSync(join(process.cwd(), 'app/api/favorites/route.js'), 'utf8');
+  assert.match(route, /\$3::text\[\]/);
+  assert.match(route, /pgQuery\(/);
+  assert.doesNotMatch(route, /\.upsert\(\{[\s\S]*notification_preferences/);
 });

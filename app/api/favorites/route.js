@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../../../lib/supabase';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
+import { pgQuery } from '../../../lib/db';
 import { jsonError } from '../../../lib/api-error';
 import {
   ALL_FOOTBALL_NOTIFICATION_PREFERENCES,
@@ -61,18 +62,16 @@ export async function POST(request) {
       return Response.json({ error: 'notificationPreferences contains invalid values' }, { status: 400 });
     }
 
-    const { error } = await supabaseAdmin
-      .from('user_favorites')
-      .upsert({
-        user_id: user.id,
-        fixture_id: Number(fixtureId),
-        notification_preferences: normalizedPreferences,
-      }, { onConflict: 'user_id,fixture_id' });
-
-    if (error) {
-      console.error('[favorites:POST]', error.message);
-      return jsonError(error);
-    }
+    // El adaptador legacy serializa arrays como JSON porque la mayoría de sus
+    // destinos son jsonb. Esta columna es TEXT[] nativa: pg debe recibir el
+    // array directamente (con cast explícito), no el literal JSON `["..."]`.
+    await pgQuery(
+      `INSERT INTO public.user_favorites (user_id, fixture_id, notification_preferences)
+       VALUES ($1, $2, $3::text[])
+       ON CONFLICT (user_id, fixture_id)
+       DO UPDATE SET notification_preferences = EXCLUDED.notification_preferences`,
+      [user.id, Number(fixtureId), normalizedPreferences],
+    );
 
     return Response.json({ success: true, fixtureId, notificationPreferences: normalizedPreferences });
   } catch (err) {
