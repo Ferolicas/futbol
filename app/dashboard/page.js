@@ -58,6 +58,8 @@ import { buildFootballProbabilityGroups } from './utils/probability-lines';
 import FinalVerdictPanel from './components/FinalVerdictPanel';
 import MarketOutcomeBadge from './components/MarketOutcomeBadge';
 import PredictionSealBadge from './components/PredictionSealBadge';
+import FavoriteNotificationSheet from './components/FavoriteNotificationSheet';
+import { normalizeFootballNotificationPreferences } from '../../lib/football-notification-preferences';
 import { marketResultState, settleMarketSelection } from '../../lib/market-settlement';
 import { resolveDailyPickView } from '../../lib/daily-pick-view';
 import { groupSavedCombinadaSelections } from '../../lib/saved-combinada';
@@ -167,6 +169,9 @@ export function FootballDashboard({
   const [confirmDismissId, setConfirmDismissId] = useState(null);
   const [showHiddenPanel, setShowHiddenPanel] = useState(false);
   const [favorites, setFavorites] = useState([]);
+  const [favoriteNotificationPreferences, setFavoriteNotificationPreferences] = useState({});
+  const [favoriteEditorId, setFavoriteEditorId] = useState(null);
+  const [favoriteSaving, setFavoriteSaving] = useState(false);
   const [analyzed, setAnalyzed] = useState([]);
   const [analyzedOdds, setAnalyzedOdds] = useState({});
   const { isFree } = useFreeAccess();
@@ -222,6 +227,7 @@ export function FootballDashboard({
   // la memoización de MatchCard — sin esto, un memo simple se anularía porque los
   // handlers cambiarían de identidad en cada tick. Mismo patrón que liveStatsRef.
   const favoritesRef = useRef(favorites);
+  const favoriteNotificationPreferencesRef = useRef(favoriteNotificationPreferences);
   const hiddenRef = useRef(hidden);
   const analyzedRef = useRef(analyzed);
   const selectedMarketsRef = useRef(selectedMarkets);
@@ -232,6 +238,7 @@ export function FootballDashboard({
   const leagueSaveQueueRef = useRef(Promise.resolve());
   const leagueSaveVersionRef = useRef(0);
   favoritesRef.current = favorites;
+  favoriteNotificationPreferencesRef.current = favoriteNotificationPreferences;
   hiddenRef.current = hidden;
   analyzedRef.current = analyzed;
   selectedMarketsRef.current = selectedMarkets;
@@ -437,6 +444,7 @@ export function FootballDashboard({
     setFixtures(fxWithLiveOverride);
     setHidden(data.hidden || []);
     setFavorites(data.favorites || []);
+    setFavoriteNotificationPreferences(data.favoriteNotificationPreferences || {});
     setAnalyzed(data.analyzed || []);
     setAnalyzedOdds(data.analyzedOdds || {});
     setAnalyzedData(data.analyzedData || {});
@@ -1062,62 +1070,108 @@ export function FootballDashboard({
     }
   }, [fixturesMutate]);
 
-  // Toggle favorite — optimistic update + persist + rollback si falla.
-  //
-  // Al MARCAR favorito, las notificaciones push son AUTOMÁTICAS:
-  //   - Si el permiso del navegador está 'default' → se pide ahora mismo.
-  //   - Si está 'granted' y no hay sub aún → se crea y registra.
-  //   - Si está 'denied' → mensaje claro al usuario (no podemos volver a
-  //     pedir desde JS; debe ir a ajustes del navegador).
-  //
-  // Marcar favorito SIN push = no tendría sentido, por eso lo forzamos.
-  // La campanita global fue eliminada — el favorito ES el toggle de alertas.
+  // La estrella abre el editor por partido. Guardar persiste el favorito y su
+  // lista exacta de alertas; una lista vacía conserva el favorito sin push.
   const toggleFavorite = useCallback(async (e, fixtureId) => {
     e.stopPropagation();
-    // Leemos favorites y el estado de push via refs (no estado directo) para
-    // que el handler sea useCallback estable — si dependiera de `favorites`
-    // cambiaría de identidad en cada toggle y re-renderizaría TODAS las
-    // tarjetas, anulando la memoización de MatchCard (FE-5).
-    const isFav = favoritesRef.current.includes(fixtureId);
-    const prevFavorites = favoritesRef.current;
+    setFavoriteEditorId(fixtureId);
+  }, []);
 
-    setFavorites(prev => isFav ? prev.filter(id => id !== fixtureId) : [...prev, fixtureId]);
+  const saveFavoriteNotifications = useCallback(async (notificationPreferences) => {
+    const fixtureId = favoriteEditorId;
+    if (!fixtureId || favoriteSaving) return;
+    const normalized = normalizeFootballNotificationPreferences(notificationPreferences);
+    const prevFavorites = favoritesRef.current;
+    const prevPreferences = favoriteNotificationPreferencesRef.current;
+    const wasFavorite = prevFavorites.includes(fixtureId);
+
+    setFavoriteSaving(true);
+    if (!wasFavorite) setFavorites((current) => [...current, fixtureId]);
+    setFavoriteNotificationPreferences((current) => ({ ...current, [fixtureId]: normalized }));
     try {
       fixturesMutate(prev => prev && ({
         ...prev,
-        favorites: isFav
-          ? (prev.favorites || []).filter(id => id !== fixtureId)
+        favorites: wasFavorite
+          ? (prev.favorites || [])
           : [...(prev.favorites || []), fixtureId],
+        favoriteNotificationPreferences: {
+          ...(prev.favoriteNotificationPreferences || {}),
+          [fixtureId]: normalized,
+        },
       }), { revalidate: false });
     } catch {}
 
     try {
       const res = await fetch('/api/favorites', {
-        method: isFav ? 'DELETE' : 'POST',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fixtureId }),
+        body: JSON.stringify({ fixtureId, notificationPreferences: normalized }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      // Al MARCAR favorito → asegurar suscripción push inmediatamente.
-      if (!isFav && pushSupportedRef.current && typeof Notification !== 'undefined') {
+      // Solo se solicita permiso Web Push si el usuario eligió al menos un
+      // evento. "Ninguno" nunca abre el prompt del navegador.
+      if (normalized.length > 0 && pushSupportedRef.current && typeof Notification !== 'undefined') {
         if (Notification.permission === 'denied') {
           setPushError('Las notificaciones están bloqueadas en tu navegador. Habilítalas en ajustes para recibir alertas de tus favoritos.');
         } else if (!pushEnabledRef.current) {
-          // subscribePush() internamente pide permiso si está 'default'
-          // y crea la subscription via service worker.
           subscribePushRef.current?.().catch(err => {
-            console.error('[toggleFavorite] push subscribe failed:', err?.message);
+            console.error('[favoriteNotifications] push subscribe failed:', err?.message);
           });
         }
       }
+      setFavoriteEditorId(null);
     } catch (e) {
-      console.error('[toggleFavorite] rollback:', e.message);
+      console.error('[favoriteNotifications] rollback:', e.message);
       setFavorites(prevFavorites);
+      setFavoriteNotificationPreferences(prevPreferences);
       try { fixturesMutate(); } catch {}
-      setError('No se pudo guardar el favorito — restaurado.');
+      setError('No se pudo guardar el favorito. Inténtalo de nuevo.');
+    } finally {
+      setFavoriteSaving(false);
     }
-  }, [fixturesMutate]);
+  }, [favoriteEditorId, favoriteSaving, fixturesMutate]);
+
+  const removeFavorite = useCallback(async () => {
+    const fixtureId = favoriteEditorId;
+    if (!fixtureId || favoriteSaving) return;
+    const prevFavorites = favoritesRef.current;
+    const prevPreferences = favoriteNotificationPreferencesRef.current;
+    setFavoriteSaving(true);
+    setFavorites((current) => current.filter((id) => id !== fixtureId));
+    setFavoriteNotificationPreferences((current) => {
+      const next = { ...current };
+      delete next[fixtureId];
+      return next;
+    });
+    try {
+      fixturesMutate((prev) => prev && ({
+        ...prev,
+        favorites: (prev.favorites || []).filter((id) => id !== fixtureId),
+        favoriteNotificationPreferences: Object.fromEntries(
+          Object.entries(prev.favoriteNotificationPreferences || {}).filter(([id]) => Number(id) !== Number(fixtureId)),
+        ),
+      }), { revalidate: false });
+    } catch {}
+
+    try {
+      const response = await fetch('/api/favorites', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fixtureId }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setFavoriteEditorId(null);
+    } catch (removeError) {
+      console.error('[removeFavorite] rollback:', removeError.message);
+      setFavorites(prevFavorites);
+      setFavoriteNotificationPreferences(prevPreferences);
+      try { fixturesMutate(); } catch {}
+      setError('No se pudo quitar el favorito. Inténtalo de nuevo.');
+    } finally {
+      setFavoriteSaving(false);
+    }
+  }, [favoriteEditorId, favoriteSaving, fixturesMutate]);
 
   // Keep backward-compatible aliases
   const doHide = requestDismiss;
@@ -1707,6 +1761,25 @@ export function FootballDashboard({
         onClose={() => setShowHiddenPanel(false)}
       />
     )}
+
+    {favoriteEditorId != null && (() => {
+      const favoriteMatch = fixtureById.get(favoriteEditorId);
+      const matchLabel = favoriteMatch
+        ? `${favoriteMatch.teams?.home?.name || 'Local'} vs ${favoriteMatch.teams?.away?.name || 'Visitante'}`
+        : 'este partido';
+      return (
+        <FavoriteNotificationSheet
+          key={favoriteEditorId}
+          isFavorite={favoritesSet.has(favoriteEditorId)}
+          matchLabel={matchLabel}
+          initialPreferences={favoriteNotificationPreferences[favoriteEditorId] || []}
+          saving={favoriteSaving}
+          onClose={() => !favoriteSaving && setFavoriteEditorId(null)}
+          onSave={saveFavoriteNotifications}
+          onRemove={removeFavorite}
+        />
+      );
+    })()}
     </>
   );
 }
@@ -1999,7 +2072,8 @@ export function MatchHeadCard({ match, odds, data, standings, liveStats, userTz,
             type="button"
             className={`btn-fav${isFavorite ? ' active' : ''}`}
             onClick={(event) => { event.stopPropagation(); onFavorite(event, match.fixture.id); }}
-            title={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+            aria-label={isFavorite ? 'Editar notificaciones del favorito' : 'Agregar a favoritos y elegir notificaciones'}
+            title={isFavorite ? 'Editar notificaciones' : 'Agregar a favoritos'}
           >&#9733;</button>
         )}
         {onDismiss && (

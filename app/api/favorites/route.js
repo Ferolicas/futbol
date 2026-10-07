@@ -1,6 +1,10 @@
 import { supabaseAdmin } from '../../../lib/supabase';
 import { createSupabaseServerClient } from '../../../lib/supabase-auth';
 import { jsonError } from '../../../lib/api-error';
+import {
+  ALL_FOOTBALL_NOTIFICATION_PREFERENCES,
+  normalizeFootballNotificationPreferences,
+} from '../../../lib/football-notification-preferences';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +22,7 @@ export async function GET() {
 
     const { data, error } = await supabaseAdmin
       .from('user_favorites')
-      .select('fixture_id, created_at')
+      .select('fixture_id, notification_preferences, created_at')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
@@ -27,32 +31,50 @@ export async function GET() {
       return jsonError(error);
     }
 
-    return Response.json({ favorites: data.map(r => r.fixture_id) });
+    return Response.json({
+      favorites: data.map(r => r.fixture_id),
+      notificationPreferences: Object.fromEntries(data.map((row) => [
+        row.fixture_id,
+        normalizeFootballNotificationPreferences(row.notification_preferences),
+      ])),
+    });
   } catch (err) {
     console.error('[favorites:GET]', err.message);
     return jsonError(err);
   }
 }
 
-// POST { fixtureId } — add to favorites
+// POST { fixtureId, notificationPreferences } — add/update favorite
 export async function POST(request) {
   try {
     const user = await getAuthUser();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { fixtureId } = await request.json();
+    const { fixtureId, notificationPreferences = [] } = await request.json();
     if (!fixtureId) return Response.json({ error: 'fixtureId required' }, { status: 400 });
+    if (!Array.isArray(notificationPreferences)) {
+      return Response.json({ error: 'notificationPreferences must be an array' }, { status: 400 });
+    }
+
+    const normalizedPreferences = normalizeFootballNotificationPreferences(notificationPreferences);
+    if (notificationPreferences.some((value) => !ALL_FOOTBALL_NOTIFICATION_PREFERENCES.includes(value))) {
+      return Response.json({ error: 'notificationPreferences contains invalid values' }, { status: 400 });
+    }
 
     const { error } = await supabaseAdmin
       .from('user_favorites')
-      .upsert({ user_id: user.id, fixture_id: Number(fixtureId) }, { onConflict: 'user_id,fixture_id' });
+      .upsert({
+        user_id: user.id,
+        fixture_id: Number(fixtureId),
+        notification_preferences: normalizedPreferences,
+      }, { onConflict: 'user_id,fixture_id' });
 
     if (error) {
       console.error('[favorites:POST]', error.message);
       return jsonError(error);
     }
 
-    return Response.json({ success: true, fixtureId });
+    return Response.json({ success: true, fixtureId, notificationPreferences: normalizedPreferences });
   } catch (err) {
     console.error('[favorites:POST]', err.message);
     return jsonError(err);

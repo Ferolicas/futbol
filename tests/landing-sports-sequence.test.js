@@ -32,7 +32,7 @@ const opacityStops = (block) => {
 test('el hero monta los cuatro recortes deportivos debajo de sus métricas', () => {
   const landing = read('app/page.js');
   const statsPosition = landing.indexOf('className="apple-hero-stats"');
-  const sequencePosition = landing.indexOf('{activeScene === 0 && <SportsSequence />}');
+  const sequencePosition = landing.indexOf('<SportsSequence />');
 
   assert.ok(statsPosition >= 0);
   assert.ok(sequencePosition > statsPosition);
@@ -40,6 +40,16 @@ test('el hero monta los cuatro recortes deportivos debajo de sus métricas', () 
     assert.match(landing, new RegExp(`/sports-sequence/${sport}\\.webp`));
     assert.ok(fs.existsSync(path.join(root, `public/sports-sequence/${sport}.webp`)));
   }
+});
+
+test('la landing usa scroll nativo sin capturar rueda ni gestos', () => {
+  const landing = read('app/page.js');
+  const styles = read('app/globals.css');
+
+  assert.match(landing, /landing-apple landing-scroll/);
+  assert.doesNotMatch(landing, /addEventListener\('wheel'|addEventListener\('touchmove'|preventDefault\(\)/);
+  assert.match(styles, /\.landing-apple\.landing-scroll\s*\{[^}]*position:\s*relative;[^}]*height:\s*auto;/s);
+  assert.match(styles, /touch-action:\s*pan-y/);
 });
 
 // Lee ancho y alto de un WebP sin decodificarlo (cabeceras VP8X / VP8L / VP8).

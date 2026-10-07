@@ -14,8 +14,8 @@ export default function FavoriteStar({ fixtureId, isFavorite, onToggle, size = '
       className={`fav-star${isFavorite ? ' active' : ''}`}
       style={small ? { width: 24, height: 24, fontSize: 12 } : {}}
       onClick={handleClick}
-      aria-label={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
-      title={isFavorite ? 'Quitar de favoritos' : 'Favorito'}
+      aria-label={isFavorite ? 'Editar notificaciones del favorito' : 'Agregar a favoritos y elegir notificaciones'}
+      title={isFavorite ? 'Editar notificaciones' : 'Agregar a favoritos'}
     >
       {isFavorite ? '★' : '☆'}
     </button>

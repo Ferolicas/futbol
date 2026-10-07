@@ -1,6 +1,6 @@
 # CF Análisis — mapa del proyecto
 
-Actualizado: 2026-10-05 · resultados exactos del bot diario de fútbol y Rendimiento coherente
+Actualizado: 2026-10-07 · notificaciones por favorito y landing con scroll nativo
 
 ## Identidad y stack
 
@@ -698,9 +698,12 @@ persistencia en `match_results` y el modelo. Hasta 500 vencidos se recuperan en
 un solo ciclo; un cursor circular evita que, por encima de eso, un fixture sin
 respuesta bloquee a los siguientes.
 
-Las notificaciones Web Push de fútbol se agrupan por partido y tick. Solo
-publican goles, goles anulados, córners, tarjetas, penaltis, remates, remates a
-puerta y faltas; sustituciones, offsides y VAR genérico no generan avisos. Los
+Las notificaciones Web Push de fútbol se agrupan por partido y tick. Cada fila
+de `user_favorites` guarda `notification_preferences`: al tocar la estrella el
+usuario puede elegir una o varias entre goles, córners, remates, remates a
+puerta, tarjetas, penaltis, cambios y faltas, o conservar el favorito con `Ninguno`.
+El worker filtra el bundle por usuario antes de enviarlo; nunca asume `Todos`.
+Offsides y VAR genérico no generan avisos. Los
 goles/tarjetas usan el evento oficial con jugador y asistencia. Un único detalle
 `/fixtures?ids=...` por lote de hasta 20 partidos alimenta eventos, estadísticas
 y jugadores cada tick: reemplaza las antiguas llamadas individuales de goleador
@@ -890,6 +893,10 @@ Las colas, clientes WS, memoria, DB/Redis y demás métricas viven en
   NBA, NFL y NCAA. El cruce de IDs se hace localmente y solo Bet365 se normaliza;
   los feeds MLB/NBA/NFL siguen siendo autoridades de datos, no de cuotas. MLB
   no cae de nuevo a API-Baseball, eliminando su consumo diario de mapeo.
+- 2026-10-07: la portada vuelve al flujo vertical normal. `app/page.js` no
+  captura `wheel`, teclado ni gestos táctiles, no bloquea el overflow del
+  documento y renderiza hero, funciones, proceso, precios y cierre como
+  secciones consecutivas; las pestañas de planes siguen siendo un control local.
 
 - 2026-08-14: `futbol-daily` persiste `startedBy` con el ID de BullMQ. El mismo
   job puede continuar en su siguiente intento después de una caída de API; un

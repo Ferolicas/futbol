@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS user_favorites (
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   fixture_id INTEGER NOT NULL,
   sport TEXT DEFAULT 'football',
+  notification_preferences TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
   created_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(user_id, fixture_id)
 );

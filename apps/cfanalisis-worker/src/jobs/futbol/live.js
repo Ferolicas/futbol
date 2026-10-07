@@ -13,6 +13,7 @@ import {
   createLiveTelemetryToken,
   supabaseAdmin, getMatchSchedule, pgQuery,
   footballApiRequest, extractResultCoverage,
+  filterFootballNotificationEvents, normalizeFootballNotificationPreferences,
 } from '../../shared.js';
 import {
   diffPlayerActivity,
@@ -264,9 +265,9 @@ function toSubArray(stored) {
 // ────────────────────────────────────────────────────────────────────────────
 // Bundled push delivery — 1 push por fixture/tick que agrupa TODOS los
 // deltas relevantes detectados desde el live anterior:
-//   goles/anulados · córners · tarjetas · penaltis · faltas · remates.
-// Las sustituciones y el VAR genérico se conservan en el snapshot interno,
-// pero NO generan notificaciones.
+//   goles/anulados · córners · tarjetas · penaltis · remates · faltas · cambios.
+// El VAR genérico y los offsides se conservan en el snapshot interno, pero no
+// forman parte del selector ni generan notificaciones.
 //
 // REGLA DE CALIDAD: solo notificamos eventos con datos REALES de API-Football
 // (array `events` con jugador/equipo concretos). NO se notifican estadísticas
@@ -388,6 +389,7 @@ const DEDUP_TTL_BY_TYPE = {
   shot: 7200,
   sot: 7200,
   foul: 7200,
+  substitution: 7200,
 };
 
 function dedupKey(fid, ...parts) {
@@ -427,6 +429,7 @@ function detectEventType(line) {
   if (line.startsWith('◉')) return 'shot';
   if (line.startsWith('⚠')) return 'foul';
   if (line.startsWith('🅿')) return 'penalty';
+  if (line.startsWith('🔄')) return 'substitution';
   return 'other';
 }
 
@@ -771,9 +774,29 @@ async function buildEventBundle(fid, data, prev, playerActivityUpdate = null) {
   // "🚫 Offside · Equipo" no aporta información real al usuario. Se mantiene
   // el contador en data.offsides para el dashboard, pero NO se notifica.
 
-  // ── Sustituciones ── NO SE NOTIFICAN.
-  // Se mantienen en el snapshot para usos internos, pero el usuario pidió
-  // eliminar completamente este ruido del canal push.
+  // ── Sustituciones ── evento oficial con jugadores y equipo.
+  // El minuto puede corregirse entre ticks, por eso la identidad estable usa
+  // entra+sale+equipo y no el timestamp del proveedor.
+  const substitutionKey = (substitution) => [
+    substitution.playerIn || '',
+    substitution.playerOut || '',
+    substitution.teamId || substitution.teamName || '',
+  ].join('|');
+  const previousSubstitutions = new Set((prev.substitutions || []).map(substitutionKey));
+  for (const substitution of (data.substitutions || [])) {
+    const identity = substitutionKey(substitution);
+    if (!identity || previousSubstitutions.has(identity)) continue;
+    const key = dedupKey(fid, 'substitution', identity);
+    if (await alreadySent(key)) {
+      skipReasons.push(`substitution:${identity}:dedup-ya-enviado`);
+      continue;
+    }
+    const playerIn = substitution.playerIn || 'Jugador no informado';
+    const playerOut = substitution.playerOut || 'Jugador no informado';
+    const teamName = substitution.teamName || 'Equipo no informado';
+    lines.push(`🔄 CAMBIO · Entra ${playerIn} · Sale ${playerOut} · ${teamName}`);
+    sentKeys.push(key);
+  }
 
   // ── Remates / remates a puerta / faltas ──
   // Deltas por jugador entre snapshots reales de API-Football. Si la liga no
@@ -891,9 +914,10 @@ async function buildEventBundle(fid, data, prev, playerActivityUpdate = null) {
   // hora exacta de detección. El caller (sendBundledPushes) le añade tPush +
   // pushResult tras intentar el envío y lo persiste en Redis.
   const tDetected = new Date().toISOString();
-  const events = lines.map((line) => ({
+  const events = lines.map((line, index) => ({
     fid: Number(fid), min: minute, type: detectEventType(line),
     detail: line, home, away, score: `${nHG}-${nAG}`, tDetected,
+    sentKey: sentKeys[index] || null,
   }));
   // sentKeys: el caller marca cada una en Redis DESPUÉS de enviar el push
   // (ver sendBundledPushes), no aquí. Si marcamos antes de enviar y el envío
@@ -943,7 +967,7 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today, playerActi
         await persistPlayerActivitySnapshot(b.fixtureId, b.activitySnapshot);
       }
       for (const ev of (b.events || [])) {
-        eventLogItems.push({ ...ev, tPush: null, pushResult: 'no-subscribers', subsTargeted: 0 });
+        eventLogItems.push({ ...ev, sentKey: undefined, tPush: null, pushResult: 'no-subscribers', subsTargeted: 0 });
       }
     }
     await appendEventLog(today, eventLogItems);
@@ -954,14 +978,17 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today, playerActi
   // sola query con IN y agrupación en memoria.
   const favoritesByUser = {};
   const userIds = [...new Set(subs.map(r => r.user_id).filter(Boolean))];
-  for (const uid of userIds) favoritesByUser[uid] = new Set();
+  for (const uid of userIds) favoritesByUser[uid] = new Map();
   if (userIds.length > 0) {
     const { data: favRows } = await supabaseAdmin
       .from('user_favorites')
-      .select('user_id, fixture_id')
+      .select('user_id, fixture_id, notification_preferences')
       .in('user_id', userIds);
     for (const r of (favRows || [])) {
-      (favoritesByUser[r.user_id] ||= new Set()).add(Number(r.fixture_id));
+      (favoritesByUser[r.user_id] ||= new Map()).set(
+        Number(r.fixture_id),
+        normalizeFootballNotificationPreferences(r.notification_preferences),
+      );
     }
   }
 
@@ -973,22 +1000,29 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today, playerActi
     // dedup keys como "enviadas" si al menos uno se entregó OK — así, si todos
     // los pushes fallan por un error transitorio del push server, el siguiente
     // tick puede reintentar el mismo evento (at-least-once).
-    let bundleHadDelivery = false;
-    let bundleHadSubscriberInFav = false;
+    const deliveredEventDetails = new Set();
+    const targetedByEventDetail = new Map((bundle.events || []).map((event) => [event.detail, 0]));
 
     // Cuántos suscriptores tienen ESTE fixture en favoritos — si es 0, el push
     // nunca se intenta (todos caen en el guard de favoritos). Lo logueamos para
     // distinguir "nadie lo tiene en favoritos" de "lo tienen pero falló el envío".
-    const subsWithThisFav = subs.filter(r => (favoritesByUser[r.user_id] || new Set()).has(bundle.fixtureId)).length;
+    const subsWithThisFav = subs.filter(r => (favoritesByUser[r.user_id] || new Map()).has(bundle.fixtureId)).length;
     console.log(`${LP} bundle fid=${bundle.fixtureId} → favoritos: ${subsWithThisFav}/${subs.length} suscriptores`);
 
     await Promise.allSettled(subs.map(async (row) => {
-      const favs = favoritesByUser[row.user_id] || new Set();
+      const favs = favoritesByUser[row.user_id] || new Map();
       if (!favs.has(bundle.fixtureId)) { skippedNoFav++; return; }
-      bundleHadSubscriberInFav = true;
+      const filteredEvents = filterFootballNotificationEvents(
+        bundle.events,
+        favs.get(bundle.fixtureId),
+      );
+      if (filteredEvents.length === 0) { skippedNoFav++; return; }
+      for (const event of filteredEvents) {
+        targetedByEventDetail.set(event.detail, (targetedByEventDetail.get(event.detail) || 0) + 1);
+      }
 
       const deviceSubs = toSubArray(row.subscription);
-      const telemetry = createLiveTelemetryToken(bundle.fixtureId, bundle.events?.[0]?.min ?? '0');
+      const telemetry = createLiveTelemetryToken(bundle.fixtureId, filteredEvents[0]?.min ?? '0');
       await Promise.allSettled(deviceSubs.map(async (sub) => {
         if (!sub?.endpoint) return;
         attempted++;
@@ -999,8 +1033,8 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today, playerActi
           sub,
           {
             title: bundle.title,
-            body: bundle.body,
-            tag: bundle.tag,
+            body: filteredEvents.map((event) => event.detail).join('\n'),
+            tag: `${bundle.tag}-${filteredEvents.map((event) => event.type).join('-')}`,
             url: '/dashboard',
             timestamp: new Date().toISOString(),
             telemetryToken: telemetry.token,
@@ -1008,7 +1042,10 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today, playerActi
           },
           { urgency: 'high' },
         );
-        if (result === true) { delivered++; bundleHadDelivery = true; }
+        if (result === true) {
+          delivered++;
+          for (const event of filteredEvents) deliveredEventDetails.add(event.detail);
+        }
         else if (result === 'expired') {
           expiredN++;
           if (!expiredByUser[row.user_id]) expiredByUser[row.user_id] = new Set();
@@ -1023,15 +1060,19 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today, playerActi
     // los próximos ticks tampoco serviría de nada. Solo se queda SIN marcar
     // el caso donde había favoritos pero todos los envíos fallaron (push
     // server caído / red transitoria) → el siguiente tick reintenta.
-    const shouldMark = bundleHadDelivery || !bundleHadSubscriberInFav;
-    if (shouldMark && Array.isArray(bundle.sentKeys) && bundle.sentKeys.length > 0) {
-      await Promise.all(bundle.sentKeys.map(k => markSent(k)));
-      const ttlDetalle = bundle.sentKeys.map(k => `${k.split(':').slice(3).join(':')}=${ttlForKey(k)}s`).join(', ');
-      console.log(`${LP} dedup marcadas ${bundle.sentKeys.length} keys fid=${bundle.fixtureId} → ${ttlDetalle}`);
-    } else if (!shouldMark) {
-      console.log(`${LP} dedup NO marcadas fid=${bundle.fixtureId} — todos los envíos fallaron, reintentará en próximo tick`);
+    const keysToMark = (bundle.events || [])
+      .filter((event) => deliveredEventDetails.has(event.detail) || (targetedByEventDetail.get(event.detail) || 0) === 0)
+      .map((event) => event.sentKey)
+      .filter(Boolean);
+    if (keysToMark.length > 0) {
+      await Promise.all(keysToMark.map((key) => markSent(key)));
+      const ttlDetalle = keysToMark.map(k => `${k.split(':').slice(3).join(':')}=${ttlForKey(k)}s`).join(', ');
+      console.log(`${LP} dedup marcadas ${keysToMark.length} keys fid=${bundle.fixtureId} → ${ttlDetalle}`);
     }
-    if (shouldMark && bundle.activitySnapshot) {
+    if (keysToMark.length < (bundle.sentKeys || []).length) {
+      console.log(`${LP} dedup parciales fid=${bundle.fixtureId} — los eventos con interesados y fallo total reintentarán`);
+    }
+    if (keysToMark.length === (bundle.sentKeys || []).length && bundle.activitySnapshot) {
       await persistPlayerActivitySnapshot(bundle.fixtureId, bundle.activitySnapshot);
     }
 
@@ -1039,11 +1080,16 @@ async function sendBundledPushes(liveDetailsMap, existingLive, today, playerActi
     //   delivered     → al menos un dispositivo recibió el push
     //   no-favorites  → nadie tenía este fixture en favoritos (no se intentó)
     //   failed        → había favoritos pero todos los envíos fallaron
-    const pushResult = bundleHadDelivery ? 'delivered'
-      : (bundleHadSubscriberInFav ? 'failed' : 'no-favorites');
-    const tPush = bundleHadDelivery ? new Date().toISOString() : null;
     for (const ev of (bundle.events || [])) {
-      eventLogItems.push({ ...ev, tPush, pushResult, subsTargeted: subsWithThisFav });
+      const subsTargeted = targetedByEventDetail.get(ev.detail) || 0;
+      const eventDelivered = deliveredEventDetails.has(ev.detail);
+      eventLogItems.push({
+        ...ev,
+        sentKey: undefined,
+        tPush: eventDelivered ? new Date().toISOString() : null,
+        pushResult: eventDelivered ? 'delivered' : (subsTargeted > 0 ? 'failed' : 'no-preferences'),
+        subsTargeted,
+      });
     }
   }
 
@@ -1630,8 +1676,8 @@ export async function runLive(_payload = {}) {
   }
 
   // Fire-and-forget pushes — 1 bundle por fixture/tick con los eventos pedidos:
-  // goles/anulados, córners, tarjetas, penaltis, remates y faltas. Sustituciones
-  // y VAR genérico quedan fuera. Anti-spam por agrupación en el propio bundle.
+  // goles/anulados, córners, tarjetas, penaltis, remates, faltas y cambios. Cada
+  // usuario recibe solo sus categorías. Offsides y VAR genérico quedan fuera.
   console.log(`${LL} → sendBundledPushes: liveDetailsMap=${Object.keys(liveDetailsMap).length} existingLive=${Object.keys(existingLive).length}`);
   sendBundledPushes(liveDetailsMap, existingLive, today, playerActivityUpdates)
     .catch(err => console.error('[live:bundled-pushes]', err.message, err.stack));

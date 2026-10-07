@@ -591,15 +591,20 @@ export async function GET(request) {
     // ===== PHASE 6: User-specific data from Supabase =====
     let hidden = [];
     let favorites = [];
+    let favoriteNotificationPreferences = {};
     if (userId) {
       const [hiddenRes, favRes] = await Promise.all([
         supabaseAdmin.from('user_hidden').select('fixture_id').eq('user_id', userId).eq('date', date),
         fixtureIds.length > 0
-          ? supabaseAdmin.from('user_favorites').select('fixture_id').eq('user_id', userId).in('fixture_id', fixtureIds)
+          ? supabaseAdmin.from('user_favorites').select('fixture_id, notification_preferences').eq('user_id', userId).in('fixture_id', fixtureIds)
           : Promise.resolve({ data: [] }),
       ]);
       hidden = (hiddenRes.data || []).map(r => r.fixture_id);
       favorites = (favRes.data || []).map(r => r.fixture_id);
+      favoriteNotificationPreferences = Object.fromEntries((favRes.data || []).map((row) => [
+        row.fixture_id,
+        Array.isArray(row.notification_preferences) ? row.notification_preferences : [],
+      ]));
     }
 
     // ===== PHASE 7: Merge analysis + odds =====
@@ -727,6 +732,7 @@ export async function GET(request) {
       quota,
       hidden,
       favorites,
+      favoriteNotificationPreferences,
       userTimezone,
       analyzed: userAnalyzed,
       analyzedOdds: paidAccess ? analyzedOdds : {},

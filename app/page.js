@@ -1,14 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
   BadgeDollarSign,
   BarChart3,
   Check,
-  ChevronDown,
-  ChevronUp,
   Globe2,
   Layers3,
   PanelsTopLeft,
@@ -50,17 +48,6 @@ const PLAN_BENEFITS = [
   'Marcadores en vivo',
   'Más de 15 ligas internacionales',
   'Corners, tarjetas y BTTS',
-];
-
-const FIRST_PLAN_SCENE = 3;
-const LAST_PLAN_SCENE = FIRST_PLAN_SCENE + PLANS.length - 1;
-const FINAL_SCENE = LAST_PLAN_SCENE + 1;
-const SCENE_LABELS = [
-  'Inicio',
-  'Funciones',
-  'Cómo funciona',
-  ...PLANS.map((plan) => `Plan ${plan.label}`),
-  'Empieza ahora',
 ];
 
 const pressCard = (event) => {
@@ -143,16 +130,9 @@ function SportsSequence() {
 export default function LandingPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
-  const [activeScene, setActiveScene] = useState(0);
+  const [activePlanIndex, setActivePlanIndex] = useState(1);
   const [prices, setPrices] = useState(null);
   const [pricesLoading, setPricesLoading] = useState(true);
-
-  const activeSceneRef = useRef(0);
-  const transitionLockRef = useRef(false);
-  const unlockTimerRef = useRef(null);
-  const wheelDeltaRef = useRef(0);
-  const wheelResetRef = useRef(null);
-  const touchStartRef = useRef(null);
 
   useEffect(() => {
     if (!authLoading && user) router.push('/dashboard');
@@ -179,116 +159,10 @@ export default function LandingPage() {
       .finally(() => setPricesLoading(false));
   }, []);
 
-  const releaseNavigation = useCallback(() => {
-    window.clearTimeout(unlockTimerRef.current);
-    unlockTimerRef.current = window.setTimeout(() => {
-      transitionLockRef.current = false;
-    }, 110);
-  }, []);
-
-  const goToScene = useCallback((target, force = false) => {
-    if (transitionLockRef.current && !force) return;
-
-    const nextScene = Math.max(0, Math.min(FINAL_SCENE, target));
-    if (nextScene === activeSceneRef.current) return;
-
-    activeSceneRef.current = nextScene;
-    setActiveScene(nextScene);
-    transitionLockRef.current = true;
-    releaseNavigation();
-  }, [releaseNavigation]);
-
-  const stepScene = useCallback((direction) => {
-    goToScene(activeSceneRef.current + direction);
-  }, [goToScene]);
-
   const beginPlanPurchase = useCallback((planId) => {
     const purchaseIntent = createPurchaseIntent();
     router.push(purchaseRoute('/sign-up', 'plan', planId, purchaseIntent));
   }, [router]);
-
-  useEffect(() => {
-    const html = document.documentElement;
-    const body = document.body;
-    const previousHtmlOverflow = html.style.overflow;
-    const previousBodyOverflow = body.style.overflow;
-    const previousOverscroll = body.style.overscrollBehavior;
-
-    html.style.overflow = 'hidden';
-    body.style.overflow = 'hidden';
-    body.style.overscrollBehavior = 'none';
-
-    const onWheel = (event) => {
-      event.preventDefault();
-      if (transitionLockRef.current) return;
-
-      wheelDeltaRef.current += event.deltaY;
-      window.clearTimeout(wheelResetRef.current);
-      wheelResetRef.current = window.setTimeout(() => {
-        wheelDeltaRef.current = 0;
-      }, 160);
-
-      if (Math.abs(wheelDeltaRef.current) >= 28) {
-        const direction = wheelDeltaRef.current > 0 ? 1 : -1;
-        wheelDeltaRef.current = 0;
-        stepScene(direction);
-      }
-    };
-
-    const onKeyDown = (event) => {
-      const tagName = event.target?.tagName;
-      if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(tagName)) return;
-
-      if (['ArrowDown', 'PageDown', ' '].includes(event.key)) {
-        event.preventDefault();
-        stepScene(1);
-      } else if (['ArrowUp', 'PageUp'].includes(event.key)) {
-        event.preventDefault();
-        stepScene(-1);
-      } else if (event.key === 'Home') {
-        event.preventDefault();
-        goToScene(0, true);
-      } else if (event.key === 'End') {
-        event.preventDefault();
-        goToScene(FINAL_SCENE, true);
-      }
-    };
-
-    const onTouchStart = (event) => {
-      touchStartRef.current = event.touches[0]?.clientY ?? null;
-    };
-
-    const onTouchMove = (event) => {
-      event.preventDefault();
-    };
-
-    const onTouchEnd = (event) => {
-      if (touchStartRef.current === null) return;
-      const endY = event.changedTouches[0]?.clientY ?? touchStartRef.current;
-      const distance = touchStartRef.current - endY;
-      touchStartRef.current = null;
-      if (Math.abs(distance) > 44) stepScene(distance > 0 ? 1 : -1);
-    };
-
-    window.addEventListener('wheel', onWheel, { passive: false });
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('touchstart', onTouchStart, { passive: true });
-    window.addEventListener('touchmove', onTouchMove, { passive: false });
-    window.addEventListener('touchend', onTouchEnd, { passive: true });
-
-    return () => {
-      window.removeEventListener('wheel', onWheel);
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('touchstart', onTouchStart);
-      window.removeEventListener('touchmove', onTouchMove);
-      window.removeEventListener('touchend', onTouchEnd);
-      window.clearTimeout(unlockTimerRef.current);
-      window.clearTimeout(wheelResetRef.current);
-      html.style.overflow = previousHtmlOverflow;
-      body.style.overflow = previousBodyOverflow;
-      body.style.overscrollBehavior = previousOverscroll;
-    };
-  }, [goToScene, stepScene]);
 
   const fmtPrice = (planId) => {
     if (pricesLoading) return 'Cargando…';
@@ -314,35 +188,20 @@ export default function LandingPage() {
     return `${symbol}${plan.originalAmount}`;
   };
 
-  const sceneState = (index) => (
-    activeScene === index ? 'is-active' : activeScene > index ? 'is-before' : 'is-after'
-  );
-
-  const pricingState = (
-    activeScene < FIRST_PLAN_SCENE
-      ? 'is-after'
-      : activeScene > LAST_PLAN_SCENE
-        ? 'is-before'
-        : 'is-active'
-  );
-
-  const activePlanIndex = Math.max(0, Math.min(PLANS.length - 1, activeScene - FIRST_PLAN_SCENE));
   const activePlan = PLANS[activePlanIndex];
   const originalPrice = fmtOriginal(activePlan.id);
   return (
-    <main className="landing landing-apple">
+    <main className="landing landing-apple landing-scroll">
       <div className="apple-ambient" aria-hidden="true">
         <span className="apple-glow apple-glow-one" />
         <span className="apple-glow apple-glow-two" />
         <span className="apple-grid" />
       </div>
 
-      <LandingBrandVideo
-        className={`apple-brand-video ${activeScene === 0 ? 'is-hero' : activeScene === FINAL_SCENE ? 'is-finale' : 'is-away'}`}
-      />
+      <LandingBrandVideo className="apple-brand-video is-hero" />
 
       <div className="apple-stage">
-        <section className={`apple-scene apple-hero-scene ${sceneState(0)}`} aria-hidden={activeScene !== 0}>
+        <section className="apple-scene apple-hero-scene is-active">
           <div className="apple-hero-copy">
             <p className="apple-kicker"><span /> Datos deportivos en tiempo real</p>
             <h1 className="apple-hero-title">
@@ -371,11 +230,11 @@ export default function LandingPage() {
               <div><strong>500+</strong><span>Partidos al día</span></div>
               <div><strong>12+</strong><span>Mercados</span></div>
             </div>
-            {activeScene === 0 && <SportsSequence />}
+            <SportsSequence />
           </div>
         </section>
 
-        <section className={`apple-scene ${sceneState(1)}`} aria-hidden={activeScene !== 1}>
+        <section id="funciones" className="apple-scene is-active">
           <div className="apple-scene-inner apple-features-scene">
             <header className="apple-scene-header">
               <p className="apple-eyebrow">Todo en una plataforma</p>
@@ -404,7 +263,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className={`apple-scene ${sceneState(2)}`} aria-hidden={activeScene !== 2}>
+        <section className="apple-scene is-active">
           <div className="apple-scene-inner apple-process-scene">
             <header className="apple-scene-header">
               <p className="apple-eyebrow">Simple por fuera. Potente por dentro.</p>
@@ -437,12 +296,12 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className={`apple-scene apple-pricing-scene ${pricingState}`} aria-hidden={pricingState !== 'is-active'}>
+        <section id="precios" className="apple-scene apple-pricing-scene is-active">
           <div className="apple-scene-inner">
             <header className="apple-scene-header apple-pricing-header">
               <p className="apple-eyebrow">Acceso completo</p>
               <h2>Un plan para cada ritmo</h2>
-              <p>Desliza para comparar. Cancela cuando quieras.</p>
+              <p>Compara los periodos y cancela cuando quieras.</p>
             </header>
 
             <div className="apple-plan-tabs" role="tablist" aria-label="Planes disponibles">
@@ -450,7 +309,7 @@ export default function LandingPage() {
                 <button
                   key={plan.id}
                   className={index === activePlanIndex ? 'is-active' : ''}
-                  onClick={() => goToScene(FIRST_PLAN_SCENE + index, true)}
+                  onClick={() => setActivePlanIndex(index)}
                   role="tab"
                   aria-selected={index === activePlanIndex}
                 >
@@ -498,7 +357,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className={`apple-scene apple-final-scene ${sceneState(FINAL_SCENE)}`} aria-hidden={activeScene !== FINAL_SCENE}>
+        <section className="apple-scene apple-final-scene is-active">
           <div className="apple-final-content">
             <p className="apple-kicker"><Sparkles size={16} aria-hidden="true" /> Tu ventaja empieza aquí</p>
             <h2>Menos intuición.<br /><span>Más información.</span></h2>
@@ -510,8 +369,8 @@ export default function LandingPage() {
               <p>CFanalisis.com — Tu ventaja en cada apuesta</p>
               <div>
                 <button onClick={() => router.push('/sign-in')}>Iniciar sesión</button>
-                <button onClick={() => goToScene(1, true)}>Funciones</button>
-                <button onClick={() => goToScene(FIRST_PLAN_SCENE, true)}>Precios</button>
+                <button onClick={() => document.getElementById('funciones')?.scrollIntoView({ behavior: 'smooth' })}>Funciones</button>
+                <button onClick={() => document.getElementById('precios')?.scrollIntoView({ behavior: 'smooth' })}>Precios</button>
                 <button onClick={() => router.push('/rendimiento')}>Rendimiento</button>
                 <button onClick={() => router.push('/terminos')}>Términos</button>
                 <button onClick={() => router.push('/privacidad')}>Privacidad</button>
@@ -522,44 +381,6 @@ export default function LandingPage() {
         </section>
       </div>
 
-      <nav className="apple-progress" aria-label="Secciones de la página">
-        {SCENE_LABELS.map((label, index) => (
-          <button
-            key={label}
-            className={index === activeScene ? 'is-active' : ''}
-            onClick={() => goToScene(index, true)}
-            aria-label={`Ir a ${label}`}
-            aria-current={index === activeScene ? 'step' : undefined}
-          >
-            <span />
-          </button>
-        ))}
-      </nav>
-
-      <div className="apple-scene-count" aria-hidden="true">
-        <strong>{String(activeScene + 1).padStart(2, '0')}</strong>
-        <span>/</span>
-        <span>{String(SCENE_LABELS.length).padStart(2, '0')}</span>
-      </div>
-
-      <div className="apple-scene-controls">
-        <button onClick={() => stepScene(-1)} disabled={activeScene === 0} aria-label="Escena anterior">
-          <ChevronUp size={19} aria-hidden="true" />
-        </button>
-        <button onClick={() => stepScene(1)} disabled={activeScene === FINAL_SCENE} aria-label="Escena siguiente">
-          <ChevronDown size={19} aria-hidden="true" />
-        </button>
-      </div>
-
-      <p className={`apple-scroll-cue ${activeScene === FINAL_SCENE ? 'is-hidden' : ''}`} aria-hidden="true">
-        <span className="apple-cue-desktop">Desliza para continuar</span>
-        <span className="apple-cue-mobile">Desliza hacia arriba</span>
-        <ChevronDown size={15} />
-      </p>
-
-      <p className="apple-sr-only" aria-live="polite">
-        Sección {activeScene + 1} de {SCENE_LABELS.length}: {SCENE_LABELS[activeScene]}
-      </p>
     </main>
   );
 }
