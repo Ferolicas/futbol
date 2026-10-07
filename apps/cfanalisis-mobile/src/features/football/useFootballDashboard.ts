@@ -13,11 +13,13 @@ import { leagueSelectionIncludes, normalizeLeagueSelection } from '@/shared/leag
 import { freeRecommendationForRail } from '@/shared/free-recommendation-rail';
 import type { StatusFilter } from '@/components/dashboard/StatusDock';
 import type { HiddenFixture } from '@/components/dashboard/HiddenMatches';
+import type { FootballNotificationPreference } from '@/components/dashboard/FavoriteNotificationSheet';
 
 interface FixturesResponse {
   fixtures: any[];
   hidden?: number[];
   favorites?: number[];
+  favoriteNotificationPreferences?: Record<string, FootballNotificationPreference[]>;
   analyzed?: number[];
   analyzedOdds?: Record<string, any>;
   analyzedData?: Record<string, any>;
@@ -64,6 +66,7 @@ export function useFootballDashboard({ date, userTz, statusFilter }: { date: str
   const [fixtures, setFixtures] = useState<any[]>([]);
   const [hidden, setHidden] = useState<number[]>([]);
   const [favorites, setFavorites] = useState<number[]>([]);
+  const [favoriteNotificationPreferences, setFavoriteNotificationPreferences] = useState<Record<string, FootballNotificationPreference[]>>({});
   const [analyzed, setAnalyzed] = useState<number[]>([]);
   const [analyzedOdds, setAnalyzedOdds] = useState<Record<string, any>>({});
   const [analyzedData, setAnalyzedData] = useState<Record<string, any>>({});
@@ -119,6 +122,7 @@ export function useFootballDashboard({ date, userTz, statusFilter }: { date: str
     setFixtures(withLive);
     setHidden(data.hidden || []);
     setFavorites(data.favorites || []);
+    setFavoriteNotificationPreferences(data.favoriteNotificationPreferences || {});
     setAnalyzed(data.analyzed || []);
     setAnalyzedOdds(data.analyzedOdds || {});
     setAnalyzedData(data.analyzedData || {});
@@ -253,16 +257,35 @@ export function useFootballDashboard({ date, userTz, statusFilter }: { date: str
   const markDateChange = useCallback(() => { clearLiveOnNextLoadRef.current = true; lastEventRef.current = 0; }, []);
 
   // ── Acciones por usuario (optimistas con rollback) ─────────────────────
-  const toggleFavorite = useCallback(async (fixtureId: number) => {
-    const isFav = favorites.includes(fixtureId);
-    setFavorites((prev) => isFav ? prev.filter((id) => id !== fixtureId) : [...prev, fixtureId]);
+  const saveFavorite = useCallback(async (fixtureId: number, notificationPreferences: FootballNotificationPreference[]) => {
+    const previousFavorites = favorites;
+    const previousPreferences = favoriteNotificationPreferences;
+    setFavorites((prev) => prev.includes(fixtureId) ? prev : [...prev, fixtureId]);
+    setFavoriteNotificationPreferences((prev) => ({ ...prev, [fixtureId]: notificationPreferences }));
     try {
-      if (isFav) await api.delete('/api/favorites', { fixtureId }); else await api.post('/api/favorites', { fixtureId });
+      await api.post('/api/favorites', { fixtureId, notificationPreferences });
     } catch {
-      setFavorites((prev) => isFav ? [...prev, fixtureId] : prev.filter((id) => id !== fixtureId));
+      setFavorites(previousFavorites);
+      setFavoriteNotificationPreferences(previousPreferences);
       setError('No se pudo guardar el favorito — restaurado.');
+      throw new Error('favorite-save-failed');
     }
-  }, [favorites]);
+  }, [favoriteNotificationPreferences, favorites]);
+
+  const removeFavorite = useCallback(async (fixtureId: number) => {
+    const previousFavorites = favorites;
+    const previousPreferences = favoriteNotificationPreferences;
+    setFavorites((prev) => prev.filter((id) => id !== fixtureId));
+    setFavoriteNotificationPreferences((prev) => { const next = { ...prev }; delete next[fixtureId]; return next; });
+    try {
+      await api.delete('/api/favorites', { fixtureId });
+    } catch {
+      setFavorites(previousFavorites);
+      setFavoriteNotificationPreferences(previousPreferences);
+      setError('No se pudo quitar el favorito — restaurado.');
+      throw new Error('favorite-remove-failed');
+    }
+  }, [favoriteNotificationPreferences, favorites]);
 
   const dismissMatch = useCallback(async (fixtureId: number) => {
     const prevHidden = hidden;
@@ -385,10 +408,10 @@ export function useFootballDashboard({ date, userTz, statusFilter }: { date: str
   }, [analyzedData, fixtureById, isFree, isViewingPast, fixtures, freeDailyResults, historicalDailySelections]);
 
   return {
-    fixtures, sorted, counts, leagues, analyzedSet, analyzedData, analyzedOdds, standings, favoritesSet,
+    fixtures, sorted, counts, leagues, analyzedSet, analyzedData, analyzedOdds, standings, favoritesSet, favoriteNotificationPreferences,
     loading, error, setError, batchRunning, isViewingToday, isViewingPast,
     leagueFilter, allLeagueIds, leagueFilterReady, leagueFilterSaving, updateLeagueFilter,
     apuestaDelDia, savedCombinadas, savingComb, saveCombinada, deleteSavedCombinada,
-    toggleFavorite, dismissMatch, unhideMatch, hiddenFixtures, refresh: () => mutate(), markDateChange,
+    saveFavorite, removeFavorite, dismissMatch, unhideMatch, hiddenFixtures, refresh: () => mutate(), markDateChange,
   };
 }

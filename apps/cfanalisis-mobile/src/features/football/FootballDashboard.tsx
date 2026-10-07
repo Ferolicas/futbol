@@ -10,6 +10,7 @@ import { LeagueMultiPicker, SportPicker } from '@/components/dashboard/Pickers';
 import { DailyPickRail, type DecoratedSelection } from '@/components/dashboard/DailyPickRail';
 import { MatchHeadCard } from '@/components/dashboard/MatchHeadCard';
 import { MatchFullscreen } from '@/components/dashboard/MatchFullscreen';
+import { FavoriteNotificationSheet, FOOTBALL_NOTIFICATION_OPTIONS, type FootballNotificationPreference } from '@/components/dashboard/FavoriteNotificationSheet';
 import { CombinationPanel } from '@/components/dashboard/CombinationPanel';
 import { DismissConfirmDialog, HiddenFixturesButton, HiddenFixturesPanel } from '@/components/dashboard/HiddenMatches';
 import { FootballAnalysisTabs } from '@/components/analysis/FootballAnalysisTabs';
@@ -72,6 +73,9 @@ export function FootballDashboard({ date, userTz, onDateChange, activeSport, onS
   // La X solo pide confirmación; se oculta al confirmar (igual que la web).
   const [pendingDismiss, setPendingDismiss] = useState<number | null>(null);
   const [showHidden, setShowHidden] = useState(false);
+  const [favoriteEditor, setFavoriteEditor] = useState<number | null>(null);
+  const [notificationSelection, setNotificationSelection] = useState<FootballNotificationPreference[]>([]);
+  const [favoriteSaving, setFavoriteSaving] = useState(false);
   const askDismiss = useCallback((id: number) => setPendingDismiss(id), []);
   const pendingMatch = pendingDismiss != null ? dash.fixtures.find((f) => f.fixture.id === pendingDismiss) : null;
   const confirmDismiss = () => {
@@ -114,6 +118,28 @@ export function FootballDashboard({ date, userTz, onDateChange, activeSport, onS
     if (dash.analyzedSet.has(match.fixture.id)) setExpanded(match.fixture.id);
     else router.push({ pathname: '/match/[sport]/[id]', params: { sport: 'football', id: String(match.fixture.id), date } });
   }, [dash.analyzedSet, router, date]);
+
+  const openFavoriteEditor = useCallback((fixtureId: number) => {
+    const current = dash.favoriteNotificationPreferences[String(fixtureId)];
+    setNotificationSelection(current || (dash.favoritesSet.has(fixtureId) ? FOOTBALL_NOTIFICATION_OPTIONS.map(([key]) => key) : []));
+    setFavoriteEditor(fixtureId);
+  }, [dash.favoriteNotificationPreferences, dash.favoritesSet]);
+
+  const saveFavorite = useCallback(async () => {
+    if (favoriteEditor == null) return;
+    setFavoriteSaving(true);
+    try { await dash.saveFavorite(favoriteEditor, notificationSelection); setFavoriteEditor(null); }
+    catch {}
+    finally { setFavoriteSaving(false); }
+  }, [dash, favoriteEditor, notificationSelection]);
+
+  const removeFavorite = useCallback(async () => {
+    if (favoriteEditor == null) return;
+    setFavoriteSaving(true);
+    try { await dash.removeFavorite(favoriteEditor); setFavoriteEditor(null); }
+    catch {}
+    finally { setFavoriteSaving(false); }
+  }, [dash, favoriteEditor]);
 
   const today = todayInTz(userTz);
   const header = (
@@ -182,7 +208,7 @@ export function FootballDashboard({ date, userTz, onDateChange, activeSport, onS
                 isFavorite={dash.favoritesSet.has(item.fixture.id)}
                 analyzed={dash.analyzedSet.has(item.fixture.id)}
                 selCount={Object.keys(selectedMarkets[String(item.fixture.id)] || {}).length}
-                onFavorite={dash.toggleFavorite}
+                onFavorite={openFavoriteEditor}
                 onDismiss={askDismiss}
                 onOpen={() => openMatch(item)}
               />
@@ -213,7 +239,7 @@ export function FootballDashboard({ date, userTz, onDateChange, activeSport, onS
           standings={dash.standings}
           userTz={userTz}
           isFavorite={dash.favoritesSet.has(expandedMatch.fixture.id)}
-          onFavorite={dash.toggleFavorite}
+          onFavorite={openFavoriteEditor}
           onDismiss={askDismiss}
           onViewFull={() => { setExpanded(null); router.push({ pathname: '/match/[sport]/[id]', params: { sport: 'football', id: String(expandedMatch.fixture.id), date } }); }}
           onClose={() => setExpanded(null)}
@@ -224,6 +250,18 @@ export function FootballDashboard({ date, userTz, onDateChange, activeSport, onS
 
       <DismissConfirmDialog visible={pendingDismiss != null && !expandedMatch} home={pendingMatch?.teams?.home?.name} away={pendingMatch?.teams?.away?.name} onCancel={() => setPendingDismiss(null)} onConfirm={confirmDismiss} />
       <HiddenFixturesPanel visible={showHidden} fixtures={dash.hiddenFixtures} userTz={userTz} onUnhide={dash.unhideMatch} onClose={() => setShowHidden(false)} />
+      <FavoriteNotificationSheet
+        visible={favoriteEditor != null}
+        home={dash.fixtures.find((match) => match.fixture.id === favoriteEditor)?.teams?.home?.name}
+        away={dash.fixtures.find((match) => match.fixture.id === favoriteEditor)?.teams?.away?.name}
+        isFavorite={favoriteEditor != null && dash.favoritesSet.has(favoriteEditor)}
+        selected={notificationSelection}
+        saving={favoriteSaving}
+        onChange={setNotificationSelection}
+        onSave={saveFavorite}
+        onRemove={removeFavorite}
+        onClose={() => { if (!favoriteSaving) setFavoriteEditor(null); }}
+      />
     </View>
   );
 }
