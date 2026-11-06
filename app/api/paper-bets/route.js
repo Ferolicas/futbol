@@ -20,6 +20,7 @@ const legSchema = z.object({
   leagueName: z.string().max(120).optional().nullable(),
   kickoff: z.string().max(40).optional().nullable(),
   odd: z.coerce.number().min(1.01).max(1000),
+  groupOdd: z.coerce.number().min(1.01).max(100000).optional().nullable(),
   probability: z.coerce.number().min(0).max(100).optional().nullable(),
   reliability: z.coerce.number().min(0).max(100).optional().nullable(),
   line: z.coerce.number().optional().nullable(),

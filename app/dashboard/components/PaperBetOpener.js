@@ -16,6 +16,7 @@ const money = (value) => Number(value).toLocaleString('es', { minimumFractionDig
 export default function PaperBetOpener({ selections = [], sport }) {
   const [stake, setStake] = useState('10');
   const [odds, setOdds] = useState({});
+  const [groupOdds, setGroupOdds] = useState({});
   const [state, setState] = useState('idle');
   const [error, setError] = useState('');
 
@@ -36,9 +37,28 @@ export default function PaperBetOpener({ selections = [], sport }) {
   const signature = legs.map((leg) => leg.key).join(',');
   useEffect(() => { setState('idle'); setError(''); }, [signature]);
 
+  // Varias opciones de un mismo partido son un «Crear apuesta»: la casa da una
+  // sola cuota para el conjunto y hay que escribirla, no se puede calcular.
+  const builders = useMemo(() => {
+    const byFixture = new Map();
+    for (const leg of legs) {
+      const fixture = String(leg.selection.fixtureId);
+      if (!byFixture.has(fixture)) byFixture.set(fixture, []);
+      byFixture.get(fixture).push(leg);
+    }
+    return [...byFixture.entries()].filter(([, group]) => group.length > 1)
+      .map(([fixture, group]) => ({ fixture, matchName: group[0].selection.matchName, count: group.length }));
+  }, [legs]);
+  const builderFixtures = new Set(builders.map((builder) => builder.fixture));
+  const builderOdd = (fixture) => Number(groupOdds[fixture]);
+
   if (!selections.length) return null;
-  const validOdds = legs.every((leg) => Number.isFinite(leg.odd) && leg.odd > 1);
-  const totalOdd = validOdds ? legs.reduce((product, leg) => product * leg.odd, 1) : null;
+  const singles = legs.filter((leg) => !builderFixtures.has(String(leg.selection.fixtureId)));
+  const validOdds = singles.every((leg) => Number.isFinite(leg.odd) && leg.odd > 1)
+    && builders.every((builder) => Number.isFinite(builderOdd(builder.fixture)) && builderOdd(builder.fixture) > 1);
+  const totalOdd = validOdds
+    ? singles.reduce((product, leg) => product * leg.odd, 1) * builders.reduce((product, builder) => product * builderOdd(builder.fixture), 1)
+    : null;
   const stakeNumber = Number(stake);
   const validStake = Number.isFinite(stakeNumber) && stakeNumber > 0;
 
@@ -65,7 +85,8 @@ export default function PaperBetOpener({ selections = [], sport }) {
             homeTeam: selection.homeTeam || null,
             awayTeam: selection.awayTeam || null,
             kickoff: selection.matchTime ? new Date(selection.matchTime).toISOString() : null,
-            odd,
+            odd: Number.isFinite(odd) && odd > 1 ? odd : 1.01,
+            groupOdd: builderFixtures.has(String(selection.fixtureId)) ? builderOdd(String(selection.fixtureId)) : null,
             probability: Math.min(100, Number(selection.rawProbability ?? selection.probability)) || null,
             reliability: Number(selection.reliability ?? selection.confidence) || null,
             line: selection.line ?? null,
@@ -90,15 +111,30 @@ export default function PaperBetOpener({ selections = [], sport }) {
         <span><strong>Apuesta sin dinero</strong><small>Regístrala tal como la abriste en la casa</small></span>
       </header>
       <div className="paper-opener-legs">
-        {legs.map(({ selection, key, odd }) => (
-          <label key={key} className="paper-opener-leg">
-            <span><small>{selection.matchName}</small>{displayBettingText(selection.name || selection.market || '')}</span>
-            <input type="number" inputMode="decimal" step="0.01" min="1.01" aria-label={`Cuota de ${selection.name || selection.market}`}
-              value={odds[key] ?? (Number.isFinite(odd) ? String(odd) : '')}
-              onChange={(event) => setOdds((previous) => ({ ...previous, [key]: event.target.value }))} />
+        {legs.map(({ selection, key, odd }) => {
+          const inBuilder = builderFixtures.has(String(selection.fixtureId));
+          return (
+            <label key={key} className={`paper-opener-leg${inBuilder ? ' is-builder' : ''}`}>
+              <span><small>{selection.matchName}</small>{displayBettingText(selection.name || selection.market || '')}</span>
+              {inBuilder
+                ? <em>Crear apuesta</em>
+                : <input type="number" inputMode="decimal" step="0.01" min="1.01" aria-label={`Cuota de ${selection.name || selection.market}`}
+                  value={odds[key] ?? (Number.isFinite(odd) ? String(odd) : '')}
+                  onChange={(event) => setOdds((previous) => ({ ...previous, [key]: event.target.value }))} />}
+            </label>
+          );
+        })}
+        {builders.map((builder) => (
+          <label key={builder.fixture} className="paper-opener-leg is-builder-odd">
+            <span><small>{builder.matchName}</small>Cuota de «Crear apuesta» ({builder.count} opciones)</span>
+            <input type="number" inputMode="decimal" step="0.01" min="1.01" required placeholder="Cuota"
+              aria-label={`Cuota de Crear apuesta de ${builder.matchName}`}
+              value={groupOdds[builder.fixture] ?? ''}
+              onChange={(event) => setGroupOdds((previous) => ({ ...previous, [builder.fixture]: event.target.value }))} />
           </label>
         ))}
       </div>
+      {builders.length > 0 && <p className="paper-hint">Varias opciones del mismo partido no se multiplican: escribe la cuota que te da la casa para ese «Crear apuesta».</p>}
       <div className="paper-opener-row">
         <label className="paper-opener-stake">
           <span>Importe ficticio</span>

@@ -2,6 +2,7 @@
 import { useFreeAccess } from './FreeAccessProvider';
 import SharedSportCard from './SharedSportAnalysis';
 import PaperBetOpener from './PaperBetOpener';
+import { hasSameMatchSelections } from '../../../lib/paper-bets';
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
@@ -309,8 +310,9 @@ function CombinedBet({ combination, onRemove, onClear, sport }) {
         ))}
       </div>
       <div className="comb-summary">
-        <div className="comb-sum-row"><span>Cuota total</span><strong className="comb-odd-total">{combination.combinedOdd.toFixed(2)}</strong></div>
-        <div className="comb-sum-row"><span>Probabilidad conjunta</span><strong className={combination.combinedProbability >= 60 ? 'safe' : 'danger'}>{displayProbability(combination.combinedProbability)}%</strong></div>
+        <div className="comb-sum-row"><span>Cuota total</span><strong className="comb-odd-total">{combination.combinedOdd == null ? '—' : combination.combinedOdd.toFixed(2)}</strong></div>
+        <div className="comb-sum-row"><span>Probabilidad conjunta</span><strong className={combination.combinedProbability >= 60 ? 'safe' : 'danger'}>{combination.combinedProbability == null ? '—' : `${displayProbability(combination.combinedProbability)}%`}</strong></div>
+        {combination.sameMatch && <div className="comb-warn">Hay varias opciones de un mismo partido: la cuota conjunta la da la casa en «Crear apuesta».</div>}
       </div>
       <div className="comb-actions">
         <button type="button" className="btn-clear" onClick={onClear}>Limpiar combinada</button>
@@ -485,9 +487,11 @@ export default function MultisportDashboard({
 
   const combination = useMemo(() => {
     const selections = Object.entries(selectedMarkets).flatMap(([fixtureId, entries]) => (
-      Object.values(entries).slice(0, 1).map((entry) => ({ ...entry, fixtureId }))
+      Object.values(entries).map((entry) => ({ ...entry, fixtureId }))
     ));
     if (!selections.length) return null;
+    // Sin cuota ni probabilidad conjunta cuando hay opciones del mismo partido.
+    if (hasSameMatchSelections(selections)) return { selections, combinedOdd: null, combinedProbability: null, sameMatch: true };
     const combinedOdd = selections.reduce((total, selection) => total * selection.odd, 1);
     const combinedProbability = selections.reduce((total, selection) => total * (Number(selection.rawProbability ?? selection.probability) / 100), 1) * 100;
     return {
@@ -515,14 +519,14 @@ export default function MultisportDashboard({
   const togglePick = useCallback((game, pick) => {
     setSelectedMarkets((previous) => {
       const fixtureId = String(game.id);
-      const alreadySelected = !!previous[fixtureId]?.[pick.id];
-      const fixtureSelections = alreadySelected ? {} : {
-        [pick.id]: {
-          ...pick,
-          probability: probability(pick),
-          odd: oddValue(pick.odd),
-          matchName: `${game.teams.home.name} vs ${game.teams.away.name}`,
-        },
+      // Varias opciones del mismo partido están permitidas («Crear apuesta»).
+      const fixtureSelections = { ...(previous[fixtureId] || {}) };
+      if (fixtureSelections[pick.id]) delete fixtureSelections[pick.id];
+      else fixtureSelections[pick.id] = {
+        ...pick,
+        probability: probability(pick),
+        odd: oddValue(pick.odd),
+        matchName: `${game.teams.home.name} vs ${game.teams.away.name}`,
       };
       const next = { ...previous };
       if (Object.keys(fixtureSelections).length) next[fixtureId] = fixtureSelections;
@@ -703,7 +707,7 @@ export default function MultisportDashboard({
             }}>
               <span className="float-comb-icon"><Layers3 size={19} aria-hidden="true" /></span>
               <span><small>Tu selección</small><strong>Ver combinada · {totalSelections}</strong></span>
-              {combination && <span className="float-odd">{combination.combinedOdd.toFixed(2)}x</span>}
+              {combination?.combinedOdd != null && <span className="float-odd">{combination.combinedOdd.toFixed(2)}x</span>}
               <ChevronRight size={18} aria-hidden="true" />
             </button>
           </div>

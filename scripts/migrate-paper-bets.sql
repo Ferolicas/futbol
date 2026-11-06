@@ -46,3 +46,7 @@ CREATE TABLE IF NOT EXISTS paper_bet_legs (
 CREATE INDEX IF NOT EXISTS paper_bets_user_placed_idx ON paper_bets (user_id, placed_at DESC);
 CREATE INDEX IF NOT EXISTS paper_bet_legs_bet_idx ON paper_bet_legs (bet_id);
 CREATE INDEX IF NOT EXISTS paper_bet_legs_pending_idx ON paper_bet_legs (sport, fixture_id) WHERE status = 'pending';
+
+-- Cuota conjunta de «Crear apuesta»: varias selecciones del mismo partido que
+-- la casa cotiza con un solo precio. Todas las del grupo guardan la misma.
+ALTER TABLE paper_bet_legs ADD COLUMN IF NOT EXISTS group_odd numeric(10,3) CHECK (group_odd >= 1);

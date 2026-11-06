@@ -14689,3 +14689,6 @@ button.fak-market { cursor: pointer; }
 .paper-manual-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .paper-manual-grid .is-wide { grid-column: 1 / -1; }
 @media (max-width: 420px) { .paper-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .paper-opener-row { grid-template-columns: 1fr; } .paper-opener-total { text-align: left; } }
+
+.paper-opener-leg em { font-style: normal; font-size: .68rem; font-weight: 700; color: #f8c95d; text-align: right; }
+.paper-opener-leg.is-builder-odd { padding-top: 8px; border-top: 1px dashed rgba(248,201,93,.35); color: #f8c95d; }

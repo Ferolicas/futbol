@@ -84,7 +84,7 @@ function LegRow({ leg, betId, onChanged }) {
         <small>{FAMILIES[leg.market_family] || leg.market_family}{leg.market_period ? ` · ${leg.market_period}` : ''}{leg.source === 'manual' ? ' · manual' : ''}</small>
       </div>
       <div className="paper-leg-side">
-        <b>{Number(leg.odd).toFixed(2)}</b>
+        <b title={leg.group_odd ? 'Cuota conjunta de «Crear apuesta» de este partido' : undefined}>{leg.group_odd ? `CA ${Number(leg.group_odd).toFixed(2)}` : Number(leg.odd).toFixed(2)}</b>
         <span className={`paper-badge is-${leg.status}`}>{STATUS[leg.status]}</span>
       </div>
       <div className="paper-leg-actions" aria-label="Marcar resultado">

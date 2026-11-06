@@ -61,9 +61,10 @@ toques nada”, “no subir” o equivalente.
 - Las recomendaciones del motor fallan cerradas: exigen corte prepartido,
   fiabilidad, validación temporal de su familia, cuota real y EV positivo. Las
   estadísticas calculadas siguen visibles aunque una opción no sea publicable.
-- Nunca multiplicar mercados del mismo fixture como independientes. Solo una
-  selección por fixture puede entrar en una combinada normal; un Bet Builder
-  requiere probabilidad y cuota conjuntas oficiales.
+- Nunca multiplicar mercados del mismo fixture como independientes. Se pueden
+  marcar varias opciones de un partido («Crear apuesta»), pero la combinada deja
+  entonces la cuota y la probabilidad conjuntas sin calcular, y la apuesta sin
+  dinero exige escribir la cuota conjunta que da la casa (`group_odd`).
 - Cada pronóstico publicable debe escribirse antes en el ledger inmutable con
   versión, cutoff, hashes, evidencia y contexto; los resultados se anexan, no
   sobrescriben el pronóstico original.

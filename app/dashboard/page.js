@@ -10,6 +10,7 @@ import { defaultRangeExtractor, useWindowVirtualizer } from '@tanstack/react-vir
 import { ArrowRight, BarChart3, CalendarDays, ChevronDown, ChevronRight, ChevronUp, EyeOff, Flag, Layers3, Save, Sparkles, Trash2, X, Share2, LoaderCircle } from 'lucide-react';
 import { shareMatchCard, sharePicksFromAnalysis } from './utils/share-card';
 import PaperBetOpener from './components/PaperBetOpener';
+import { hasSameMatchSelections } from '../../lib/paper-bets';
 import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
 import { useWorkerSocketState } from '../../hooks/useWorkerSocket';
@@ -1381,12 +1382,15 @@ export function FootballDashboard({
   const customCombinada = useMemo(() => {
     const all = [];
     Object.entries(selectedMarkets).forEach(([fid, markets]) => {
-      // Defensa contra estado local antiguo: incluso si quedaron varias claves
-      // persistidas, solo una selección del fixture puede llegar al producto.
-      const market = Object.values(markets)[0];
-      if (market) all.push({ ...market, fixtureId: fid });
+      Object.values(markets).forEach((market) => { if (market) all.push({ ...market, fixtureId: fid }); });
     });
     if (all.length === 0) return null;
+    // Con dos opciones del mismo partido no hay cuota ni probabilidad conjunta
+    // calculable: esos mercados no son independientes y el precio lo pone la
+    // casa en «Crear apuesta».
+    if (hasSameMatchSelections(all)) {
+      return { selections: all, combinedOdd: null, combinedProbability: null, highRisk: false, sameMatch: true };
+    }
     const co = all.reduce((a, m) => m.odd ? a * m.odd : a, 1);
     const cp = all.reduce((a, m) => a * (Number(m.rawProbability ?? m.probability) / 100), 1) * 100;
     return { selections: all, combinedOdd: +co.toFixed(2), combinedProbability: +cp.toFixed(2), highRisk: cp < 60 };
@@ -1688,7 +1692,7 @@ export function FootballDashboard({
             }}>
               <span className="float-comb-icon"><Layers3 size={19} aria-hidden="true" /></span>
               <span><small>Tu selección</small><strong>Ver combinada · {totalSel}</strong></span>
-              {customCombinada && <span className="float-odd">{customCombinada.combinedOdd}x</span>}
+              {customCombinada?.combinedOdd != null && <span className="float-odd">{customCombinada.combinedOdd}x</span>}
               <ArrowRight size={18} aria-hidden="true" />
             </button>
           </div>
@@ -1926,16 +1930,17 @@ function FootballCombinationPanel({
           <div className="comb-summary">
             <div className="comb-sum-row">
               <span>Cuota total (x{customCombinada.selections.length})</span>
-              <strong className="comb-odd-total">{customCombinada.combinedOdd}</strong>
+              <strong className="comb-odd-total">{customCombinada.combinedOdd ?? '—'}</strong>
             </div>
             <div className="comb-sum-row">
               <span>Probabilidad compuesta</span>
-              <strong className={customCombinada.highRisk ? 'danger' : 'safe'}>{cap(customCombinada.combinedProbability)}%</strong>
+              <strong className={customCombinada.highRisk ? 'danger' : 'safe'}>{customCombinada.combinedProbability == null ? '—' : `${cap(customCombinada.combinedProbability)}%`}</strong>
             </div>
+            {customCombinada.sameMatch && <div className="comb-warn">Hay varias opciones de un mismo partido: la cuota conjunta la da la casa en «Crear apuesta».</div>}
             {customCombinada.highRisk && <div className="comb-warn">Combinada de alto riesgo (&lt;60%)</div>}
           </div>
           <div className="comb-actions">
-            <button className="btn-save-comb" onClick={onSave} disabled={saving}>
+            <button className="btn-save-comb" onClick={onSave} disabled={saving || customCombinada.sameMatch}>
               <Save size={16} aria-hidden="true" /> {saving ? 'Guardando...' : 'Guardar combinada'}
             </button>
             <button className="btn-clear" onClick={onClear}><Trash2 size={16} aria-hidden="true" /> Limpiar</button>

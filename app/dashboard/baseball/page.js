@@ -351,10 +351,13 @@ export function BaseballDashboard({
   const toggleMarket = (fixtureId, marketKey, marketData) => {
     setSelectedMarkets(prev => {
       const next = { ...prev };
-      if (prev[fixtureId]?.[marketKey]) delete next[fixtureId];
-      // Un único mercado por partido: MLB no entrega aquí una cuota SGP que
-      // permita valorar correctamente dependencias entre carreras/jugadores.
-      else next[fixtureId] = { [marketKey]: marketData };
+      // Varias opciones del mismo partido están permitidas («Crear apuesta»);
+      // su cuota conjunta no se calcula aquí, la da la casa.
+      const fixtureMarkets = { ...(prev[fixtureId] || {}) };
+      if (fixtureMarkets[marketKey]) delete fixtureMarkets[marketKey];
+      else fixtureMarkets[marketKey] = marketData;
+      if (Object.keys(fixtureMarkets).length) next[fixtureId] = fixtureMarkets;
+      else delete next[fixtureId];
       return next;
     });
   };
@@ -1051,7 +1054,7 @@ function CombinadaTab({ customCombinada, onClear, onRemove }) {
       <div className="comb-summary">
         <div className="comb-sum-row">
           <span>Probabilidad combinada</span>
-          <strong>{cap(customCombinada.combinedProbability)}%</strong>
+          <strong>{customCombinada.sameMatch ? '—' : `${cap(customCombinada.combinedProbability)}%`}</strong>
         </div>
         <div className="comb-sum-row">
           <span>Cuota total</span>

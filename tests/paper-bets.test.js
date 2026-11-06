@@ -63,3 +63,17 @@ test('apuestas sin dinero: la analítica separa familia y equipo, y un total cue
   assert.equal(result.teams.find((row) => row.family === 'corners' && row.team === 'Chelsea'), undefined);
   assert.equal(result.teams.find((row) => row.family === 'total' && row.team === 'Chelsea').hitRate, 100);
 });
+
+test('apuestas sin dinero: «Crear apuesta» usa la cuota conjunta y no multiplica el partido', async () => {
+  const { hasSameMatchSelections, oddGroups } = await import('../lib/paper-bets.js');
+  const leg = (fixture, status, odd, groupOdd = null) => ({ sport: 'football', fixture_id: fixture, status, odd, group_odd: groupOdd });
+  const builder = [leg('1', 'won', 1.5, 3.2), leg('1', 'won', 1.8, 3.2), leg('2', 'won', 2)];
+  assert.equal(oddGroups(builder).length, 2);
+  assert.equal(combinedOdd(builder), 6.4);
+  assert.deepEqual(betOutcome(10, builder), { status: 'won', payout: 64 });
+  assert.deepEqual(betOutcome(10, [leg('1', 'won', 1.5, 3.2), leg('1', 'lost', 1.8, 3.2), leg('2', 'won', 2)]), { status: 'lost', payout: 0 });
+  // Una selección nula dentro del «Crear apuesta» anula ese grupo (cuota 1).
+  assert.deepEqual(betOutcome(10, [leg('1', 'won', 1.5, 3.2), leg('1', 'void', 1.8, 3.2), leg('2', 'won', 2)]), { status: 'won', payout: 20 });
+  assert.equal(hasSameMatchSelections([{ fixtureId: 7 }, { fixtureId: '7' }]), true);
+  assert.equal(hasSameMatchSelections([{ fixtureId: 7 }, { fixtureId: 8 }]), false);
+});
