@@ -21,6 +21,7 @@ import { useWorkerSocketState } from '../../../../hooks/useWorkerSocket';
 import DashboardBuffer from '../../components/DashboardBuffer';
 import FinalVerdictPanel from '../../components/FinalVerdictPanel';
 import { AccordionProbBlock, AccordionPlayersBlock, MatchHeadCard } from '../../page';
+import { sharePicksFromAnalysis } from '../../utils/share-card';
 import { AccordionSection, DocPage, Grid, H2HTable, MarketCard, Panel, StatTile } from '../../components/FullAnalysisKit';
 
 const cap = (v) => {
@@ -298,7 +299,7 @@ function PaidAnalysisExperience({ fixtureId: fixtureIdProp, embedded = false, on
 
   return (
     <DocPage onBack={closeOrBack} title={title} embedded={embedded}>
-      <MatchHeadCard match={match} odds={a.odds?.matchWinner} data={a} liveStats={liveStats} userTz={tz} />
+      <MatchHeadCard match={match} odds={a.odds?.matchWinner} data={a} liveStats={liveStats} userTz={tz} sharePicks={sharePicksFromAnalysis(a)} />
       {a.leagueRound && <p className="fak-round">{a.leagueRound}</p>}
 
       <AccordionSection title="Mercados para tu combinada" icon={Layers3} count={markets.length} hint="Líneas con fiabilidad ≥90%, cuota real ≥1.20 y probabilidad ≥70%.">

@@ -7,21 +7,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import useSWR from 'swr';
 import { defaultRangeExtractor, useWindowVirtualizer } from '@tanstack/react-virtual';
-import {
-  ArrowRight,
-  BarChart3,
-  CalendarDays,
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
-  EyeOff,
-  Flag,
-  Layers3,
-  Save,
-  Sparkles,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { ArrowRight, BarChart3, CalendarDays, ChevronDown, ChevronRight, ChevronUp, EyeOff, Flag, Layers3, Save, Sparkles, Trash2, X, Share2, LoaderCircle } from 'lucide-react';
+import { shareMatchCard, sharePicksFromAnalysis } from './utils/share-card';
 import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
 import { useWorkerSocketState } from '../../hooks/useWorkerSocket';
@@ -2041,7 +2028,36 @@ function MatchTeamMeta({ position, odd, side }) {
 // tarjetas, cuotas y árbitro en un solo bloque. Antes eran tres filas sueltas
 // (liga+fecha, equipos+cuotas, caja de marcador) que ocupaban el triple de
 // alto. Compartida por MatchCard y AccordionCard.
-export function MatchHeadCard({ match, odds, data, standings, liveStats, userTz, isFavorite, onFavorite, onDismiss, sport = 'football' }) {
+// Botón "compartir" de la tarjeta: genera la imagen del partido con sus
+// opciones y abre la hoja de compartir del dispositivo.
+function ShareCardButton({ match, picks, userTz }) {
+  const [state, setState] = useState('idle');
+  const share = async (event) => {
+    event.stopPropagation();
+    if (state === 'busy') return;
+    setState('busy');
+    try {
+      const result = await shareMatchCard({ match, picks, timeZone: userTz || 'UTC' });
+      setState(result === 'downloaded' ? 'saved' : 'idle');
+      if (result === 'downloaded') setTimeout(() => setState('idle'), 2500);
+    } catch (error) {
+      console.error('[share-card]', error);
+      setState('error');
+      setTimeout(() => setState('idle'), 2500);
+    }
+  };
+  const label = state === 'saved' ? 'Imagen guardada' : state === 'error' ? 'No se pudo generar la imagen' : 'Compartir este partido como imagen';
+  return (
+    <button type="button" className={`btn-share${state === 'saved' ? ' is-saved' : ''}${state === 'error' ? ' is-error' : ''}`}
+      onClick={share} disabled={state === 'busy'} aria-label={label} title={label}>
+      {state === 'busy'
+        ? <LoaderCircle size={15} className="btn-share-spin" aria-hidden="true" />
+        : <Share2 size={15} aria-hidden="true" />}
+    </button>
+  );
+}
+
+export function MatchHeadCard({ match, odds, data, standings, liveStats, userTz, isFavorite, onFavorite, onDismiss, sharePicks, sport = 'football' }) {
   const status = match.fixture.status;
   const live = isLive(status.short);
   const finished = isFinished(status.short);
@@ -2067,6 +2083,7 @@ export function MatchHeadCard({ match, odds, data, standings, liveStats, userTz,
           : <span aria-hidden="true">{flag}</span>}
         <span className="mhead-league-name">{match.league.name}</span>
         <span className="mhead-date">{cardDate}</span>
+        <ShareCardButton match={match} picks={sharePicks || []} userTz={tz} />
         {onFavorite && (
           <button
             type="button"
@@ -2166,7 +2183,7 @@ const MatchCard = memo(function MatchCard({ match, isAnalyzed, isSelected, isFav
           el main thread JS, así no compiten con la apertura del acordeón. */}
       <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-        <MatchHeadCard match={match} odds={odds} data={matchData} standings={standings} liveStats={liveStats} userTz={userTz} isFavorite={isFavorite} onFavorite={onFavorite} onDismiss={onHide} />
+        <MatchHeadCard match={match} odds={odds} data={matchData} standings={standings} liveStats={liveStats} userTz={userTz} isFavorite={isFavorite} onFavorite={onFavorite} onDismiss={onHide} sharePicks={sharePicksFromAnalysis(matchData)} />
         {/* ── Footer: selección / favorito / ocultar ── */}
         <div className="mcard-foot">
           {isAnalyzed ? (
@@ -2448,7 +2465,8 @@ const AccordionCard = memo(function AccordionCard({ match, data, odds, standings
     <div className="acc-head" onClick={() => onToggle(fixtureId)}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          <MatchHeadCard match={match} odds={odds} data={data} standings={standings} liveStats={liveStats} userTz={userTz} isFavorite={isFavorite} onFavorite={onFavorite} onDismiss={onRemove} />
+          <MatchHeadCard match={match} odds={odds} data={data} standings={standings} liveStats={liveStats} userTz={userTz} isFavorite={isFavorite} onFavorite={onFavorite} onDismiss={onRemove}
+            sharePicks={data?.access === 'free' ? sharePicksFromAnalysis(data) : sharePicksFromAnalysis({ combinada: { selectable: markets } }, selMarkets)} />
           {/* ── Indicador: selCount / chevron ── */}
           {/* Desplegada, el chevron sobra —la tarjeta ya está abierta— y se
               quedaba solo como un punto suelto entre la tarjeta y las pestañas. */}

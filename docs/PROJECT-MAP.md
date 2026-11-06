@@ -586,6 +586,15 @@ Las fuentes y namespaces de identificadores también están separados:
   horario (`ncaaBasketballGameMatch`). Con plan gratuito cubre una parte de la
   jornada; con plan de pago basta subir `API_SPORTS_BASKETBALL_DAILY_BUDGET` y
   `NCAA_ODDS_PER_PASS`. Un pase sin cuota nunca borra la cuota previa guardada.
+- Compartir tarjeta: `MatchHeadCard` (común a los cuatro deportes) lleva un
+  botón que dibuja en el navegador un PNG del partido con sus opciones
+  (`app/dashboard/utils/share-card.js`) y lo pasa a la hoja de compartir
+  (`navigator.share` con archivos; si el navegador no lo admite, lo descarga).
+  No hay ruta de servidor: la imagen usa solo lo que la tarjeta ya recibió, de
+  modo que Free comparte únicamente su opción visible. Comparte las opciones
+  marcadas para la combinada o, si no hay, la más probable de cada familia.
+  Los escudos deben servirse con CORS; los de `cdn.nba.com` no lo hacen y se
+  sustituyen por los de ESPN.
 - Detalle NBA: `prediction.breakdown` (conteos crudos por temporada, localía,
   h2h y últimos 5 de cada mercado) y `analysis.playerMarkets` (puntos, rebotes,
   asistencias, triples y 1.er cuarto por jugador, con los mismos cortes) se

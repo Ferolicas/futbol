@@ -834,6 +834,23 @@ body {
 .btn-fav:hover { color: #f5c518; background: rgba(245,197,24,.1); }
 .btn-fav.active { color: #f5c518; }
 
+.btn-share {
+  width: 28px; height: 28px;
+  border: none; border-radius: 6px;
+  background: transparent;
+  color: var(--t3);
+  cursor: pointer;
+  transition: all .15s;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.btn-share:hover { color: #5ee6b1; background: rgba(94,230,177,.1); }
+.btn-share:disabled { cursor: progress; }
+.btn-share.is-saved { color: #5ee6b1; }
+.btn-share.is-error { color: var(--red); }
+.btn-share-spin { animation: btn-share-spin .8s linear infinite; }
+@keyframes btn-share-spin { to { transform: rotate(360deg); } }
+
 /* ===================== TEAM LOGO ===================== */
 .team-crest { width: 24px; height: 24px; object-fit: contain; flex-shrink: 0; }
 
@@ -5461,6 +5478,7 @@ body.match-fs-open .float-bar-combinada {
 .score-stat-chip.is-draw-odd strong { color: #f4c867; }
 
 /* Estrella y X viven ya dentro de la tarjeta, en la fila de la liga */
+.mhead-league .btn-share,
 .mhead-league .btn-fav,
 .mhead-league .btn-x {
   flex: 0 0 auto;
@@ -5471,7 +5489,7 @@ body.match-fs-open .float-bar-combinada {
   line-height: 1;
 }
 
-.mhead-league .btn-fav { margin-left: 4px; }
+.mhead-league .btn-share { margin-left: 4px; }
 
 /* Columna central: es el hueco entre los dos escudos, y ahí van marcador,
    cuotas y árbitro. */

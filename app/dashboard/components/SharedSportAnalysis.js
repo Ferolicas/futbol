@@ -10,6 +10,7 @@ import MarketOutcomeBadge from './MarketOutcomeBadge';
 import PredictionSealBadge from './PredictionSealBadge';
 import { marketResultState, settleMarketSelection } from '../../../lib/market-settlement';
 import { displayBettingText } from '../utils/display-betting-text';
+import { sharePicksFromAnalysis } from '../utils/share-card';
 
 const percent = entry => {
   if (entry == null) return null;
@@ -85,7 +86,7 @@ export default function SharedSportCard({ game, sport, scoreLabel, timeZone, exp
   // liveResult trae la caja de béisbol; basketball/NFL exponen los cuartos
   // como game.periods (top-level), no anidados — se combinan las dos formas.
   const cardLiveStats = { ...(game.liveResult || {}), periods: game.periods || game.liveResult?.periods || null };
-  const head = <div className="acc-head" onClick={onToggle}><MatchHeadCard sport={sport} match={match} userTz={timeZone} isFavorite={favorite} liveStats={cardLiveStats}
+  const head = <div className="acc-head" onClick={onToggle}><MatchHeadCard sport={sport} match={match} userTz={timeZone} isFavorite={favorite} liveStats={cardLiveStats} sharePicks={sharePicksFromAnalysis(game.analysis, selected)}
     onFavorite={onFavorite ? () => onFavorite(game.id) : null} onDismiss={onDismiss} />{!expanded && <div className="acc-indicator"><span className="chev-ico">▾</span></div>}</div>;
   return <><div className="acc-card">{head}</div>{expanded && <MatchFullscreen onStep={onStep} head={head} body={game.analysis
     ? <SportAnalysisTabs game={game} sport={sport} scoreLabel={scoreLabel} selected={selected} onToggle={onTogglePick} onViewFull={onViewFull} />
