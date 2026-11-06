@@ -553,13 +553,36 @@ tamaño. Over y under auditan sus propios aciertos en la dirección exacta.
 
 Las fuentes y namespaces de identificadores también están separados:
 
-- NBA: feed/CDN oficial primero; si el servidor recibe bloqueo o timeout,
-  `lib/nba-stats-api.js` cambia a API-NBA. API-Basketball queda para cuotas y
-  como último respaldo de boxscores. ESPN completa el calendario amplio, pero
-  una cuota embebida solo se acepta si pertenece a Bet365. El índice oficial de `nba.com/players`
-  cruza nombres/equipos con el ID NBA y sus headshots CDN, incluso cuando el
-  boxscore llega desde API-NBA. IDs y logos canónicos evitan duplicados al
-  cambiar de fuente.
+- NBA: ESPN es la fuente primaria de calendario, marcador, boxscore y jugada a
+  jugada. El CDN oficial (`cdn.nba.com`) y `stats.nba.com` bloquean las IP de
+  servidor (403/timeout), así que `lib/nba-stats-api.js` queda solo como
+  respaldo cuando ESPN falla; una jornada vacía de ESPN es válida y no lo
+  dispara. El ID canónico es `NBA-<fecha de EE. UU.>-<visitante>-<local>`:
+  alternar con API-NBA (que fecha en UTC) duplicaba cada partido nocturno, por
+  eso el respaldo también fecha en hora del Este. API-Basketball se usa solo
+  para cuotas Bet365 y se cruza por franquicia canónica y liga 12
+  (`nbaTeamsMatch`): por nombre, "LA Clippers" nunca encontraba su cuota.
+  El boxscore de jugadores se lee por `keys` (las abreviaturas `names` solo
+  dejaban pasar los puntos) y el desglose por cuarto (`q1Points`,
+  `q1Rebounds`, …) se cuenta jugada a jugada y solo se guarda si reproduce el
+  boxscore oficial del jugador. La pretemporada (`season.type=1`, `stage=1`)
+  queda fuera de la muestra del motor y de la plantilla.
+- Cuotas NBA en plan gratuito de API-Sports (100/día por producto): la ventana
+  útil es ayer–mañana en UTC. Bet365 escribe los cuartos como "1st Qtr" y el
+  hándicap sobre el eje del local ("Away +7.5" = visitante −7.5); ambos se
+  normalizan en `normalizeApiSportsOdds`. Los mercados compuestos
+  (Result/Total, Winning Margin, 3Way, Odd/Even…) se descartan y "Player Points
+  Milestones" entra como prop `points` con línea N−0,5. El pase de las 01:40
+  (Madrid) corre antes de que exista cuota; `basketball-analyze-nba-midday`
+  (11:00 Bogotá) y `basketball-analyze-nba-pregame` (cada hora, partidos a
+  menos de 4 h) la traen con `today: true` y `competitionKeys: ['nba']`.
+- Detalle NBA: `prediction.breakdown` (conteos crudos por temporada, localía,
+  h2h y últimos 5 de cada mercado) y `analysis.playerMarkets` (puntos, rebotes,
+  asistencias, triples y 1.er cuarto por jugador, con los mismos cortes) se
+  muestran en `BasketballBreakdown.js`. La lista de la jornada no transporta
+  `playerMarkets` y reduce la evidencia a `n/hits`; el detalle va completo. La
+  plantilla sale de los últimos cinco partidos oficiales menos las bajas "Out"
+  de ESPN. Historial de jugadores: `npm run backfill:nba-players -- <año>`.
 - NCAA baloncesto: calendario, logos, marcadores y boxscores mediante el feed
   deportivo de ESPN (grupo 50), con IDs aislados de
   NBA. No depende de la ventana de fechas de API-Sports.

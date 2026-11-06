@@ -30,6 +30,15 @@ export async function GET(_request, props) {
     ]);
     if (!analysis.rows[0]) return Response.json({ error: 'Not analyzed yet' }, { status: 404 });
     const game = match.rows[0] || null;
+    // Boxscore de jugadores del partido terminado: liquida los props en el
+    // análisis completo sin volver al proveedor.
+    if (game && config.key === 'basketball' && game.status === 'FT') {
+      const players = await pgPool.query(
+        `SELECT player_id, stats FROM ${config.tablePrefix}_engine_player_stats WHERE fixture_id=$1`,
+        [String(params.id)],
+      ).catch(() => ({ rows: [] }));
+      game.player_stats = Object.fromEntries(players.rows.map((row) => [String(row.player_id), { stats: row.stats || {} }]));
+    }
     const seals = await sealedProofsForFixtures(config.key, [params.id]).catch(() => new Map());
     analysis.rows[0].combinada = attachSealsToRecommendationContainer(
       analysis.rows[0].combinada,

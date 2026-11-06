@@ -109,10 +109,25 @@ const SCHEDULES: Sched[] = [
   { queue: 'baseball-live', id: 'baseball-live-1m', every: 60_000 },
 
   // ── Baloncesto NBA + NCAA ───────────────────────────────────────────
-  // NBA oficial es primaria y NCAA usa calendario/boxscore deportivo público.
-  // API-Basketball queda para cuotas y último fallback de NBA.
+  // NBA y NCAA usan el calendario/boxscore deportivo público; API-Basketball
+  // queda solo para las cuotas Bet365 de la NBA.
   { queue: 'basketball-fixtures', id: 'basketball-fixtures-daily', pattern: '10 1 * * *', tz: TZ },
   { queue: 'basketball-analyze', id: 'basketball-analyze-daily', pattern: '40 1 * * *', tz: TZ },
+  // Cuotas de la NBA. El pase nocturno corre casi un día antes del salto
+  // inicial, cuando Bet365 aún no ha publicado la jornada (y el plan gratuito
+  // de API-Sports ni siquiera la sirve). A las 11:00 de Bogotá se analiza la
+  // jornada del día con la cuota ya abierta; después, cada hora, se refrescan
+  // solo los partidos que empiezan en las próximas 4 h, que es cuando aparecen
+  // las líneas de 1.er cuarto y de jugadores. Una jornada de 15 partidos gasta
+  // ~75 de las 90 llamadas diarias presupuestadas.
+  {
+    queue: 'basketball-analyze', id: 'basketball-analyze-nba-midday', pattern: '0 11 * * *', tz: BOGOTA_TZ,
+    data: { today: true, competitionKeys: ['nba'], oddsTtl: 3600 },
+  },
+  {
+    queue: 'basketball-analyze', id: 'basketball-analyze-nba-pregame', pattern: '0 13,15,17,18,19,20,21 * * *', tz: BOGOTA_TZ,
+    data: { today: true, pregame: true, pregameWindowMs: 4 * 3600_000, competitionKeys: ['nba'], oddsTtl: 2400 },
+  },
   { queue: 'basketball-finalize', id: 'basketball-finalize-daily', pattern: '0 8,11 * * *', tz: TZ },
   { queue: 'basketball-retrain', id: 'basketball-retrain-daily', pattern: '30 12 * * *', tz: TZ },
   // Smart-window evita trabajo fuera de juegos; los calendarios universitarios

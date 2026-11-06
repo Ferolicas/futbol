@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { ChartColumn, Clock, Layers3, Scale, Sigma, Trophy } from 'lucide-react';
 import DashboardBuffer from './DashboardBuffer';
 import FinalVerdictPanel from './FinalVerdictPanel';
+import { PlayerMarketsSection, TeamBreakdownSection } from './BasketballBreakdown';
 import { displayBettingText } from '../utils/display-betting-text';
 import { settleMarketSelection } from '../../../lib/market-settlement';
 import {
@@ -121,6 +122,12 @@ function PaidMultisportAnalysisPage({ sport, slug, sportLabel, scoreLabel }) {
             validation={displayBettingText(market.marketLabel || market.market || '')} outcome={settleMarketSelection({ sport, selection: market, game, liveResult: match })} />
         )) : <p className="fak-empty">Bet365 no tiene ahora una línea exacta que cumpla ambos criterios. El análisis estadístico completo permanece visible.</p>}
       </AccordionSection>
+      {sport === 'basketball' && (
+        <>
+          <TeamBreakdownSection breakdown={prediction?.breakdown} homeName={homeName} awayName={awayName} />
+          <PlayerMarketsSection playerMarkets={analysis?.analysis?.playerMarkets} meta={analysis?.analysis?.playerMarketsMeta} homeName={homeName} awayName={awayName} />
+        </>
+      )}
       <FullFrequencies prediction={prediction} homeName={homeName} awayName={awayName} scoreLabel={scoreLabel} />
       <FinalVerdictPanel verdict={analysis?.analysis?.finalVerdict} homeName={homeName} awayName={awayName} />
     </DocPage>
