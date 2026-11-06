@@ -92,6 +92,14 @@ async function verifySessionToken(token) {
   return null;
 }
 
+const CLOSED_PAGES = [
+  '/sign-up', '/planes', '/pago', '/rendimiento', '/verify-email', '/preferencias',
+  '/cookies', '/terminos', '/privacidad', '/modal-test', '/tab-qa',
+];
+const CLOSED_APIS = [
+  '/api/register', '/api/public', '/api/verificar-pronostico', '/api/checkout', '/api/auth/verify-email',
+];
+
 export async function proxy(request) {
   const { pathname } = request.nextUrl;
   if (csrfRejected(request)) {
@@ -108,6 +116,19 @@ export async function proxy(request) {
   const token = request.cookies.get(COOKIE_NAME)?.value || null;
   const payload = await verifySessionToken(token);
   const userId = payload?.uid || null;
+
+  // ── Acceso cerrado: la app es de uso personal ──
+  // No hay registro, planes, pagos ni páginas públicas. Todo eso vuelve a la
+  // raíz, que responde "Esta página no existe", y sus API responden 404.
+  if (CLOSED_PAGES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/';
+    url.search = '';
+    return NextResponse.redirect(url);
+  }
+  if (CLOSED_APIS.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
+    return Response.json({ error: 'Not found' }, { status: 404, headers: { 'Cache-Control': 'no-store' } });
+  }
 
   // ── Bloqueo de páginas protegidas sin sesión ──
   const protectedPaths = ['/dashboard', '/admin', '/ferney'];

@@ -4,6 +4,18 @@
 
 CF Análisis es una aplicación móvil de análisis de fútbol, béisbol, baloncesto y fútbol americano con acceso gratuito limitado y planes de suscripción. Producción: `https://cfanalisis.com` · VPS: `/apps/futbol` · PM2: `cfanalisis-web` · PostgreSQL: `cfanalisis`.
 
+## Uso personal (desde 2026-11-06)
+
+La app dejó de ser un producto con clientes: es la herramienta personal del
+propietario. No hay registro, planes, versión Free ni páginas públicas.
+
+- `/` y cualquier página pública responden «Esta página no existe» (404). La app
+  se abre en `/dashboard`, que redirige a `/sign-in` sin sesión.
+- `getCurrentUser` solo devuelve sesión a un perfil `admin`/`owner`; el login
+  rechaza cualquier otra cuenta. `proxy.js` cierra `CLOSED_PAGES` y `CLOSED_APIS`.
+- Las reglas de abajo sobre Free, planes y checkout describen código que sigue
+  en el repositorio pero ya no es alcanzable.
+
 ## Stack real
 
 - Next.js 16.3 App Router, React 19.2 y JavaScript.

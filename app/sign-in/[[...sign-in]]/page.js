@@ -82,7 +82,7 @@ export default function SignInPage() {
       // que nombre, avatar y estado por usuario aparezcan en el primer render.
       try { if (data.user?.id) sessionStorage.removeItem(`cf-free-visit:${data.user.id}`); } catch {}
       await refreshSession();
-      router.replace(selectedPlan ? checkoutHref : (safeRedirect || '/dashboard'));
+      router.replace(safeRedirect || '/dashboard');
     } catch {
       setLoading(false);
       setError('Error de red. Intenta de nuevo.');
@@ -217,11 +217,6 @@ export default function SignInPage() {
                 : <ArrowRight size={18} aria-hidden="true" />}
             </button>
           </form>
-
-          <p className="signup-footer">
-            ¿Todavía no tienes cuenta?{' '}
-            <Link href={signUpHref}>Regístrate</Link>
-          </p>
 
           <p className="signup-privacy">
             <ShieldCheck size={14} aria-hidden="true" />

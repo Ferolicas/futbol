@@ -75,9 +75,3 @@ test('marketing campaigns use consent, recheck it and carry unsubscribe controls
   assert.match(email, /List-Unsubscribe/);
   assert.match(email, /info@cfanalisis\.com/);
 });
-
-test('landing uses the H.264 asset that Caddy serves as video', () => {
-  const component = fs.readFileSync(path.join(__dirname, '..', 'components/LandingBrandVideo.js'), 'utf8');
-  assert.match(component, /logo-metalizado-fast\.mp4/);
-  assert.equal(fs.existsSync(path.join(__dirname, '..', 'public/logo-metalizado-fast.mp4')), true);
-});

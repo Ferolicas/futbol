@@ -13,7 +13,12 @@ import { normalizePurchaseIntent, normalizePurchasePlan, purchaseRoute } from '.
 
 export const dynamic = 'force-dynamic';
 
+// Registro cerrado: la app es de uso personal y no admite cuentas nuevas. El
+// proxy ya responde 404 a esta ruta; esto es la segunda barrera.
+const REGISTRATION_CLOSED = true;
+
 export async function POST(request) {
+  if (REGISTRATION_CLOSED) return Response.json({ error: 'Not found' }, { status: 404 });
   try {
     // A2: rate-limit compartido (Redis) — 5/min/IP anti abuso de registro.
     const rl = await redisRateLimit('register', clientIp(request), 5, 60, { failClosed: true });
