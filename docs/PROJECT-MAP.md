@@ -576,6 +576,16 @@ Las fuentes y namespaces de identificadores también están separados:
   (Madrid) corre antes de que exista cuota; `basketball-analyze-nba-midday`
   (11:00 Bogotá) y `basketball-analyze-nba-pregame` (cada hora, partidos a
   menos de 4 h) la traen con `today: true` y `competitionKeys: ['nba']`.
+- Cuotas NCAA de baloncesto: The Odds API no publica Bet365 para la NCAA
+  (solo casas de EE. UU.), así que ya no se consulta. La única fuente es
+  API-Basketball a una llamada por partido, y solo dentro del cupo:
+  `basketball-analyze-ncaa-odds` (cada hora, :30, hora de Bogotá) toma los
+  partidos que empiezan en 3 h, reserva las llamadas pendientes de la NBA
+  (`ncaaOddsAllowance`) y pide primero los del Top 25
+  (`selectNcaaGamesForOdds`). El cruce exige liga 116, ambos equipos y mismo
+  horario (`ncaaBasketballGameMatch`). Con plan gratuito cubre una parte de la
+  jornada; con plan de pago basta subir `API_SPORTS_BASKETBALL_DAILY_BUDGET` y
+  `NCAA_ODDS_PER_PASS`. Un pase sin cuota nunca borra la cuota previa guardada.
 - Detalle NBA: `prediction.breakdown` (conteos crudos por temporada, localía,
   h2h y últimos 5 de cada mercado) y `analysis.playerMarkets` (puntos, rebotes,
   asistencias, triples y 1.er cuarto por jugador, con los mismos cortes) se

@@ -23,6 +23,8 @@ async function run(sport, payload, job) {
     pregame: payload.pregame === true,
     pregameWindowMs: payload.pregameWindowMs,
     competitionKeys: Array.isArray(payload.competitionKeys) ? payload.competitionKeys : undefined,
+    // Pase de cuotas universitarias: elige los partidos que caben en el cupo.
+    ncaaOdds: payload.ncaaOdds === true,
     onlyMissingCurrent: payload.onlyMissingCurrent === true,
     retryMissingOdds: payload.retryMissingOdds === true,
     oddsRetryMinLeadMs: payload.oddsRetryMinLeadMs,

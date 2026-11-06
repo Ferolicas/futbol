@@ -128,6 +128,14 @@ const SCHEDULES: Sched[] = [
     queue: 'basketball-analyze', id: 'basketball-analyze-nba-pregame', pattern: '0 13,15,17,18,19,20,21 * * *', tz: BOGOTA_TZ,
     data: { today: true, pregame: true, pregameWindowMs: 4 * 3600_000, competitionKeys: ['nba'], oddsTtl: 2400 },
   },
+  // Cuotas Bet365 de la NCAA. Cuestan una llamada por partido y la jornada
+  // puede pasar de cien, así que cada media hora se piden solo las de los
+  // partidos que empiezan en las próximas 3 h, hasta agotar lo que la NBA deja
+  // libre del presupuesto diario (primero los equipos del Top 25).
+  {
+    queue: 'basketball-analyze', id: 'basketball-analyze-ncaa-odds', pattern: '30 10-22 * * *', tz: BOGOTA_TZ,
+    data: { today: true, pregame: true, pregameWindowMs: 3 * 3600_000, competitionKeys: ['ncaa'], ncaaOdds: true },
+  },
   { queue: 'basketball-finalize', id: 'basketball-finalize-daily', pattern: '0 8,11 * * *', tz: TZ },
   { queue: 'basketball-retrain', id: 'basketball-retrain-daily', pattern: '30 12 * * *', tz: TZ },
   // Smart-window evita trabajo fuera de juegos; los calendarios universitarios

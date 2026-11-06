@@ -166,3 +166,28 @@ test('NBA: el respaldo fecha el ID en hora del Este y cruza a los Clippers', () 
   assert.equal(multisportProviderInternals.withinApiSportsDateWindow('2026-11-07', new Date('2026-11-06T15:00:00Z')), true);
   assert.equal(multisportProviderInternals.withinApiSportsDateWindow('2026-11-08', new Date('2026-11-06T15:00:00Z')), false);
 });
+
+test('NCAA: el cruce exige liga, ambos equipos y horario, y no adivina entre homónimos', () => {
+  const game = { date: '2026-11-07T00:00:00Z', teams: { home: { name: 'Florida Gators' }, away: { name: 'Boston College Eagles' } } };
+  const candidate = (id, home, away, date = '2026-11-07T00:00:00+00:00', league = 116) => ({ id, league: { id: league }, date, teams: { home: { name: home }, away: { name: away } } });
+  const match = multisportProviderInternals.ncaaBasketballGameMatch;
+  assert.equal(match([candidate(1, 'Florida', 'Boston College')], game).id, 1);
+  assert.equal(match([candidate(1, 'Florida', 'Boston College', '2026-11-07T04:00:00+00:00')], game), null);
+  assert.equal(match([candidate(1, 'Florida', 'Boston College', undefined, 423)], game), null);
+  assert.equal(match([candidate(1, 'Florida Int\'l', 'Boston College')], game), null);
+  assert.equal(match([candidate(1, 'Florida', 'Boston College'), candidate(2, 'Florida', 'Boston')], game), null);
+  const abbreviated = { date: '2026-11-07T00:00:00Z', teams: { home: { name: 'Miami Hurricanes' }, away: { name: 'Middle Tennessee Blue Raiders' } } };
+  assert.equal(match([candidate(3, 'Miami (FL)', 'Middle Tenn. St.'), candidate(4, 'Kansas State', 'CS Northridge')], abbreviated).id, 3);
+  const saint = { date: '2026-11-07T00:00:00Z', teams: { home: { name: 'Missouri Tigers' }, away: { name: 'Saint Louis Billikens' } } };
+  assert.equal(match([candidate(5, 'Missouri', 'St. Louis Billikens'), candidate(6, 'Missouri State', 'Truman State')], saint).id, 5);
+});
+
+test('NCAA: el cupo de cuotas prioriza el Top 25 y salta los que ya tienen Bet365', async () => {
+  const { selectNcaaGamesForOdds } = await import('../lib/multisport-providers.js');
+  const game = (id, date, rank) => ({ id, date, league: { id: '116' }, raw: { competitions: [{ competitors: [{ curatedRank: { current: rank } }, { curatedRank: { current: 99 } }] }] } });
+  const games = [game('a', '2026-11-07T00:00:00Z', 99), game('b', '2026-11-07T02:00:00Z', 4), game('c', '2026-11-07T01:00:00Z', 99), game('d', '2026-11-07T00:30:00Z', 12),
+    { id: 'nba', date: '2026-11-07T00:00:00Z', league: { id: 'NBA' } }];
+  const analyses = [{ fixture_id: 'd', best_odds: { preMatch: true, rawBookmakers: [{ name: 'Bet365' }] } }];
+  assert.deepEqual(selectNcaaGamesForOdds(games, analyses, 2).map((entry) => entry.id), ['b', 'a']);
+  assert.deepEqual(selectNcaaGamesForOdds(games, analyses, 0), []);
+});

@@ -46,15 +46,30 @@ test('getSportOdds propaga emptyTtl a fetchMultisportBet365Event (no solo ttl)',
   assert.match(call, /emptyTtl:\s*options\.emptyTtl/);
 });
 
-test('NCAA de fútbol americano nunca toca API-Sports partido a partido; si ESPN no trae cuota, cae a la cartelera completa de The Odds API en una sola llamada', () => {
+test('NCAA no pasa por API-Sports partido a partido salvo el cupo explícito de baloncesto', () => {
   const source = fs.readFileSync(new URL('../lib/multisport-providers.js', import.meta.url), 'utf8');
   const ncaaStart = source.indexOf("if (/^espn-ncaa/.test");
   const ncaaEnd = source.indexOf('// Los planes gratuitos de API-Sports', ncaaStart);
   assert.ok(ncaaStart > 0);
   assert.ok(ncaaEnd > ncaaStart);
   const ncaaBlock = source.slice(ncaaStart, ncaaEnd);
-  assert.match(ncaaBlock, /tryFeaturedOdds\(config, game, options\)/, 'NCAA debe intentar The Odds API cuando ESPN no trae la cuota embebida');
-  assert.doesNotMatch(ncaaBlock, /apiSportsFixtureIdFor|getApiSportsOddsForGame/, 'NCAA jamás debe pasar por API-Sports partido a partido (100-150+ partidos por jornada)');
+  // Una jornada universitaria tiene 100-150+ partidos: pedirlos todos agota el
+  // presupuesto diario compartido con la NBA. La única excepción es el
+  // baloncesto, donde Bet365 solo existe en API-Basketball, y solo cuando el
+  // pase de análisis marca el partido dentro de su cupo (`ncaaApiSports`).
+  const basketballStart = ncaaBlock.indexOf("if (config.key === 'basketball') {");
+  const footballStart = ncaaBlock.indexOf('const featuredNcaa = await tryFeaturedOdds(config, game, options);');
+  assert.ok(basketballStart > 0 && footballStart > basketballStart);
+  const basketballBlock = ncaaBlock.slice(basketballStart, footballStart);
+  const gate = basketballBlock.indexOf("if (options.ncaaApiSports !== true) return emptyMultisportOdds(");
+  const firstProviderCall = basketballBlock.search(/apiSportsFixtureIdFor|getApiSportsOddsForGame/);
+  assert.ok(gate > 0 && gate < firstProviderCall, 'sin el permiso del cupo no se llama al proveedor');
+  assert.doesNotMatch(basketballBlock, /tryFeaturedOdds/, 'The Odds API no publica Bet365 para la NCAA de baloncesto');
+  // Fútbol americano universitario: cartelera completa de The Odds API, nunca
+  // API-Sports partido a partido.
+  const footballBlock = ncaaBlock.slice(footballStart);
+  assert.doesNotMatch(footballBlock, /apiSportsFixtureIdFor|getApiSportsOddsForGame/);
+  assert.doesNotMatch(ncaaBlock.slice(0, basketballStart), /apiSportsFixtureIdFor|getApiSportsOddsForGame/);
 });
 
 test('el cron de béisbol (cada 15 min) ya no fuerza un TTL de cuota más corto que su propio intervalo', () => {
