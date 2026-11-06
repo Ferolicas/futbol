@@ -16,7 +16,10 @@ export default function DashboardHeader() {
         <BrandLogoMedia deferred />
       </Link>
 
-      <div className="dashboard-header-actions"><AppleSpotlightSearch /><UpgradeButton /></div>
+      <div className="dashboard-header-actions">
+        <Link href="/dashboard/apuestas" className="paper-link" aria-label="Mis apuestas sin dinero">Mis apuestas</Link>
+        <AppleSpotlightSearch /><UpgradeButton />
+      </div>
     </header>
   );
 }

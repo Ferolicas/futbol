@@ -1,6 +1,7 @@
 'use client';
 import { useFreeAccess } from './FreeAccessProvider';
 import SharedSportCard from './SharedSportAnalysis';
+import PaperBetOpener from './PaperBetOpener';
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
@@ -269,7 +270,7 @@ const MatchCard = memo(function MatchCard({ game, timeZone, scoreLabel, slug, ex
     onViewFull={() => { window.location.href = `/dashboard/${slug}/analisis/${encodeURIComponent(game.id)}`; }} />;
 });
 
-function CombinedBet({ combination, onRemove, onClear }) {
+function CombinedBet({ combination, onRemove, onClear, sport }) {
   if (!combination) {
     return (
       <div className="empty-state fade-in">
@@ -314,6 +315,7 @@ function CombinedBet({ combination, onRemove, onClear }) {
       <div className="comb-actions">
         <button type="button" className="btn-clear" onClick={onClear}>Limpiar combinada</button>
       </div>
+      <PaperBetOpener selections={combination.selections} sport={sport} />
     </div>
   );
 }
@@ -614,7 +616,7 @@ export default function MultisportDashboard({
               <span><small>Dentro de Favoritos</small><strong>Tu combinada</strong></span>
               {totalSelections > 0 && <b>{totalSelections}</b>}
             </div>
-            <CombinedBet combination={combination} onRemove={removePick} onClear={() => setSelectedMarkets({})} />
+            <CombinedBet combination={combination} onRemove={removePick} onClear={() => setSelectedMarkets({})} sport={sport} />
           </section>
         )}
 

@@ -586,6 +586,17 @@ Las fuentes y namespaces de identificadores también están separados:
   horario (`ncaaBasketballGameMatch`). Con plan gratuito cubre una parte de la
   jornada; con plan de pago basta subir `API_SPORTS_BASKETBALL_DAILY_BUDGET` y
   `NCAA_ODDS_PER_PASS`. Un pase sin cuota nunca borra la cuota previa guardada.
+- Apuestas sin dinero (`paper_bets` + `paper_bet_legs`,
+  `scripts/migrate-paper-bets.sql`): registro personal de lo que el propietario
+  abre de verdad, con importe ficticio, aparte de las recomendaciones.
+  `PaperBetOpener` vive dentro de «Tu combinada» (Favoritos) en los cuatro
+  deportes y deja corregir la cuota real. `/dashboard/apuestas` muestra
+  historial, balance y analítica por familia de mercado y por equipo
+  (`lib/paper-bets.js`, lógica pura). Una selección elegida en la app se cierra
+  sola leyendo `prediction_settlements` por deporte + fixture + `market_key`
+  cada vez que se abre el historial; una selección manual, o un mercado que el
+  registro no conoce, se marca a mano. Una selección del partido entero cuenta
+  para los dos equipos en la analítica.
 - Compartir tarjeta: `MatchHeadCard` (común a los cuatro deportes) lleva un
   botón que dibuja en el navegador un PNG del partido con sus opciones
   (`app/dashboard/utils/share-card.js`) y lo pasa a la hoja de compartir

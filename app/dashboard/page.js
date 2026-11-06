@@ -9,6 +9,7 @@ import useSWR from 'swr';
 import { defaultRangeExtractor, useWindowVirtualizer } from '@tanstack/react-virtual';
 import { ArrowRight, BarChart3, CalendarDays, ChevronDown, ChevronRight, ChevronUp, EyeOff, Flag, Layers3, Save, Sparkles, Trash2, X, Share2, LoaderCircle } from 'lucide-react';
 import { shareMatchCard, sharePicksFromAnalysis } from './utils/share-card';
+import PaperBetOpener from './components/PaperBetOpener';
 import { FLAGS } from '../../lib/leagues';
 import { usePusherEvent } from '../../lib/use-pusher';
 import { useWorkerSocketState } from '../../hooks/useWorkerSocket';
@@ -1939,6 +1940,7 @@ function FootballCombinationPanel({
             </button>
             <button className="btn-clear" onClick={onClear}><Trash2 size={16} aria-hidden="true" /> Limpiar</button>
           </div>
+          <PaperBetOpener selections={customCombinada.selections} sport="football" />
         </div>
       )}
 

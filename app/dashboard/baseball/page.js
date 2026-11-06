@@ -1,6 +1,7 @@
 'use client';
 import { useFreeAccess } from '../components/FreeAccessProvider';
 import SharedSportCard, { DismissConfirmDialog, HiddenFixturesPanel } from '../components/SharedSportAnalysis';
+import PaperBetOpener from '../components/PaperBetOpener';
 
 /**
  * Baseball Dashboard — paleta amarillo tierra (amber-500/700/300).
@@ -1060,6 +1061,7 @@ function CombinadaTab({ customCombinada, onClear, onRemove }) {
       <div className="comb-actions">
         <button className="btn-clear" onClick={onClear}><Trash2 size={16} aria-hidden="true" /> Limpiar combinada</button>
       </div>
+      <PaperBetOpener selections={customCombinada.selections} sport="baseball" />
     </div>
   );
 }
