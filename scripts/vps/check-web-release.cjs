@@ -7,14 +7,18 @@ const { once } = require('node:events');
 
 async function check(base) {
   let root;
-  for (const [route, status] of [['/', 200], ['/sign-in', 200], ['/dashboard', 307], ['/api/auth/session', 200], ['/api/free/visit', 401]]) {
-    const response = await fetch(base + route, { redirect: 'manual', method: route === '/api/free/visit' ? 'POST' : 'GET', signal: AbortSignal.timeout(15000) });
+  // Uso personal: la raíz responde 404 («Esta página no existe»), el registro
+  // y los planes están cerrados, y la app vive en /dashboard tras /sign-in.
+  const POST_ROUTES = new Set(['/api/free/visit', '/api/register']);
+  for (const [route, status] of [['/', 404], ['/sign-in', 200], ['/dashboard', 307], ['/planes', 307], ['/api/auth/session', 200], ['/api/free/visit', 401], ['/api/register', 404]]) {
+    const response = await fetch(base + route, { redirect: 'manual', method: POST_ROUTES.has(route) ? 'POST' : 'GET', signal: AbortSignal.timeout(15000) });
     if (response.status !== status) throw Error(`${route}: HTTP ${response.status}, expected ${status}`);
     const body = await response.text();
-    if (route === '/') root = body;
+    if (route === '/' && !body.includes('Esta página no existe')) throw Error('La raíz no muestra el aviso de página inexistente');
+    if (route === '/sign-in') root = body;
   }
   const assets = [...new Set([...root.matchAll(/(?:src|href)="(\/_next\/static\/[^"?]+)(?:\?[^" ]*)?"/g)].map(m => m[1]))];
-  if (!assets.length) throw Error('Home has no generated assets');
+  if (!assets.length) throw Error('Sign-in has no generated assets');
   for (const asset of assets) {
     const response = await fetch(base + asset, { signal: AbortSignal.timeout(15000) });
     if (!response.ok) throw Error(`Missing generated asset: ${asset}`);
